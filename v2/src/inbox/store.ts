@@ -3,7 +3,7 @@
 // are the API's (api/types.ts); this file stores them, it does not decide
 // what is asked: the flow does.
 import type { DatabaseSync } from 'node:sqlite';
-import type { ContractItem, InboxItem, KnowledgeItem, KnowledgeLevel, NextInboxItem, PermissionItem, PlanItemInbox, QuestionItem, QuestionTimeout, ReleaseItem, SessionPlan, SessionPlanItem, TrainState } from '../api/types.ts';
+import type { ContractItem, InboxItem, KnowledgeItem, KnowledgeLevel, NextInboxItem, PermissionItem, PlanItemInbox, QuestionItem, QuestionTimeout, ReleaseItem, SessionPlan, SessionPlanItem, TicketVariant, TrainState, VariantsItem } from '../api/types.ts';
 import { LEAD_TICKET } from '../lead/contract.ts';
 import type { SessionId, UserId } from '../session/contract.ts';
 
@@ -19,7 +19,8 @@ const DAY_MS = 24 * 3600_000;
 // leave with it: a permission, a question, its session plan waiting for a
 // Go (lane 17). A contract or a knowledge item outlives its session: the
 // owner validates a contract step after it ended, and a handover's
-// knowledge is proposed when the session is over.
+// knowledge is proposed when the session is over. A variants item
+// outlives its sessions too: the owner chooses once they have ended.
 const SESSION_KINDS = "('permission', 'question', 'session_plan')";
 
 type Base = { readonly ticket: string; readonly project: string };
@@ -75,7 +76,7 @@ export class InboxStore {
 
   // Handles a waiting item of `kind` and writes what the person did into
   // it; true when this call handled it, so an item is answered once.
-  #settle(id: string, kind: 'contract' | 'knowledge', by: UserId, outcome: object): boolean {
+  #settle(id: string, kind: 'contract' | 'knowledge' | 'variants', by: UserId, outcome: object): boolean {
     const result = this.#changed(this.#db.prepare("UPDATE flow_inbox SET state = 'handled', handled_at = ?, handled_by = ?, payload = json_set(payload, '$.outcome', json(?)) WHERE id = ? AND kind = ? AND state = 'waiting'")
       .run(this.#now().toISOString(), by, JSON.stringify(outcome), id, kind));
     return Number(result.changes) > 0;
@@ -204,7 +205,29 @@ export class InboxStore {
     return this.#settle(id, 'knowledge', by, { decision, by, at: this.#now().toISOString() });
   }
 
-  #of(kind: 'contract' | 'knowledge', filter: { readonly ticket?: string; readonly state?: 'waiting' | 'handled' }): NextInboxItem[] {
+  // A ticket's run of variants for the owner's choice (issue #271), one
+  // item per run, added once one variant is done.
+  addVariants(input: Base & Pick<VariantsItem, 'round' | 'variants'>): VariantsItem {
+    const id = `variants:${input.ticket}:${input.round}`;
+    this.#insert(id, 'variants', input, '', String(input.round), this.#now().toISOString(), { round: input.round, variants: input.variants, outcome: null });
+    return this.#get(id) as VariantsItem;
+  }
+
+  // The variants as they are now, while the item waits: a handled one keeps what the owner saw.
+  setVariants(id: string, variants: readonly TicketVariant[]): void {
+    this.#changed(this.#db.prepare("UPDATE flow_inbox SET payload = json_set(payload, '$.variants', json(?)) WHERE id = ? AND kind = 'variants' AND state = 'waiting'").run(JSON.stringify(variants), id));
+  }
+
+  variants(filter: { readonly ticket?: string; readonly state?: 'waiting' | 'handled' } = {}): VariantsItem[] {
+    return this.#of('variants', filter) as VariantsItem[];
+  }
+
+  // True when this call handled it: the owner chooses once.
+  handleVariants(id: string, by: UserId, chosen: number): boolean {
+    return this.#settle(id, 'variants', by, { chosen, by, at: this.#now().toISOString() });
+  }
+
+  #of(kind: 'contract' | 'knowledge' | 'variants', filter: { readonly ticket?: string; readonly state?: 'waiting' | 'handled' }): NextInboxItem[] {
     const rows = this.#db.prepare('SELECT * FROM flow_inbox WHERE kind = ? AND state = ? AND (? IS NULL OR ticket = ?) ORDER BY since, rowid')
       .all(kind, filter.state ?? 'waiting', filter.ticket ?? null, filter.ticket ?? null) as Row[];
     return rows.map((row) => this.#item(row));

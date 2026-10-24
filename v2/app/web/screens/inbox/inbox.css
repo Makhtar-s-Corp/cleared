@@ -317,3 +317,19 @@ a.btn, a.btn:hover { text-decoration: none; }
 .btn.ask-lead { text-align: center; }
 @media (max-width: 359px) { .shots { flex-direction: column; } .shots.frame-phone .shot { flex-basis: auto; width: 70%; } }
 @media (prefers-reduced-motion: reduce) { .caret { transition: none; } .grace-fill { transition: none; } }
+
+/* The variants of one ticket side by side (issue #271): a column each,
+   wrapped on a narrow detail, their diffs scrolled in their own column. */
+.variants { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-3); margin-top: var(--space-3); }
+.variant { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; padding: var(--space-3); border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); }
+.variant[data-state="chosen"] { box-shadow: 0 0 0 2px var(--ok-text); }
+.variant[data-state="failed"], .variant[data-state="dropped"] { opacity: .75; }
+.variant-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.variant-head .d-sub { margin: 0; }
+.variant-state { display: inline-flex; align-items: center; gap: var(--space-1); font: var(--weight-strong) var(--text-sm)/1.4 var(--sans); color: var(--text-secondary); }
+.variant-state.done, .variant-state.chosen { color: var(--ok-text); }
+.variant-state.failed { color: var(--danger-text); }
+.variant-facts, .variant-note { margin: 0; font: var(--weight-regular) var(--text-sm)/1.5 var(--sans); color: var(--text-secondary); }
+.variant-files { margin: 0; padding: 0; list-style: none; font-size: var(--text-sm); }
+.variant .diff { max-height: 420px; overflow: auto; }
+.variant .btn { align-self: flex-start; }

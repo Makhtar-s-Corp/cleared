@@ -422,16 +422,21 @@ export function leadHref(kind: 'goal' | 'lead', title: string, body = ''): strin
 }
 
 // What the bar sends to create a ticket: the title, the description only
-// when one was written, and the services picked only when some were (the
-// service takes a non-empty list or nothing).
-export function newTicket(title: string, body: string, project: string, services: readonly string[] = []): CreateTicketBody {
+// when one was written, the services picked only when some were (the
+// service takes a non-empty list or nothing), and the variants only when
+// more than one author is asked for (issue #271).
+export function newTicket(title: string, body: string, project: string, services: readonly string[] = [], variants = 1): CreateTicketBody {
   const text = body.trim();
-  return { title: title.trim(), project, ...(text ? { body: text } : {}), ...(services.length ? { services: [...services] } : {}) };
+  return { title: title.trim(), project, ...(text ? { body: text } : {}), ...(services.length ? { services: [...services] } : {}), ...(variants > 1 ? { variants } : {}) };
 }
 
-export function createTicket(api: ScreenContext['api'], input: { readonly title: string; readonly body: string; readonly project: string; readonly services?: readonly string[] }): Promise<Ticket> {
-  return api<Ticket>('/tickets', { method: 'POST', body: newTicket(input.title, input.body, input.project, input.services) });
+export function createTicket(api: ScreenContext['api'], input: { readonly title: string; readonly body: string; readonly project: string; readonly services?: readonly string[]; readonly variants?: number }): Promise<Ticket> {
+  return api<Ticket>('/tickets', { method: 'POST', body: newTicket(input.title, input.body, input.project, input.services, input.variants) });
 }
+
+// How many authors a new ticket may start with (issue #271): one, or 2 to 4
+// variants, on a workspace of one service only.
+export const VARIANT_CHOICES: readonly number[] = [1, 2, 3, 4];
 
 // What a need's card says under its title: the item's own words, then the catalog's sentence.
 export function needSentence(card: NeedCard, t: Translate): string {

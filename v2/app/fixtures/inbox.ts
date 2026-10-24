@@ -27,7 +27,7 @@
 // and a second approval is a 409.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type {
-  ContractItem, KnowledgeItem, NextInboxItem, PermissionItem, Plan, PlanItem, PlanItemInbox, QuestionItem, ReleaseItem, SessionPlanConfidence, SessionPlanItem, SessionSummary, TrainState,
+  ContractItem, KnowledgeItem, NextInboxItem, PermissionItem, Plan, PlanItem, PlanItemInbox, QuestionItem, ReleaseItem, SessionPlanConfidence, SessionPlanItem, SessionSummary, TicketVariant, TrainState, VariantsItem,
 } from '../../src/api/types.ts';
 import { LEAD_TICKET } from '../../src/lead/contract.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
@@ -215,6 +215,27 @@ export function knowledgeItem(now: Date = FIXTURE_NOW): KnowledgeItem {
   return {
     kind: 'knowledge', id: 'knowledge:fixture-158-author:1', ticket: RELEASE_TICKET, project: FIXTURE_PROJECT, since: ago(now, 50), state: 'waiting',
     sessionId: 'fixture-158-author', text: 'The archive page reuses the list\'s heading: a heading changes in both templates.', level: 'service', service: 'guestbook', outcome: null,
+  };
+}
+
+// Three variants of one ticket (issue #271): the first two done, each with
+// its diff, the third failed; the owner chooses one to review.
+export const VARIANTS_TICKET = 'LOCAL-175';
+export function variantsItem(now: Date = FIXTURE_NOW): VariantsItem {
+  const variant = (position: number, state: TicketVariant['state'], files: string[], diff: string, costUsd: number | null, minutes: number | null, note: string | null): TicketVariant => {
+    const lines = diff.split('\n');
+    return {
+      position, state, session: `fixture-175-v${position}`, files, diff, cut: false, costUsd, minutes, note,
+      added: lines.filter((l) => l.startsWith('+') && !l.startsWith('+++')).length, removed: lines.filter((l) => l.startsWith('-') && !l.startsWith('---')).length,
+    };
+  };
+  return {
+    kind: 'variants', id: `variants:${VARIANTS_TICKET}:1`, ticket: VARIANTS_TICKET, project: FIXTURE_PROJECT, since: ago(now, 8), state: 'waiting', round: 1, outcome: null,
+    variants: [
+      variant(1, 'done', ['src/entries.ts'], '--- a/src/entries.ts\n+++ b/src/entries.ts\n@@ -3 +3 @@\n-  ORDER BY created_at\n+  ORDER BY created_at DESC\n', 0.42, 12, null),
+      variant(2, 'done', ['src/entries.ts', 'test/entries.test.ts'], '--- a/src/entries.ts\n+++ b/src/entries.ts\n@@ -8 +8,2 @@\n-  return rows;\n+  return [...rows].reverse();\n+  // newest first\n', 0.57, 75, null),
+      variant(3, 'failed', [], '', 0.08, 2, 'Variant 3 of 3 failed: The session failed: the runner died'),
+    ],
   };
 }
 
