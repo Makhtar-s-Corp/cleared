@@ -2,6 +2,7 @@
 // FlowEvent is fired by a test of this file, after the write it reports.
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
+import type { QuestionItem } from '../../src/api/types.ts';
 import { FLOW_EVENT_TYPES, type FlowEvent } from '../../src/flow/events.ts';
 import { REPORT_PASS, approved, finished, ledgerRow, quickAuthor, releaseRow, reviewerScript, setup, started, text, until, type Setup } from './support.ts';
 
@@ -231,7 +232,7 @@ test('a team\'s question past its delay says question_timed_out, after the inbox
   await t.engine.settled();
   let leadAt: string | undefined;
   t.engine.subscribe((event) => {
-    if (event.type === 'question_timed_out') leadAt = t.inbox.items().find((i) => i.kind === 'question' && i.state === 'waiting' && 'timeout' in i)?.timeout?.leadAt;
+    if (event.type === 'question_timed_out') leadAt = t.inbox.items().find((i): i is QuestionItem => i.kind === 'question' && i.state === 'waiting')?.timeout?.leadAt;
   });
   t.clock.now += 30 * 60_000;
   await t.engine.tick();
