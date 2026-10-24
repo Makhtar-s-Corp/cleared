@@ -4929,7 +4929,7 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Tests first.** The tests were committed alone in `0b009a9`, before any code: there, `test/flow/batch.test.ts`, `test/flow/batch-routes.test.ts` and `app/web/test/tower-batch.test.tsx` do not load (`flow/batch.ts` and the model's exports do not exist), the route counts of `test/api/types.test.ts`, `test/flow/api.test.ts` and `test/flow/modules.test.ts` fail, and the browser test calls `lanes` and `quota`, which the fixtures did not have.
 
-**Checks** (after merging `origin/v2` at `5002ee5`, pull requests 316, 318 and 319). `npm run typecheck`; `npm run build`. The node tests ran in two parts (`test/`, then `app/test/` with `CLEARED_V2_PLAYWRIGHT`): 1818 tests, 1815 pass, 2 skipped, 1 fails. The 276 Vitest tests pass. The batch browser test passes in French and in English.
+**Checks** (after merging `origin/v2` at `5002ee5`, pull requests 316, 318 and 319). `npm run typecheck`; `npm run build`. The node tests ran in two parts (`test/`, then `app/test/` with `CLEARED_V2_PLAYWRIGHT`): 1848 tests, 1845 pass, 2 skipped, 1 fails. The 278 Vitest tests pass. The batch browser test passes in French and in English.
 - The one failure is `app/test/notify/browser.test.ts` ("a headless browser registers the worker...", a 30-second timeout). It fails the same way on `origin/v2` in this environment, checked in a temporary worktree, as the `j3-reject-close` entry said.
 - `app/test/foundation/budget-browser.test.ts` ("twenty switches") passes in this run. An earlier full run, with all files at once, measured 112 ms at p95 against its 100 ms budget.
 
