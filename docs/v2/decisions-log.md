@@ -4752,7 +4752,7 @@ The issue for taking over an approved plan is #285 (« Preuve 48 h : le driver d
 - No wiki, no editing, no screen (out of scope). The page is not yet shown in the app.
 - Commit subjects stand for decisions. A project that keeps a decisions folder gets it through `lib/memory` as before; the page does not read it.
 
-**Checks.** Tests written first and committed alone (`971d145`, rewritten before the pull request: its first version held a literal key marker the repository guard refused): 10 of 11 failed on the old code (the 11th, "a queued merge asks for no page", guards the old behaviour); the review round added 3 tests and a train test, and 12 of the 13 tests of the two files fail on `origin/v2`. `npm run typecheck`; `npm test` (1740 node tests: 1702 pass, 38 skipped, 0 fail; 260 Vitest tests pass); `npm run guard -- --base origin/v2`: nothing refused.
+**Checks.** Tests written first and committed alone (`971d145`, rewritten before the pull request: its first version held a literal key marker the repository guard refused): 10 of 11 failed on the old code (the 11th, "a queued merge asks for no page", guards the old behaviour); the review round added 3 tests and a train test, and 12 of the 13 tests of the two files fail on `origin/v2`. `npm run typecheck`; `npm test` (1744 node tests: 1706 pass, 38 skipped, 0 fail; 260 Vitest tests pass); `npm run guard -- --base origin/v2`: nothing refused.
 
 **Resources.** No Docker object, no network, no tunnel, no port. Sample repositories are local bare repositories in temporary folders; nothing is pushed.
 
