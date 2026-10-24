@@ -757,3 +757,12 @@ test('a real wake dispatches: the first one takes note, the next one tells ntfy 
   assert.deepEqual({ ...row, detail: JSON.parse(row.detail) }, { ticket: 'X-4', detail: { event: 'rollback', adapter: 'ntfy' } });
   assert.doesNotMatch(second.stderr, /tk_abcdefgh|cleared-test|notify\//, 'nothing of the secrets on the wake output');
 });
+
+test('a failed schedule run has its own health line, in English and in French (P34), not the unknown-code sentence', () => {
+  const en = render({ kind: 'health', code: 'schedule_failed' }, { language: 'en' });
+  const fr = render({ kind: 'health', code: 'schedule_failed' }, { language: 'fr' });
+  assert.equal(en.body, 'Cleared: a scheduled run failed.');
+  assert.equal(fr.body, 'Cleared : une exécution planifiée a échoué.');
+  assert.notEqual(en.body, render({ kind: 'health', code: 'unknown' }, { language: 'en' }).body);
+  assert.notEqual(fr.body, render({ kind: 'health', code: 'unknown' }, { language: 'fr' }).body);
+});
