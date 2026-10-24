@@ -169,6 +169,20 @@ test('the week share is Claude Code\'s: a later seven-day window of a Codex sess
   assert.equal(weekShare(t.store.db, 'guestbook', new Date(t.clock.now + 2000)), 30, 'a Claude Code session\'s window still counts');
 });
 
+// Review r2 of PR 302: the week share, read through the quota's newest
+// figure (issue #270), stays Claude Code's: a Codex session's seven-day
+// window above the stop skips no run.
+test('a Codex session\'s seven-day window above the stop is no week share, and the run is not skipped', async () => {
+  const t = await scheduler();
+  await t.schedules.create({ recipe: 'bump-dependency', parameters: { package: 'pg' }, every: 'day 03:00', budgetUsd: 2, weekCapPercent: 85 }, 'u1');
+  const at = iso(t.clock.now);
+  t.store.sessions.put({ id: 'codex-1', project: 'guestbook', ticket: 'LOCAL-1', role: 'author', harness: 'codex', model: 'gpt-6-luna', status: 'working', createdAt: at, updatedAt: at });
+  t.store.events.append({ at, sessionId: 'codex-1', ticket: 'LOCAL-1', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.rate_limit', value: { window: 'seven_day', usedPercent: 95, resetsAt: null } } });
+  assert.equal(weekShare(t.store.db, 'guestbook', new Date(t.clock.now)), undefined);
+  await t.at(Date.parse('2026-10-22T03:00:30.000Z'));
+  assert.deepEqual(t.events.map((e) => e.type), ['schedule_ran']);
+});
+
 test('a disabled schedule never runs', async () => {
   const t = await scheduler();
   const created = await t.schedules.create({ recipe: 'bump-dependency', parameters: { package: 'pg' }, every: 'hour :00', budgetUsd: 2, weekCapPercent: 85 }, 'u1');

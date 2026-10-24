@@ -14,7 +14,7 @@ import { translator } from '../../web/lib/i18n.ts';
 import { ApiError, type ScreenContext } from '../../web/lib/screen.ts';
 import {
   averagePerDay, chartOf, consumptionPath, costView, dayInitial, dollars, headline, leverFailure, leverViews, measuredAt, modelName, moment, periodText, projectionLines,
-  quotaOf, readConsumption, readFailure, resetIn, setLevers, tokensText, verdictOf,
+  quotaOf, readConsumption, readFailure, readingLines, resetIn, setLevers, tokensText, verdictOf,
 } from '../../web/screens/consumption/model.ts';
 
 const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('consumption', 'en') });
@@ -175,4 +175,19 @@ test('the fixtures answer through the service\'s own levers: a reviewer\'s model
   assert.equal(done.status, 200);
   assert.deepEqual(source.read(ZONE).levers, 'body' in done ? done.body : undefined);
   assert.equal(source.read(ZONE).levers.paused, true);
+});
+
+// Issue #270: where the figure comes from, and a failed reading.
+test('the reading lines: the source and the time of the figure, and the last reading when it failed', () => {
+  const data = read();
+  const claude = harness(data, 'claude-code');
+  const codex = harness(data, 'codex');
+  assert.equal(quotaOf(claude)?.source, 'claude-code /api/oauth/usage');
+  assert.equal(quotaOf(codex)?.source, 'session');
+  assert.deepEqual(readingLines(claude, quotaOf(claude), ZONE, 'en', en).map((l) => l.kind), ['seen']);
+  assert.match(flat(readingLines(claude, quotaOf(claude), ZONE, 'fr', fr)[0]!.text), /^Relevé .+, sur la page d'usage de l'agent\.$/);
+  assert.match(readingLines(codex, quotaOf(codex), ZONE, 'en', en)[0]!.text, /from a session's report\.$/);
+  const failed = { ...claude, lastReading: { at: '2026-10-23T21:00:00.000Z', source: 'claude-code /api/oauth/usage', ok: false, error: 'no token in the login file' } };
+  assert.deepEqual(readingLines(failed, undefined, ZONE, 'en', en).map((l) => [l.kind, flat(l.text)]), [['failed', 'The last quota reading failed (Fri, Oct 23, 11:00 PM): no token in the login file.']]);
+  assert.equal(readingLines({ lastReading: { at: '2026-10-23T21:00:00.000Z', source: 's', ok: true } }, undefined, ZONE, 'en', en).length, 0);
 });

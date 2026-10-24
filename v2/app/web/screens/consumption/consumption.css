@@ -59,6 +59,8 @@
 .quota[data-verdict="hit"] .quota-line[data-projection="before"] { color: var(--danger-text); }
 .quota-after, .quota-note { color: var(--text-muted); }
 .quota-note { margin: 0; font-size: var(--text-sm); }
+.quota-reading { margin: 0; font-size: var(--text-sm); color: var(--text-muted); overflow-wrap: anywhere; }
+.quota-reading-failed { color: var(--danger-text); }
 
 .cost-total { margin: 0; font-size: var(--text-md); font-variant-numeric: tabular-nums; }
 .cost-total-label { color: var(--text-muted); }

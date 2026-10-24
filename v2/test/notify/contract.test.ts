@@ -59,6 +59,10 @@ test('the health codes of the lead and of the week stop have their sentence; v1\
   assert.equal(contract.render({ kind: 'health', code: 'lead_start_failed' }).body, 'Cleared: the project lead could not start.');
   assert.equal(contract.render({ kind: 'health', code: 'week_stop' }, { language: 'fr' }).body, 'Cleared : la limite d’usage est atteinte, aucun nouveau ticket ne démarre.');
   assert.equal(contract.render({ kind: 'health', code: 'week_stop' }).group, 'health:week_stop');
+  // Issue #270: the quota's alerts and its failed reading each say what they are.
+  assert.equal(contract.render({ kind: 'health', code: 'quota_75' }).body, 'Cleared: a usage window of the subscription is at 75%.');
+  assert.match(contract.render({ kind: 'health', code: 'quota_85' }, { language: 'fr' }).body, /^Cleared : une fenêtre d’usage de l’abonnement est à 85\s%\.$/);
+  assert.equal(contract.render({ kind: 'health', code: 'quota_read_failed' }).body, 'Cleared: the hourly quota reading failed.');
   assert.equal(contract.render({ kind: 'rollback' }).group, 'rollback:none');
   assert.equal(contract.render({ kind: 'approval', ticket: 'EX-1' }).group, 'EX-1');
 });

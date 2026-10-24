@@ -8,6 +8,7 @@
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { ServiceError, parseServices, type ServiceSpec } from '../container/services.ts';
+import { parseCommand } from '../session/policy.ts';
 import { WorkspaceError, loadWorkspace, parseConf, serviceNameOf, type Sections, type WorkspaceConfig } from '../workspace/config.ts';
 
 // The format of agents.conf is read by workspace/config.ts, which reads the
@@ -78,6 +79,10 @@ export type ProjectSettings = {
   // given to its sibling in a step's trial environment (lane 23).
   readonly serviceUrls?: Readonly<Record<string, string>>;
   readonly guardedPaths?: readonly string[]; // [merge] guarded_paths, when set: the release card's `config` flag reads them (lane 23)
+  // [session] test_command, its words: the one command a reviewer runs
+  // (issue #268). Not declared, `npm test` when package.json has a test
+  // script, else none: the reviewer then runs no code.
+  readonly testCommand?: readonly string[];
 };
 
 const list = (value: string | undefined): string[] => (value ?? '').split(',').map((word) => word.trim()).filter(Boolean);
@@ -97,12 +102,24 @@ export function projectSettings(sections: Sections, scripts: readonly string[] =
   const planGoMinutes = positive(sections.session?.plan_go_minutes, '[session] plan_go_minutes', false);
   const serviceUrls = urlVariables(sections.session?.service_urls);
   const guardedPaths = list(sections.merge?.guarded_paths);
+  const testCommand = testCommandOf(sections.session?.test_command, scripts);
   return {
     verdict, safeCommands: list(sections.session?.safe_commands), hosts: list(sections.session?.hosts), services, scripts,
     ...(planGoMinutes === undefined ? {} : { planGoMinutes }),
     ...(serviceUrls === undefined ? {} : { serviceUrls }),
     ...(guardedPaths.length === 0 ? {} : { guardedPaths }),
+    ...(testCommand === undefined ? {} : { testCommand }),
   };
+}
+
+// One simple command, read as the policy reads a session's: no list, pipe,
+// redirection or expansion, so that what the reviewer may run is exactly it.
+function testCommandOf(value: string | undefined, scripts: readonly string[]): readonly string[] | undefined {
+  const text = value?.trim();
+  if (!text) return scripts.includes('test') ? ['npm', 'test'] : undefined;
+  const words = parseCommand(text);
+  if (!words) throw new FlowConfigError(`[session] test_command must be one simple command (no list, pipe, redirection or expansion), not "${text}"`);
+  return words;
 }
 
 // `<service>:<VARIABLE>` pairs, the variable an upper-case name ending in

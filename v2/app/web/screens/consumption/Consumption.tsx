@@ -13,7 +13,7 @@ import type { Translate } from '@/lib/i18n.ts';
 import { useLive } from '@/lib/query.tsx';
 import {
   REFRESH_MS, averagePerDay, browserZone, chartOf, costView, dayInitial, dayLong, harnessMaker, harnessName, headline, leverFailure, leverViews, measuredAt, percentText,
-  periodText, projectionLines, quotaOf, readConsumption, readFailure, resetIn, setLevers, tokensText, verdictOf, type LeverId, type LeverView,
+  periodText, projectionLines, quotaOf, readConsumption, readingLines, readFailure, resetIn, setLevers, tokensText, verdictOf, type LeverId, type LeverView,
 } from './model.ts';
 import './consumption.css';
 
@@ -72,6 +72,7 @@ function QuotaRow({ h, quota, data, now, t, language }: { readonly h: HarnessCon
       <div className="quota" data-quota={h.harness} data-verdict="unknown">
         <p className="quota-name">{name}</p>
         <p className="quota-note">{t('consumption_quota_none')}</p>
+        <Readings h={h} quota={undefined} data={data} t={t} language={language} />
       </div>
     );
   }
@@ -85,8 +86,15 @@ function QuotaRow({ h, quota, data, now, t, language }: { readonly h: HarnessCon
       <p className="quota-reset"><span>{t(`consumption_window_${quota.window}`)}</span><span className="sep" aria-hidden="true">·</span><span>{resetIn(quota, now, t)}</span></p>
       <p className="quota-line" data-projection="before">{lines.before}</p>
       {lines.after ? <p className="quota-line quota-after" data-projection="after">{lines.after}</p> : null}
+      <Readings h={h} quota={quota} data={data} t={t} language={language} />
     </div>
   );
+}
+
+function Readings({ h, quota, data, t, language }: { readonly h: HarnessConsumption; readonly quota: Quota | undefined; readonly data: Consumption; readonly t: Translate; readonly language: Language }) {
+  return readingLines(h, quota, data.timeZone, language, t).map((line) => (
+    <p key={line.kind} className={line.kind === 'failed' ? 'quota-reading quota-reading-failed' : 'quota-reading'} data-reading={line.kind} {...(line.kind === 'failed' ? { role: 'status' } : {})}>{line.text}</p>
+  ));
 }
 
 function Lever({ lever, busy, onLever }: { readonly lever: LeverView; readonly busy: boolean; readonly onLever: (change: LeversChange) => void }) {

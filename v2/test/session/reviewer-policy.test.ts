@@ -19,6 +19,7 @@ const base: Policy = {
   forbiddenHosts: ['prod.example.com'],
   ticketFiles: ['src/app.ts'],
   learned: [],
+  testCommand: ['npm', 'test'],
 };
 
 const bash = (command: string): ToolRequest => ({ tool: 'Bash', input: { command, description: 'a command' } });
@@ -39,7 +40,8 @@ test('the command of the capture is allowed for the reviewer, as a whole', () =>
   table([
     [DEMO, 'allow', 'shell.compound_safe'],
     ['git log origin/main..HEAD; git merge-base main HEAD; git show HEAD; npm test | tail', 'allow', 'shell.compound_safe'],
-    ['npm run typecheck && npm test 2>&1 | tail -40', 'allow', 'shell.compound_safe'],
+    // Issue #268: the declared test command is the reviewer's only run of code.
+    ['npm run typecheck && npm test 2>&1 | tail -40', 'deny', 'reviewer.run'],
     ['git status; git rev-parse HEAD; git diff --stat main...HEAD | head -50', 'allow', 'shell.compound_safe'],
     ['rg -n "severity" src test | head -20; wc -l src/page.ts', 'allow', 'shell.compound_safe'],
     ['npm test || tail -n 30 npm-debug.log', 'allow', 'shell.compound_safe'],
@@ -76,11 +78,11 @@ test('the reviewer\'s reads, one simple command each', () => {
     ['tail -20 src/page.ts', 'allow', 'run.safe'],
     ['ls -la src', 'allow', 'run.safe'],
     ['find src -name "*.ts" -newer package.json', 'allow', 'run.safe'],
-    ['npm test', 'allow', 'run.safe'],
-    ['npm run test', 'allow', 'run.safe'],
-    ['npm run typecheck', 'allow', 'run.safe'],
-    // A script the base branch does not declare is not the project's own check.
-    ['npm run deploy', 'ask', 'default'],
+    // Issue #268: the declared test command, word for word, and no other script.
+    ['npm test', 'allow', 'reviewer.tests'],
+    ['npm run test', 'deny', 'reviewer.run'],
+    ['npm run typecheck', 'deny', 'reviewer.run'],
+    ['npm run deploy', 'deny', 'reviewer.run'],
   ]);
 });
 
@@ -195,7 +197,7 @@ test('tricky quoting: a separator inside quotes or escaped is a character, an ex
     ['git diff $(git merge-base main HEAD)', 'ask', 'shell.compound'],
     ['git show `git merge-base main HEAD`', 'ask', 'shell.compound'],
     ['git show $REF', 'ask', 'shell.compound'],
-    ['git log\nrm -rf src', 'ask', 'shell.compound'],
+    ['git log\nrm -rf src', 'deny', 'reviewer.edit'],
     ["rg 'open src", 'ask', 'shell.compound'],
     ['git log ;; git status', 'ask', 'shell.compound'],
     ['git log & git status', 'ask', 'shell.compound'],
@@ -213,12 +215,12 @@ test('only the parts that are not allowed ask, and the reason names each of them
   assert.deepEqual([one.decision, one.rule], ['ask', 'net.undeclared']);
   assert.ok(one.decision === 'ask' && one.reason.includes('curl') && !one.reason.includes('git'), JSON.stringify(one));
 
-  const two = evaluate(bash('git log -3; make build && git merge-base main HEAD; rm -r dist | tail'), policy);
+  const two = evaluate(bash('git log -3; git rev-parse --git-dir ../x && git merge-base main HEAD; wc -l /etc/hosts | tail'), policy);
   assert.deepEqual([two.decision, two.rule], ['ask', 'shell.compound']);
   assert.ok(two.decision === 'ask', JSON.stringify(two));
   if (two.decision === 'ask') {
-    assert.match(two.reason, /make build/);
-    assert.match(two.reason, /rm -r dist/);
+    assert.match(two.reason, /git rev-parse --git-dir \.\.\/x/);
+    assert.match(two.reason, /wc -l \/etc\/hosts/);
     assert.doesNotMatch(two.reason, /git log|merge-base|tail/);
   }
 
@@ -237,9 +239,11 @@ test('a deny in any part wins over an ask in an earlier part', () => {
   table([
     // A reviewer's redirection is an edit, denied, even after a part that asks:
     // an "Allow once" of the first part must not run the write.
-    ['make build; npm test > out.txt', 'deny', 'reviewer.edit'],
+    ['curl https://example.com; npm test > out.txt', 'deny', 'reviewer.edit'],
     ['curl https://example.com && git show HEAD > patch.diff', 'deny', 'reviewer.edit'],
-    ['make build; git commit -m x', 'deny', 'reviewer.edit'],
+    ['curl https://example.com; git commit -m x', 'deny', 'reviewer.edit'],
+    // Issue #268: a program that runs code, other than the declared tests, is refused wherever it stands.
+    ['git log; make build', 'deny', 'reviewer.run'],
   ]);
   table([
     ['make build; npm test > notes.txt', 'deny', 'plan.before_go'],
@@ -253,7 +257,7 @@ test('redirections to files and substitutions are never allowed to the reviewer'
     ['npm test >> out.txt', 'deny', 'reviewer.edit'],
     ['git log 2>/dev/null', 'deny', 'reviewer.edit'],
     ['npm test &> out.txt', 'deny', 'reviewer.edit'],
-    ['git merge-base main HEAD | tee base.txt', 'ask', 'shell.compound'],
+    ['git merge-base main HEAD | tee base.txt', 'deny', 'reviewer.edit'],
     ['echo $(git merge-base main HEAD)', 'ask', 'shell.compound'],
     // A duplication writes no file.
     ['npm test 2>&1 | tail -5', 'allow', 'shell.compound_safe'],
@@ -287,4 +291,58 @@ test('the reviewer\'s reads are the reviewer\'s only: the author, the reader and
     ['git merge-base main HEAD', 'deny', 'lead.command'],
     ['rg health src | head -n 20', 'deny', 'lead.command'],
   ], { role: 'lead' });
+});
+
+// Issue #268: the reviewer's policy allows the test command the service
+// declares, and nothing else that runs code or writes.
+test('issue #268: the declared test command is allowed, a write is refused', () => {
+  table([
+    ['npm test', 'allow', 'reviewer.tests'],
+    ['npm test 2>&1 | tail -30', 'allow', 'shell.compound_safe'],
+    // A write: a file program, an in-place edit, an install, git's writes.
+    ['rm src/page.ts', 'deny', 'reviewer.edit'],
+    ['touch src/new.ts', 'deny', 'reviewer.edit'],
+    ['cp src/page.ts src/copy.ts', 'deny', 'reviewer.edit'],
+    ["sed -i 's/a/b/' src/page.ts", 'deny', 'reviewer.edit'],
+    ['git checkout -b mine', 'deny', 'reviewer.edit'],
+    ['git add src', 'deny', 'reviewer.edit'],
+    ['git stash', 'deny', 'reviewer.edit'],
+    ['git reset --hard HEAD~1', 'deny', 'reviewer.edit'],
+    ['git branch -D ticket-1', 'deny', 'reviewer.edit'],
+    ['xargs rm < list.txt', 'deny', 'reviewer.edit'],
+    // Code other than the declared command: another script, the same with an option, an install.
+    ['npm ci', 'deny', 'reviewer.run'],
+    ['npm install left-pad', 'deny', 'reviewer.run'],
+    ['npm test -- -u', 'deny', 'reviewer.run'],
+    ['CI=1 npm test', 'deny', 'reviewer.run'],
+    ['node --test', 'deny', 'reviewer.run'],
+    ['npx vitest run', 'deny', 'reviewer.run'],
+    ['bash -c "npm test"', 'deny', 'reviewer.run'],
+  ]);
+});
+
+test('issue #268: another declared command is the only one; none declared, the reviewer runs no code', () => {
+  table([
+    ['node --test test/', 'allow', 'reviewer.tests'],
+    ["node --test 'test/'", 'allow', 'reviewer.tests'],
+    ['npm test', 'deny', 'reviewer.run'],
+    ['node --test test/ --test-update-snapshots', 'deny', 'reviewer.run'],
+  ], { testCommand: ['node', '--test', 'test/'] });
+  const { testCommand: _, ...none } = base;
+  for (const command of ['npm test', 'node --test', 'npm run typecheck']) {
+    const verdict = evaluate(bash(command), none);
+    assert.equal(verdict.decision, 'deny', command);
+    assert.ok(verdict.decision === 'deny' && /declares no test command/.test(verdict.message), JSON.stringify(verdict));
+  }
+  // The reads stay.
+  assert.equal(evaluate(bash('git diff main...HEAD'), none).decision, 'allow');
+});
+
+test('issue #268: the author keeps its runs and writes', () => {
+  table([
+    ['npm run typecheck', 'allow', 'run.safe'],
+    ['git add src/app.ts', 'allow', 'run.safe'],
+    ['git checkout -b ticket-2', 'allow', 'run.safe'],
+    ['node --test', 'allow', 'run.safe'],
+  ], { role: 'author' });
 });

@@ -1,0 +1,4 @@
+{
+  "type": "error",
+  "error": { "type": "authentication_error", "message": "OAuth token does not meet scope requirement user:profile" }
+}

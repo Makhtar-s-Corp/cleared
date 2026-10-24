@@ -32,6 +32,10 @@ export type Policy = {
   // An author whose session plan waits for its Go (milestone 2, decision 22):
   // it reads and runs the checks, and writes nothing but its HANDOVER.md.
   readonly planning?: boolean;
+  // The reviewer's one command that runs code (issue #268): the service's
+  // declared test command, its words. A reviewer runs it and its reads,
+  // nothing else that runs or writes; none declared, it runs no code.
+  readonly testCommand?: readonly string[];
 };
 
 export type ToolRequest = {
@@ -75,6 +79,52 @@ export const REVIEWER_READS: readonly string[] = [
   'rg *',
   'wc', 'wc *',
 ];
+
+// The safe commands a reviewer keeps (issue #268): milestone 1's reads.
+// The test runners of DEFAULT_SAFE_COMMANDS, git add, commit and checkout,
+// and the project's own safe commands are not a reviewer's.
+export const REVIEWER_SAFE_READS: readonly string[] = [
+  'git status', 'git status *',
+  'git diff', 'git diff *',
+  'git log', 'git log *',
+  'git branch', 'git branch --show-current',
+  'ls', 'ls *',
+  'cat *', 'head *', 'tail *', 'grep *', 'find *',
+  'pwd',
+];
+
+// What a reviewer never runs (issue #268), wherever it stands in a command:
+// a program that writes files, and git's commands that change the checkout,
+// its refs or a remote. A program that runs code (RUNNERS) is refused unless
+// it is the declared test command, word for word.
+const WRITERS = new Set(['rm', 'mv', 'cp', 'touch', 'mkdir', 'rmdir', 'ln', 'chmod', 'chown', 'tee', 'dd', 'truncate', 'install', 'patch', 'rsync', 'unzip', 'tar']);
+const GIT_WRITES = new Set(['add', 'commit', 'push', 'checkout', 'switch', 'reset', 'restore', 'rm', 'mv', 'stash', 'merge', 'rebase', 'cherry-pick', 'revert', 'apply', 'am', 'clean', 'tag', 'pull', 'fetch', 'worktree', 'update-index', 'update-ref', 'gc', 'init', 'clone', 'config', 'notes', 'submodule']);
+const RUNNERS = new Set(['npm', 'npx', 'pnpm', 'yarn', 'bun', 'deno', 'node', 'tsx', 'ts-node', 'vitest', 'jest', 'mocha', 'tsc', 'make', 'python', 'python3', 'pytest', 'cargo', 'go', 'perl', 'ruby', 'sh', 'bash', 'zsh', 'dash']);
+
+const unquoted = (word: string) => word.replace(/^(['"])(.*)\1$/s, '$2');
+
+// The declared test command, word for word: no variable before it, no option added.
+function isTestCommand(words: readonly string[], policy: Policy): boolean {
+  const declared = policy.testCommand;
+  return declared !== undefined && declared.length > 0 && words.length === declared.length && words.every((word, i) => unquoted(word) === declared[i]);
+}
+
+// The reviewer's refusal of a loose command, or undefined.
+function reviewerWrite(words: readonly string[], policy: Policy): string | undefined {
+  if (isTestCommand(words, policy)) return undefined;
+  const programs = commandWords(words);
+  const writer = programs.find((program) => WRITERS.has(program));
+  if (writer) return `${writer} writes files`;
+  if (programs.some((program) => program === 'sed' || program === 'perl') && words.some((word) => /^-[A-Za-z]*i/.test(word) || word.startsWith('--in-place')))
+    return 'an in-place edit writes files';
+  const git = gitCommand(words)?.rest ?? [];
+  if (git[0] !== undefined && GIT_WRITES.has(git[0])) return `git ${git[0]} changes the checkout or its refs`;
+  if (git[0] === 'branch' && git.slice(1).some((word) => !['--show-current', '--list', '-l', '-a', '--all', '-r', '--remotes', '-v', '-vv', '--verbose', '--contains', '--merged', '--no-merged'].includes(word) && word.startsWith('-')))
+    return 'git branch with that option changes the refs';
+  const runner = programs.find((program) => RUNNERS.has(program));
+  if (runner) return `${runner} runs code`;
+  return undefined;
+}
 
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep']);
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
@@ -534,6 +584,17 @@ function denied(request: ToolRequest, policy: Policy): Verdict | undefined {
     for (const words of commands) {
       const sub = gitCommand(words)?.rest[0];
       if (sub === 'commit' || sub === 'push') return deny(rule, `a ${policy.role} does not run git ${sub}`);
+    }
+  }
+  if (policy.role === 'reviewer') {
+    // Read word for word when the parser can, so that `npm test 2>&1` is the
+    // test command; else loosely, where a runner or a writer is refused.
+    const exact = command === undefined ? undefined : parseList(command)?.map((part) => part.words);
+    for (const words of exact ?? commands) {
+      const why = reviewerWrite(words, policy);
+      if (why === undefined) continue;
+      const declared = policy.testCommand?.join(' ');
+      return deny(why.endsWith('runs code') ? 'reviewer.run' : 'reviewer.edit', `${why}: a reviewer reads the code and runs ${declared ? `the service's declared test command, \`${declared}\`, exactly as declared` : 'no command that runs code, since the service declares no test command'}, and nothing else`);
     }
   }
   if (policy.role === 'author' && policy.planning === true) {
@@ -1019,8 +1080,14 @@ function rules(request: ToolRequest, policy: Policy, context: PolicyContext): Ve
 
 // The verdict of one simple command, after the deny rules.
 function simple(request: ToolRequest, words: readonly string[], policy: Policy): Verdict {
+  if (policy.role === 'reviewer') {
+    if (isTestCommand(words, policy)) return allow('reviewer.tests');
+    if (matches(words, REVIEWER_SAFE_READS, policy)) return allow('run.safe');
+    if (matches(words, REVIEWER_READS, policy)) return allow('reviewer.read');
+    if (learned(request, words, policy)) return allow('learned');
+    return asked(request, words, policy);
+  }
   if (safeCommand(words, policy)) return allow('run.safe');
-  if (policy.role === 'reviewer' && matches(words, REVIEWER_READS, policy)) return allow('reviewer.read');
   if (learned(request, words, policy)) return allow('learned');
   if (ticketDeletion(words, policy)) return allow('delete.ticket');
   return asked(request, words, policy);
