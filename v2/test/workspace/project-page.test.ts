@@ -13,7 +13,9 @@ import type { Ticket } from '../../src/tickets/contract.ts';
 import { CONFIG, approved, quickAuthor, setup } from '../flow/support.ts';
 import { AGENTS_CONF, commit, plantedKey, remote, tempDir } from './git.ts';
 
-const PACKAGE = JSON.stringify({ name: 'sample-guestbook', scripts: { test: 'node --test', typecheck: 'tsc --noEmit', build: 'vite build' } });
+const SCRIPT_VALUE = ['k3y', 'Hq7Lm2Vx9Bn4'].join('');
+const SUBJECT_VALUE = ['pw', 'Rt5Yu8Io1Pa6'].join('');
+const PACKAGE = JSON.stringify({ name: 'sample-guestbook', scripts: { test: 'node --test', typecheck: 'tsc --noEmit', build: 'vite build', deploy: `API_TOKEN=${SCRIPT_VALUE} node deploy.js` } });
 const TOKEN = ['ghp', 'Zx9Qw8Er7Ty6Ui5Op4As3Df2Gh1Jk0Lm'].join('_');
 const ENV_VALUE = `${plantedKey}-envfile`;
 // Assembled at run time, as plantedKey is: written whole, the repository guard would refuse this file.
@@ -25,6 +27,7 @@ const CONF = `${AGENTS_CONF}[merge]\nverdict = no blocking issues\n[session]\nsa
 const FILES = {
   'package.json': PACKAGE,
   '.cleared/agents.conf': CONF,
+  '.envrc': `export DIRENV_SECRET=${ENV_VALUE}-direnv\n`,
   '.env': `SESSION_SECRET=${ENV_VALUE}\n`,
   'config/.env.production': `DB_PASSWORD=hunter2-${TOKEN}\n`,
   'keys/server.pem': `${KEY_MARK('BEGIN')}\nMIIEvQ\n${KEY_MARK('END')}\n`,
@@ -66,7 +69,7 @@ function everyText(dir: string): string {
 
 const pageOf = (state: string) => join(state, 'pages', 'guestbook.md');
 const noSecret = (text: string) => {
-  for (const leak of [TOKEN, ENV_VALUE, plantedKey, 'hunter2', 'PRIVATE KEY', 'MIIEvQ', 'SESSION_SECRET', 'DB_PASSWORD'])
+  for (const leak of [SCRIPT_VALUE, SUBJECT_VALUE, `${ENV_VALUE}-direnv`, TOKEN, ENV_VALUE, plantedKey, 'hunter2', 'PRIVATE KEY', 'MIIEvQ', 'SESSION_SECRET', 'DB_PASSWORD'])
     assert.ok(!text.includes(leak), `"${leak}" is not in the page`);
   assert.doesNotMatch(text, /\.env|server\.pem/, 'the names of the environment and key files are left out too');
 };
@@ -89,28 +92,34 @@ test('the first connection of a service makes its page: the layout, the scripts,
 test('the page holds no secret: no environment file, no key file, no token of the README or of a commit subject, in the page or anywhere in the state', async () => {
   const { root, url, state, flow } = await sample();
   merged(root, url, { 'src/more.js': 'export {};\n' }, `Rotate the deploy key ${TOKEN}`);
+  merged(root, url, { 'src/more2.js': 'export {};\n' }, `Set DB_PASSWORD=${SUBJECT_VALUE} for staging`);
   await flow.refreshProject();
   noSecret(readFileSync(pageOf(state), 'utf8'));
   noSecret(everyText(state));
 });
 
-test('the page is read from the base branch, not from the checkout: an untracked file of the checkout is not in it', async () => {
-  const { config, state, flow } = await sample();
+test('the page is read from the base branch, not from the checkout: an untracked file of the checkout is not in it, a new commit of the base is', async () => {
+  const { root, url, config, state, flow } = await sample();
   await flow.refreshProject();
   writeFileSync(join(config.projectDir, 'local-notes.txt'), 'untracked\n');
+  merged(root, url, { 'src/after.js': 'export {};\n' }, 'Add after.js');
   await flow.updateProjectPages?.({ ticket: 'LOCAL-1', pr: 7 });
-  assert.ok(!readFileSync(pageOf(state), 'utf8').includes('local-notes'));
+  const page = readFileSync(pageOf(state), 'utf8');
+  assert.match(page, /Add after\.js/, 'the page was made again from the new base');
+  assert.ok(!page.includes('local-notes'));
 });
 
-test('a service that is already connected keeps its page: a new fetch does not make it again', async () => {
+test('a fetch that finds the base unmoved leaves the page as it is; one that finds it moved, even by a merge made on the forge itself, makes it again', async () => {
   const { root, url, state, flow } = await sample();
   await flow.refreshProject();
   const before = readFileSync(pageOf(state), 'utf8');
   const at = statSync(pageOf(state)).mtimeMs;
-  merged(root, url, { 'src/late.js': 'export {};\n' }, 'Add late.js');
   await flow.refreshProject();
   assert.equal(readFileSync(pageOf(state), 'utf8'), before);
   assert.equal(statSync(pageOf(state)).mtimeMs, at);
+  merged(root, url, { 'src/late.js': 'export {};\n' }, 'Add late.js');
+  await flow.refreshProject();
+  assert.match(readFileSync(pageOf(state), 'utf8'), /Add late\.js/);
 });
 
 test('after a merge the page is made again from the new base: the merge is among the recent decisions, the new file in the layout, and still no secret', async () => {
@@ -126,6 +135,22 @@ test('after a merge the page is made again from the new base: the merge is among
   const at = statSync(pageOf(state)).mtimeMs;
   await flow.updateProjectPages({ ticket: 'LOCAL-1', pr: 7 });
   assert.equal(statSync(pageOf(state)).mtimeMs, at, 'a base that did not move leaves the page as it is');
+});
+
+test('on the guestbook example of this repository: its real scripts and README, and no secret', async () => {
+  const example = join(import.meta.dirname, '..', '..', '..', 'examples', 'guestbook');
+  const files: Record<string, string> = {};
+  for (const path of execFileSync('git', ['-C', example, 'ls-files', '-z'], { encoding: 'utf8' }).split('\0').filter(Boolean))
+    if (!path.endsWith('package-lock.json')) files[path] = readFileSync(join(example, path), 'utf8');
+  const { state, flow } = await sample(files);
+  await flow.refreshProject();
+  const page = readFileSync(pageOf(state), 'utf8');
+  const scripts = Object.keys((JSON.parse(files['package.json'] as string) as { scripts: Record<string, string> }).scripts);
+  assert.ok(scripts.length > 0);
+  for (const script of scripts) assert.ok(page.includes(`npm run ${script}`), `the script ${script}`);
+  assert.match(page, /`src\/server\.ts`/);
+  assert.ok(statSync(pageOf(state)).size <= 8 * 1024);
+  noSecret(page);
 });
 
 test('the page is cut to a size a briefing can carry, whatever the repository holds', async () => {

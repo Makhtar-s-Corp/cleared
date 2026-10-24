@@ -53,9 +53,10 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
   const refresh = async (service?: ServiceConfig) => {
     const { dir, url, base } = of(service);
     const checkout = await projectCheckout({ url, dir, base, env: (await forge(service)).git });
-    // The service's first connection makes its project page (issue #274); a
-    // page that cannot be made never stops the fetch.
-    await pageOf(service, 'ensure').catch((error) => console.error(`cleared-v2: the project page could not be made (${error instanceof Error ? error.name : typeof error})`));
+    // The service's first connection makes its project page (issue #274), and
+    // a fetch that finds the base moved makes it again, so a merge made on the
+    // forge itself is in it too; a page that cannot be made never stops the fetch.
+    await pageOf(service, 'update').catch((error) => console.error(`cleared-v2: the project page could not be made (${error instanceof Error ? error.name : typeof error})`));
     return checkout;
   };
   const pageOf = async (service: ServiceConfig | undefined, how: 'ensure' | 'update') => {

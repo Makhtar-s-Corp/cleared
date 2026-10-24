@@ -736,9 +736,6 @@ export class FlowEngine {
     if (merge.outcome === 'merged') {
       state.mergedAt = this.#now().toISOString();
       this.#follow(c);
-      const pages = this.#effects.updateProjectPages;
-      if (pages) void this.#track(Promise.resolve().then(() => pages.call(this.#effects, { ticket: c.ticket, pr: c.pr }))
-        .catch((error) => { console.error(`cleared-v2: the project pages were not made again after pull request #${c.pr} (${name(error)})`); }));
     } else if (merge.outcome === 'refused') {
       state.refused = `The lock refused to merge pull request #${c.pr}: ${merge.message || 'no reason given'}`;
       state.inFlight = true;
@@ -768,6 +765,8 @@ export class FlowEngine {
   }
 
   #emit(event: FlowEvent): void {
+    // A merge, one-service or of a train, makes the project pages again (issue #274).
+    if (event.type === 'release_merged') this.#pagesAfter(event.ticket, event.pr);
     const failed = (error: unknown) => console.error(`cleared-v2: a flow listener failed on ${event.type} (${error instanceof Error ? error.name : typeof error})`);
     for (const listener of [...this.#listeners]) {
       try {
@@ -777,6 +776,13 @@ export class FlowEngine {
         failed(error);
       }
     }
+  }
+
+  #pagesAfter(ticket: TicketId, pr: number): void {
+    const pages = this.#effects.updateProjectPages;
+    if (!pages) return;
+    void this.#track(Promise.resolve().then(() => pages.call(this.#effects, { ticket, pr }))
+      .catch((error) => { console.error(`cleared-v2: the project pages were not made again after pull request #${pr} (${name(error)})`); }));
   }
 
   #at(): string {

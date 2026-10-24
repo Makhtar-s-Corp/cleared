@@ -44,14 +44,25 @@ export function readProjectPage(env: NodeJS.ProcessEnv, service: string): string
 
 // A path that can hold a secret: an environment file, a key or certificate,
 // a credentials or secrets file, a package registry's or a netrc login.
-const DENIED_PATH = /(?:^|\/)(?:\.env(?:\..*)?|\.npmrc|\.netrc|\.pypirc|\.htpasswd|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|[^/]*(?:credential|secret|password|passwd|token)[^/]*)$|\.(?:pem|key|p12|pfx|jks|keystore|asc|gpg|kdbx)$/i;
+const DENIED_PATH = /(?:^|\/)(?:\.env(?:\..*)?|\.envrc|\.npmrc|\.netrc|\.pypirc|\.htpasswd|id_(?:rsa|dsa|ecdsa|ed25519)(?:\.pub)?|[^/]*(?:credential|secret|password|passwd|token)[^/]*)$|\.(?:pem|key|p12|pfx|jks|keystore|asc|gpg|kdbx)$/i;
 export const isDeniedPath = (path: string): boolean => DENIED_PATH.test(path);
 
 // The shapes of the tokens the cleaner's guard patterns do not name.
 const TOKEN_SHAPES = /\b(?:gh[pousr]_[A-Za-z0-9]{16,}|github_pat_[A-Za-z0-9_]{20,}|xox[abprs]-[A-Za-z0-9-]{10,}|glpat-[A-Za-z0-9_-]{16,}|AKIA[0-9A-Z]{16}|npm_[A-Za-z0-9]{30,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}|(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{16,})/g;
 
+// A name that says a secret, then its value, anywhere in a line: a script
+// that sets a token for one command, a subject that says what was set.
+const ASSIGNED = /[\w-]*(?:pass(?:word|wd)?|secret|token|api[_-]?key|pepper|credential)[\w-]*\s*[=:]\s*[^\s,;]{4,}/gi;
+
 function clean(text: string, env: NodeJS.ProcessEnv): string {
-  return cleanText(text, { secrets: secretValues(env) }).replace(TOKEN_SHAPES, '[removed: token]');
+  return cleanText(text, { secrets: secretValues(env) }).replace(TOKEN_SHAPES, '[removed: token]').replace(ASSIGNED, '[removed: secret]');
+}
+
+// One field of the page, cleaned on its own: the guard's patterns for an
+// assigned secret start at the beginning of a line, which in the page a
+// field no longer is.
+function field(env: NodeJS.ProcessEnv, text: string, limit: number): string {
+  return oneLine(clean(oneLine(text, limit * 4), env), limit);
 }
 
 // One line of prose: control characters out, one line, cut.
@@ -128,11 +139,11 @@ export async function generateProjectPage(source: PageSource): Promise<{ readonl
       const parsed = JSON.parse(pkg) as { name?: unknown; scripts?: Record<string, unknown> };
       if (typeof parsed.name === 'string') packageName = oneLine(parsed.name, 80);
       for (const [script, body] of Object.entries(parsed.scripts ?? {}))
-        if (typeof body === 'string') commands.push(`- \`npm run ${oneLine(script, 40)}\`: \`${oneLine(body, 100)}\``);
+        if (typeof body === 'string') commands.push(`- \`npm run ${oneLine(script, 40)}\`: \`${field(source.env, body, 100)}\``);
     } catch { /* a package.json that does not parse says nothing */ }
   }
   const conf = await show(source, '.cleared/agents.conf');
-  const safe = conf === undefined ? [] : listOf(/^\s*safe_commands\s*=\s*(.*)$/m.exec(conf)?.[1]);
+  const safe = conf === undefined ? [] : listOf(/^\s*safe_commands\s*=\s*(.*)$/m.exec(conf)?.[1]).map((c) => field(source.env, c, 80));
 
   const readme = await show(source, 'README.md');
   const subjects = (await git(source.dir, ['log', '--first-parent', `-n${DECISIONS}`, '--no-show-signature', '--format=%cs %s', ref])).split('\n').filter(Boolean);
@@ -144,17 +155,17 @@ export async function generateProjectPage(source: PageSource): Promise<{ readonl
     '',
     '## Architecture',
     ...(packageName ? [`Package: ${packageName}`] : []),
-    ...(readme !== undefined && summaryOf(readme) ? [summaryOf(readme)] : []),
+    ...(readme !== undefined && summaryOf(readme) ? [field(source.env, summaryOf(readme), SUMMARY_LIMIT)] : []),
     '',
     'Layout of the base branch:',
     ...layoutOf(paths),
     '',
     '## Useful commands',
     ...(commands.length ? commands : ['- None found in package.json.']),
-    ...(safe.length ? ['', `Commands a session may run unasked: ${safe.map((c) => `\`${oneLine(c, 80)}\``).join(', ')}.`] : []),
+    ...(safe.length ? ['', `Commands a session may run unasked: ${safe.map((c) => `\`${c}\``).join(', ')}.`] : []),
     '',
     '## Recent decisions',
-    ...(subjects.length ? subjects.map((s) => `- ${oneLine(s, SUBJECT_LIMIT)}`) : ['- None yet.']),
+    ...(subjects.length ? subjects.map((s) => `- ${s.slice(0, 11)}${field(source.env, s.slice(11), SUBJECT_LIMIT)}`) : ['- None yet.']),
     '',
   ];
   let text = clean(lines.join('\n'), source.env);

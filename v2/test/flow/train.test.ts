@@ -77,12 +77,13 @@ const effects = (changed: Record<string, string[]>): Partial<FlowEffects> => ({
   },
 });
 
-async function train(options: { services?: string[]; changed?: Record<string, string[]>; outcomes?: Record<string, MergeOutcome['outcome'][]>; drift?: string; rollback?: { ok: boolean; message: string } } = {}) {
+async function train(options: { services?: string[]; changed?: Record<string, string[]>; outcomes?: Record<string, MergeOutcome['outcome'][]>; drift?: string; rollback?: { ok: boolean; message: string }; pages?: string[] } = {}) {
   const calls: Call[] = [];
   let t: Setup | undefined;
+  const pages = options.pages;
   t = await setup({
     scripts: { author: quickAuthor }, config: { workspace: WORKSPACE },
-    effects: effects(options.changed ?? { guestbook: ['src/page.ts'], 'filter-api': ['src/check.ts'] }),
+    effects: { ...effects(options.changed ?? { guestbook: ['src/page.ts'], 'filter-api': ['src/check.ts'] }), ...(pages ? { async updateProjectPages(input: { ticket: string; pr: number }) { pages.push(`${input.ticket}:${input.pr}`); } } : {}) },
     locks: locks(() => t as Setup, calls, options),
   });
   const ticket = await t.tickets.create({ title: 'Held for review', body: 'An entry the filter flags is held for review instead of refused.', project: 'guestbook', services: options.services ?? ['guestbook', 'filter-api'] }, { kind: 'human', id: 'u1' });
@@ -186,6 +187,16 @@ test('a two-service ticket lands in order: the provider first, the consumer only
   const before = calls.length;
   await tick(t, 600_000);
   assert.equal(calls.length, before, 'a landed train asks nothing more');
+  await t.engine.close();
+});
+
+test('each merge of a train makes the project pages again (issue #274, P103)', async () => {
+  const pages: string[] = [];
+  const { t, ticket, approve } = await train({ pages });
+  await approve();
+  await t.engine.settled();
+  assert.equal(pages.length, of(t, 'release_merged').length, 'one call for each service merged');
+  assert.ok(pages.length >= 1 && pages.every((p) => p.startsWith(`${ticket.id}:`)));
   await t.engine.close();
 });
 
