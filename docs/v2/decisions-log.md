@@ -7020,3 +7020,101 @@ Tests first (`65ed443d`): a render case per value, a guess case, and a repositor
 
 - Pull request: 418, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-connect`.
+
+## 2026-10-25: prepared images per service, chosen at a session's start, built after connect and after a merge that changes them (the author's choices, lane `v2-j5-images`, C15, P254, issue #422)
+
+**The need.** Issue #422, section 10 of [milestone-5-plan.md](milestone-5-plan.md) (matrix C15, decision 13): an image ready in seconds. Per service, `cleared-v2-prep-<service>:<hash>`, built after the service is connected and after each merge that changes what the hash covers, with the project's dependencies installed. A session starts on the ready image, or tells its ticket it waits for one. The two newest per service are kept. The assistant's environment step shows the build and its time, and a doctor section `images` says each image and measures a session's start on one. French and English, fakes in the tests. As earlier lanes noted, the brief's section 6 (`PROMPT.md`) and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of section 3.1 of the milestone 5 plan.
+
+**The branch.** The brief asked for `v2/j5-images`. Git refuses that name beside the branch `v2`, locally and on the remote, so the lane runs on `v2-j5-images`, as the other milestone 5 lanes do.
+
+**Where it started.** Section 2 of the plan says each session builds or pulls what its devcontainer names at its start. At `origin/v2` `3c27792` nothing did: no code called `readDevcontainer` or `sessionImage`, and the three adapters gave `startSession` the runtime's one image, so every session ran Cleared's session image whatever the project declared. This lane is what first reads a project's `.devcontainer` for a session.
+
+**Decision.**
+1. **The hash** (`src/container/prepared.ts`, `readInputs`). It is read from git's objects at `refs/remotes/origin/<base>` of the service's checkout, as the service map reads it, never the working tree. It covers:
+   - the devcontainer file, the service's folder's, else the repository's;
+   - the Dockerfile that file builds, when it builds one;
+   - the lock files at the service's root (`package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`, `pnpm-lock.yaml`, `requirements.txt`, `poetry.lock`, `Pipfile.lock`, `uv.lock`, `go.sum`, `Cargo.lock`, `Gemfile.lock`, `composer.lock`);
+   - the install command;
+   - the image it starts from, so a new Claude Code version in Cleared's session image builds again;
+   - a recipe number, for a change of this file that changes what a build makes.
+
+   A manifest (`package.json` and the like) is copied for the install but not hashed: a version or a script changes no dependency, and a dependency changes the lock file. The hash is 16 hexadecimal characters of a SHA-256. A folder service reads its own folder: the folders beside it change nothing.
+2. **The install command** is `install_command` in the `[session]` section of the service's `.cleared/agents.conf` (its folder's, else the repository's), read at the base branch. No such key existed. It is one simple command, read as the policy reads a session's (`parseCommand`); a list, a pipe, a redirection or an expansion is refused with the reason. Without it nothing is installed ahead (question 1).
+3. **What a build makes.** The image starts from Cleared's session image when the project has no `.devcontainer`, or from the image its `.devcontainer` names. `cleared-v2-session` under any tag means this install's session image: the guestbook's devcontainer names `cleared-v2-session:latest`, a tag nothing builds, which a `FROM` would look for on Docker Hub. A `.devcontainer` that builds a Dockerfile has it built first, as `<tag>-devcontainer`, from the base branch's files, labelled like the image. Then Cleared's own Dockerfile (`preparedDockerfile`), every word of it checked:
+   - `FROM` that image;
+   - the manifests and lock files copied to `/opt/cleared/prepared`;
+   - the install command run there in exec form, with no shell;
+   - `/node_modules` linked to `/opt/cleared/prepared/node_modules`;
+   - `WORKDIR /workspace`.
+
+   The session's checkout is mounted over `/workspace`, which hides anything an image puts there, so the dependencies live outside it. Node's resolution and npm's scripts look in `/node_modules` once `/workspace` has none. This was checked on this server, without Docker, on a folder laid out the same way: from a project with no `node_modules`, `npm run` found the linked package's command, and both `import` and `require` reached it. The build reaches the network (the registry), and runs only what the base branch holds, which a person approved and the lock merged, as a sibling's base layer does.
+4. **One build per service at a time** (`ensure`). A second caller (the step, the merge hook, a session's start) waits for the running build, then finds the image ready. Each build is recorded in `<state>/prepared/<service>.json` (mode 600): the service's checkout, its base and folder, the last ready image's hash, tag, time and build time, and the last build's hash, start and first line of failure. A session's start reads the hash again from the checkout that record names. The build's folder is a temporary one, removed after.
+5. **The two newest.** After a build, the images labelled with the service whose name is exactly `cleared-v2-prep-<service>:...` are grouped by hash, and the images of the two newest hashes are kept, with their `-devcontainer` layers; the others are removed by tag. An image of another service whose name starts the same (`api-v2` beside `api`), an image of that name without the label, and an image with the service's label under another name are left alone.
+6. **The session's start** (`session-runtime.ts`).
+   - An image the adapter's runtime names wins: Codex's and Cursor's carry their own programs.
+   - A service with no record runs Cleared's image, as before.
+   - Otherwise the ready image for the hash read now is used, and nothing is built.
+   - When there is none, the session waits for the build. The Claude Code adapter emits `cleared.prepared_image` with `state: waiting` on the session, so the ticket's events say it, and the session starts on the new image.
+   - A build that fails, or already failed for that hash, leaves Cleared's image with the reason (`build_failed`), and the start does not build again until the person fixes it (question 2).
+
+   The choice is made before any object of the session exists. `StartedSession.image` says which image ran, why, and how long it waited.
+7. **After a merge** (`flow/runtime.ts`, `preparedAfterMerge`). The engine's `release_merged` event fetches each service that has a record (the one a train's merge names, else all), as the lead module fetches for the map, then calls `ensure`, which builds nothing when the hash did not move. A failure is one line of the service's log.
+8. **The environment step** (`src/setup/steps/environment.ts`, `Environment.tsx`):
+   - each service of the workspace with its `.devcontainer` (none, an image, a Dockerfile), its install command, and its image ready, stale, building, failed or not built, in words beside the coloured bar;
+   - a ready image with its tag, its build time and its age ("built in 3 min, 2h ago"), and a failed one with its first line and what to do;
+   - Build answers 202 at once and builds one service after the other; the page reads the view every 2 seconds while one runs, with Build disabled;
+   - the builds count as the machine's time, and the step is done when every image is ready. No workspace yet is said, with no Build;
+   - reading the view asks Docker nothing.
+9. **The doctor's `images` section** (`src/doctor/sections/images.ts`, not run by default since it starts a container):
+   - each service's image, ready with its age and its build time, or not built, stale, being built, missing from Docker or failed, each with what to do;
+   - then one session started on the newest ready image through `startSession`, labelled as every session is (networks, egress proxy, container), running `node -e 'console.log("ready")'` with an empty file mounted where the login goes, timed from the call to its first line;
+   - a pass under 10 seconds, a notice above, a failure with what to do, and everything it made removed by label.
+
+   The measure covers the start of the networks, the proxy and the container, not the flow's checkout and briefing before it.
+10. **Files outside the lane's list of section 10.4**, none of them a wave 3 lane's (`v2-j5-gitlab` lists the forge's files):
+    - `src/container/docker.ts`: a build takes extra labels (checked, never `cleared.dev` or `cleared.session`), images are listed by one more label with their build time;
+    - `src/container/types.ts`, new: the step's shapes (section 3.1);
+    - `src/session/adapters/claude-code.ts`: the service passed, and the wait said;
+    - `src/session/events.ts`: the name `cleared.prepared_image`;
+    - `src/flow/runtime.ts`: the merge hook;
+    - the step's catalogs, its sheet `environment.css`, and the doctor's catalogs `src/doctor/messages/images.{en,fr}.json`.
+
+**Questions for the owner** (defaults applied):
+1. A project that declares no install command: nothing is installed ahead (applied), as the plan says ("when it has one"). Or Cleared infers `npm ci` from a `package-lock.json` (and the like for pnpm and yarn), a project's sessions then faster without a line of settings. The guestbook declares none today, so its prepared image holds no dependency until it does.
+2. A build that failed for a hash is not tried again at each session's start (applied): the session runs Cleared's image at once, and the step and the doctor say the failure. Or each start tries again, and waits minutes each time it fails.
+3. The real run on this server (below): left to the rehearsal (applied). Or the orchestrator builds the session and egress images here, labelled, and runs `node scripts/doctor.ts images` on the guestbook with `install_command = npm ci`.
+
+**Not done here.**
+- **The real run.** The plan proves C15 also by the `images` section's real run, quoted with its times. This server holds no session or egress image (a labelled list found the guestbook's and the filter API's only), and building them pulls `node:24`, an unlabelled object, where the brief prefers no Docker at all. So no Docker command ran here beyond that list. The measured time, and so the 10-second target, wait for the rehearsal (lane `v2-j5-proof`) or question 3. C15 and P254 stay `partial` until then.
+- **The session screen** does not draw `cleared.prepared_image` yet. The cleaner lets it through and the session's event log keeps it; a line on the timeline is a later lane's.
+- **Out of scope.** A shared cache or a registry; the devcontainer specification beyond `image` and `build`. A `build.context` larger than the Dockerfile's folder is copied whole, but only the Dockerfile is in the hash, as decision 13 says, so a file it copies that changes does not build again. The setup session for a service whose image cannot be built is lane `v2-j5-env-setup`'s (section 13), on this step.
+- **Documentation.** `install_command` is a new key of `[session]`. Its line in `examples/guestbook/.cleared/agents.conf` and in the README is lane `v2-j5-docs`'s (section 15); neither file is this lane's.
+
+**Tests first.** `af73a458` committed the tests alone, with `src/container/types.ts` (the step's shapes they name). On it:
+- `test/container/prepared.test.ts`, `test/doctor/images.test.ts` and `test/setup/environment.test.ts` could not load what they test;
+- the three new session-runtime cases failed;
+- the three cases of the screen failed.
+
+The assistant's stub cases moved from the environment step to the secrets step.
+
+Changes that came with the code:
+- the test of a base image's place in the hash compares a project with no Dockerfile, whose image is Cleared's;
+- the full suite found three more. The list of custom names now holds the new one. A catalog key ending in `_none` read as an empty state, which must be one sentence, so it became `environment_no_devcontainer`. The doctor test split French lines on a plain space, where French writes a no-break space before `:`.
+
+**Captures** (`docs/v2/prepared-images/`): the step with two services ready, at 1440, 1280, 768 and 390 px, light and dark, in English, and at 1440 in French, taken by `app/test/setup/environment-browser.test.ts` with `CLEARED_V2_CAPTURES`, against a fake `docker` program that builds after a pause.
+
+**Checks.** See the pull request for the counts at its head.
+- `npm run typecheck` passes.
+- `npm test`: see the pull request.
+- The setup's three browser tests (`environment-browser`, `setup-browser`, `checks-browser`) pass with `CLEARED_V2_PLAYWRIGHT` set, in both languages, axe finding nothing.
+- `npm run guard -- --base origin/v2`: nothing refused.
+- The guard does not read `docs/v2/`, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
+
+**Resources.**
+- Docker: one list of images filtered on `cleared.dev=v2`, nothing else. No image built, no container started.
+- No Claude Code login read. No GitHub, Slack, Cursor or Codex account used.
+- Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issue and the pull request.
+- Ports: only the tests' own ephemeral loopback ones (`ss -ltn` read first). No tunnel, no secret.
+
+- Pull request: against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-images`.
