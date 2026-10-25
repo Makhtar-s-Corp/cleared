@@ -57,7 +57,7 @@ import { CloseTicket } from './CloseTicket.tsx';
 import { BrowserTab, Confidence, Criteria, EditorTab, OpenInEditor, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown, type PlanAsk } from './Tabs.tsx';
 import { browserView, changeProblem, CHANGE_MAX, editorOffer, goLine, handoverFor, nextTab, planAskBody, planAskProblem, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import {
-  CAPTURE_CHOICES, actingSession, chooseCaptures, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketCostFacts, productionFacts, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
+  CAPTURE_CHOICES, actingSession, captureChoiceOf, chooseCaptures, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketCostFacts, productionFacts, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
   type Filter, type Handover, type ThreadEntry, type TicketPart,
 } from './ticket.ts';
 import { askFailure, askHref, startAsk } from '@/screens/ask/model.ts';
@@ -427,20 +427,22 @@ const closable = (ticket: Ticket | undefined): boolean => ticket !== undefined &
 
 // The proof receipt's captures, forced on or off from the ticket (P226,
 // issue #368): Auto lets the service's rule decide from the change. Drawn
-// once the choice is read, on a ticket that has not shipped.
+// once the choice is read, on a ticket that has not shipped. While a save
+// is on its way the buttons are not disabled, which would fade the pressed
+// one: the screen ignores a second click (Live's onCaptures).
 function CaptureSwitch({ choice, t, busy, note, onCaptures }: {
   readonly choice: CaptureChoice['choice']; readonly t: Translate; readonly busy?: boolean; readonly note?: string; readonly onCaptures?: (choice: CaptureChoice['choice']) => void;
 }) {
   return (
     <div className="ticket-captures" data-ticket-captures="">
       <h3 className="card-label sub-label" id="captures-label">{t('captures_label')}</h3>
-      <div className="mode scope" role="group" aria-labelledby="captures-label">
+      <div className="mode scope" role="group" aria-labelledby="captures-label" aria-describedby="captures-hint" aria-busy={busy ? true : undefined}>
         {CAPTURE_CHOICES.map((option) => (
-          <button key={option} type="button" data-captures={option} aria-pressed={choice === option} disabled={busy} onClick={() => onCaptures?.(option)}>{t(`captures_${option}`)}</button>
+          <button key={option} type="button" data-captures={option} aria-pressed={choice === option} onClick={() => onCaptures?.(option)}>{t(`captures_${option}`)}</button>
         ))}
       </div>
-      <p className="faint small">{t(`captures_${choice}_hint`)}</p>
-      {note ? <p className="composer-note" role="status">{note}</p> : null}
+      <p className="faint small" id="captures-hint">{t(`captures_${choice}_hint`)}</p>
+      <p className="composer-note" role="status">{note ?? ''}</p>
     </div>
   );
 }
@@ -828,23 +830,30 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     catch { /* the next change tries again */ }
   }, [context, ticketId]);
   useEffect(() => { if (resolved) void readProduction(); }, [resolved, readProduction]);
-  // The choice of the receipt's captures (P226), read again at each change: another tab may have made it.
+  // The choice of the receipt's captures (P226), read once with the view
+  // and set by its own save: a choice made in another tab shows on the next
+  // visit, so a change of the service costs no request per mounted view.
   const readCaptures = useCallback(async () => {
-    try { setCaptures(await context.api<CaptureChoice>(`/tickets/${encodeURIComponent(ticketId)}/captures`)); }
-    catch { /* the next change tries again */ }
+    try { setCaptures(captureChoiceOf(await context.api<unknown>(`/tickets/${encodeURIComponent(ticketId)}/captures`))); }
+    catch { /* no switch: the next visit tries again */ }
   }, [context, ticketId]);
   useEffect(() => { if (!resolved) void readCaptures(); }, [resolved, readCaptures]);
+  const savingCaptures = useRef(false);
   const onCaptures = useCallback(async (choice: CaptureChoice['choice']) => {
+    if (savingCaptures.current) return;
+    savingCaptures.current = true;
     setCapturesBusy(true);
     try {
-      setCaptures(await chooseCaptures(context.api, ticketId, choice));
+      const saved = captureChoiceOf(await chooseCaptures(context.api, ticketId, choice));
+      if (!saved) throw new Error('not a choice');
+      setCaptures(saved);
       setCapturesNote('');
     } catch { setCapturesNote(t('captures_failed')); }
+    savingCaptures.current = false;
     setCapturesBusy(false);
   }, [context, ticketId, t]);
   useLive(() => {
     if (resolved) void readProduction();
-    else void readCaptures();
     if (shown) void refresh();
     else missed.current = true;
   });

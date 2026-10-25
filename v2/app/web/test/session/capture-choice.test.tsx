@@ -12,7 +12,7 @@ import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
 import { loadCatalog } from '../../../src/catalog.ts';
 import { translator } from '../../lib/i18n.ts';
 import { applyAll, emptyModel, threadOf, type SessionView } from '../../screens/session/model.ts';
-import { chooseCaptures } from '../../screens/session/ticket.ts';
+import { captureChoiceOf, chooseCaptures } from '../../screens/session/ticket.ts';
 import { LeftCards } from '../../screens/session/Session.tsx';
 import { html, visibleText } from '../render.tsx';
 
@@ -68,4 +68,9 @@ test('the choice is posted to the service\'s route of the ticket', async () => {
   const answer = await chooseCaptures(api, 'LOCAL-7', 'off');
   assert.deepEqual(calls, [{ path: '/tickets/LOCAL-7/captures', init: { method: 'POST', body: { choice: 'off' } } }]);
   assert.equal(answer.choice, 'off');
+});
+
+test('an answer that is not a choice draws no switch: a source that does not know the route', () => {
+  assert.deepEqual(captureChoiceOf({ choice: 'on', by: USER, at: '2026-10-25T10:00:00.000Z' }), { choice: 'on', by: USER, at: '2026-10-25T10:00:00.000Z' });
+  for (const answer of [{ accepted: true }, { choice: 'always' }, null, 'auto', []]) assert.equal(captureChoiceOf(answer), null, JSON.stringify(answer));
 });
