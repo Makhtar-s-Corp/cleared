@@ -1,7 +1,6 @@
 // The lanes' MCP server over HTTP (P216): POST /mcp on the service, MCP's
 // Streamable HTTP answered in plain JSON, behind a local token of its own
-// (never the app's proof), for peers of this machine or the private network
-// only. Driven by a fake MCP client over loopback, port 0; no real Claude
+// (never the app's proof), for peers of this machine or the tailnet only. Driven by a fake MCP client over loopback, port 0; no real Claude
 // Code is configured. The tokens are made at run time.
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
@@ -149,18 +148,18 @@ test('no token to check (it could not be made) or no flow: 503, the reason said 
   assert.match(await answer.text(), /CLEARED_V2_PROJECT/);
 });
 
-test('only this machine and the private network: loopback, RFC 1918, the tailnet\'s 100.64.0.0/10 and IPv6 unique local addresses', () => {
-  for (const address of ['127.0.0.1', '127.8.9.10', '::1', '::ffff:127.0.0.1', '10.1.2.3', '172.16.0.1', '172.31.255.255', '192.168.1.20', '100.64.0.1', '100.127.255.254', '::ffff:100.101.102.103', 'fd7a:115c:a1e0::1', 'fc00::5'])
+test('only this machine and the tailnet: loopback, 100.64.0.0/10 and fd7a:115c:a1e0::/48; not a Docker bridge nor another private range', () => {
+  for (const address of ['127.0.0.1', '127.8.9.10', '::1', '::ffff:127.0.0.1', '100.64.0.1', '100.127.255.254', '::ffff:100.101.102.103', 'fd7a:115c:a1e0::1', 'fd7a:115c:a1e0:ab12::42'])
     assert.equal(privatePeer(address), true, address);
-  for (const address of ['8.8.8.8', '172.32.0.1', '172.15.255.255', '100.128.0.1', '100.63.255.255', '192.169.0.1', '2001:db8::1', '::ffff:8.8.8.8', 'fe80::1', '', undefined, 'not an address'])
+  for (const address of ['8.8.8.8', '172.17.0.2', '172.16.0.1', '10.1.2.3', '192.168.1.20', 'fc00::5', 'fd7a:115c:a1e1::1', '100.128.0.1', '100.63.255.255', '2001:db8::1', '::ffff:8.8.8.8', '::ffff:172.17.0.2', 'fe80::1', '', undefined, 'not an address'])
     assert.equal(privatePeer(address), false, String(address));
 });
 
-test('a peer outside the private network is 403 before the token is read', async () => {
+test('a peer outside this machine and the tailnet, a session\'s container on a Docker bridge, is 403 before the token is read', async () => {
   const t = await setup();
   const route = lanesMcpRoutes({ engine: () => t.engine, store: () => t.store, token: () => TOKEN, language: 'en', redactor: createRedactor({ env: {}, paths: [] }) })[0] as Route;
   const request = Object.assign(Readable.from([Buffer.from(JSON.stringify(initialize))]), {
-    method: 'POST', url: MCP_PATH, socket: { remoteAddress: '203.0.113.9' },
+    method: 'POST', url: MCP_PATH, socket: { remoteAddress: '172.17.0.2' },
     headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
   }) as unknown as IncomingMessage;
   let status = 0;

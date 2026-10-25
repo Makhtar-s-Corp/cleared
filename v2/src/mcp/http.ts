@@ -5,9 +5,11 @@
 // transport allows for a server with no stream.
 //
 // Three checks, in this order, before a message is read:
-//   1. the peer: this machine, a private network (RFC 1918) or the tailnet
-//      (100.64.0.0/10, IPv6 unique local addresses); anyone else is 403,
-//      whatever address the service was told to listen on (B3.2);
+//   1. the peer: this machine or the tailnet (100.64.0.0/10 and its IPv6
+//      fd7a:115c:a1e0::/48), as B3.2 says; anyone else is 403, whatever
+//      address the service was told to listen on. Not the other private
+//      ranges: a session's container reaches the host from a Docker bridge
+//      (172.17.0.0/16 and the like), and a container is never trusted;
 //   2. no Origin: a request from a web page is 403, so a page the person
 //      opens cannot reach the server through their browser;
 //   3. the token: Authorization: Bearer <the v2-mcp-token file beside
@@ -45,11 +47,12 @@ export function readOrCreateMcpToken(path: string): string {
 }
 
 const PRIVATE = new BlockList();
-for (const [network, prefix] of [['127.0.0.0', 8], ['10.0.0.0', 8], ['172.16.0.0', 12], ['192.168.0.0', 16], ['100.64.0.0', 10]] as const) PRIVATE.addSubnet(network, prefix, 'ipv4');
+PRIVATE.addSubnet('127.0.0.0', 8, 'ipv4');
+PRIVATE.addSubnet('100.64.0.0', 10, 'ipv4');
 PRIVATE.addAddress('::1', 'ipv6');
-PRIVATE.addSubnet('fc00::', 7, 'ipv6');
+PRIVATE.addSubnet('fd7a:115c:a1e0::', 48, 'ipv6');
 
-// Whether a peer's address is this machine or a private network's.
+// Whether a peer's address is this machine's or the tailnet's.
 export function privatePeer(address: string | undefined): boolean {
   if (!address) return false;
   const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)?.[1];
@@ -119,7 +122,7 @@ export function lanesMcpRoutes(deps: McpRouteDeps): Route[] {
     if (!privatePeer(request.socket.remoteAddress)) return refuse(context, 403, 'http_peer');
     if (request.headers.origin !== undefined) return refuse(context, 403, 'http_origin');
     const token = deps.token();
-    if (token === undefined) return refuse(context, 503, 'http_no_token');
+    if (token === undefined) return refuse(context, 503, 'http_unreadable');
     const given = /^Bearer ([^\s]+)$/.exec(header(request, 'authorization') ?? '')?.[1];
     if (!sameProof(given, token)) return refuse(context, 401, 'http_unauthorized', undefined, { 'www-authenticate': 'Bearer realm="cleared-lanes"' });
     const engine = deps.engine(context.registry);

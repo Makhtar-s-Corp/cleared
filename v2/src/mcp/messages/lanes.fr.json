@@ -17,10 +17,10 @@
   "rpc_invalid": "Ce n'est pas une requête JSON-RPC 2.0.",
   "rpc_method": "Aucune méthode ne s'appelle {name}.",
   "http_unauthorized": "Il faut un jeton\u00a0: l'en-tête Authorization, Bearer puis le contenu du fichier v2-mcp-token à côté de ledger.db.",
-  "http_peer": "Ce serveur ne répond qu'à cette machine et au réseau privé.",
+  "http_peer": "Ce serveur ne répond qu'à cette machine et au tailnet.",
   "http_origin": "Une requête venue d'une page web est refusée.",
   "http_content_type": "Le corps est du JSON (Content-Type\u00a0: application/json).",
   "http_too_large": "Le corps est trop gros ({max} Ko au plus).",
   "http_version": "Cette version du protocole MCP n'est pas prise en charge.",
-  "http_no_token": "Le jeton MCP n'a pas pu être lu\u00a0: voyez le journal du service."
+  "http_unreadable": "Le jeton MCP n'a pas pu être lu\u00a0: voyez le journal du service."
 }

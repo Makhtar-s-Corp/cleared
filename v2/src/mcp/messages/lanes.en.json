@@ -17,10 +17,10 @@
   "rpc_invalid": "Not a JSON-RPC 2.0 request.",
   "rpc_method": "No method is named {name}.",
   "http_unauthorized": "A token is needed: the Authorization header, Bearer then the content of the v2-mcp-token file beside ledger.db.",
-  "http_peer": "This server answers this machine and the private network only.",
+  "http_peer": "This server answers this machine and the tailnet only.",
   "http_origin": "A request from a web page is refused.",
   "http_content_type": "The body is JSON (Content-Type: application/json).",
   "http_too_large": "The body is too large ({max} KB at most).",
   "http_version": "This version of the MCP protocol is not supported.",
-  "http_no_token": "The MCP token could not be read: see the service's log."
+  "http_unreadable": "The MCP token could not be read: see the service's log."
 }
