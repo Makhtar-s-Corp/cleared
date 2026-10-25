@@ -6768,3 +6768,16 @@ The three issues were then closed by hand as not planned. Nothing ran against Li
 
 - Pull request: 410, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-compose`.
+
+## 2026-10-25: the one-command install builds on the machine, nothing published (the owner's decision of 19:33, question 1 of milestone 5, lane `v2-j5-compose`, D14, P248, issue #406)
+
+**Decision.** By the owner, 2026-10-25 19:33, relayed by the lead: the one-command install is git clone, then docker compose up, with the images built locally on the machine; nothing is published to any registry.
+
+**What it settles.** Question 1 of [milestone-5-plan.md](milestone-5-plan.md) section 19 is answered (a). Options (b), images and a Compose file on the organisation's registry, and (c), a published installer image, are not taken. The plan's sections 18, 19 and 20, `v2/README.md` and matrix lines D14 and P248 now say so. D14 goes from `partial` to `done`: what it waited for was this question.
+
+**What pull request 410 does about it.** `v2/compose.yaml` builds every image it names from the clone: Cleared's own `cleared-v2:local` through the `install` entry, and the session and egress images through their build-only entries. The three running containers have `pull_policy: never`, so Compose never pulls Cleared's image from a registry. No image name in the file names a registry or a namespace. `docker compose config --images` lists `cleared-v2:local`, `cleared-v2-session:2.1.306` and `cleared-v2-egress:1` only. A new case of `test/install/compose.test.ts` keeps it so, and also keeps each of the three Dockerfiles on `FROM node:24` alone. That base is the one image a build reads from outside: Docker Hub's `node:24`, pulled when the machine does not have it. The README says so.
+
+**Said to the lead.** The decision's words are "docker compose up". The command this branch ships after `git clone` is `docker compose -f v2/compose.yaml run --rm install`, a Compose command that checks Docker, the ports and the state folder, then runs `docker compose up -d` itself (the lane's log entry of today, decision 2). A bare `docker compose -f v2/compose.yaml up -d` on a fresh machine stops at the missing `cleared-v2:local` and pulls nothing. If the owner wants the bare `up` to be the command, that is a change of `compose.yaml` and the entrypoint for a next commit or lane, not made here.
+
+- Pull request: 410, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-compose`.

@@ -132,3 +132,18 @@ test('the image: node:24 with git, gh, the Docker CLI and Compose at pinned vers
   const ignore = readFileSync(`${v2}images/cleared/Dockerfile.dockerignore`, 'utf8').split('\n').map((line) => line.trim());
   for (const pattern of ['.git', '**/node_modules', '**/.env*', 'v2/app/dist', '**/*.db', '**/*.key', '**/*.token']) assert.ok(ignore.includes(pattern), pattern);
 });
+
+test('nothing comes from a registry of Cleared\'s: every image is built here from the clone, or never pulled (the owner\'s decision of 2026-10-25, 19:33)', () => {
+  const built = new Set(Object.values(services).filter((service) => service.build !== undefined).map((service) => String(service.image)));
+  for (const [name, service] of Object.entries(services)) {
+    const image = String(service.image);
+    assert.doesNotMatch(image, /^[^/]+[.:][^/]*\/|\//, `${name}: ${image} names no registry or namespace`);
+    assert.ok(built.has(image), `${name}: ${image} is built by this file`);
+    assert.ok(service.build !== undefined || service.pull_policy === 'never', `${name} is built here or never pulled`);
+  }
+  assert.doesNotMatch(source, /ghcr\.io|docker\.io|oci:\/\/|quay\.io/);
+  for (const dockerfile of ['images/cleared/Dockerfile', 'images/session/Dockerfile', 'images/egress/Dockerfile']) {
+    const from = readFileSync(`${v2}${dockerfile}`, 'utf8').split('\n').filter((line) => line.startsWith('FROM '));
+    assert.deepEqual(from, ['FROM node:24'], `${dockerfile} builds on node:24 alone`);
+  }
+});
