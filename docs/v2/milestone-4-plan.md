@@ -116,3 +116,40 @@ v1's handovers, events and sessions; several v1 ledgers into one workspace (a se
 | Whether the first piloted project's v1 ledger holds `ticket_measured` events and lines changed for most of its tickets (the samples need both) | the owner's dry run on that ledger; its counts say it, and nothing is written |
 | Whether the size thresholds (20, 100, 400 lines) match the sizes the lead gives | the owner (question in the log entry, default applied) |
 | A v1 ledger written while it is copied | not closed: v1 is stopped (D22), and the command is run on a stopped v1 |
+
+## 5. The passkeys lane (`v2-j4-passkeys`, issue #389)
+
+This section was written on 2026-10-25 by the author of issue #389 (Opus 5.5), before the lane's tests and code. Inputs: issue #389, the [decisions log](decisions-log.md) (the entries "app login by password, no passkeys" of 2026-10-21, "the v1 passkey code stays until milestone 4" of 2026-10-25, and the latest ones, the ten ideas among them), the [requirements matrix](requirements-matrix.md) (B3.9, B5.9d, B5.10g, D17, D18, D21), section 4 of this page (question 1), and the v1 app as pull request 388 leaves it, in TypeScript. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md).
+
+### 5.1 Context
+
+The v2 app signs the human in with a password and has no passkeys (pull request 135, B3.9). The v1 app (`app/`, kept and converted by pull request 388) still asks a passkey for Clear to land, Send back and turning a browser's notifications on or off, registered with `cleared app passkey` through a grant socket. Issue #389 removes that code, as the owner's decision of 2026-10-21 and B5.9d ask, and so answers question 1 of section 4.5, which 388 left at its default (a), the files kept.
+
+### 5.2 What exists at the end, and how it is proven
+
+- Gone: `app/lib/webauthn.ts`, `app/lib/grant-socket.ts`, `app/public/register.html`, `app/public/register.js`, `test/app-authenticator.ts`; the routes `GET /register`, `GET /register.js`, `POST /api/passkeys/options` and `POST /api/passkeys/finish`; the passkey file's reading and writing in `app/lib/credentials.ts`; the `[app] grant_socket` setting; the passkey words of both catalogs.
+- `cleared app passkey` says that passkeys are gone and where the gestures are confirmed now, in the owner's language, and exits 2 without starting the server.
+- The three gestures are confirmed by the signed-in session (decision below). The rest stays as it is: a one-time challenge bound to the session, the gesture, the version on screen and the text sent back (or the subscription); the 60 second grace delay held on the server and its Undo; a Send back that withdraws a waiting Clear; the board read again before the agreement is written; an https address (or this machine) required.
+- Proven by `test/app-actions.test.ts` and `test/app-notify.test.ts` (a session alone confirms; another session, a reused challenge, a changed text or subscription, no cookie, no anti-forgery token, another origin, an insecure address are refused and nothing is written), `test/app.test.ts` (the routes), `v2/test/keep-and-drop.test.ts` and `v2/test/repository-core.test.ts` (the passkey files no longer tracked), and the v1 and v2 suites green.
+
+### 5.3 Decisions this lane takes
+
+1. **What confirms the gestures: the signed-in session.** The owner's decisions already say it for v2: "the identity for an agreement is the app session" (D18) and "subscription without a passkey" (D21, B5.10g). The v1 access token, like v2's password, is held by the human alone: it lives in a private file of the app's account, which the agents' account cannot read (`test/app-writers.test.ts`), and nothing but the human's browser, `cleared app --link` and the screenshot tool (with a token of its own) sends it. Rejected: refusing the three gestures in v1 (the app would lose Clear to land, Send back and its notifications, far more than the passkey code); dropping the v1 app (question 2 of section 4.5, the owner's). Asked to the owner in the log entry, this default applied.
+2. **The one behaviour change.** An installation with no passkey registered refused Clear to land, Send back and notifications; it now takes them from a signed-in session over https. An installation with passkeys registered no longer asks for one. A `passkeys.json` left in the human credentials directory is no longer read, and never deleted by Cleared.
+3. **`[app] grant_socket`** is no longer read; a setting file that still has it starts as before.
+4. **The pictures** of the gestures that show a passkey (`app/screenshots/`) are not retaken here; the v1 docs pages lose the lines that describe the passkey, nothing else.
+5. **Lines.** P237 (this lane; P236 is the cleanup's); B5.9d `done`; the shared line "B5.9d and D17: milestone 4" of "Reste avant v2 -> main" loses B5.9d, D17 keeps its own status (the Linear trial).
+
+### 5.4 Out of scope
+
+The v2 app and its password login (unchanged); the v1 access token and its sign-in; dropping the v1 app; the v1 docs beyond their passkey lines; retaking the v1 pictures.
+
+### 5.5 Files this lane owns
+
+The passkey files above; the passkey parts of `app/lib/actions.ts`, `app/lib/notifications.ts`, `app/lib/credentials.ts`, `app/main.ts`, `app/server.ts`, `app/public/actions.js`, `app/public/notify.js`, `app/public/login.js`, `app/screenshots.ts`, `app/screenshots-actions.ts`, `app/DESIGN.md`, `lib/i18n/{en,fr}.json`, and of the v1 tests and docs pages that name them; the passkey rows of `keep-and-drop.md`, `v2/test/keep-and-drop.test.ts` and `v2/test/repository-core.test.ts`; its lines of the matrix and its log entry.
+
+### 5.6 Unknowns, and who closes them
+
+| Unknown on 2026-10-25 | Closed by |
+| --- | --- |
+| Whether the owner wants the v1 gestures confirmed by the session, refused, or the v1 app dropped | the owner (question in the log entry, the session applied) |
