@@ -32,7 +32,7 @@
   "quota_resets": "reset {when}",
   "quota_none": "Non mesuré",
   "quota_name": "Quota de la semaine\u00a0: {percent}\u00a0% utilisés, reset {when}. Ouvre Consommation.",
-  "quota_name_none": "Quota de la semaine non mesuré. Ouvre Consommation.",
+  "quota_name_none": "Quota de la semaine non mesuré",
   "nav_plans": "Plans",
   "notify_label": "Notifications",
   "notify_label_on": "Notifications\u00a0: activées sur cet appareil",

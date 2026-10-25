@@ -6002,3 +6002,61 @@ With the CPU slowed four times the budget is at its edge: what is left is the ne
 - `npm run guard -- --base origin/v2`: nothing refused.
 
 **A capture for the product owner, during the lane.** At the owner's request, the current state was captured with the same script, in French, dark, at 1440 and 390: the tower, the session, the inbox and Consumption, beside the before captures this lane already had (no tower among them). The files were compressed with the same two commands and pushed as one commit on a separate branch from `origin/v2`, `amdiakhate/j3-visual-redesign-wip`, under `docs/v2/visual-redesign/wip/`. No pull request was opened for it, and this lane's branch was not touched by it.
+
+## 2026-10-25: the sidebar is for the development; Consumption becomes a quota gauge at its foot (owner decision of 11:14, P227, issue #375)
+
+**Decision** (the product owner, on pull request 377): "Consommation ne doit pas être dans la sidebar, la sidebar doit être en priorité pour tout ce qui concerne le dev."
+1. Consumption leaves the sidebar's screens. The sidebar keeps the tower, the inbox, the sessions and the plans, then the sessions' groups. The tower stays: it is the development's overview, what waits and what runs.
+2. A compact quota gauge at the sidebar's foot shows:
+   - the week's percent used;
+   - its colour at the Consumption screen's thresholds;
+   - its reset as a weekday and a clock through `lib/time.ts` ("reset mar. 9 h 59", "resets Tue 9:59").
+
+   A click opens the whole Consumption screen. Its route stays, and the palette's Go to, the G C chord and the account menu reach it too.
+3. In French and English, read out with its percent and its reset, reached by the keyboard.
+
+**The author's choices** (lane `j3-visual-redesign`).
+- **The thresholds** are the Consumption screen's own: `verdictOf`, imported from its model, not copied.
+  - That screen has no percent thresholds. A quota that reaches 100 % before its reset, or has reached it, is drawn in the danger text colour; any other is drawn in the progress colour, as its bars are.
+  - So the gauge and the screen never disagree.
+- **Which quota.** Of the agents' seven-day quotas, the first to reach 100 % before its reset (one already at 100 % first); else the most used. A five-hour window is never the week's. On the fixtures: Codex, 62 %, red.
+- **Its words.**
+  - It shows "Weekly quota", "62% used" and "resets Sat 21:41" ("Quota de la semaine", "62 % utilisés", "reset sam. 21 h 41").
+  - Its accessible name holds the same words in the same order: "Weekly quota: 62% used, resets Sat 21:41. Opens Consumption." This is WCAG 2.5.3, label in name, which P224's axe test checks. A first wording without "used" in sight failed it, and was changed before any commit.
+  - With nothing measured, it says "Not measured" ("Non mesuré") and still opens Consumption.
+  - The agent's name is not shown: the shell's catalog has none, and the screen it opens names them.
+- **Its place.** The gauge sits at the sidebar's foot, above the Lead's state. On the screen it opens, it is the raised row with `aria-current`, as a screen's item is. Folded on the rail, it is its bar alone, its words in its tooltip. On a phone it is not shown: the top bar has no room. There the palette and the account menu open Consumption, and the bar of screens at the foot loses Consumption with the sidebar.
+- **The settings.** The app has no settings screen; the account menu is where the theme and the language are chosen. It gains a link to Consumption, and the menu closes on its way.
+- **Its data.** The shell reads `/consumption` for the person's zone once they are known, then each minute: the Consumption screen's own pace (`REFRESH_MS`).
+  - The cache does not hold it (its address has a query string), so this is one request a minute, never one per screen switch.
+  - The budget's per-switch request count still allows one.
+  - A failed read keeps what the gauge shows.
+- **`lib/time.ts`** gains `weekdayClock`: the weekday from Intl, and the clock in the catalog's words (`time_weekday_clock`, "{day} {h} h {m}" and "{day} {h}:{m}"). One formatter is kept per language and zone, as P223 asks, and an unknown zone reads as UTC.
+
+**Tests first.** `03fd1a4` commits the tests alone; all fail on the code before it.
+- `app/test/shell/quota.test.ts`:
+  - NAV is the four screens, SCREENS the five, the palette's Go to and `hrefOf` keep Consumption.
+  - The quota picked, and its verdict for each projection, matches the screen's `verdictOf`.
+  - The reset, in both languages, and in an unknown zone.
+- `app/test/redesign/redesign-browser.test.ts`, three tests:
+  - No Consumption item. The gauge at the foot: its name, its words, its red as the danger text token computes it, focus and Enter, `aria-current`, a click from another screen.
+  - The palette and the account menu.
+  - The French name.
+- Changed with the decision, as the owner changed what they pinned:
+  - `app/test/shell/sidebar.test.ts` pins SCREENS for the addresses and chords, and NAV for the four screens.
+  - `app/test/consumption/consumption-browser.test.ts` opens Consumption from the gauge, not from the removed item.
+  - `app/test/shell/tokens.test.ts` adds the sidebar's ground and its hover to the grounds the danger text is checked on.
+- The palette test waits for the palette's field and its selected item before Enter: a fix to the new test, in the implementation's commit.
+- `app/test/polish/copy.test.ts` (an empty state says one sentence) refused the first `quota_name_none`. It became one sentence, "Weekly quota not measured" ("Quota de la semaine non mesuré"); the key was not renamed around the rule.
+
+**Captures.** The after set was taken again at this head with the same commands: the gauge at the sidebar's foot on every screen, and the phone's bar of four screens. It was compressed with `pngquant --quality=80-95 --skip-if-larger` then `optipng -o2`, from 3,905,055 bytes to 1,313,838. The before set is unchanged.
+
+**Checks** (at `origin/v2` `2b2314e`):
+- `npm run typecheck` passes.
+- `npm test` runs 2145 Node tests: 2054 pass, 91 skipped, 0 fail. 344 Vitest tests pass.
+- With the CI's Chromium, 79 of 79 pass in one parallel run: the CI's browser list with 374's axe test, this lane's file, and `consumption-browser.test.ts`. The notify file is left out, for the host reason already logged.
+- The budget runs alone at a p95 of 18.0, 25.4 and 20.5 ms, with no request per switch, during a load average of 25.
+- `npm run guard -- --base origin/v2`: nothing refused.
+
+- Pull request: 377, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-visual-redesign`.
