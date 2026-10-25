@@ -23,6 +23,7 @@
 // server (P216), POST /mcp behind the v2-mcp-token file made at start, is
 // mcp/http.ts's: it reads the engine and the store, and writes nothing.
 import { dirname } from 'node:path';
+import type { Language } from '../../app/src/catalog.ts';
 import { LeverStore } from '../consumption/levers.ts';
 import { Docker } from '../container/docker.ts';
 import { BATCH_TABLES, BatchRunner, batchRoutes } from '../flow/batch.ts';
@@ -38,7 +39,7 @@ import { takeoverRoutes } from '../flow/takeover.ts';
 import { VARIANTS_TABLE, variantRoutes } from '../flow/variants.ts';
 import { loadPlanConfig } from '../lead/plans/runner.ts';
 import { lanesMcpRoutes, mcpTokenPath, readOrCreateMcpToken } from '../mcp/http.ts';
-import { createRedactor } from '../mcp/redact.ts';
+import { createRedactor, type Redactor } from '../mcp/redact.ts';
 import { TRAIN_TABLE } from '../release/store.ts';
 import { ledgerPath, type Store } from '../store/db.ts';
 import { dockerContainer } from '../terminal/container.ts';
@@ -90,10 +91,22 @@ function chatOf(registry: Registry): ChatLauncher | undefined {
   chat.listen();
   return chat;
 }
-// The ledger's folder, for the cleaner: none when it cannot be told, and then the service stops at start.
+// The ledger's folder, for the cleaner. main.ts places the ledger before any
+// module starts and exits with 64 when it cannot (test/main.test.ts), so
+// none only for a start without main.ts, whose POST /mcp then has no token.
 function ledgerFolder(): string[] {
   try { return [dirname(ledgerPath(process.env))]; } catch { return []; }
 }
+// The lanes' MCP language and cleaner, read at start from the environment
+// of that moment (issue #348); a request before any start reads them then.
+let mcpSettings: { language: Language; redactor: Redactor } | undefined;
+function readMcpSettings(): { language: Language; redactor: Redactor } {
+  return {
+    language: process.env.CLEARED_V2_APP_LANGUAGE === 'en' ? 'en' : 'fr',
+    redactor: createRedactor({ env: process.env, paths: ledgerFolder() }),
+  };
+}
+const mcpSettingsOf = () => (mcpSettings ??= readMcpSettings());
 
 let mcpToken: string | undefined | null = null;
 // The lanes' MCP token, made or read once; a token that cannot be is said
@@ -135,8 +148,8 @@ const flow: Module = {
     ...chatRoutes({ config: chatConfigOf, launcher: chatOf }),
     ...lanesMcpRoutes({
       engine: (registry) => runtime.engine(registry), store: () => store, token: mcpTokenOf,
-      language: process.env.CLEARED_V2_APP_LANGUAGE === 'en' ? 'en' : 'fr',
-      redactor: createRedactor({ env: process.env, paths: ledgerFolder() }),
+      language: () => mcpSettingsOf().language,
+      redactor: () => mcpSettingsOf().redactor,
       log: (line) => console.error(line),
     }),
   ],
@@ -149,8 +162,10 @@ const flow: Module = {
   // releases the stopped sessions' containers and networks. The watchdog
   // starts with it, once a minute, and so does the batches' runner, whose
   // queue a restart finishes, and the chat's replies, which a restart
-  // still sends. The lanes' MCP token is made then, for its install line.
+  // still sends. The lanes' MCP token is made then, for its install line,
+  // and the MCP route's language and cleaner are read then, engine or not.
   start: (registry) => {
+    mcpSettings = readMcpSettings();
     const engine = runtime.engine(registry);
     if (!engine || !store) return;
     batchesOf(registry);

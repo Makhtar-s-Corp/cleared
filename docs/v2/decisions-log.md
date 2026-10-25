@@ -5436,6 +5436,25 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 - Pull request: 354, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-prompt-cache`.
 
+## 2026-10-25: the lanes' MCP route reads its words and its cleaner at start, and no module starts without a ledger (the author's choices, lane `j3-mcp-startup`, P220, issues #348 and #349)
+
+**The need.** Two follow-ups of P216 (pull request 344). #348: the flow module built `POST /mcp` with `CLEARED_V2_APP_LANGUAGE` and `createRedactor` read when the module was imported, so an environment set between the import and the start was not seen. The cleaner matters more than the words: `createRedactor` takes the secret values of the environment when it is made, and a secret set after the import was never removed. #349: the comment of `ledgerFolder` said that when the ledger's folder cannot be told, "the service stops at start", with no test named. The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight; the conventions followed are those of section 10 of `milestone-1-plan.md` (a lane fills its own module, never `main.ts`), as the P216 lane did.
+
+**Decision.**
+1. **Read at start, engine or not.** The flow module's `start` reads the language and makes the cleaner first, before it looks for an engine: without one, `POST /mcp` still answers, and its refusals are in that language. A request before any start reads them then, once. A second start reads them again.
+2. **Getters in `McpRouteDeps`.** `language` and `redactor` are functions, read per request. The tool server of an engine is made again when either changed, so a new start is seen without a new engine. The refusal's words are looked up per refusal; the catalog itself is read once per language, as before.
+3. **#349: the claim holds, the comment now says why.** `main.ts` opens the ledger at `ledgerPath()` before it listens and exits with 64 when it has no place, and the modules start in the listen callback: a module's start never runs without a ledger. The test that proves it was already there, `test/main.test.ts` ("a ledger the service cannot place stops it before it listens"); it now names #349 and says so. The empty folder list is left for a start without `main.ts` (a test), whose `POST /mcp` then has no token and answers `503`.
+4. **Not done.** No test sets a secret between the import and the start and reads it cleaned: that needs an engine and a tool call. The cleaner goes through the same path as the language, which the test checks. The token is still made once per process, as P216 left it.
+
+**Tests first.** The tests were committed alone in `bf9eb1c`. There, `test/flow/mcp-startup.test.ts` imports the flow module with `CLEARED_V2_APP_LANGUAGE=fr`, sets `en`, starts it and sends `POST /mcp` with a wrong token: the refusal comes back in French. The renamed test in `test/main.test.ts` passes there, as it did before. Changed after that commit: the three calls of `lanesMcpRoutes` in `test/mcp/lanes-http.test.ts`, to the getters; and the new test sets `fr` back after the start, before the request, since the first version also passed with a read at the first request only.
+
+**Checks.** `npm run typecheck` passes. `npm test` (the build, `node --test` and Vitest): 2049 Node tests, 1981 pass, 68 skipped (66 because `CLEARED_V2_PLAYWRIGHT` is not set, 2 because `CLEARED_V2_REAL_HARNESS` is not), 0 fail; 321 Vitest tests pass. A mutation check: without the read in `start`, `test/flow/mcp-startup.test.ts` fails (the refusal in French). No browser test was run: nothing of the app changed.
+
+**Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, no tunnel, no secret: the test's service listens on port 0 on loopback.
+
+- Pull request: 355, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-mcp-startup`.
+
 ## 2026-10-25: the lanes' MCP tools say no "NaN" and read the history once per call (the author's choices, lane `j3-mcp-lanes-perf`, P216, issues #351 and #352)
 
 **The need.** Two non-blocking follow-ups of pull request 344 (P216). Issue #351: `since()` in `v2/src/mcp/lanes.ts` never says "NaN"; a date that is none gives a duration that is absent (`null`), and a test proves it. Issue #352: `lanes()` reads the open tickets' history without one read per ticket, or the measured call stays under a budget the test writes; `locked_files` does not read the lanes twice. The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight, as earlier lanes noted; the conventions followed are those of sections 9 and 10 of `milestone-1-plan.md` (a lane changes its own files). Neither issue's text nor pull request 344's comments say where `locked_files` read the lanes twice: it calls `lanes()` once on `v2`, so the test pins that.
@@ -5448,6 +5467,8 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 **Tests first.** `6d9bc71` committed the tests alone. On that code four tests fail: the invalid date (`runningFor` is "NaNd NaNh"), the reads (21 reads of the history for 21 lanes), and the two `histories` tests (`histories is not a function`).
 
 **Checks.** `npm run typecheck` passes. `npm test` runs 2052 Node tests, 1984 pass, 68 skipped (the browser tests, with no `CLEARED_V2_PLAYWRIGHT`), 0 fail; Vitest, 321 tests pass. No browser test was run: nothing of the app changed. `npm run guard -- --base origin/v2`: nothing refused.
+
+**The merge of 355** (P220, at `origin/v2` `26822ed`). The log keeps 355's entry, then this one; the matrix merged by itself and keeps every id once (P216 with these follow-ups, P220 from 355). After the merge: `npm run typecheck` passes; `npm test` runs 2053 Node tests, 1985 pass, 68 skipped (the browser tests), 0 fail, and 321 Vitest tests pass; `test/ci-triggers.test.mjs` passes 4 of 4; `npm run guard -- --base origin/v2`: nothing refused.
 
 **Resources.** No Docker object, no account, no network beyond `git fetch` and GitHub, no port, no secret.
 

@@ -106,9 +106,11 @@ test('the service opens the ledger of its state directory and creates its tables
   }
 });
 
-test('a ledger the service cannot place stops it before it listens', () => {
+test('a ledger the service cannot place stops it before it listens, before any module starts (issue #349)', () => {
   // No state directory, no project: the ledger has no place. Port 1 cannot
   // be bound by this account, so a regression could never start listening.
+  // The modules start once the service listens: the flow module's start
+  // never runs without a ledger (its ledgerFolder counts on it).
   const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: state, XDG_CONFIG_HOME: join(state, 'no-config'), CLEARED_V2_PORT: '1' };
   const run = spawnSync(process.execPath, [main], { env, encoding: 'utf8', timeout: 10_000 });
   assert.equal(run.status, 64);
