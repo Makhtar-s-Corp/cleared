@@ -6600,4 +6600,5 @@ The three issues were then closed by hand as not planned. Nothing ran against Li
 
 **Resources.** No Docker object; no Claude Code login read; no Slack, Cursor, Codex or Linear account, and no Linear key. Network: `git fetch`, and GitHub's API on the example repository: one label made, three issues opened, commented and closed. No port but the tests' own loopback ones (port 0), no tunnel, no secret written.
 
+- Pull request: 401, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-delegation`.
