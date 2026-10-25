@@ -28,6 +28,7 @@ test('one project named cleared-v2, with the three running containers, the two b
   for (const name of RUNNING) {
     assert.deepEqual(services[name]!.profiles, undefined, `${name} starts with the project`);
     assert.equal(services[name]!.restart, 'unless-stopped', name);
+    assert.equal(services[name]!.init, true, `${name} has an init that reaps the lock's children`);
     assert.deepEqual(list(services[name]!.command), [name], `${name} is a role of the image's entrypoint`);
   }
   assert.deepEqual(list(services.install!.profiles), ['install']);
@@ -112,10 +113,16 @@ test('the broker runs as the service\'s account, on the state folder, with no so
   assert.equal(env('broker').CLEARED_V2_PROJECT_DIR, '${CLEARED_V2_PROJECT_DIR:-}');
 });
 
-test('the image: node:24 with git, gh, the Docker CLI and Compose, v2 and the kept v1 lock, the front end built', () => {
+test('the image: node:24 with git, gh, the Docker CLI and Compose at pinned versions, v2 and the kept v1 lock, the front end built', () => {
   const dockerfile = readFileSync(`${v2}images/cleared/Dockerfile`, 'utf8');
   assert.match(dockerfile, /^FROM node:24$/m);
-  for (const tool of ['git', 'gh', 'docker-cli', 'docker-compose', 'python3', 'util-linux']) assert.match(dockerfile, new RegExp(`\\b${tool}\\b`), tool);
+  for (const tool of ['git', 'gh', 'docker-ce-cli', 'docker-compose-plugin', 'docker-buildx-plugin', 'python3', 'util-linux', 'iproute2']) assert.match(dockerfile, new RegExp(`\\b${tool}\\b`), tool);
+  // Docker's signing key, checked by its fingerprint before apt trusts it,
+  // and gh's .deb by the SHA-256 its release publishes.
+  assert.match(dockerfile, /9DC858229FC7DD38854AE2D88D81803C0EBFCD88/);
+  assert.match(dockerfile, /sha256sum -c/);
+  assert.match(dockerfile, /^ARG GH_SHA256_AMD64=[0-9a-f]{64}$/m);
+  for (const version of ['DOCKER_VERSION=29.8.1', 'COMPOSE_VERSION=5.5.1', 'BUILDX_VERSION=0.37.1', 'GH_VERSION=2.101.0']) assert.match(dockerfile, new RegExp(`^ARG ${version}$`, 'm'), version);
   assert.match(dockerfile, /npm ci\b/);
   assert.match(dockerfile, /npm run build\b/);
   assert.match(dockerfile, /ENTRYPOINT \["node", "\/opt\/cleared\/v2\/images\/cleared\/entrypoint\.ts"\]/);

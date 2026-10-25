@@ -108,6 +108,10 @@ None for the lane: its real run is on this server, labelled. The fresh machine i
 | Whether `[security] allow_shared_uid` is still needed when the broker runs under its own user in its own container | this lane |
 | How long the images take to build on a machine with no cache | this lane's real run, then the proof |
 
+### 4.7 Delivered
+
+Matrix line P247, pull request PRNUM. Two decisions of section 3 changed, as the decisions log of 2026-10-25 says: nothing is published (decision 3), since the app finds the service on `127.0.0.1` and refuses any other address of its own, so the three containers share the host's network and bind `127.0.0.1` only; and the one command is `docker compose -f v2/compose.yaml run --rm install` (decision 4), since `up -d` cannot check the port first nor print the address. The broker runs under the service's account, not its own (decision 2), since the lock accepts the service's requests by its own uid.
+
 ## 5. The browser setup assistant (`v2-j5-assistant`)
 
 Matrix: B6.5. Wave 1. Effort L.

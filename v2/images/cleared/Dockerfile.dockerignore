@@ -1,0 +1,22 @@
+# What the build of Cleared's own image never reads (BuildKit takes this
+# file, beside the Dockerfile, over a .dockerignore of the clone): the
+# history, the dependencies installed in the clone, any .env, the front end
+# built in the clone, a ledger, a key or a login file, the tests and the
+# documentation.
+.git
+**/.git
+**/node_modules
+**/.env*
+v2/app/dist
+**/*.db
+**/*.db-*
+**/*.key
+**/*.token
+**/*.pem
+.dashboard
+.github
+docs
+test
+v2/test
+v2/app/test
+v2/app/web/test

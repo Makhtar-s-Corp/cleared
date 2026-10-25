@@ -49,5 +49,5 @@ test('no command, help, or an unknown one: the list, in the language asked, with
   assert.equal(unknown.status, 64);
   assert.match(unknown.stderr, /"nope" is not a command of cleared/);
   const french = run(['nope'], { CLEARED_V2_APP_LANGUAGE: 'fr' });
-  assert.match(french.stderr, /« nope » n’est pas une commande de cleared/);
+  assert.match(french.stderr, /«\snope\s» n’est pas une commande de cleared/);
 });

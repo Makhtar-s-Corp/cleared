@@ -105,7 +105,7 @@ test('a first run checks Docker and the ports, makes the state folder, builds wh
   assert.equal(up.env.CLEARED_V2_PREVIEW_PORT, '18794');
   assert.match(out, /http:\/\/127\.0\.0\.1:18792\//);
   assert.ok(out.includes(SETUP), 'the service\'s setup line is shown as it is');
-  assert.match(out, /answered in \d+ s/);
+  assert.match(out, /answered in \d+s\b/);
   assert.doesNotMatch(out, /\d ?ms\b|millisecond/);
 });
 
@@ -113,7 +113,7 @@ test('the same run in French, the default', async () => {
   const { code, out } = await run();
   assert.equal(code, 0, out);
   assert.match(out, /Cleared répond sur http:\/\/127\.0\.0\.1:18792\//);
-  assert.match(out, /en \d+ s/);
+  assert.match(out, /en \d+\u00a0s\b/);
 });
 
 test('the session images already built are not built again', async () => {
@@ -207,7 +207,7 @@ test('a state folder of another account, or one others may write, is refused bef
   chmodSync(open, 0o777);
   const loose = await run({ state: open, env: { CLEARED_V2_APP_LANGUAGE: 'en' } });
   assert.equal(loose.code, 1);
-  assert.match(loose.out, /others/);
+  assert.match(loose.out, /Other accounts may write/);
   assert.deepEqual(loose.docker.verbs().filter((verb) => WRITES.includes(verb)), []);
   const owned = freshState();
   mkdirSync(owned, { mode: 0o700 });
@@ -228,7 +228,7 @@ test('an app that never answers ends the command after a few minutes, with where
   docker.answering = false;
   const { code, out } = await run({ docker, env: { CLEARED_V2_APP_LANGUAGE: 'en' } });
   assert.equal(code, 1);
-  assert.match(out, /3 min/);
+  assert.match(out, /3\u00a0min/);
   assert.match(out, new RegExp(`docker compose --project-name ${PROJECT} .*logs app`));
 });
 
@@ -286,7 +286,7 @@ test('the catalogs of the command line: French and English, the same keys and pl
       assert.doesNotMatch(fr[key]!, / [?!;:%»]/, `${name} ${key}: French typography`);
     }
     const text = sources.map((file) => readFileSync(join(INSTALL_MESSAGES_DIR, '..', file), 'utf8')).join('\n');
-    const said = new Set([...text.matchAll(/\bt\('([a-z0-9_]+)'/g)].map(([, key]) => key as string));
+    const said = new Set([...text.matchAll(/\b(?:t|refuse|InstallError|EntryError)\('([a-z0-9_]+)'/g)].map(([, key]) => key as string));
     for (const key of said) assert.ok(Object.hasOwn(en, key), `${name}: ${key} is said and not in the catalog`);
     for (const key of Object.keys(en)) assert.ok(said.has(key), `${name}: ${key} is never said`);
   }
