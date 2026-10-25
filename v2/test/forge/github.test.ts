@@ -89,7 +89,7 @@ test('a gh that fails is a ForgeError that names the call and ends with what gh 
   await assert.rejects(forge.closePullRequest(REPO, 7, 'x'), (error: unknown) =>
     error instanceof ForgeError && /^gh pr close failed: HTTP 502: the forge is down$/.test(error.message));
   const api = setup([], { fail: 'api' });
-  await assert.rejects(api.forge.listRepositories(), /^Error|gh api failed: HTTP 502/);
+  await assert.rejects(api.forge.listRepositories(), /gh api failed: HTTP 502/);
 });
 
 test('a pending check makes gh exit 8, and its list is read all the same; another exit is an error', async () => {

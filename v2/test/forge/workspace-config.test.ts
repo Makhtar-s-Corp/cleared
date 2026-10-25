@@ -13,9 +13,10 @@ const file = (extra = '') => `[workspace]\nid = guestbook\n\n[service guestbook]
 test('a service with no forge key is on GitHub, and `forge = github` says the same', () => {
   const [plain] = parseWorkspace(file(), options).services;
   const [named] = parseWorkspace(file('forge = github\n'), options).services;
-  assert.equal(plain?.forge, 'github');
-  assert.equal(named?.forge, 'github');
+  assert.equal(plain?.forge, undefined, 'a file without the key parses as it did');
   assert.equal(forgeKindOf(plain), 'github');
+  assert.equal(named?.forge, 'github');
+  assert.equal(forgeKindOf(named), 'github');
 });
 
 test('a forge Cleared has no adapter for is refused, and the message names the ones it has', () => {
@@ -28,7 +29,7 @@ test('the one-service workspace of the milestone 1 variables is on GitHub', () =
   const workspace = loadWorkspace({
     CLEARED_V2_PROJECT: 'guestbook', CLEARED_V2_PROJECT_DIR: '/srv/guestbook', CLEARED_V2_REPO: 'example/guestbook', CLEARED_V2_REPO_URL: 'https://github.com/example/guestbook.git',
   }, options);
-  assert.equal(workspace?.services[0]?.forge, 'github');
+  assert.equal(forgeKindOf(workspace?.services[0]), 'github');
 });
 
 test('GET /api/workspace does not show the forge key', () => {

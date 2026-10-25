@@ -15,7 +15,8 @@
 //      project commits at the base ([guard] terms and allowed); nothing
 //      leaves when it refuses or when the project names no list;
 //   3. push the branch to the branch of the same name, never forced;
-//   4. reuse the open pull request of the branch, or open one with gh:
+//   4. reuse the open pull request of the branch, or open one on the
+//      service's forge (src/forge/, GitHub through gh by default):
 //      not a draft (merge-pr.ts refuses a draft), its body the session's
 //      report as lib/pr-body.ts cleans it, left out when the guard refuses
 //      it, then the commits; the proof receipt first (P210, flow/receipt.ts),
@@ -30,6 +31,8 @@ import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { CheckoutError, checkBranchName, git, gitPath } from './checkout.ts';
 import { renderReceipt, withReceipt, type ReceiptData } from '../flow/receipt.ts';
+import { ForgeError, type Forge } from '../forge/contract.ts';
+import { forgeFor } from '../forge/index.ts';
 
 const run = promisify(execFile);
 
@@ -58,12 +61,13 @@ export type PublishInput = {
   readonly workdir: string;               // the ticket checkout the session worked in
   readonly base: string;
   readonly branch: string;
-  readonly repo: string;                  // owner/name on the forge, for gh
+  readonly repo: string;                  // owner/name on the forge
   readonly ticket: string;
   readonly report?: string;               // the session's report for the body
   readonly receipt?: ReceiptData;         // the proof receipt's facts, first in the body
   readonly gitEnv?: NodeJS.ProcessEnv;    // forgeEnv of lib/forge.ts; read from it when absent
   readonly ghEnv?: NodeJS.ProcessEnv;     // forgeGhEnv of lib/forge.ts; read from it when absent
+  readonly forge?: Forge;                 // GitHub in the project checkout with ghEnv when absent
 };
 
 export type Published = {
@@ -256,26 +260,25 @@ async function guardPushOpen(input: PublishInput, at: { base: string; ref: strin
   if (refused !== undefined)
     throw new PublishRefused('guard', `${input.branch} not published: the guard refuses it (input no. 1 is the commit messages, no. 2 the changes)\n${refused}`);
 
-  const forge = input.gitEnv && input.ghEnv ? { git: input.gitEnv, gh: input.ghEnv } : await forgeEnvironments(input.project);
-  const gitEnv = input.gitEnv ?? forge.git;
-  const ghEnv = input.ghEnv ?? forge.gh;
+  const environments = input.gitEnv && input.ghEnv ? { git: input.gitEnv, gh: input.ghEnv } : await forgeEnvironments(input.project);
+  const gitEnv = input.gitEnv ?? environments.git;
+  const ghEnv = input.ghEnv ?? environments.gh;
 
   // 3. The branch to the branch of the same name, and only that, never forced.
   await git(input.project, ['push', '--quiet', 'origin', `${ref}:refs/heads/${input.branch}`], gitEnv);
 
   // 4. The pull request.
-  const gh = (args: readonly string[]) => command('gh', args, { cwd: input.project, env: ghEnv });
-  const open = JSON.parse(await gh(['pr', 'list', '--repo', input.repo, '--head', input.branch, '--state', 'open', '--json', 'number,url'])) as { number?: unknown; url?: unknown }[];
-  const existing = open[0];
+  const forge = input.forge ?? forgeFor('github', { dir: input.project, env: ghEnv });
+  const existing = await forge.openPullRequestOf(input.repo, input.branch).catch((error: unknown) => {
+    throw error instanceof ForgeError ? new PublishError(error.message) : error;
+  });
   const receipt = await receiptFor(input, base, join(work, 'receipt.md'));
-  if (existing && typeof existing.number === 'number' && typeof existing.url === 'string') {
+  if (existing) {
     if (receipt) {
       // The branch is pushed: a receipt that cannot be put in place is said, and the pull request stays as it is.
       try {
-        const seen = JSON.parse(await gh(['pr', 'view', String(existing.number), '--repo', input.repo, '--json', 'body'])) as { body?: unknown };
-        const edited = join(work, 'edited.md');
-        writeFileSync(edited, withReceipt(typeof seen.body === 'string' ? seen.body : '', receipt));
-        await gh(['pr', 'edit', String(existing.number), '--repo', input.repo, '--body-file', edited]);
+        const seen = await forge.pullRequestBody(input.repo, existing.number);
+        await forge.editPullRequestBody(input.repo, existing.number, withReceipt(seen, receipt));
       } catch (error) {
         console.error(`cleared-v2: the proof receipt of pull request ${existing.number} was not updated (${error instanceof Error ? error.name : typeof error})`);
       }
@@ -286,13 +289,16 @@ async function guardPushOpen(input: PublishInput, at: { base: string; ref: strin
   const subjects = (await git(input.project, ['log', '--reverse', '--format=%s', range])).split('\n').filter(Boolean);
   const bare = `Opened by Cleared for ${input.ticket} (branch \`${input.branch}\`).\n\nCommits:\n${subjects.map((s) => `- ${s}`).join('\n')}\n`;
   const report = await cleanReport(input.report ?? '', join(work, 'report.md'), input.project);
-  const body = join(work, 'body.md');
+  const file = join(work, 'body.md');
   const first = (text: string) => (receipt ? withReceipt(text, receipt) : text);
-  writeFileSync(body, first(report ? `${report}\n\n---\n\n${bare}` : bare));
-  if (report && (await runGuard(input.project, base, [body])) !== undefined) writeFileSync(body, first(bare));
+  let body = first(report ? `${report}\n\n---\n\n${bare}` : bare);
+  writeFileSync(file, body);
+  if (report && (await runGuard(input.project, base, [file])) !== undefined) body = first(bare);
 
-  const url = (await gh(['pr', 'create', '--repo', input.repo, '--base', input.base, '--head', input.branch, '--title', subjects[0] ?? input.branch, '--body-file', body])).trim();
-  const number = Number(/\/pull\/(\d+)$/.exec(url)?.[1]);
-  if (!Number.isSafeInteger(number)) throw new PublishError(`${input.branch} is pushed, but gh gave no pull request address`);
-  return { url, number, head, created: true };
+  try {
+    const opened = await forge.createPullRequest({ repo: input.repo, base: input.base, head: input.branch, title: subjects[0] ?? input.branch, body });
+    return { url: opened.url, number: opened.number, head, created: true };
+  } catch (error) {
+    throw error instanceof ForgeError ? new PublishError(`${input.branch} is pushed, but ${error.message}`) : error;
+  }
 }

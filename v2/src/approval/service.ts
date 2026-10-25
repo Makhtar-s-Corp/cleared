@@ -2,10 +2,8 @@
 // tables, the approval writer with its grace, the review recorder. The modules
 // (src/modules/tickets.ts and approval.ts) call this with what the
 // environment says; the tests call it with what they choose.
-import { execFile } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { promisify } from 'node:util';
 import { SqliteUsers, proofPath, readOrCreateProof } from '../modules/users.ts';
 import type { UserDirectory } from '../modules/registry.ts';
 import { LocalTicketStore, TICKET_TABLES } from '../tickets/local-store.ts';
@@ -24,6 +22,7 @@ import { TrainStore, type Train } from '../release/store.ts';
 import type { Ticket } from '../tickets/contract.ts';
 import type { ServiceConfig, WorkspaceConfig } from '../workspace/config.ts';
 import { loadFlowConfig } from '../flow/config.ts';
+import { forgeFor } from '../forge/index.ts';
 
 // The tables the approval writer and the review recorder use besides the
 // tickets': the ledger's runs and events, as lib/ledger.ts creates them.
@@ -66,16 +65,14 @@ export function createApproval(options: ApprovalOptions) {
   return { ticketStore, approvalWriter, reviewRecorder };
 }
 
-const run = promisify(execFile);
-
-// The head of a pull request now, from the forge, in the project's checkout:
-// the fallback of the review recorder when the flow does not pass the commit.
-function ghHead(project: string | undefined) {
+// The head of a pull request now, from the forge, in the project's checkout
+// and on the repository it points at: the fallback of the review recorder
+// when the flow does not pass the commit.
+export function headOnForge(project: string | undefined) {
   return async (pr: number): Promise<string | undefined> => {
     if (!project) return undefined;
     try {
-      const { stdout } = await run('gh', ['pr', 'view', String(pr), '--json', 'headRefOid'], { cwd: project, timeout: 15_000, encoding: 'utf8' });
-      return (JSON.parse(stdout) as { headRefOid?: string }).headRefOid;
+      return await forgeFor('github', { dir: project, env: process.env }).headCommit(undefined, pr);
     } catch {
       return undefined;
     }
@@ -127,7 +124,7 @@ export function approvalEnvironment(db: DatabaseSync, env: NodeJS.ProcessEnv = p
   const users = new SqliteUsers(db);
   const parts = createApproval({
     db, users, stateDir, proof, ownerId: conf.ownerId, publicKey: conf.publicKey, signer, states: conf.states, verdict: conf.verdict,
-    broker: new SocketReleaseBroker(socket, { stateDir }), resolveHead: ghHead(env.CLEARED_REPO || env.ORCH_REPO),
+    broker: new SocketReleaseBroker(socket, { stateDir }), resolveHead: headOnForge(env.CLEARED_REPO || env.ORCH_REPO),
   });
   const built: Environment = { ...parts, conf, signer, stateDir, users, proof };
   environments.set(db, built);

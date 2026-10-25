@@ -43,7 +43,7 @@ if (group === 'api') {
   out(world.pulls.filter((p) => p.repo === repo && p.head === flag('--head') && p.state === 'open').map((p) => ({ number: p.number, url: p.url })));
 } else if (group === 'pr' && verb === 'view') {
   const p = pull(args[2]);
-  const all = { body: p.body, state: STATE[p.state], headRefName: p.head, headRefOid: p.headCommit, statusCheckRollup: rollup(p) };
+  const all = { body: p.body, state: STATE[p.state] || p.state, headRefName: p.head, headRefOid: p.headCommit, statusCheckRollup: rollup(p) };
   out(Object.fromEntries(flag('--json').split(',').map((field) => [field, all[field]])));
 } else if (group === 'pr' && verb === 'create') {
   const number = Math.max(0, ...world.pulls.filter((p) => p.repo === repo).map((p) => p.number)) + 1;
@@ -82,7 +82,7 @@ export function fakeGh(world: World, options: { readonly fail?: string } = {}) {
   chmodSync(join(bin, 'gh'), 0o755);
   const calls = (): GhCall[] => (existsSync(log) ? readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line)) : []);
   const now = (): World => JSON.parse(readFileSync(file, 'utf8'));
-  const env = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${bin}:${process.env.PATH}` };
   delete env.GH_TOKEN;
   delete env.GITHUB_TOKEN;
   return { root, env, calls, world: now };
