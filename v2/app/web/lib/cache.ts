@@ -17,7 +17,10 @@
 // - An event refetches the resources it names that the cache holds, and
 //   nothing else; a reconnect refetches everything held, once.
 // - A subscriber (a screen's live refresh, the shell's count) is called
-//   when a resource it read has a new value, from a fetch or a gesture.
+//   when a resource it read has a new value, from a fetch or a gesture. A
+//   fetch that answers what the cache held is not a new value: the query
+//   client keeps the held one (its structural sharing), and no subscriber
+//   is called, so a poll draws no screen again (lane j3-tab-perf).
 // - A gesture's write is optimistic where the list can say its outcome at
 //   once (optimistic()): the cache moves first, and moves back if the
 //   service refuses; then what the write touched is refetched.
@@ -130,6 +133,7 @@ export class Cache {
   readonly #pollMs: number;
   readonly #paths = new Map<string, string>();
   readonly #at = new Map<string, number>();                    // when each value arrived, on this cache's clock
+  readonly #told = new Map<string, unknown>();                 // the value the subscribers were last called for
   readonly #subscribers = new Set<Subscriber>();
   #live = false;
   #timer: ReturnType<typeof setInterval> | undefined;
@@ -143,6 +147,9 @@ export class Cache {
       if (event.type !== 'updated' || event.action.type !== 'success') return;
       const hash = event.query.queryHash;
       this.#at.set(hash, this.#now());
+      const value = event.query.state.data;
+      if (this.#told.has(hash) && this.#told.get(hash) === value) return;
+      this.#told.set(hash, value);
       for (const subscriber of [...this.#subscribers]) if (subscriber.keys.has(hash)) subscriber.notify();
     });
   }
@@ -228,6 +235,7 @@ export class Cache {
   dispose(): void {
     this.stop();
     this.client.clear();
+    this.#told.clear();
   }
 
   subscribe(subscriber: Subscriber): () => void {

@@ -132,8 +132,11 @@ export function ordered(items: readonly Item[]): { readonly waiting: Item[]; rea
 
 // What the service answered, without the kinds this screen does not know:
 // a later kind is left out rather than drawn as a row with no words.
+// The list itself when every item is known, so the same list read again
+// from the cache is the same value.
 export function known(values: readonly unknown[]): Item[] {
-  return values.filter((value): value is Item => typeof value === 'object' && value !== null && Object.hasOwn(RANK, (value as { kind?: unknown }).kind as string));
+  const ok = (value: unknown): value is Item => typeof value === 'object' && value !== null && Object.hasOwn(RANK, (value as { kind?: unknown }).kind as string);
+  return values.every(ok) ? values as Item[] : values.filter(ok);
 }
 
 // The item shown: the one the address names, else the first that waits.

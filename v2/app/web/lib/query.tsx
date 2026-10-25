@@ -67,13 +67,26 @@ export function useLive(run: () => void): void {
 // A screen's last drawn state, kept for the page's life: a screen drawn
 // again (a switch back to it) starts from what it showed, then its first
 // read from the cache brings it up to date. No skeleton on a second visit.
+// That first read usually finds what was kept, the same values gathered in
+// a new object: it does not draw the screen again (lane j3-tab-perf).
 const kept = new Map<string, unknown>();
+
+export function sameFields(a: unknown, b: unknown): boolean {
+  if (Object.is(a, b)) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null || Array.isArray(a) || Array.isArray(b)) return false;
+  if (Object.getPrototypeOf(a) !== Object.prototype || Object.getPrototypeOf(b) !== Object.prototype) return false;
+  const keys = Object.keys(a);
+  return keys.length === Object.keys(b).length && keys.every((key) => Object.hasOwn(b, key) && Object.is((a as Record<string, unknown>)[key], (b as Record<string, unknown>)[key]));
+}
 
 export function useKept<T>(name: string, initial: T): [T, (value: T) => void] {
   const [value, setValue] = useState<T>(() => (kept.has(name) ? kept.get(name) as T : initial));
   const set = useCallback((next: T) => {
-    kept.set(name, next);
-    setValue(next);
+    setValue((current) => {
+      const value = sameFields(current, next) ? current : next;
+      kept.set(name, value);
+      return value;
+    });
   }, [name]);
   return [value, set];
 }

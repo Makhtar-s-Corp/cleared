@@ -14,8 +14,23 @@ export type Translate = (key: string, values?: Values) => string;
 export function format(template: string, values: Values = {}, locale?: string): string {
   return template.replace(/\{([a-z_]+)\}/g, (_, name: string) => {
     const value = values[name];
-    return typeof value === 'number' && locale ? new Intl.NumberFormat(locale).format(value) : String(value ?? '');
+    return typeof value === 'number' && locale ? numberFormat(locale).format(value) : String(value ?? '');
   });
+}
+
+// Intl's formatters are slow to build, and a screen says hundreds of
+// numbers each time it is drawn: one per locale and options, kept for the
+// page's life (lane j3-tab-perf). Each says what a new one would.
+const formatters = new Map<string, Intl.NumberFormat>();
+
+export function numberFormat(locale: string, options: Intl.NumberFormatOptions = {}): Intl.NumberFormat {
+  const key = `${locale} ${JSON.stringify(options)}`;
+  let made = formatters.get(key);
+  if (!made) {
+    made = new Intl.NumberFormat(locale, options);
+    formatters.set(key, made);
+  }
+  return made;
 }
 
 // A key missing from the catalog is drawn marked (⟦key⟧), never thrown:
