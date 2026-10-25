@@ -707,7 +707,7 @@ test('[Linear adapter] label trust: each tracker says who set a label: GitHub by
 
   const box = sandbox();
   copyFileSync(join(import.meta.dirname, '..', 'tracker.ts'), join(box.home, 'tracker.ts'));
-  writeFileSync(box.env.ORCH_CONF, readFileSync(box.env.ORCH_CONF, 'utf8').replace('adapter = local', 'adapter = linear\nowner_id = alice'));
+  writeFileSync(box.env.ORCH_CONF!, readFileSync(box.env.ORCH_CONF!, 'utf8').replace('adapter = local', 'adapter = linear\nowner_id = alice'));
   const answer = join(box.home, 'linear-answer.json');
   writeFileSync(join(box.home, 'bin', 'curl'), `#!${process.execPath}
 const fs = process.getBuiltinModule('node:fs');
