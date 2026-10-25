@@ -12,9 +12,11 @@
 // J and K walk ([data-row]); an empty part says so in one sentence, with
 // the one thing to do about it. Requirement C6: "Batch" in the bar opens a
 // form of one ticket per line, and the batches under way are a side card.
+// P214: "Template" in the bar shows the ready-made tickets (templates.ts).
 import { Check, HandGrabbing, ListChecks, Package, TerminalWindow, X } from '@phosphor-icons/react';
 import { Fragment, useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { Recipe } from '../../../../src/api/types.ts';
+import { TICKET_TEMPLATES, type TicketTemplate } from '../../../../src/tickets/templates.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
@@ -32,6 +34,7 @@ import {
   recipeDone, recipeFailure, recipeProblem, runRecipe, scheduleLine, serviceParts, serviceState, serviceTone, stepTag, takenOverText, towerModel, towerSummary,
   type BatchRow, type LeadCard as LeadCardModel, type LeadThread, type LiveCard, type NeedCard, type PlanRow, type ScheduleRow, type ServiceRow, type TowerModel,
 } from './model.ts';
+import { pickTemplate, templateLabels } from './templates.ts';
 import './tower.css';
 
 // A line of facts, each kept whole on a line (lane 38's art director: no fact cut, no line ending on its "·").
@@ -45,25 +48,41 @@ function Facts({ text }: { readonly text: string }) {
 // to the code; "Run a recipe" opens the recipes' form, once the service has some.
 // On a workspace of one service, the number of authors: one, or 2 to 4
 // variants compared in the inbox (issue #271). "Batch" opens the form of
-// several tickets at once (requirement C6).
-export function Bar({ t, title, body, services = [], picked = [], variants = 1, recipes = [], recipeOpen = false, batchOpen = false, busy = false, onTitle, onBody, onPick, onVariants, onLead, onAsk, onRecipe, onBatch, onSubmit }: {
+// several tickets at once (requirement C6). "Template" shows the ready-made
+// tickets (P214), a row that stays while one is picked; the picked one says
+// in the title's placeholder what to write.
+export function Bar({ t, title, body, services = [], picked = [], variants = 1, recipes = [], recipeOpen = false, batchOpen = false, template = null, templatesOpen = false, busy = false, onTitle, onBody, onPick, onVariants, onLead, onAsk, onRecipe, onBatch, onTemplates, onTemplate, onSubmit }: {
   readonly t: Translate; readonly title: string; readonly body: string;
   readonly services?: readonly string[]; readonly picked?: readonly string[]; readonly variants?: number; readonly onVariants?: (n: number) => void;
   readonly recipes?: readonly Recipe[]; readonly recipeOpen?: boolean; readonly batchOpen?: boolean; readonly busy?: boolean;
+  readonly template?: TicketTemplate | null; readonly templatesOpen?: boolean;
   readonly onTitle?: (value: string) => void; readonly onBody?: (value: string) => void; readonly onPick?: (service: string) => void;
-  readonly onLead?: (kind: 'goal' | 'lead') => void; readonly onAsk?: () => void; readonly onRecipe?: () => void; readonly onBatch?: () => void; readonly onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
+  readonly onLead?: (kind: 'goal' | 'lead') => void; readonly onAsk?: () => void; readonly onRecipe?: () => void; readonly onBatch?: () => void;
+  readonly onTemplates?: () => void; readonly onTemplate?: (template: TicketTemplate) => void; readonly onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
 }) {
+  const templates = templatesOpen || template !== null;
   return (
     <form className="ask" id="ask" autoComplete="off" onSubmit={onSubmit}>
-      <Input id="ask-input" name="title" maxLength={200} placeholder={t('bar_placeholder')} aria-label={t('bar_label')} value={title} onChange={(event) => onTitle?.(event.target.value)} />
+      <Input id="ask-input" name="title" maxLength={200} placeholder={t(template ? `template_${template}_title` : 'bar_placeholder')} aria-label={t('bar_label')} value={title} onChange={(event) => onTitle?.(event.target.value)} />
       <div className="ask-actions">
         <Button variant="chip" className="chip-button" data-lead="goal" onClick={() => onLead?.('goal')}>{t('bar_new_goal')}</Button>
         <Button variant="chip" className="chip-button" data-lead="lead" onClick={() => onLead?.('lead')}>{t('bar_ask_lead')}</Button>
         <Button variant="chip" className="chip-button" data-bar="ask" disabled={busy} title={t('bar_ask_code_note')} onClick={onAsk}>{t('bar_ask_code')}</Button>
         {recipes.length > 0 ? <Button variant="chip" className="chip-button" data-bar="recipe" aria-expanded={recipeOpen} aria-controls="recipe-form" onClick={onRecipe}>{t('bar_recipe')}</Button> : null}
+        <Button variant="chip" className="chip-button" data-bar="template" aria-expanded={templates} aria-controls="ask-templates" onClick={onTemplates}>{t('bar_template')}</Button>
         <Button variant="chip" className="chip-button" data-bar="batch" aria-expanded={batchOpen} aria-controls="batch-form" onClick={onBatch}>{t('bar_batch')}</Button>
         <Button variant="ink" className="chip-button primary" type="submit">{t('bar_new_ticket')}</Button>
       </div>
+      {templates ? (
+        <div className="ask-templates" id="ask-templates" role="group" aria-label={t('bar_templates_label')}>
+          <span className="ask-variants-label" aria-hidden="true">{t('bar_template')}</span>
+          {TICKET_TEMPLATES.map((id) => (
+            <Toggle key={id} className="svc-toggle" pressed={template === id} onPressedChange={() => onTemplate?.(id)} data-template={id}>
+              {template === id ? <Check size={12} aria-hidden="true" /> : null}{t(`template_${id}`)}
+            </Toggle>
+          ))}
+        </div>
+      ) : null}
       <Textarea id="ask-body" name="body" maxLength={20000} rows={5} placeholder={t('bar_body_placeholder')} aria-label={t('bar_body_label')} value={body} onChange={(event) => onBody?.(event.target.value)} />
       {services.length >= 2 ? (
         <div className="ask-services" role="group" aria-label={t('bar_services_label')}>
@@ -369,6 +388,8 @@ export default function Tower() {
   const [batchText, setBatchText] = useState('');
   const [batchNote, setBatchNote] = useState('');
   const [batching, setBatching] = useState(false);
+  const [template, setTemplate] = useState<TicketTemplate | null>(null);
+  const [templatesOpen, setTemplatesOpen] = useState(false);
   const thread = useRef<LeadThread>({ after: 0, line: null });
 
   const refresh = useCallback(async (live: () => boolean = () => true) => {
@@ -404,17 +425,35 @@ export default function Tower() {
       const services = model?.serviceNames.filter((name) => pickedFor(title, picked).includes(name)) ?? [];
       const several = (model?.serviceNames.length ?? 0) >= 2;
       const count = several ? 1 : variants;
-      const ticket = await createTicket(context.api, { title: typed, body, project: context.me.project, services, variants: count });
+      const ticket = await createTicket(context.api, { title: typed, body, project: context.me.project, services, variants: count, labels: templateLabels(template) });
       setTitle('');
       setBody('');
       setPicked([]);
       setVariants(1);
+      setTemplate(null);
+      setTemplatesOpen(false);
       const status = ticketState(ticket.status, t);
       setNote({ text: count > 1 ? t('ticket_created_variants', { id: ticket.id, status, n: count }) : t('ticket_created', { id: ticket.id, status }), kind: 'ok' });
       void refresh();
     } catch {
       setNote({ text: t('ticket_failed'), kind: 'error' });
     }
+  };
+
+  // A ready-made ticket: its sections in an empty or untouched description, the title to write next. Only the
+  // first pick takes the focus to the title, so the keys can still go from one template to the next.
+  const choose = (id: TicketTemplate) => {
+    const pick = pickTemplate({ template, body }, id, t);
+    setTemplate(pick.template);
+    setBody(pick.body);
+    setNote(pick.kept ? { text: t('template_kept'), kind: 'ok' } : null);
+    if (template === null && pick.template !== null) document.getElementById('ask-input')?.focus();
+  };
+  // The chip shows the row, or hides it with the template picked, its untouched sections with it.
+  const toggleTemplates = () => {
+    if (!templatesOpen && template === null) return setTemplatesOpen(true);
+    if (template !== null) choose(template);
+    setTemplatesOpen(false);
   };
 
   // "Ask about the code": the title and the description are the question;
@@ -489,7 +528,7 @@ export default function Tower() {
         onTitle={(value) => { setTitle(value); if (!value.trim()) { setPicked([]); setVariants(1); } }} onBody={setBody} onSubmit={(event) => void submit(event)}
         onPick={(name) => setPicked((current) => (current.includes(name) ? current.filter((n) => n !== name) : [...current, name]))}
         onLead={(kind) => go(leadHref(kind, title, body))} onAsk={() => void ask()} onRecipe={() => setRecipeOpen((open) => !open)}
-        onBatch={() => setBatchOpen((open) => !open)} />
+        onBatch={() => setBatchOpen((open) => !open)} template={template} templatesOpen={templatesOpen} onTemplates={toggleTemplates} onTemplate={choose} />
       <p className="ask-note" id="ask-note" role="status" data-kind={note?.kind}>{note?.text ?? ''}</p>
       {recipeOpen && model && model.recipes.length > 0 ? (
         <RecipeForm t={t} recipes={model.recipes} picked={recipe} values={values} note={recipeNote.text} link={recipeNote.link} busy={running}

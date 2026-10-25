@@ -37,7 +37,10 @@ test('CLEARED_V2_PICK_HARNESSES: Claude Code alone by default; Codex on its defa
     assert.throws(() => pickHarnessesOf(bad), FlowConfigError, bad);
 });
 
-test('a ticket\'s type is its first label among Bug, Review, CI and Question, whatever the case; else other', () => {
+test('a ticket\'s type is its template\'s label (P214); without one, its first label among Bug, Review, CI and Question, whatever the case; else other', () => {
+  assert.equal(ticketType(['type:ci']), 'ci');
+  assert.equal(ticketType(['Bug', 'type:question']), 'question', 'the template\'s label first');
+  assert.equal(ticketType(['type:nope', 'review']), 'review');
   assert.equal(ticketType(['Bug']), 'bug');
   assert.equal(ticketType(['Quick', 'ci']), 'ci');
   assert.equal(ticketType(['Question', 'Bug']), 'question');

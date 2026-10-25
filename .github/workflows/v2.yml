@@ -100,6 +100,7 @@ jobs:
             app/test/session/continuity-browser.test.ts app/test/inbox/inbox-browser.test.ts
             app/test/polish/first-paint-browser.test.ts app/test/i18n-browser.test.ts
             app/test/session/replay-browser.test.ts app/test/session/ticket-cost-browser.test.ts
+            app/test/tower-templates-browser.test.ts
             app/test/consumption/wins-browser.test.ts"
           node --test --test-reporter=tap $files | tee "$RUNNER_TEMP/browser.tap"
           count() { grep -E "^# $1 " "$RUNNER_TEMP/browser.tap" | awk '{print $3}'; }

@@ -35,6 +35,7 @@ import { BatchError, BatchRunner } from '../../src/flow/batch.ts';
 import { changedFiles } from '../../src/flow/files.ts';
 import type { SessionState } from '../../src/session/events.ts';
 import { MemoryTicketStore, type Ticket } from '../../src/tickets/contract.ts';
+import { typeLabelProblem } from '../../src/tickets/templates.ts';
 import { applyAll, emptyModel } from '../web/screens/session/model.ts';
 import { sendJson, type DataSource } from '../src/proxy.ts';
 import { leadFixture } from './lead.ts';
@@ -67,10 +68,12 @@ function readJson(request: IncomingMessage): Promise<unknown> {
 
 function ticketBody(value: unknown, project: string): CreateTicketBody | undefined {
   if (!value || typeof value !== 'object') return undefined;
-  const { title, body } = value as Record<string, unknown>;
+  const { title, body, labels } = value as Record<string, unknown>;
   if (typeof title !== 'string' || !title.trim() || title.length > TITLE_LIMIT) return undefined;
   if (body !== undefined && typeof body !== 'string') return undefined;
-  return { title: title.trim(), ...(typeof body === 'string' ? { body } : {}), project };
+  // A ready-made ticket's type label (P214), checked as the service checks it.
+  if (labels !== undefined && (!Array.isArray(labels) || labels.some((l) => typeof l !== 'string') || typeLabelProblem(labels as string[]))) return undefined;
+  return { title: title.trim(), ...(typeof body === 'string' ? { body } : {}), ...(labels === undefined ? {} : { labels: labels as string[] }), project };
 }
 
 // `ask`: a session's question that arrives while the page is open, said on

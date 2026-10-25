@@ -151,19 +151,25 @@
   .tower { grid-template-columns: minmax(0, 1fr); }
   .tower-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--space-4); }
   .tower-side > :first-child { grid-column: 1 / -1; }
+  /* Once the actions no longer fit beside the field (P214's Template chip made it sooner), the field and New
+     ticket keep the first row, the other actions take the lines under it, and what the bar opens comes after.
+     The empty full-width item ends the first row, so no chip climbs beside New ticket; its negative margin
+     takes back the gap of the line it makes. */
+  .ask { flex-wrap: wrap; }
+  .ask input { flex: 1 1 160px; }
+  .ask-actions { display: contents; }
+  .ask-actions .primary { order: 1; }
+  .ask::after { content: ""; order: 1; flex-basis: 100%; height: 0; margin-top: calc(-1 * var(--space-2)); }
+  .ask-actions [data-bar], .ask-actions [data-lead] { order: 2; }
+  .ask-templates, .ask textarea, .ask-services, .ask-variants { order: 3; }
 }
 @container tower (max-width: 560px) {
   .tower-side { grid-template-columns: minmax(0, 1fr); }
-  /* The actions wrap under the field, New ticket at the end of their line; Ask about the code and Run a
-     recipe stay in the palette (Ctrl-K or the top bar's search), so the bar is two lines at most. */
+  /* Ask about the code and Run a recipe stay in the palette (Ctrl-K or the top bar's search). */
   .ask-actions [data-bar="ask"], .ask-actions [data-bar="recipe"] { display: none; }
   /* A phone keeps the field and New ticket on one row (lane 38): a goal and the lead are the next block down and
      in the palette. */
   .ask-actions [data-lead] { display: none; }
-  .ask { flex-wrap: nowrap; }
-  .ask input { flex: 1 1 0; }
-  .ask-actions { flex: none; }
-  .ask:has(#ask-input:not(:placeholder-shown)), .ask:has(.ask-services) { flex-wrap: wrap; }
 }
 /* the rows, by the width of their own column */
 @container rows (max-width: 720px) {
@@ -205,3 +211,9 @@
 .ask:has(#ask-input:not(:placeholder-shown)) .ask-variants { display: flex; }
 .ask textarea + .ask-variants { border-top: 0; padding-top: 2px; }
 .ask-variants-label { color: var(--text-muted); font-size: var(--text-sm); margin-right: var(--space-1); }
+/* The ready-made tickets (P214): a row under the field while the chip has it open or one is picked; the
+   description it fills follows with no rule of its own, as the authors follow the description. */
+.ask-templates + textarea { border-top: 0; padding-top: 2px; }
+/* A chip whose row or form is open says so, in the hover's fill, never the ink of New ticket. */
+.ask-actions .chip-button[aria-expanded="true"] { background: var(--tab-fill); }
+.ask-templates { display: flex; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--hairline); }
