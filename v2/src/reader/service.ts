@@ -296,7 +296,7 @@ export class ReaderService {
         const answer = live.text.join('\n\n');
         live.text = [];
         const citations = await citationsOf(answer, {
-          services: this.#deps.workspace.services, commits: live.commits,
+          services: this.#deps.workspace.services, read: this.#servicesOf((this.#asks.get(live.ask) as AskRecord).service), commits: live.commits,
           linesAt: (service, commit, path) => this.#deps.effects.linesAt(service, commit, path),
         });
         const ask = this.#asks.get(live.ask) as AskRecord;

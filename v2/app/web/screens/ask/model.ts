@@ -86,11 +86,16 @@ export type AnswerPart = { readonly text: string; readonly url?: string; readonl
 
 const GITHUB = 'https://github.com/';
 const linked = (citation: AskCitation) => citation.url !== null && citation.url.startsWith(GITHUB) && citation.text !== '';
+// A mention stands whole as the service reads it (src/reader/citations.ts):
+// not inside a longer path, nor before more digits or a range.
+const whole = (answer: string, at: number, end: number) => !/[A-Za-z0-9_./-]/.test(answer[at - 1] ?? '') && !/^(?:[0-9]|[-–][0-9])/.test(answer.slice(end));
 
 export function answerParts(answer: string, citations: readonly AskCitation[] | undefined): AnswerPart[] {
   const found: { at: number; citation: AskCitation }[] = [];
   for (const citation of (citations ?? []).filter(linked)) {
-    for (let at = answer.indexOf(citation.text); at !== -1; at = answer.indexOf(citation.text, at + citation.text.length)) found.push({ at, citation });
+    for (let at = answer.indexOf(citation.text); at !== -1; at = answer.indexOf(citation.text, at + 1)) {
+      if (whole(answer, at, at + citation.text.length)) found.push({ at, citation });
+    }
   }
   // From the start, the longer mention first where two start together; one inside another is left.
   found.sort((a, b) => a.at - b.at || b.citation.text.length - a.citation.text.length);

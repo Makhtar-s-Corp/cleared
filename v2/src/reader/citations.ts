@@ -10,7 +10,7 @@
 //   reader writes is never taken. A mention whose file or lines that commit
 //   does not hold keeps no link and says why, so an invented citation shows.
 //
-//   A bare `path:line`, without its service, is read in an ask of one
+//   A bare `path:line`, without its service, is read when the ask read one
 //   service only, and kept only when that commit holds it: anything else
 //   written that way (a host and its port) may be no citation at all.
 import { WORKDIR_MOUNT } from '../container/session-runtime.ts';
@@ -38,6 +38,8 @@ export type CiteSource = {
 
 export type CiteDeps = {
   readonly services: readonly CiteSource[];
+  // The services the ask read, every one when absent: a bare path is theirs when they are one.
+  readonly read?: readonly string[];
   // The commit each service's folder was exported at, for the session that answered.
   readonly commits: Readonly<Record<string, string>>;
   // The lines of a plain text file of a service at a commit; a ReaderError when it holds none.
@@ -49,7 +51,7 @@ const LINES = ':([0-9]{1,7})(?:[-–]([0-9]{1,7}))?(?![0-9])';
 const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const errorName = (error: unknown) => (error instanceof Error ? error.name : typeof error);
 
-export function mentionsIn(answer: string, services: readonly string[]): Mention[] {
+export function mentionsIn(answer: string, services: readonly string[], read: readonly string[] = services): Mention[] {
   const found: (Mention & { readonly at: number; readonly end: number })[] = [];
   const add = (match: RegExpExecArray, service: string, raw: string, bare: boolean) => {
     const path = servicePath(raw);
@@ -62,12 +64,12 @@ export function mentionsIn(answer: string, services: readonly string[]): Mention
     const named = new RegExp(`(?<![A-Za-z0-9_./-])(?:${escape(WORKDIR_MOUNT)}/)?(${services.map(escape).join('|')})/(${PATH})${LINES}`, 'g');
     for (const match of answer.matchAll(named)) add(match, match[1] as string, match[2] as string, false);
   }
-  if (services.length === 1) {
+  if (read.length === 1) {
     const bare = new RegExp(`(?<![A-Za-z0-9_./:@+-])(${PATH})${LINES}`, 'g');
     for (const match of answer.matchAll(bare)) {
       const at = match.index;
       if (!/[A-Za-z]/.test(match[1] as string) || found.some((m) => at < m.end && m.at < at + match[0].length)) continue;
-      add(match, services[0] as string, match[1] as string, true);
+      add(match, read[0] as string, match[1] as string, true);
     }
   }
   const seen = new Set<string>();
@@ -107,9 +109,10 @@ export async function citationsOf(answer: string, deps: CiteDeps): Promise<AskCi
     return lines;
   };
   const cited: AskCitation[] = [];
-  for (const mention of mentionsIn(answer, deps.services.map((service) => service.name))) {
+  for (const mention of mentionsIn(answer, deps.services.map((service) => service.name), deps.read)) {
     const { bare, ...where } = mention;
-    const commit = deps.commits[mention.service] ?? null;
+    // A service the ask did not read is no code the reader read.
+    const commit = !deps.read || deps.read.includes(mention.service) ? deps.commits[mention.service] ?? null : null;
     const source = deps.services.find((service) => service.name === mention.service) as CiteSource;
     let problem: AskCitation['problem'] = null;
     let url: string | undefined;
