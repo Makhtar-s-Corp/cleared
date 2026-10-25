@@ -5,7 +5,7 @@ import { join } from 'node:path';
 import { FakeBroker, head, service, settle } from './support.ts';
 import { OWNER } from './harness.ts';
 
-const oracle = new URL('./oracle.mjs', import.meta.url).pathname;
+const oracle = new URL('./oracle.ts', import.meta.url).pathname;
 const v1 = (s: Awaited<ReturnType<typeof service>>, command: string, ticket = 'LOCAL-1') =>
   JSON.parse(execFileSync(process.execPath, [oracle, join(s.box.state, 'ledger.db'), s.box.confFile, command, ticket], { encoding: 'utf8', env: { ...process.env, ORCH_STATE_DIR: s.box.state } }));
 const moved = (s: Awaited<ReturnType<typeof service>>, args: string[] = []) => s.box.tracker('moved-by-owner', 'LOCAL-1', 'Ready to Ship', ...args).status;
