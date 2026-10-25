@@ -146,7 +146,7 @@ Pull request 384 mirrors a ticket's creation and its state, and left three thing
 
 - **New tables, not new columns.** `CREATE TABLE IF NOT EXISTS` does not add a column to the `mirror_links` 384 made: `mirror_fields` (the agreed value and the tracker's last read, per link and field), `mirror_edits`, `mirror_comments` and `mirror_followed` (the time this code first followed a link) are new tables of the tickets module.
 - **The store's edit.** `TicketStore.edit(id, { title?, body? }, by)`, on `LocalTicketStore` and `MemoryTicketStore`: it writes `tracker_tickets` and its `updated_at`, no history row (the history is the states'). The mirror is its only caller.
-- **The tracker's interface.** `Tracker.comments(since)`, `Tracker.edit(id, fields)`, and `Tracker.comment` returns the comment's id; `TrackerIssue.edits` lists who changed a field, as `changes` does for the state.
+- **The tracker's interface.** `Tracker.commentsSince(since)`, `Tracker.edit(id, fields)`, and `Tracker.comment` returns the comment's id; `TrackerIssue.edits` lists who changed a field, as `changes` does for the state.
 - **The redraw.** An optional `changed(ticket)` in the mirror's dependencies, wired by `modules/tickets.ts` to the engine's change hub.
 - **Language.** The comments' first lines and the edit's refusal follow `CLEARED_V2_APP_LANGUAGE`, French by default, as the mirror's other words.
 - **Matrix line.** P237 (P236 is the cleanup's); B5.8b, P230 and `docs/v2/mirrors.md` updated.
@@ -163,5 +163,5 @@ A comment edited or deleted after it was mirrored; a screen of the app that show
 
 | Unknown on 2026-10-25 | Closed by |
 | --- | --- |
-| Whether GitHub records who changed an issue's description anywhere its REST API reads | the real run of this lane, on the example repository |
+| Whether GitHub records who changed an issue's description anywhere its REST API reads | closed by the real run of this lane, on the example repository: neither the issue's events nor its timeline hold an event for it, a new title is `renamed` |
 | Whether Linear's `Comment.botActor` names an integration's comment, and whether its history's `toTitle` and `updatedDescription` are filled as its schema says | the owner's real trial; until then an unnamed author reads as an agent's |
