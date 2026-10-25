@@ -43,6 +43,16 @@ test('two done tickets are not enough: the defaults, with samples: 2', async () 
   assert.equal(estimateFor([], 'l', 'fast').samples, 0);
 });
 
+test('samples without a cost (v1\'s, imported) count for the minutes; the cost is the median of those that have one, else the default', () => {
+  const sample = (minutes: number, costUsd: number | null) => ({ size: 's' as const, lane: 'full' as const, minutes, costUsd });
+  assert.deepEqual(estimateFor([sample(10, 1), sample(20, null), sample(30, 2), sample(40, 3)], 's', 'full'), { minutes: 25, costUsd: 2, weekPercent: null, samples: 4 });
+  // A default cost is never said to come from history: the plan's panel
+  // says "Estimates from {n} similar tickets" from three samples, so the
+  // count is then the samples that have a cost.
+  assert.deepEqual(estimateFor([sample(10, null), sample(20, null), sample(30, null)], 's', 'full'), { minutes: 20, costUsd: 0.3, weekPercent: null, samples: 0 });
+  assert.deepEqual(estimateFor([sample(10, 1), sample(20, null), sample(30, 2), sample(40, null)], 's', 'full'), { minutes: 25, costUsd: 0.3, weekPercent: null, samples: 2 });
+});
+
 test('the plan\'s time is its critical path given after and two at a time, not the sum', () => {
   // The acceptance's plan: 1, 2 and 4 independent, 3 after 2, 5 after 3, ten minutes each.
   const ten = [[], [], [2], [], [3]].map((after) => ({ after, minutes: 10 }));

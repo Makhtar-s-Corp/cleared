@@ -26,6 +26,7 @@ Run from `v2/`:
 | `npm test` | Builds the front end, runs the unit tests with `node --test` (`test/` and `app/test/`), then the components' tests with Vitest (`app/web/test/`, rendered to HTML under Node). |
 | `npx tsc --noEmit` | Type checks `src/`, `test/` and `scripts/`. `npm run typecheck` also checks the app's server with `tsc --noEmit -p app` and the front end with `tsc --noEmit -p app/web`; `npm test` runs both through `app/test/static.test.ts`. |
 | `node src/cli/ledger-mcp.ts` | Serves the ledger's session history to an agent as a read-only MCP server on stdio, see [The ledger's MCP server](#the-ledgers-mcp-server). Not through `npm run`, whose banner would reach the protocol's stdout. |
+| `npm run import-v1 -- --from <v1 ledger.db>` | Says what a v1 ledger would bring to the configured workspace: its measured tickets as samples of the plans' estimates, and the decisions the owner approved there and that are unchanged in the checkout. Writes nothing; `--apply` imports, once however many times it runs. The v1 ledger is never written. See the [milestone 4 plan](../docs/v2/milestone-4-plan.md), section 3. |
 | `npm run guard` | Runs the repository's private terms and secrets guard (`lib/guard/codex-guard.ts`) on every v2 file and the v2 workflow. `-- --base origin/v2` also checks the lines changed since that ref, in the guard's `--strict` diff mode. |
 
 ## Settings
