@@ -5548,6 +5548,50 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 - Pull request: 359, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-js-convert`.
 
+## 2026-10-25: the runner reads the user setting source alone, so sessions read the mounted skills (owner decision of 06:06, option A; B5.5b, M7, issue 140)
+
+**Decision.** The runner (`v2/images/session/runner/main.ts`) gives `query()` `settingSources: ['user']`. Claude Code reads the skills mounted from the base branch; the checkout's `CLAUDE.md`, `.claude/settings.json`, `.claude/settings.local.json`, their hooks and the ticket branch's own `.claude/skills` stay unloaded. The briefing is still appended to the system prompt.
+
+**Options weighed.**
+- **A, `['user']` alone (taken).** In the container the user source is `CLAUDE_CONFIG_DIR`, the session's config volume, where lane 15 mounts the base branch's `.claude/skills` read only. It is enough for B5.5b and M7, and the repository gets no say over the session: no hook, no permission rule, no instruction file from the checkout.
+- **`['user', 'project']`** (issue 140 asked for `['project']`). It would also load the checkout's settings: hooks that run commands outside the policy, permission rules that pass a call without `canUseTool`, and skills the ticket branch itself wrote. A ticket could change the rules of its own session.
+- **`[]`** (kept since 2026-10-21). The mounted skills were never read, so B5.5b and M7 stayed `partial`.
+
+**Supersedes** item 10 of the entry of 2026-10-22 on the runner ("It stays `[]`") and the consequence of 2026-10-21 that left the skills' loading unknown. Issue 140's other asks were met by then: the `stop_hook_active` test (`test/runner/hooks.test.ts`) and the commit identity (item 7 of the same entry).
+
+- Decided by the owner, 2026-10-25 06:06.
+
+## 2026-10-25: the v1 passkey code stays until milestone 4 (owner decision, option C; B5.9d)
+
+**Decision.** The v1 passkey code (`app/lib/webauthn.mjs` and the passkey parts of the files the entry of 2026-10-21 lists) stays as it is until the milestone 4 conversion of the v1 app. B5.9d stays `partial`: the v2 app has no passkeys (135), and their removal from v1 comes with that conversion.
+
+**Deferred with it.** The question the entry of 2026-10-21 ("app login by password, no passkeys") left open: what confirms "Clear to land", "Send back" and turning notifications on in v1, which a passkey confirms today. It is settled at milestone 4, with the code.
+
+- Decided by the owner, 2026-10-25.
+
+## 2026-10-25: the user setting source, its tests and what is left to run (the author's choices, lane `j3-skills-user`, B5.5b, M7, issue 140)
+
+**The need.** The two decisions above, applied: `settingSources: ['user']` in the runner, tests that the mounted skills are read and the project's settings and hooks are not, and the matrix lines B5.5b, M7 and B5.9d. The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight, as earlier lanes noted; the conventions followed are those of section 10 of `milestone-1-plan.md`.
+
+**Decision.**
+1. **What `'user'` reads, from the source.** `sdk.d.ts` of `@anthropic-ai/claude-agent-sdk` 0.3.306 (read from the package's tarball, nothing of it run): `'user'` is "Global user settings (`~/.claude/settings.json`)", `'project'` and `'local'` the checkout's two files, and "Must include `'project'` to load CLAUDE.md files". The `skills` option, left unset, "is **not** 'skills off'": the CLI's defaults stand. `system/init` carries `skills: string[]`. In the container, `CLAUDE_CONFIG_DIR` is set by the image and by the runtime to `/var/lib/cleared/claude-config`, the session's volume (`test/container/session-runtime.test.ts` now checks the runtime's), so the host's own settings never enter (the isolation of `docs/adapters.md` holds).
+2. **The runner.** One option changed and its comment. The reload after a Take over builds its options from the same function, so a session given back to the runner reads the user source alone again, whatever sources the human's `claude --resume` read.
+3. **The config volume is now read.** A `settings.json` written in it would bring hooks and permission rules into the session's next query. An Edit or Write there, or a shell write, is not allowed by any rule of the policy: it goes to the human (`default`, or `shell.compound`), `test/session/policy.test.ts` pins that. A human who answers "always in this project" to that exact write saves a learned rule that allows it for the project's later sessions, as for any path; the test says so too. The residual: a declared command that runs the checkout's scripts (`npm test`) can write there unasked. That command can already run anything in the container, so the user source adds no reach the session did not have; it stays inside the container.
+4. **A skill may ask once.** The policy has no rule for the `Skill` tool. If Claude Code asks `canUseTool` for it, as for other tools in `default` mode (not seen in a run), its first use in a project goes to the inbox (`default`), and "always in this project" saves the answer. No rule was added for it: the owner's decision was about the setting sources, not the policy.
+5. **The real check, written, not run.** The `claude-code` section of the doctor mounts a skills folder holding `doctor-skill`, plants `checkout-skill` in the checkout's `.claude/skills` and a `SessionStart` and `PreToolUse` hook in the checkout's `.claude/settings.json` that would write a marker, then checks after the first turn that `system/init` lists `doctor-skill`, not `checkout-skill`, and that no marker was written. The marker is the hook's test, not the `hook_*` frames: `sdk.d.ts` says SessionStart hook events are always emitted, and the runner has hooks of its own. It needs the session image built again (the runner is copied into it, the tag follows Claude Code's version and does not change) and the login, so it was not run here. B5.5b and M7 stay `partial` until it passes; "Reste avant v2 -> main" lists them under the real proof now.
+6. **Lines.** B5.5b, M7 and B5.9d updated; no new P line, since the two decisions are the owner's and the lines are the brief's.
+
+**Tests first.** `92cbc0b` committed the tests alone. There, three runner tests fail on `[]` (the start's options, the new test of the user source, the reload after a Take over); the policy test passes, as it guards what the change must not open; the doctor change typechecks.
+
+**Checks** (on `origin/v2` at `7304f41`, which had not moved when this was written). `npm run typecheck` passes. `npm test`: 2065 Node tests, 1995 pass, 70 skipped (the browser tests without `CLEARED_V2_PLAYWRIGHT`, and the gated real-harness test), 0 fail; 326 Vitest tests pass. `test/container/session-runtime.test.ts` gained its `CLAUDE_CONFIG_DIR` check after that run and passes 31 of 31 alone. `npm run guard -- --base origin/v2`: nothing refused. No browser test was run: nothing of the app changed. The `claude-code` section of the doctor was not run (item 5).
+
+**The merge of 359** (lane `j3-js-convert`, B5.11b, at `origin/v2` `8807382`). The log keeps 359's entry, then this lane's three. In the matrix, the "Later milestone" list keeps this lane's B5.9d bullet and 359's B5.11b bullet; every id is there once. 359 touches none of this lane's files. After the merge: `npm run typecheck` passes. The first `npm test` failed one test of 2066: `test/flow/one-service.test.ts`, "a ticket of a one-service workspace produces the events…". Neither that test nor `src/flow/` is changed by this lane, and run alone three times it passes. Run again in full, `npm test` runs 2066 Node tests, 1996 pass, 70 skipped, 0 fail, and 326 Vitest tests pass. `npm run guard -- --base origin/v2`: nothing refused.
+
+**Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read, no network beyond `npm ci` of the lock file and `npm pack` of the SDK's tarball (read, not run), no tunnel, no port opened, no secret.
+
+- Pull request: 361, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-skills-user`.
+
 ## 2026-10-25: the project page written again over a base that had not moved (the author's choices, lane `j3-flaky-page`, matrix P103, issue #360)
 
 **The need.** Issue #360: during a full `npm test`, `test/workspace/project-page.test.ts` saw the page's modification time move by about 130 ms between two updates of a base that had not moved (the tests "a fetch that finds the base unmoved" and "after a merge the page is made again"; the merge of 358 in lane `j3-mcp-access-sec` logged one). Run alone, the file passed. The issue asks for the cause, either a real rewrite or a fragile test, and a check that does not rest on time. The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight; the conventions followed are those of section 10 of `milestone-1-plan.md` (a lane changes its own files), as the earlier lanes did.
@@ -5567,6 +5611,8 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 **Checks** (on `origin/v2` at `8807382`). `npm run typecheck` passes. `npm test` three times in a row: each time 2065 Node tests, 1995 pass, 70 skipped (the browser tests and the gated real-harness tests), 0 fail, and 326 Vitest tests pass. `test/workspace/project-page.test.ts`, run 72 times in parallel in batches of 24, passes 13 of 13 each time. `npm run guard -- --base origin/v2`: nothing refused.
 
 **Another flaky test, left as it is.** One of the probe's full runs (before the fix) failed in `test/mcp/followups.test.ts`, "the server process whose client closed its stdout exits with 0". The failure is `EPIPE` in the test's own write to the child's stdin, after the child had exited. This lane does not touch it.
+
+**The merge of 361** (lane `j3-skills-user`, at `origin/v2` `daf39b9`). The log keeps 361's entries, then this one. The matrix merged by itself, and every id is still there once. 361 touches neither `src/workspace/` nor the page's test. After the merge: `npm run typecheck` passes. `npm test` three times in a row: each time 2067 Node tests, 1997 pass, 70 skipped, 0 fail, and 326 Vitest tests pass. `npm run guard -- --base origin/v2`: nothing refused.
 
 **Resources.** No Docker object, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no port, no secret.
 

@@ -573,3 +573,20 @@ test('an author before its Go changes nothing but its handover', () => {
     { name: 'a reviewer is not concerned', request: edit('/workspace/src/app.ts'), policy: { role: 'reviewer', planning: true }, decision: 'deny', rule: 'reviewer.edit' },
   ]);
 });
+
+// B5.5b (the owner's decision of 2026-10-25 06:06): the runner reads the user
+// setting source, which in the container is the session's config volume. A
+// settings file written there would bring hooks and permission rules into the
+// session's next query, so no rule lets an edit there through without the
+// human, nor into the skills mounted from the base branch.
+test('the config folder the user source reads is not written without the human', () => {
+  const config = '/var/lib/cleared/claude-config';
+  check([
+    { name: 'Write its settings', request: { tool: 'Write', input: { file_path: `${config}/settings.json`, content: '{"hooks":{}}' } }, decision: 'ask', rule: 'default' },
+    { name: 'Edit its settings', request: { tool: 'Edit', input: { file_path: `${config}/settings.json`, old_string: 'a', new_string: 'b' } }, decision: 'ask', rule: 'default' },
+    { name: 'Write a skill', request: { tool: 'Write', input: { file_path: `${config}/skills/cleared-guestbook/SKILL.md`, content: 'x' } }, decision: 'ask', rule: 'default' },
+    { name: 'a shell write', request: bash(`echo {} > ${config}/settings.json`), decision: 'ask', rule: 'shell.compound' },
+    // "Always in this project" on that exact write opens it, as for any path: the human's answer.
+    { name: 'the human\'s always for that file', request: { tool: 'Write', input: { file_path: `${config}/settings.json`, content: '{}' } }, policy: { learned: [{ tool: 'Write', pattern: `${config}/settings.json` }] }, decision: 'allow', rule: 'learned' },
+  ]);
+});

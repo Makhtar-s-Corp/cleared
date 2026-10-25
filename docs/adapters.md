@@ -694,6 +694,14 @@ Neither was run against the real CLI: a run needs the session image and the serv
 
 `v2/src/session/adapters/claude-code/map.ts` turns a user frame into events only for its tool results. A context message the SDK might print therefore reaches neither the ledger nor the thread (`test/session/claude-code/map.test.ts`).
 
+### The user setting source alone (2026-10-25, B5.5b, not verified by a run)
+
+Lane `j3-skills-user` (the owner's decision of 2026-10-25 06:06, option A) gives `query()` `settingSources: ['user']` instead of `[]`. Read in `sdk.d.ts` of `@anthropic-ai/claude-agent-sdk` 0.3.306: `'user'` is "Global user settings (`~/.claude/settings.json`)", `'project'` the checkout's `.claude/settings.json`, `'local'` its `.claude/settings.local.json`; "Must include `'project'` to load CLAUDE.md files". `skills`, left unset, keeps "the CLI's own defaults".
+
+In the session container the user folder is `CLAUDE_CONFIG_DIR`, the session's config volume (`/var/lib/cleared/claude-config`), not a home folder of the host, so the isolation from the host's own hooks, plugins and MCP servers ([Configuration isolation](#configuration-isolation)) holds. The base branch's `.claude/skills` is mounted read only at `skills/` in that volume (lane 15). The briefing is still appended to the system prompt, as [above](#claude-code-verified-in-a-container-2026-10-21) says.
+
+Not run against the real CLI: a run needs the session image built again (the runner is copied into it) and the service's login, and this lane used neither. The `claude-code` section of the doctor now checks it: `system/init` lists `doctor-skill`, mounted from a skills folder, and neither `checkout-skill` from the checkout's `.claude/skills` nor a marker written by a hook of the checkout's `.claude/settings.json`.
+
 ## Cursor harness (milestone 3, lane j3-cursor-harness)
 
 Written on 2026-10-23 with **no Cursor account and no Cursor program on this server**. Everything below is split in two: what the official pages say (read that day, not run) and what the tests prove against fakes. Nothing here was observed from a real Cursor run. The owner's trial list is at the end.

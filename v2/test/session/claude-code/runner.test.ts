@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { hooks } from '../../../images/session/runner/hooks.ts';
 import { CLAUDE_BIN, LOGIN_FILE, run, type QueryFn, type RunnerDeps, type RunnerOutput } from '../../../images/session/runner/main.ts';
+import { CONFIG_MOUNT, SKILLS_MOUNT } from '../../../src/container/session-runtime.ts';
 
 const token = ['sk', 'ant', 'oat01', 'R4u9Kd0Qm2Zx7Lp1Vb8Nc3Ws6Ty5Hj0'].join('-');
 
@@ -107,7 +108,7 @@ test('the runner starts query() with the plan options, the token in the child en
   assert.equal(options.model, 'claude-haiku-5-5');
   assert.equal(options.sessionId, start.sessionId);
   assert.equal(options.resume, undefined);
-  assert.deepEqual(options.settingSources, []);
+  assert.deepEqual(options.settingSources, ['user']);
   // No co-author trailer: its address would make the guard refuse the publish.
   assert.deepEqual(options.settings, { attribution: { commit: '', pr: '' } });
   assert.equal(options.permissionMode, 'default');
@@ -159,6 +160,31 @@ test('resume passes the session id as resume, and CLAUDE.md is appended to the s
   assert.equal(options.resume, start.sessionId);
   assert.equal(options.sessionId, undefined);
   assert.deepEqual(options.systemPrompt, { type: 'preset', preset: 'claude_code', append: '# Briefing\nThe word is MAPLE.\n', excludeDynamicSections: true, snapshot: true });
+});
+
+// B5.5b and M7 (the owner's decision of 2026-10-25 06:06, option A): the
+// user source alone. In the container it is CLAUDE_CONFIG_DIR, the session's
+// config volume, where the base branch's skills are mounted read only; the
+// 'project' and 'local' sources, which would load the checkout's CLAUDE.md,
+// .claude/settings.json, .claude/settings.local.json, their hooks and the
+// ticket branch's own .claude/skills, stay off (sdk.d.ts 0.3.306,
+// settingSources).
+test('the user setting source alone: the mounted skills are read, the checkout\'s settings, hooks and skills are not', async () => {
+  assert.equal(SKILLS_MOUNT, `${CONFIG_MOUNT}/skills`, 'the skills sit in the folder the user source reads');
+  const { query, seen } = fakeQuery(async function* () {});
+  const source = lineSource();
+  const done = run(deps(query, source.lines, [], { env: { PATH: '/usr/bin', HOME: '/tmp', CLAUDE_CONFIG_DIR: CONFIG_MOUNT } }));
+  source.send(start);
+  source.end();
+  assert.equal(await done, 0);
+  const options = seen.options as Options;
+  assert.deepEqual(options.settingSources, ['user']);
+  assert.equal(options.cwd, '/workspace', 'the checkout is the project the absent sources would read');
+  assert.equal((options.env as Record<string, string | undefined>).CLAUDE_CONFIG_DIR, CONFIG_MOUNT, 'the user source is the config volume, not a home folder');
+  // Only the runner's own hooks: none comes from a settings file.
+  assert.deepEqual(Object.keys(options.hooks as object).sort(), [...new Set(['PreToolUse', 'PostToolUse', ...Object.keys(hooks)])].sort());
+  // The skills are not narrowed by the SDK: the CLI's own default stands.
+  assert.equal(options.skills, undefined);
 });
 
 test('a permission request goes out as a line and the answer line decides it', async () => {
@@ -723,6 +749,8 @@ test('release hands the harness over: the query closes and the runner stays up; 
   assert.equal(q.options[1]?.resume, start.sessionId, 'the same session, read again from its transcript');
   assert.equal(q.options[1]?.sessionId, undefined);
   assert.equal(q.options[1]?.canUseTool, q.options[0]?.canUseTool);
+  // The human's harness ran with the CLI's own sources; the runner's reads the user source alone again.
+  assert.deepEqual(q.options[1]?.settingSources, ['user']);
   assert.deepEqual(q.prompts, ['Work.', 'Carry on.']);
   source.end();
   assert.equal(await done, 0);

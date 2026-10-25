@@ -101,6 +101,8 @@ test('a session gets an internal network, an egress network, a config volume, it
     ['--env', 'https_proxy=http://egress:3128'], ['--env', 'http_proxy=http://egress:3128'],
     ['--env', 'NO_PROXY=localhost,127.0.0.1,postgres'], ['--env', 'no_proxy=localhost,127.0.0.1,postgres'],
     ['--env', 'DATABASE_URL=postgres://postgres@postgres:5432/postgres'], ['--env', 'HOME=/tmp'],
+    // The folder the runner's user setting source reads (B5.5b), where the skills are mounted.
+    ['--env', 'CLAUDE_CONFIG_DIR=/var/lib/cleared/claude-config'],
     ['--workdir', '/workspace'],
   ];
   for (const [flag, value] of expected) assert.ok(hasPair(session, flag, value), `${flag} ${value}`);
