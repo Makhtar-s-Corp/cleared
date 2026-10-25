@@ -16,30 +16,42 @@ import { addEvent, openLedger } from '../lib/ledger.ts';
 import { activeRelease } from '../lib/release.ts';
 import { finishedReviews } from '../lib/reviews.ts';
 import { sandbox, scratch, task } from './support.ts';
+import type { Conf } from '../lib/conf.ts';
+import type { boardCollector as collectorOf } from '../lib/board-collector.ts';
+
+type Files = Record<string, string>;
+type Git = (...args: string[]) => string;
+type Change = (made: { write: (more: Files) => void; git: Git; dir: string }) => unknown;
+type Project = ReturnType<typeof project>;
+type LaneRecord = Parameters<typeof decideLane>[0]['record'];
+type Actor = { kind: string; id: string };
+// What these tests read of the board's snapshot, beyond the fields its type names.
+type BoardView = Awaited<ReturnType<ReturnType<typeof collectorOf>['snapshot']>>
+  & { details: Record<string, { lane: string }>; stats: { lanes: unknown }; landed: Record<string, unknown>[] };
 
 // ---- A project with a base and a branch, and the settings of its main checkout ----
 
-const confOf = (fast, extra = '') => parseConf(`[lanes]\nbase = main\n[merge]\nguarded_paths = ops/cleared/, compose\n[release]\nmigration_paths = db/schema\n[fast_lane]\n${fast}\n${extra}`);
+const confOf = (fast: string, extra = '') => parseConf(`[lanes]\nbase = main\n[merge]\nguarded_paths = ops/cleared/, compose\n[release]\nmigration_paths = db/schema\n[fast_lane]\n${fast}\n${extra}`);
 // What the project declares safe: its texts, its translations, its styles.
 const CONF = confOf('enabled = yes\nlabels = Quick\nprojects = Wording\nsafe_paths = docs/, web/locales/*.json, **/*.css\nnever_paths = docs/security/\nmax_lines = 10\nmax_files = 5\ntests_command = node --test {files}');
 // Everything declared safe: only the rules no setting can widen are left (a dotfile at the root is named: "**" never takes one).
 const WIDE = confOf('enabled = yes\nsafe_paths = **, .*\nmax_lines = 400\nmax_files = 50');
-const write = (dir, files) => {
+const write = (dir: string, files: Files) => {
   for (const [path, text] of Object.entries(files)) {
     mkdirSync(dirname(join(dir, path)), { recursive: true });
     writeFileSync(join(dir, path), text);
   }
 };
-function project(files = { 'docs/guide.md': 'Hello\n', 'api/server.js': 'export const x = 1;\n', 'package.json': '{}\n', 'web/locales/en.json': '{"title": "Hello"}\n' }) {
+function project(files: Files = { 'docs/guide.md': 'Hello\n', 'api/server.js': 'export const x = 1;\n', 'package.json': '{}\n', 'web/locales/en.json': '{"title": "Hello"}\n' }) {
   const dir = scratch('fast-lane-repo-');
-  const git = (...args) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
+  const git: Git = (...args) => execFileSync('git', ['-C', dir, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
   git('init', '-q', '-b', 'main');
   write(dir, files);
   git('add', '-A');
   git('commit', '-q', '-m', 'base');
   git('checkout', '-q', '-b', 'dev/X-1');
   // One commit of the team: what `change` leaves in the worktree, as it is.
-  const commit = (change) => {
+  const commit = (change: Change) => {
     if (change({ write: (more) => write(dir, more), git, dir }) !== 'staged') git('add', '-A');
     git('commit', '-q', '--allow-empty', '-m', 'fast-lane: yes, this is a tiny safe change');
     return git('rev-parse', 'HEAD').trim();
@@ -47,7 +59,7 @@ function project(files = { 'docs/guide.md': 'Hello\n', 'api/server.js': 'export 
   return { dir, git, commit };
 }
 const OPENED = { fast_lane: { opening: 'fast', state: 'fast' } };
-const judge = (p, head, conf = CONF, record = OPENED) => decideLane({ conf, repo: p.dir, base: 'main', commit: head, record });
+const judge = (p: Project, head: string, conf = CONF, record: LaneRecord = OPENED) => decideLane({ conf, repo: p.dir, base: 'main', commit: head, record });
 
 test('the rules: a small text change in the safe paths stays on the fast lane; a path outside them, a migration or a dependency sends it to the full circuit', () => {
   const p = project();
@@ -56,7 +68,7 @@ test('the rules: a small text change in the safe paths stays on the fast lane; a
   const outside = p.commit(({ write: w }) => w({ 'api/server.js': 'export const x = 2;\n' }));
   assert.equal(judge(p, outside).state, 'full');
   assert.deepEqual(judge(p, outside).reasons, ['outside_safe', 'file_type'], 'outside the safe list, and code');
-  assert.equal(judge(p, outside).offending.outside_safe, 'api/server.js');
+  assert.equal(judge(p, outside).offending!.outside_safe, 'api/server.js');
   // With everything declared safe, a migration and a dependency still never are.
   const migrations = project();
   const sql = migrations.commit(({ write: w }) => w({ 'db/migrations/0042_add_column.sql': 'ALTER TABLE t ADD c int;\n' }));
@@ -92,7 +104,7 @@ test('a dotfile or a dot directory is matched only by a pattern that names a dot
   const p = project({ 'docs/guide.md': 'Hello\n', 'docs/.htaccess': 'deny\n' });
   const head = p.commit(({ write: w }) => w({ 'docs/.htaccess': 'allow\n', 'docs/.env': 'K=1\n', 'docs/.eslintrc': '{}\n' }));
   assert.deepEqual(judge(p, head).reasons, ['outside_safe', 'file_type'], 'and a dotfile is no file type the fast lane takes');
-  assert.equal(judge(p, head).offending.outside_safe, 'docs/.env', 'the first dotfile is named, never a line of it');
+  assert.equal(judge(p, head).offending!.outside_safe, 'docs/.env', 'the first dotfile is named, never a line of it');
 });
 
 test('an unknown [fast_lane] key is refused, not ignored: the fast lane is off for the ticket, and the problem is named', () => {
@@ -103,7 +115,7 @@ test('an unknown [fast_lane] key is refused, not ignored: the fast lane is off f
   const judged = judge(p, head, typo);
   assert.equal(judged.state, 'full');
   assert.deepEqual(judged.reasons, ['settings']);
-  assert.match(judged.problem, /unknown key "never_path"/);
+  assert.match(judged.problem!, /unknown key "never_path"/);
   assert.equal(judge(p, head, CONF).state, 'fast', 'the same change with the key spelled right is fast');
 });
 
@@ -142,7 +154,7 @@ test('adversarial: path tricks (unicode, look-alikes, case, option-like and spac
 });
 
 test('adversarial: a rename, a deletion, a symbolic link, an executable, a binary file, a submodule or a file deleted and recreated as something else is not judged fast', () => {
-  const cases = {
+  const cases: Record<string, Change> = {
     rename: ({ git }) => git('mv', 'docs/guide.md', 'docs/manual.md'),
     deletion: ({ git }) => git('rm', '-q', 'docs/guide.md'),
     symlink: ({ dir }) => symlinkSync('../api/server.js', join(dir, 'docs', 'link.md')),
@@ -199,7 +211,7 @@ test('the decision is bound to the commit: a later push is judged again, a ticke
   try {
     writeFileSync(join(state, 'lanes', 'X-1.json'), JSON.stringify({ ticket: 'X-1', pr: 41, ...OPENED }));
     const record = () => JSON.parse(readFileSync(join(state, 'lanes', 'X-1.json'), 'utf8')).fast_lane;
-    const events = () => { const db = openLedger(); const rows = db.prepare("SELECT kind, detail FROM events WHERE kind LIKE 'fast_lane_%' ORDER BY event_id").all(); db.close(); return rows; };
+    const events = () => { const db = openLedger(); const rows = db.prepare("SELECT kind, detail FROM events WHERE kind LIKE 'fast_lane_%' ORDER BY event_id").all() as { kind: string; detail: string }[]; db.close(); return rows; };
     const first = p.commit(({ write: w }) => w({ 'docs/guide.md': 'Hello, world\n' }));
     assert.equal(decide('X-1', first, { conf: CONF, repo: p.dir }).state, 'fast');
     assert.equal(record().head, first);
@@ -211,7 +223,7 @@ test('the decision is bound to the commit: a later push is judged again, a ticke
     const extended = p.commit(({ write: w }) => w({ 'api/server.js': 'export const x = 2;\n' }));
     assert.equal(decide('X-1', extended, { conf: CONF, repo: p.dir }).state, 'full');
     assert.deepEqual({ state: record().state, head: record().head, reasons: record().reasons }, { state: 'full', head: extended, reasons: ['outside_safe', 'file_type'] });
-    const fallback = events().at(-1);
+    const fallback = events().at(-1)!;
     assert.equal(fallback.kind, 'fast_lane_fallback');
     assert.match(JSON.parse(fallback.detail).first, /outside_safe: api\/server\.js/);
     // Taking the unsafe file back out does not bring it back to the fast lane, and neither does the first commit.
@@ -239,7 +251,7 @@ test('adversarial: the flag cannot be forged: another account cannot decide, a f
   // A safe diff, a commit message, a report or a file that claims the fast lane: without the opening the rules wrote, no.
   const claimed = project();
   const head = claimed.commit(({ write: w }) => w({ 'docs/guide.md': 'Hello, world\n', 'docs/FAST_LANE': 'state: fast\n' }));
-  for (const record of [null, {}, { fast_lane: { state: 'fast' } }, { fast_lane: { opening: 'full', state: 'fast' } }]) {
+  for (const record of [null, {}, { fast_lane: { state: 'fast' } }, { fast_lane: { opening: 'full', state: 'fast' } }] as LaneRecord[]) {
     assert.equal(judge(claimed, head, CONF, record).state, 'full', JSON.stringify(record));
   }
   // The command line refuses an account other than the owner of the state before it reads anything.
@@ -285,34 +297,34 @@ test('the settings: unreadable patterns or numbers make nothing fast; empty safe
 
 test('routing: the fast lane picks the light author and a light reviewer that still differs from the author', () => {
   const conf = parseConf(`[models]\nheavy = claude:opus\nlight = claude:haiku\nmid = claude:sonnet\n[fallbacks]\n[roles]\ndev = heavy\nreview = heavy\n[rules]\ndev label=Bug -> heavy\n[review]\ndiffers_from_author = yes\nwhen_same = mid\n[fast_lane]\nauthor_model = light\nreview_model = light\n`);
-  assert.equal(route(conf, task({ labels: ['Bug'] })).chain[0].alias, 'heavy');
+  assert.equal(route(conf, task({ labels: ['Bug'] })).chain[0]!.alias, 'heavy');
   const fast = route(conf, task({ labels: ['Bug'], lane: 'fast' }));
-  assert.equal(fast.chain[0].alias, 'light');
+  assert.equal(fast.chain[0]!.alias, 'light');
   assert.match(fast.rule, /fast lane: light author/);
   // A light reviewer that is the author's own model is replaced, as for any review.
   const review = route(conf, task({ role: 'review', lane: 'fast', authorModel: 'haiku' }));
-  assert.equal(review.chain[0].alias, 'mid');
-  assert.equal(route(conf, task({ role: 'review', lane: 'fast', authorModel: 'opus' })).chain[0].alias, 'light');
+  assert.equal(review.chain[0]!.alias, 'mid');
+  assert.equal(route(conf, task({ role: 'review', lane: 'fast', authorModel: 'opus' })).chain[0]!.alias, 'light');
   // A model named at launch is not second-guessed; another role is not concerned.
-  assert.equal(route(conf, task({ lane: 'fast', forced: 'heavy' })).chain[0].alias, 'heavy');
-  assert.equal(route(conf, task({ role: 'review', authorModel: 'haiku' })).chain[0].alias, 'heavy');
+  assert.equal(route(conf, task({ lane: 'fast', forced: 'heavy' })).chain[0]!.alias, 'heavy');
+  assert.equal(route(conf, task({ role: 'review', authorModel: 'haiku' })).chain[0]!.alias, 'heavy');
 });
 
 test('measurement: working time is the union of the sessions, the human waits from the notification (else the card) to his gesture, the machine the rest; medians by lane', () => {
-  const at = (minutes) => new Date(Date.UTC(2026, 9, 15, 10, minutes)).toISOString();
+  const at = (minutes: number) => new Date(Date.UTC(2026, 9, 15, 10, minutes)).toISOString();
   const runs = [{ started_at: at(1), ended_at: at(5) }, { started_at: at(4), ended_at: at(6) }, { started_at: at(8), ended_at: at(9) }];
   assert.deepEqual(measureTicket({ todoAt: at(0), doneAt: at(15), runs, cardAt: at(9), notifiedAt: at(10), gestureAt: at(12) }),
     { total: 15, working: 6, humanWait: 2, machineWait: 7, humanFrom: 'notification' });
   assert.deepEqual(measureTicket({ todoAt: at(0), doneAt: at(15), runs, cardAt: at(9), notifiedAt: null, gestureAt: at(12) }),
     { total: 15, working: 6, humanWait: 3, machineWait: 6, humanFrom: 'card' });
-  assert.equal(measureTicket({ todoAt: at(0), doneAt: at(15), runs, cardAt: at(9) }).humanWait, null, 'no gesture known: not guessed');
+  assert.equal(measureTicket({ todoAt: at(0), doneAt: at(15), runs, cardAt: at(9) })!.humanWait, null, 'no gesture known: not guessed');
   assert.equal(measureTicket({ todoAt: at(10), doneAt: at(5) }), null);
   assert.equal(median([5, 1, 3]), 3);
   assert.equal(median([1, 2, 3, 10]), 2.5);
   assert.equal(median([]), null);
   const db = openLedger(':memory:');
   const now = Date.parse('2026-10-15T12:00:00Z');
-  for (const [lane, value, days] of [['fast', 14, 1], ['fast', 12, 2], ['fast', 30, 3], ['full', 329, 1], ['full', 100, 9]]) {
+  for (const [lane, value, days] of [['fast', 14, 1], ['fast', 12, 2], ['fast', 30, 3], ['full', 329, 1], ['full', 100, 9]] as [string, number, number][]) {
     addEvent(db, { kind: 'ticket_measured', ticket: 'X-1', value, at: new Date(now - days * 86400e3).toISOString(), detail: JSON.stringify({ lane }) });
   }
   // 14:00 at +03:00 is 11:00 UTC, eight days back: outside the window, though its text sorts inside it.
@@ -324,14 +336,14 @@ test('measurement: working time is the union of the sessions, the human waits fr
 test('the health watch of a fast-lane release holds no merge back; one of the full circuit, or a rollback at work, still does', () => {
   const db = openLedger(':memory:');
   activeRelease(db);
-  const add = (id, status, lane) => db.prepare('INSERT INTO releases(id, ticket, pr, merge_sha, title, merged_at, status, lane) VALUES (?,?,?,?,?,?,?,?)').run(id, `X-${id}`, id, String(id).repeat(40).slice(0, 40), 't', '2026-10-15T10:00:00Z', status, lane);
+  const add = (id: number, status: string, lane: string | null) => db.prepare('INSERT INTO releases(id, ticket, pr, merge_sha, title, merged_at, status, lane) VALUES (?,?,?,?,?,?,?,?)').run(id, `X-${id}`, id, String(id).repeat(40).slice(0, 40), 't', '2026-10-15T10:00:00Z', status, lane);
   add(1, 'watching', 'fast');
   assert.equal(activeRelease(db), undefined);
   add(2, 'watching', null);
-  assert.equal(activeRelease(db).id, 2, 'an older row without a lane counts as the full circuit');
+  assert.equal(activeRelease(db)!.id, 2, 'an older row without a lane counts as the full circuit');
   db.prepare("UPDATE releases SET status = 'complete' WHERE id = 2").run();
   db.prepare("UPDATE releases SET status = 'rolling_back' WHERE id = 1").run();
-  assert.equal(activeRelease(db).id, 1, 'a rollback of a fast-lane release is at work: nothing goes live meanwhile');
+  assert.equal(activeRelease(db)!.id, 1, 'a rollback of a fast-lane release is at work: nothing goes live meanwhile');
   db.close();
 });
 
@@ -353,13 +365,13 @@ async function board({ status = 'Needs Approval', checks = 'pending', approval =
   db.prepare('INSERT INTO runs (run_id, ticket, role, model, provider, started_at, ended_at, outcome, pr_number) VALUES (?,?,?,?,?,?,?,?,?)')
     .run('r1-dev-a1', 'EX-7', 'dev', 'claude-haiku', 'claude', new Date(Date.now() - 900e3).toISOString(), new Date(Date.now() - 600e3).toISOString(), 'done', 314);
   const conf = { sections: { owner: { language: 'en' }, heartbeat: { wake_interval_minutes: '1' }, lanes: { push_roles: 'dev' },
-    tracker: { adapter: 'github', repository: 'owner/repo', progress_state: 'In Progress', review_state: 'In Review', validate_state: 'Needs Approval', go_state: 'Ready to Ship' } } };
+    tracker: { adapter: 'github', repository: 'owner/repo', progress_state: 'In Progress', review_state: 'In Review', validate_state: 'Needs Approval', go_state: 'Ready to Ship' } } } as unknown as Conf;
   const { boardCollector } = await import('../lib/board-collector.ts');
-  const trackerClient = { listTickets: ({ status: s }) => (s === ticket.status ? [ticket] : []), getTicket: () => ticket, comments: () => [] };
-  const collect = () => boardCollector({ conf, trackerClient, fuelReader: async () => [] }).snapshot();
+  const trackerClient = { listTickets: ({ status: s }: { status: string }) => (s === ticket.status ? [ticket] : []), getTicket: () => ticket, comments: () => [] };
+  const collect = () => boardCollector({ conf, trackerClient, fuelReader: async () => [] }).snapshot() as Promise<BoardView>;
   const close = () => {
     db.close();
-    for (const [name, value] of [['ORCH_LEDGER', saved.ledger], ['ORCH_STATE_DIR', saved.state], ['CLEARED_STATE_DIR', saved.cleared]]) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
+    for (const [name, value] of [['ORCH_LEDGER', saved.ledger], ['ORCH_STATE_DIR', saved.state], ['CLEARED_STATE_DIR', saved.cleared]] as [string, string | undefined][]) { if (value === undefined) delete process.env[name]; else process.env[name] = value; }
   };
   return { db, dir, collect, close };
 }
@@ -369,19 +381,19 @@ test('the card: Ready to land appears while the full checks run and says so; a t
   try {
     addEvent(b.db, { kind: 'fast_lane_opened', ticket: 'EX-7', detail: 'dev/EX-7: opened on the fast lane' });
     let snap = await b.collect();
-    let card = snap.tickets[0];
+    let card = snap.tickets[0]!;
     assert.equal(card.kind, 'ready');
     assert.equal(card.lane, 'fast');
     assert.equal(card.statusLine, 'full checks running, landing when green');
-    assert.equal(snap.details['EX-7'].lane, 'fast');
+    assert.equal(snap.details['EX-7']!.lane, 'fast');
     // The checks turned green: the card is an ordinary Ready to land.
     writeFileSync(join(b.dir, 'wake', 'state.json'), JSON.stringify({ pulls: { 314: { state: 'ready', checks: 'success', files: 1, additions: 1, deletions: 1 } } }));
     snap = await b.collect();
-    assert.notEqual(snap.tickets[0].statusLine, 'full checks running, landing when green');
+    assert.notEqual(snap.tickets[0]!.statusLine, 'full checks running, landing when green');
     // Sent back by the rules: the card says it, with the reason in words and never the path.
     addEvent(b.db, { kind: 'fast_lane_fallback', ticket: 'EX-7', detail: JSON.stringify({ head: 'b'.repeat(40), reasons: ['outside_safe'], first: 'outside_safe: api/secret/server.js' }) });
     snap = await b.collect();
-    card = snap.tickets[0];
+    card = snap.tickets[0]!;
     assert.equal(card.lane, 'full');
     assert.equal(card.statusLine, 'back to the full circuit: a file outside the safe list');
     assert.doesNotMatch(JSON.stringify(snap), /api\/secret/);
@@ -390,7 +402,7 @@ test('the card: Ready to land appears while the full checks run and says so; a t
     addEvent(b.db, { kind: 'ticket_measured', ticket: 'EX-3', value: 14.2, detail: JSON.stringify({ lane: 'fast', working_min: 6.1, human_wait_min: 3, machine_wait_min: 5.1 }) });
     snap = await b.collect();
     assert.deepEqual(snap.stats.lanes, { days: 7, fast: { minutes: 14.2, count: 1 }, full: { minutes: null, count: 0 } });
-    assert.deepEqual((({ lane, totalMin, workingMin, humanWaitMin, machineWaitMin }) => ({ lane, totalMin, workingMin, humanWaitMin, machineWaitMin }))(snap.landed[0]),
+    assert.deepEqual((({ lane, totalMin, workingMin, humanWaitMin, machineWaitMin }) => ({ lane, totalMin, workingMin, humanWaitMin, machineWaitMin }))(snap.landed[0]!),
       { lane: 'fast', totalMin: 14, workingMin: 6, humanWaitMin: 3, machineWaitMin: 5 });
     const { validBoard } = await import('../app/sources/live.ts');
     assert.equal(validBoard(snap), true);
@@ -412,7 +424,10 @@ test('the lane record is written under its lock: a writer waits for a holder of 
   const cli = fileURLToPath(new URL('../lib/fast-lane.ts', import.meta.url));
   const env = { ...process.env, ORCH_STATE_DIR: state, ORCH_LEDGER: join(state, 'ledger.db') };
   const started = join(state, 'holder-started');
-  const holder = spawn('flock', ['-x', `${record}.lock`, '-c', `touch ${started}; sleep 1`]);
+  // The holder takes the lock, says so with a file (touch), then keeps the lock a second.
+  const hold = `const fs = process.getBuiltinModule('node:fs'); const started = ${JSON.stringify(started)};
+fs.closeSync(fs.openSync(started, 'a')); const now = new Date(); fs.utimesSync(started, now, now); setTimeout(() => {}, 1000);`;
+  const holder = spawn('flock', ['-x', `${record}.lock`, process.execPath, '-e', hold]);
   const exited = new Promise((resolve) => holder.on('exit', resolve));
   while (!existsSync(started)) await new Promise((resolve) => setTimeout(resolve, 20));
   const from = Date.now();
@@ -428,9 +443,9 @@ test('the card says what is true: running checks as running, red and not started
   const b = await board();
   try {
     addEvent(b.db, { kind: 'fast_lane_opened', ticket: 'EX-7', detail: 'dev/EX-7: opened on the fast lane' });
-    const line = async (checks) => {
+    const line = async (checks: string) => {
       writeFileSync(join(b.dir, 'wake', 'state.json'), JSON.stringify({ pulls: { 314: { state: 'ready', checks, files: 1, additions: 1, deletions: 1 } } }));
-      return (await b.collect()).tickets[0].statusLine;
+      return (await b.collect()).tickets[0]!.statusLine;
     };
     // The wake's words for the checks: pending is running, failure is red, none is not started.
     assert.equal(await line('pending'), 'full checks running, landing when green');
@@ -569,7 +584,7 @@ test('adversarial: a safe file that carries behaviour (markup, a remote load, a 
       const judged = judge(p, head);
       assert.equal(judged.state, 'full', `${file}: ${line}`);
       assert.deepEqual(judged.reasons, ['content'], `${file}: ${line}`);
-      assert.match(judged.offending.content, new RegExp(`^${file.replace(/[.]/g, '\\.')} \\(`));
+      assert.match(judged.offending!.content!, new RegExp(`^${file.replace(/[.]/g, '\\.')} \\(`));
     }
   }
   // Not UTF-8: not read, not fast.
@@ -612,7 +627,7 @@ test('adversarial: a style sheet that loads an image through image-set, image, s
     const judged = judge(p, head);
     assert.equal(judged.state, 'full', line);
     assert.deepEqual(judged.reasons, ['content'], line);
-    assert.match(judged.offending.content, /^web\/app\.css \(load\)$/, line);
+    assert.match(judged.offending!.content!, /^web\/app\.css \(load\)$/, line);
   }
   assert.equal(contentFinding(['h1 { color: #333; margin: 0 auto; }', 'Choose the image that suits you, then save.']), null);
 });
@@ -638,7 +653,7 @@ test('adversarial: a link in any form (a scheme and //, a protocol-relative //ho
     const judged = judge(p, head);
     assert.equal(judged.state, 'full', line);
     assert.deepEqual(judged.reasons, ['link'], line);
-    assert.match(judged.offending.link, /^docs\/guide\.md \(link\)$/, line);
+    assert.match(judged.offending!.link!, /^docs\/guide\.md \(link\)$/, line);
   }
   assert.equal(contentFinding(['Nous répondons par e-mail, du lundi au vendredi.', 'Le site ferme à 18 h.']), null);
 });
@@ -673,7 +688,7 @@ test('label trust: a fast mark counts only when the user set it; a tracker that 
   assert.equal(openingLane(settings, issue, { labels: { Quick: agents }, project: human }), 'fast', 'the user put it in a fast project himself');
   // The tracker cannot say who set it: nothing, unless the project opts in; even then, a mark it says an agent set is refused.
   assert.equal(openingLane(settings, issue, null), 'full');
-  assert.match(openingDecision(settings, issue, null).ignored[0], /the tracker cannot say who set it/);
+  assert.match(openingDecision(settings, issue, null).ignored[0]!, /the tracker cannot say who set it/);
   const trusting = fastSettings(confOf('enabled = yes\nlabels = Quick\nsafe_paths = docs/\ntrust_label_without_actor = yes'));
   assert.equal(openingLane(trusting, issue, null), 'fast');
   assert.equal(openingLane(trusting, issue, { labels: { Quick: agents }, project: null }), 'full');
@@ -694,9 +709,14 @@ test('[Linear adapter] label trust: each tracker says who set a label: GitHub by
   copyFileSync(join(import.meta.dirname, '..', 'tracker.ts'), join(box.home, 'tracker.ts'));
   writeFileSync(box.env.ORCH_CONF, readFileSync(box.env.ORCH_CONF, 'utf8').replace('adapter = local', 'adapter = linear\nowner_id = alice'));
   const answer = join(box.home, 'linear-answer.json');
-  writeFileSync(join(box.home, 'bin', 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\ncat '${answer}'\n`, { mode: 0o755 });
-  const node = (at, actor, app, labels, project = null) => ({ createdAt: at, actorId: actor, actor: actor ? { id: actor, app } : null, botActor: null, addedLabelIds: labels, toProjectId: project });
-  const linear = (history, { more = false, creator = { id: 'alice', app: false } } = {}) => {
+  writeFileSync(join(box.home, 'bin', 'curl'), `#!${process.execPath}
+const fs = process.getBuiltinModule('node:fs');
+try { fs.readFileSync(0); } catch { /* no input */ }
+const answer = ${JSON.stringify(answer)};
+try { process.stdout.write(fs.readFileSync(answer)); } catch { process.stderr.write('cat: ' + answer + ': No such file or directory\\n'); process.exitCode = 1; }
+`, { mode: 0o755 });
+  const node = (at: string, actor: string | null, app: boolean, labels: string[], project: string | null = null) => ({ createdAt: at, actorId: actor, actor: actor ? { id: actor, app } : null, botActor: null, addedLabelIds: labels, toProjectId: project });
+  const linear = (history: ReturnType<typeof node>[], { more = false, creator = { id: 'alice', app: false } } = {}) => {
     writeFileSync(answer, JSON.stringify({ data: { viewer: { id: 'key-owner' }, issue: { createdAt: '2026-01-01T00:00:00Z', creator, botActor: null,
       labels: { nodes: [{ id: 'L1', name: 'Quick' }, { id: 'L2', name: 'Bug' }] }, project: { id: 'P1', name: 'Wording' },
       history: { pageInfo: { hasNextPage: more }, nodes: history } } } }));
@@ -717,10 +737,10 @@ test('[Linear adapter] label trust: each tracker says who set a label: GitHub by
   const byAgent = new LocalTracker({ conf, db, actor: { kind: 'agents', id: 'agent' } }).createTicket({ title: 'Follow-up', labels: ['Quick'], project: 'Wording' });
   const byHuman = new LocalTracker({ conf, db, actor: { kind: 'human', id: 'alice' } });
   const reader = new LocalTracker({ conf, db, actor: { kind: 'shared', id: 'service' } });
-  assert.deepEqual(reader.labelActors(byAgent.identifier), { labels: { Quick: { kind: 'agents', id: 'agent' } }, project: { kind: 'agents', id: 'agent' } });
+  assert.deepEqual(reader.labelActors(byAgent!.identifier), { labels: { Quick: { kind: 'agents', id: 'agent' } }, project: { kind: 'agents', id: 'agent' } });
   let unsigned;
   try { unsigned = byHuman.createTicket({ title: 'Mine', labels: ['Quick'] }); } catch { unsigned = null; }
-  if (unsigned) assert.equal(reader.labelActors(unsigned.identifier).labels.Quick.kind, 'other', 'no signature that holds: not the user');
+  if (unsigned) assert.equal(reader.labelActors(unsigned.identifier).labels.Quick!.kind, 'other', 'no signature that holds: not the user');
   db.close();
 });
 
@@ -735,14 +755,14 @@ test('adversarial: code in the safe paths takes the full circuit by its type: a 
     ['docs/deploy.py', "os.system('id')", ['file_type']],
     ['docs/post.mdx', 'import X from "../../api/secret"', ['file_type']],
     ['docs/post.mdx', '{process.env.SECRET}', ['file_type']],
-  ];
+  ] as [string, string, string[]][];
   for (const [file, line, reasons] of cases) {
     const p = project();
     const head = p.commit(({ write: w }) => w({ [file]: `${line}\n` }));
     const judged = judge(p, head, DOCS);
     assert.equal(judged.state, 'full', `${file}: ${line}`);
     assert.deepEqual(judged.reasons, reasons, `${file}: ${line}`);
-    assert.equal(judged.offending.file_type, file);
+    assert.equal(judged.offending!.file_type, file);
   }
   // The same words in a Markdown page pass the type rule; the content rule still reads them (and a link is refused there).
   const p = project();
@@ -810,7 +830,7 @@ test('the file types can be narrowed; widened only by extra_file_types, never to
   // Whatever the types, the built-in lists still refuse lock files, manifests, git files and hooks.
   const wide = confOf('enabled = yes\nsafe_paths = **, .*, .husky/*, .git*\nmax_lines = 400\nmax_files = 50\nextra_file_types = csv, lockfile');
   for (const [file, reason] of [['package.json', 'dependency'], ['web/composer.json', 'dependency'], ['yarn.lock', 'dependency'], ['deps.lockfile', 'dependency'],
-    ['.gitattributes', 'protected'], ['docs/.gitmodules', 'protected'], ['.husky/pre-commit', 'protected'], ['.githooks/pre-push', 'protected'], ['requirements.txt', 'dependency']]) {
+    ['.gitattributes', 'protected'], ['docs/.gitmodules', 'protected'], ['.husky/pre-commit', 'protected'], ['.githooks/pre-push', 'protected'], ['requirements.txt', 'dependency']] as [string, string][]) {
     const one = project();
     const changed = one.commit(({ write: w }) => w({ [file]: 'changed\n' }));
     const judged = judge(one, changed, wide);
@@ -830,8 +850,8 @@ test('shared identity at opening: under the user\'s own key a label he seems to 
   const human = { kind: 'human', id: 'alice' };
   const agents = { kind: 'agents', id: 'cleared[bot]' };
   const issue = { identifier: 'X-1', labels: ['Quick'], project: null };
-  const confWith = (merge, fast = '') => parseConf(`[merge]\n${merge}\n[fast_lane]\nenabled = yes\nlabels = Quick\nsafe_paths = docs/\n${fast}\n`);
-  const open = (conf, identity, by) => {
+  const confWith = (merge: string, fast = '') => parseConf(`[merge]\n${merge}\n[fast_lane]\nenabled = yes\nlabels = Quick\nsafe_paths = docs/\n${fast}\n`);
+  const open = (conf: Conf, identity: string, by: Actor) => {
     let asked = 0;
     const decision = openingFor(conf, fastSettings(conf), issue, { identity: () => { asked += 1; return identity; }, actorsOf: () => ({ labels: { Quick: by }, project: null }) });
     return { ...decision, asked };
@@ -846,7 +866,7 @@ test('shared identity at opening: under the user\'s own key a label he seems to 
   // Shared key: the label is ignored, and said.
   const shared = open(required, 'shared', human);
   assert.equal(shared.lane, 'full');
-  assert.match(shared.ignored[0], /^label Quick \(set under the key the agents share with the user: the tracker cannot say who set it/);
+  assert.match(shared.ignored[0]!, /^label Quick \(set under the key the agents share with the user: the tracker cannot say who set it/);
   assert.equal(open(required, 'unknown', human).lane, 'full');
   // An application of the agents: the user's label is his.
   assert.deepEqual(open(required, 'app', human), { lane: 'fast', ignored: [], asked: 1 });
@@ -856,10 +876,10 @@ test('shared identity at opening: under the user\'s own key a label he seems to 
   assert.equal(open(confWith('separate_identity = required', 'trust_label_without_actor = yes'), 'shared', human).lane, 'fast');
   // An agent's label is never taken: with an application, under a shared key, opted in or with separate_identity = no.
   for (const [conf, identity] of [[required, 'app'], [required, 'shared'], [confWith('separate_identity = required', 'trust_label_without_actor = yes'), 'shared'],
-    [confWith('separate_identity = required', 'trust_label_without_actor = yes'), 'app'], [confWith('separate_identity = no', 'trust_label_without_actor = yes'), 'shared']]) {
+    [confWith('separate_identity = required', 'trust_label_without_actor = yes'), 'app'], [confWith('separate_identity = no', 'trust_label_without_actor = yes'), 'shared']] as [Conf, string][]) {
     const forged = open(conf, identity, agents);
     assert.equal(forged.lane, 'full', identity);
-    assert.match(forged.ignored[0], /set by agents/);
+    assert.match(forged.ignored[0]!, /set by agents/);
   }
   // A ticket with no fast mark asks the tracker nothing.
   const conf = required;

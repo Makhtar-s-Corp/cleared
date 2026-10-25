@@ -29,7 +29,7 @@ test('the repository tracks no shell script outside examples/', () => {
   assert.deepEqual(tracked.filter((file) => SHELL_SHEBANG.test(text(file) ?? '')), []);
 });
 
-test('nothing outside v2/ and examples/, its tests included, writes a bash script or runs bash on the host', { todo: 'steps b to d of docs/v2/milestone-4-plan.md' }, () => {
+test('nothing outside v2/ and examples/, its tests included, writes a bash script or runs bash on the host', () => {
   const bashCall = new RegExp(String.raw`\(\s*(['"\x60])(?:/(?:usr/)?bin/)?bash\1\s*,`);
   const found = tracked.filter((file) => !file.startsWith('v2/')).filter((file) => {
     const content = text(file);

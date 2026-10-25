@@ -3,34 +3,41 @@ import assert from 'node:assert/strict';
 import { createDecipheriv, createECDH, createHmac, createPublicKey, randomBytes, verify } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
+import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { ORCH_HOME } from '../lib/conf.ts';
 import { addEvent, openLedger, runStart } from '../lib/ledger.ts';
 import { createAdapters, isQuiet, KINDS, notifySettings, render, sanitize, URGENT } from '../lib/notify/contract.ts';
+import type { Adapter, NotifyMessage, NotifySettings, Occurrence, Transport } from '../lib/notify/contract.ts';
 import { encrypt, newVapidKeys, pushHostAllowed, validSubscription, vapidHeader, vapidKeysFrom, webpushAdapter } from '../lib/notify/adapters/webpush.ts';
+import type { Subscription } from '../lib/notify/adapters/webpush.ts';
 import { ntfyAdapter } from '../lib/notify/adapters/ntfy.ts';
 import { telegramAdapter } from '../lib/notify/adapters/telegram.ts';
 import { emailAdapter, sendmailDefault } from '../lib/notify/adapters/email.ts';
 import { notifyStore } from '../lib/notify/store.ts';
 import { dispatch, EXPIRE_MS, sendTest } from '../lib/notify.ts';
 import { scratch } from './support.ts';
+import type { DatabaseSync } from 'node:sqlite';
+
+// What a fake transport was given: the headers as the adapters write them, an object.
+type Posted<Body> = { url: string; init: { headers: Record<string, string>; body: Body; redirect?: RequestInit['redirect']; signal?: AbortSignal } };
 
 // Values a notification must never carry, whatever a ticket says.
 const SECRET_PATH = '/home/cleared/.config/cleared/human/credentials.json';
 const TOKEN = 'ghp_0123456789abcdefghijklmnopqrstuvwxyzAB';
 const LEAKS = [/\/home\//, /credentials\.json/, /ghp_/, /0123456789abcdef/, /1\s?234/, /€/, /hunter2/, /owner@example\.org/, /192\.0\.2\.7/];
-const clean = (text) => { for (const leak of LEAKS) assert.doesNotMatch(text, leak, `${leak} in ${JSON.stringify(text)}`); };
+const clean = (text: string) => { for (const leak of LEAKS) assert.doesNotMatch(text, leak, `${leak} in ${JSON.stringify(text)}`); };
 
-const b64u = (bytes) => Buffer.from(bytes).toString('base64url');
-const hkdf = (salt, ikm, info, length) => createHmac('sha256', createHmac('sha256', salt).update(ikm).digest()).update(Buffer.concat([info, Buffer.from([1])])).digest().subarray(0, length);
+const b64u = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64url');
+const hkdf = (salt: Buffer, ikm: Buffer, info: Buffer, length: number) => createHmac('sha256', createHmac('sha256', salt).update(ikm).digest()).update(Buffer.concat([info, Buffer.from([1])])).digest().subarray(0, length);
 // The browser's side of RFC 8291, written apart from the sender's: what a phone would read.
 function browser() {
   const ecdh = createECDH('prime256v1');
   ecdh.generateKeys();
   const auth = Buffer.from('0123456789abcdef');
   const keys = { p256dh: b64u(ecdh.getPublicKey()), auth: b64u(auth) };
-  const read = (body) => {
-    const salt = body.subarray(0, 16), length = body[20], asPublic = body.subarray(21, 21 + length), sealed = body.subarray(21 + length);
+  const read = (body: Buffer) => {
+    const salt = body.subarray(0, 16), length = body[20]!, asPublic = body.subarray(21, 21 + length), sealed = body.subarray(21 + length);
     assert.equal(body.readUInt32BE(16), 4096);
     const ikm = hkdf(auth, ecdh.computeSecret(asPublic), Buffer.concat([Buffer.from('WebPush: info\0'), ecdh.getPublicKey(), asPublic]), 32);
     const decipher = createDecipheriv('aes-128-gcm', hkdf(salt, ikm, Buffer.from('Content-Encoding: aes128gcm\0'), 16), hkdf(salt, ikm, Buffer.from('Content-Encoding: nonce\0'), 12));
@@ -42,9 +49,9 @@ function browser() {
   return { keys, read };
 }
 const endpoint = 'https://fcm.googleapis.com/fcm/send/abc123';
-const memoryStore = (subscriptions = [], credentials = {}) => {
+const memoryStore = (subscriptions: Subscription[] = [], credentials: Record<string, unknown> = {}) => {
   const keys = newVapidKeys();
-  return { vapid: () => keys, subscriptions: () => subscriptions, forget(url) { const i = subscriptions.findIndex((s) => s.endpoint === url); if (i >= 0) subscriptions.splice(i, 1); }, credentials: (name) => credentials[name], keys };
+  return { vapid: () => keys, subscriptions: () => subscriptions, forget(url: string) { const i = subscriptions.findIndex((s) => s.endpoint === url); if (i >= 0) subscriptions.splice(i, 1); }, credentials: (name: string) => credentials[name], keys };
 };
 
 // ---- Web Push --------------------------------------------------------------------
@@ -60,18 +67,18 @@ test('the VAPID header is an ES256 token for the push service, signed by the ser
   const keys = newVapidKeys();
   const now = Date.parse('2026-10-15T08:00:00Z');
   const header = vapidHeader(endpoint, keys, 'mailto:ops@example.org', now);
-  const [, token, k] = /^vapid t=([^,]+), k=(\S+)$/.exec(header);
+  const [, token, k] = /^vapid t=([^,]+), k=(\S+)$/.exec(header)!;
   assert.equal(k, keys.publicKey);
-  const [head, claims, signature] = token.split('.');
-  assert.deepEqual(JSON.parse(Buffer.from(head, 'base64url')), { typ: 'JWT', alg: 'ES256' });
-  const body = JSON.parse(Buffer.from(claims, 'base64url'));
+  const [head, claims, signature] = token!.split('.');
+  assert.deepEqual(JSON.parse(Buffer.from(head!, 'base64url') as unknown as string), { typ: 'JWT', alg: 'ES256' });
+  const body = JSON.parse(Buffer.from(claims!, 'base64url') as unknown as string);
   assert.equal(body.aud, 'https://fcm.googleapis.com');
   assert.equal(body.sub, 'mailto:ops@example.org');
   assert.ok(body.exp > now / 1000 && body.exp <= now / 1000 + 24 * 3600, 'expires within a day');
   const raw = Buffer.from(keys.publicKey, 'base64url');
   const key = createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: b64u(raw.subarray(1, 33)), y: b64u(raw.subarray(33)) }, format: 'jwk' });
-  assert.equal(Buffer.from(signature, 'base64url').length, 64, 'r and s, not DER');
-  assert.ok(verify('sha256', Buffer.from(`${head}.${claims}`), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature, 'base64url')));
+  assert.equal(Buffer.from(signature!, 'base64url').length, 64, 'r and s, not DER');
+  assert.ok(verify('sha256', Buffer.from(`${head}.${claims}`), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature!, 'base64url')));
 });
 
 test('a VAPID key whose private scalar starts with a zero byte is kept on 32 bytes and still signs', () => {
@@ -84,9 +91,9 @@ test('a VAPID key whose private scalar starts with a zero byte is kept on 32 byt
   const key = createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: b64u(raw.subarray(1, 33)), y: b64u(raw.subarray(33)) }, format: 'jwk' });
   // Kept on 32 bytes, or kept short by an earlier version: both sign.
   for (const privateKey of [keys.privateKey, b64u(ecdh.getPrivateKey())]) {
-    const [, token] = /^vapid t=([^,]+),/.exec(vapidHeader(endpoint, { ...keys, privateKey }, 'mailto:ops@example.org'));
-    const [head, claims, signature] = token.split('.');
-    assert.ok(verify('sha256', Buffer.from(`${head}.${claims}`), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature, 'base64url')));
+    const [, token] = /^vapid t=([^,]+),/.exec(vapidHeader(endpoint, { ...keys, privateKey }, 'mailto:ops@example.org'))!;
+    const [head, claims, signature] = token!.split('.');
+    assert.ok(verify('sha256', Buffer.from(`${head}.${claims}`), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature!, 'base64url')));
   }
 });
 
@@ -106,21 +113,21 @@ test('the Web Push adapter sends what the phone can read, drops a subscription t
   const one = browser(), two = browser();
   const subscriptions = [{ endpoint, keys: one.keys }, { endpoint: 'https://updates.push.services.mozilla.com/wpush/v2/gone', keys: two.keys }];
   const store = memoryStore(subscriptions);
-  const posts = [];
-  const transport = async (url, init) => { posts.push({ url, init }); return { ok: !url.includes('gone'), status: url.includes('gone') ? 410 : 201 }; };
+  const posts: Posted<Buffer>[] = [];
+  const transport = async (url: string, init: RequestInit) => { posts.push({ url, init } as Posted<Buffer>); return { ok: !url.includes('gone'), status: url.includes('gone') ? 410 : 201 }; };
   const adapter = webpushAdapter({ store, subject: 'https://cockpit.example.ts.net', transport });
   assert.equal(adapter.ready(), null);
   const message = render({ kind: 'approval', ticket: 'EX-12', title: 'Rename the save button' }, { linkBase: 'https://cockpit.example.ts.net' });
   await adapter.send(message);
   assert.equal(posts.length, 2);
-  assert.equal(posts[0].init.headers['content-encoding'], 'aes128gcm');
-  assert.equal(posts[0].init.headers.urgency, 'normal');
-  assert.match(posts[0].init.headers.topic, /^[A-Za-z0-9_-]{1,32}$/);
-  assert.match(posts[0].init.headers.authorization, /^vapid t=/);
-  assert.deepEqual(one.read(posts[0].init.body), { title: message.title, body: message.body, url: 'https://cockpit.example.ts.net/#ticket=EX-12', tag: 'EX-12' });
+  assert.equal(posts[0]!.init.headers['content-encoding'], 'aes128gcm');
+  assert.equal(posts[0]!.init.headers.urgency, 'normal');
+  assert.match(posts[0]!.init.headers.topic!, /^[A-Za-z0-9_-]{1,32}$/);
+  assert.match(posts[0]!.init.headers.authorization!, /^vapid t=/);
+  assert.deepEqual(one.read(posts[0]!.init.body), { title: message.title, body: message.body, url: 'https://cockpit.example.ts.net/#ticket=EX-12', tag: 'EX-12' });
   assert.deepEqual(subscriptions.map((s) => s.endpoint), [endpoint], 'a 410 forgets that browser');
   const refusing = webpushAdapter({ store, subject: 'mailto:ops@example.org', transport: async () => ({ ok: false, status: 400 }) });
-  await assert.rejects(refusing.send(message), (error) => !error.message.includes('googleapis') && /refused/.test(error.message));
+  await assert.rejects(refusing.send(message), (error: Error) => !error.message.includes('googleapis') && /refused/.test(error.message));
   assert.equal(webpushAdapter({ store, subject: '', transport }).ready(), 'no_subject');
   assert.equal(webpushAdapter({ store: memoryStore([]), subject: 'mailto:a@b.org', transport }).ready(), 'no_subscription');
 });
@@ -146,91 +153,91 @@ test('every adapter has the same contract: a name, ready() with a reason when it
 });
 
 test('ntfy gets one JSON post on its topic, with the token as a bearer; its errors name no server, topic or token', async () => {
-  const posts = [];
+  const posts: Posted<string>[] = [];
   const credentials = { server: 'https://ntfy.example.org', topic: 'cleared-x7Rk2', token: 'tk_abcdefgh12345' };
-  const adapter = ntfyAdapter({ credentials: () => credentials, transport: async (url, init) => { posts.push({ url, init }); return { ok: true, status: 200 }; } });
+  const adapter = ntfyAdapter({ credentials: () => credentials, transport: async (url, init) => { posts.push({ url, init } as Posted<string>); return { ok: true, status: 200 }; } });
   assert.equal(adapter.ready(), null);
   await adapter.send(MESSAGE);
-  assert.equal(posts[0].url, 'https://ntfy.example.org/');
-  assert.equal(posts[0].init.headers.authorization, 'Bearer tk_abcdefgh12345');
-  const sent = JSON.parse(posts[0].init.body);
+  assert.equal(posts[0]!.url, 'https://ntfy.example.org/');
+  assert.equal(posts[0]!.init.headers.authorization, 'Bearer tk_abcdefgh12345');
+  const sent = JSON.parse(posts[0]!.init.body);
   assert.deepEqual(Object.keys(sent).sort(), ['click', 'message', 'priority', 'tags', 'title', 'topic']);
   assert.equal(sent.topic, 'cleared-x7Rk2');
   assert.equal(sent.priority, 5, 'a rollback is urgent');
   assert.equal(sent.click, 'https://cockpit.example.ts.net/#ticket=EX-4');
   clean(`${sent.title} ${sent.message}`);
   const down = ntfyAdapter({ credentials: () => credentials, transport: async () => ({ ok: false, status: 403 }) });
-  await assert.rejects(down.send(MESSAGE), (error) => error.message === 'ntfy refused (403)');
+  await assert.rejects(down.send(MESSAGE), (error: Error) => error.message === 'ntfy refused (403)');
   for (const bad of [{ server: 'http://ntfy.example.org', topic: 'x' }, { server: 'https://a:b@ntfy.example.org', topic: 'x' }, { server: 'https://ntfy.example.org', topic: '../x' }])
-    assert.equal(ntfyAdapter({ credentials: () => bad, transport: async () => ({ ok: true }) }).ready(), 'no_credentials', JSON.stringify(bad));
+    assert.equal(ntfyAdapter({ credentials: () => bad, transport: (async () => ({ ok: true })) as unknown as Transport }).ready(), 'no_credentials', JSON.stringify(bad));
 });
 
 test('Telegram posts plain text to the bot; the bot token travels in the address only and no error repeats it', async () => {
   const token = '123456789:AAH-abcdefghijklmnopqrstuvwxyz_0123';
-  const posts = [];
-  const adapter = telegramAdapter({ credentials: () => ({ bot_token: token, chat_id: '-1001234' }), transport: async (url, init) => { posts.push({ url, init }); return { ok: true, status: 200 }; } });
+  const posts: Posted<string>[] = [];
+  const adapter = telegramAdapter({ credentials: () => ({ bot_token: token, chat_id: '-1001234' }), transport: async (url, init) => { posts.push({ url, init } as Posted<string>); return { ok: true, status: 200 }; } });
   await adapter.send(MESSAGE);
-  assert.equal(posts[0].url, `https://api.telegram.org/bot${token}/sendMessage`);
-  const sent = JSON.parse(posts[0].init.body);
+  assert.equal(posts[0]!.url, `https://api.telegram.org/bot${token}/sendMessage`);
+  const sent = JSON.parse(posts[0]!.init.body);
   assert.equal(sent.chat_id, '-1001234');
   assert.equal(sent.parse_mode, undefined, 'nothing is read as markup');
   assert.ok(sent.text.startsWith(MESSAGE.title));
   for (const fail of [async () => { throw new Error(`connect ECONNREFUSED https://api.telegram.org/bot${token}`); }, async () => ({ ok: false, status: 401 })]) {
     const broken = telegramAdapter({ credentials: () => ({ bot_token: token, chat_id: '42' }), transport: fail });
-    await assert.rejects(broken.send(MESSAGE), (error) => !error.message.includes(token) && !error.message.includes('AAH') && /^telegram (?:unreachable|refused \(401\))$/.test(error.message));
+    await assert.rejects(broken.send(MESSAGE), (error: Error) => !error.message.includes(token) && !error.message.includes('AAH') && /^telegram (?:unreachable|refused \(401\))$/.test(error.message));
   }
 });
 
 test('every adapter refuses a redirect: the request says so, and a redirect answer is a failure with a code only', async () => {
-  const seen = [];
-  const redirected = async (url, init) => { seen.push(init.redirect); return { ok: false, status: 302, headers: new Map([['location', 'https://elsewhere.example/x']]) }; };
+  const seen: (RequestInit['redirect'] | undefined)[] = [];
+  const redirected = async (url: string, init: RequestInit) => { seen.push(init.redirect); return { ok: false, status: 302, headers: new Map([['location', 'https://elsewhere.example/x']]) }; };
   const subscriptions = [{ endpoint, keys: browser().keys }];
-  const adapters = [
+  const adapters: [Adapter, RegExp][] = [
     [webpushAdapter({ store: memoryStore(subscriptions), subject: 'mailto:ops@example.org', transport: redirected }), /^push service refused$/],
     [ntfyAdapter({ credentials: () => ({ server: 'https://ntfy.example.org', topic: 'cleared-x7Rk2' }), transport: redirected }), /^ntfy refused \(302\)$/],
     [telegramAdapter({ credentials: () => ({ bot_token: '123456789:AAH-abcdefghijklmnopqrstuvwxyz_0123', chat_id: '42' }), transport: redirected }), /^telegram refused \(302\)$/],
   ];
-  for (const [adapter, code] of adapters) await assert.rejects(adapter.send(MESSAGE), (error) => code.test(error.message) && !/elsewhere/.test(error.message), adapter.name);
+  for (const [adapter, code] of adapters) await assert.rejects(adapter.send(MESSAGE), (error: Error) => code.test(error.message) && !/elsewhere/.test(error.message), adapter.name);
   assert.deepEqual(seen, ['error', 'error', 'error'], 'fetch is told to refuse a redirect, in each adapter');
   // What fetch does with redirect: 'error' is to reject: the adapter says it is unreachable, not that it was sent.
   const refused = ntfyAdapter({ credentials: () => ({ server: 'https://ntfy.example.org', topic: 'cleared-x7Rk2' }), transport: async (url, init) => { if (init.redirect === 'error') throw new TypeError('redirect mode is set to error'); return { ok: true, status: 200 }; } });
-  await assert.rejects(refused.send(MESSAGE), (error) => error.message === 'ntfy unreachable');
+  await assert.rejects(refused.send(MESSAGE), (error: Error) => error.message === 'ntfy unreachable');
 });
 
 test('a long e-mail subject is folded into encoded words of 75 characters at most, each a whole UTF-8 text', async () => {
-  const calls = [];
+  const calls: string[] = [];
   const adapter = emailAdapter({ credentials: () => ({ to: 'owner@example.org' }), sendmail: '/usr/sbin/sendmail', run: (file, args, input) => calls.push(input) });
   const title = 'Déployer la nouvelle façade « Réglages » sur le téléphone de l\'équipe, en français, avec des accents partout ✓🙂 '.repeat(4).trim();
-  await adapter.send({ kind: 'approval', title, body: 'x', url: null, urgent: false, group: 'EX-1' });
-  const lines = calls[0].split('\r\n');
+  await adapter.send({ kind: 'approval', title, body: 'x', url: null, urgent: false, group: 'EX-1' } as NotifyMessage);
+  const lines = calls[0]!.split('\r\n');
   const start = lines.findIndex((line) => line.startsWith('Subject: '));
-  const folded = [lines[start]];
-  for (let i = start + 1; lines[i].startsWith(' '); i += 1) folded.push(lines[i]);
+  const folded = [lines[start]!];
+  for (let i = start + 1; lines[i]!.startsWith(' '); i += 1) folded.push(lines[i]!);
   assert.ok(folded.length > 1, 'a long subject is folded');
   for (const line of folded) assert.ok(line.replace(/^(Subject: | )/, '').length <= 75 && line.length <= 81, line);
   const words = folded.map((line) => line.replace(/^Subject: /, '').trim()).map((word) => /^=\?UTF-8\?B\?([A-Za-z0-9+/]+={0,2})\?=$/.exec(word));
   assert.ok(words.every(Boolean), 'each word is one encoded word');
-  const decoded = words.map((m) => Buffer.from(m[1], 'base64'));
+  const decoded = words.map((m) => Buffer.from(m![1]!, 'base64'));
   for (const bytes of decoded) assert.ok(!bytes.toString('utf8').includes('\uFFFD'), 'no character is cut in two');
   assert.equal(Buffer.concat(decoded).toString('utf8'), title, 'the words, read back in order, are the subject');
   const short = emailAdapter({ credentials: () => ({ to: 'owner@example.org' }), sendmail: '/usr/sbin/sendmail', run: (f, a, input) => calls.push(input) });
-  await short.send({ kind: 'test', title: 'Test', body: 'x', url: null, urgent: false, group: 'test' });
-  assert.match(calls.at(-1), /^Subject: =\?UTF-8\?B\?VGVzdA==\?=\r$/m, 'a short subject is one word, as before');
+  await short.send({ kind: 'test', title: 'Test', body: 'x', url: null, urgent: false, group: 'test' } as NotifyMessage);
+  assert.match(calls.at(-1)!, /^Subject: =\?UTF-8\?B\?VGVzdA==\?=\r$/m, 'a short subject is one word, as before');
 });
 
 test('e-mail goes through sendmail with the recipient as an argument; a title cannot add a header or a recipient', async () => {
-  const calls = [];
+  const calls: { file: string; args: string[]; input: string }[] = [];
   const adapter = emailAdapter({ credentials: () => ({ to: 'owner@example.org', from: 'cleared@example.org' }), sendmail: '/usr/sbin/sendmail', run: (file, args, input) => calls.push({ file, args, input }) });
   const evil = render({ kind: 'question', ticket: 'EX-9', title: 'Hi\r\nBcc: thief@example.net\r\n\r\nbody' }, { linkBase: 'https://cockpit.example.ts.net' });
   await adapter.send(evil);
-  assert.equal(calls[0].file, '/usr/sbin/sendmail');
-  assert.deepEqual(calls[0].args, ['-i', '-f', 'cleared@example.org', '--', 'owner@example.org']);
-  const [head] = calls[0].input.split('\r\n\r\n');
-  assert.deepEqual(head.split('\r\n').map((line) => line.split(':')[0]), ['From', 'To', 'Subject', 'Date', 'MIME-Version', 'Content-Type', 'Content-Transfer-Encoding', 'Auto-Submitted']);
-  assert.doesNotMatch(calls[0].input, /thief|Bcc/i);
-  assert.match(head, /^Subject: =\?UTF-8\?B\?[A-Za-z0-9+/=]+\?=$/m);
+  assert.equal(calls[0]!.file, '/usr/sbin/sendmail');
+  assert.deepEqual(calls[0]!.args, ['-i', '-f', 'cleared@example.org', '--', 'owner@example.org']);
+  const [head] = calls[0]!.input.split('\r\n\r\n');
+  assert.deepEqual(head!.split('\r\n').map((line) => line.split(':')[0]), ['From', 'To', 'Subject', 'Date', 'MIME-Version', 'Content-Type', 'Content-Transfer-Encoding', 'Auto-Submitted']);
+  assert.doesNotMatch(calls[0]!.input, /thief|Bcc/i);
+  assert.match(head!, /^Subject: =\?UTF-8\?B\?[A-Za-z0-9+/=]+\?=$/m);
   const failing = emailAdapter({ credentials: () => ({ to: 'owner@example.org' }), run: () => { throw new Error('/usr/sbin/sendmail: exit 75 owner@example.org'); } });
-  await assert.rejects(failing.send(evil), (error) => error.message === 'sendmail failed');
+  await assert.rejects(failing.send(evil), (error: Error) => error.message === 'sendmail failed');
   assert.equal(emailAdapter({ credentials: () => ({ to: 'owner@example.org\nBcc: x@y.z' }) }).ready(), 'no_credentials');
 });
 
@@ -342,7 +349,7 @@ test('the dispatcher does not inherit the wake lock: a child that outlives the k
   const wake = readFileSync(join(ORCH_HOME, 'wake.ts'), 'utf8');
   const dispatch = wake.split('\n').filter((line) => line.includes("'notify.ts'), 'dispatch'"));
   assert.equal(dispatch.length, 1, 'one dispatcher call');
-  assert.match(dispatch[0], /spawnSync\('timeout', \['-k', '5', '60', /, 'stopped after 60 seconds, killed 5 seconds later');
+  assert.match(dispatch[0]!, /spawnSync\('timeout', \['-k', '5', '60', /, 'stopped after 60 seconds, killed 5 seconds later');
   // The lock is a descriptor of the wake that flock(1) took, and Node opens it close-on-exec: a child started while
   // the wake holds it, and still running once the wake let it go, does not keep it.
   const dir = scratch('cleared-wake-lock-');
@@ -367,7 +374,7 @@ test('serve/install.ts warns when CLEARED_NOTIFY_LINK_BASE is not set, and is si
 });
 
 test('each kind reads as a product sentence, in English and in French; health names a known code only', () => {
-  const en = (o) => render(o, { language: 'en' }), fr = (o) => render(o, { language: 'fr' });
+  const en = (o: Occurrence) => render(o, { language: 'en' }), fr = (o: Occurrence) => render(o, { language: 'fr' });
   assert.deepEqual([en({ kind: 'approval', ticket: 'EX-1', title: 'Rename' }).title, en({ kind: 'approval', ticket: 'EX-1', title: 'Rename' }).body], ['Ready to land', 'EX-1 · Rename waits for your agreement.']);
   assert.equal(fr({ kind: 'question', ticket: 'EX-1', title: 'Renommer' }).body, 'EX-1 · Renommer : ouvrez-le pour répondre.');
   assert.equal(fr({ kind: 'blocked', ticket: 'EX-1', title: 'Renommer', minutes: 42 }).body, 'EX-1 · Renommer est bloqué depuis 42 min.');
@@ -451,7 +458,7 @@ test('subscriptions are changed under a lock (flock): the app and the dispatcher
   const lock = join(dir, 'subscriptions.lock');
   assert.equal(statSync(lock).mode & 0o777, 0o600);
   // Two processes adding four devices each, at the same time.
-  const child = (from) => new Promise((resolve) => {
+  const child = (from: number) => new Promise((resolve) => {
     const code = `const { notifyStore } = await import(${JSON.stringify(join(ORCH_HOME, 'lib', 'notify', 'store.ts'))});
       const { createECDH } = await import('node:crypto');
       const s = notifyStore(${JSON.stringify(dir)});
@@ -475,18 +482,27 @@ test('subscriptions are changed under a lock (flock): the app and the dispatcher
 
 const T0 = Date.parse('2026-10-15T09:00:00Z');
 const minute = 60000;
-function setup({ notify = {}, snapshot = { schema: 1, tickets: [] } } = {}) {
+type Ticket = ReturnType<typeof ready> | ReturnType<typeof question>;
+type Snap = { schema: number; tickets: Ticket[] };
+type Done = Awaited<ReturnType<typeof dispatch>>;
+type EventRow = { ticket: string | null; detail: string; value: number; source: string };
+type Box = {
+  db: DatabaseSync; settings: NotifySettings; snapshot: Snap; sent: NotifyMessage[]; adapters: Adapter[];
+  run: (at: number, extra?: { deadlineMs?: number }) => Promise<Done>; rows: (kind: string) => EventRow[];
+};
+// snapshot: null is the test of no snapshot yet, which sets one before it reads its tickets.
+function setup({ notify = {}, snapshot = { schema: 1, tickets: [] } }: { notify?: Record<string, string>; snapshot?: Snap | null } = {}) {
   const db = openLedger(':memory:');
   const settings = notifySettings({ sections: { notify, owner: { language: 'en' } } }, LINK_ENV);
-  const sent = [];
-  const fake = { name: 'fake', ready: () => null, send: async (message) => { sent.push(message); } };
-  const box = { db, settings, snapshot, sent, adapters: [fake] };
+  const sent: NotifyMessage[] = [];
+  const fake = { name: 'fake', ready: () => null, send: async (message: NotifyMessage) => { sent.push(message); } };
+  const box = { db, settings, snapshot: snapshot as Snap, sent, adapters: [fake] } as Box;
   box.run = (at, extra = {}) => dispatch({ db, settings: box.settings, snapshot: box.snapshot, adapters: box.adapters, now: at, ...extra });
-  box.rows = (kind) => db.prepare('SELECT ticket, detail, value, source FROM events WHERE kind = ? ORDER BY event_id').all(kind);
+  box.rows = (kind) => db.prepare('SELECT ticket, detail, value, source FROM events WHERE kind = ? ORDER BY event_id').all(kind) as EventRow[];
   return box;
 }
-const ready = (id, title, at) => ({ id, ref: id, title, kind: 'ready', waiting: true, since: at, approval: { at, versions: [{ pr: 7, head: 'a'.repeat(40) }] } });
-const question = (id, title, at) => ({ id, ref: id, title, kind: 'question', waiting: true, since: at });
+const ready = (id: string, title: string, at: string) => ({ id, ref: id, title, kind: 'ready', waiting: true, since: at, approval: { at, versions: [{ pr: 7, head: 'a'.repeat(40) }] } });
+const question = (id: string, title: string, at: string) => ({ id, ref: id, title, kind: 'question', waiting: true, since: at });
 
 test('the first dispatch sends nothing (no backlog), then every kind of event is sent once, and each send is a ledger row', async () => {
   const box = setup();
@@ -504,7 +520,7 @@ test('the first dispatch sends nothing (no backlog), then every kind of event is
   assert.deepEqual(box.sent.map((m) => `${m.kind} ${m.ticket ?? m.group}`).sort(), ['approval EX-2', 'blocked EX-6', 'health health:lane_idle', 'question EX-3', 'rollback EX-4']);
   assert.equal(done.sent.length, 5);
   for (const message of box.sent) clean(JSON.stringify(message));
-  assert.equal(box.sent.find((m) => m.kind === 'blocked').body, 'EX-6 has been blocked for 46 min.');
+  assert.equal(box.sent.find((m) => m.kind === 'blocked')!.body, 'EX-6 has been blocked for 46 min.');
   const rows = box.rows('notification_sent');
   assert.equal(rows.length, 5);
   for (const row of rows) {
@@ -513,7 +529,7 @@ test('the first dispatch sends nothing (no backlog), then every kind of event is
     assert.ok(Number.isFinite(row.value), 'seconds since what it tells happened');
   }
   assert.deepEqual(rows.map((r) => r.ticket ?? '').sort(), ['', 'EX-2', 'EX-3', 'EX-4', 'EX-6'], 'a health problem of no ticket has none');
-  assert.equal(rows.find((r) => r.ticket === 'EX-2').value, 60);
+  assert.equal(rows.find((r) => r.ticket === 'EX-2')!.value, 60);
   await box.run(T0 + 30 * minute);
   assert.equal(box.sent.length, 5, 'the same occurrence is never sent twice');
 });
@@ -522,7 +538,7 @@ test('no snapshot yet: the first dispatch initialises nothing, so cards that alr
   const box = setup({ snapshot: null });
   await box.run(T0);
   assert.equal(box.db.prepare("SELECT value FROM notify_state WHERE key = 'cursor'").get(), undefined, 'no cursor while the snapshot is missing');
-  assert.equal(box.db.prepare('SELECT COUNT(*) n FROM notify_queue').get().n, 0, 'no seen state either');
+  assert.equal((box.db.prepare('SELECT COUNT(*) n FROM notify_queue').get() as { n: number }).n, 0, 'no seen state either');
   box.snapshot = { schema: 1, tickets: [ready('EX-1', 'Old request', iso(T0 - 60 * minute)), question('EX-3', 'Pick a colour', iso(T0 - 30 * minute))] };
   await box.run(T0 + minute);
   assert.equal(box.sent.length, 0, 'the cards that existed before the snapshot is read are not sent');
@@ -672,7 +688,7 @@ test('Web Push tells a few browsers at a time, and starts none once the deadline
   assert.ok(most > 1 && most <= 4, `at most four at once (${most})`);
   calls = 0;
   const hanging = webpushAdapter({ store: memoryStore(subscriptions), subject: 'mailto:ops@example.org',
-    transport: (_url, init) => { calls += 1; return new Promise((_resolve, reject) => { init.signal.addEventListener('abort', () => reject(new Error('aborted'))); }); } });
+    transport: (_url, init) => { calls += 1; return new Promise((_resolve, reject) => { init.signal!.addEventListener('abort', () => reject(new Error('aborted'))); }); } });
   const box = setup();
   await box.run(T0);
   box.snapshot.tickets = [ready('EX-9', 'Rename', iso(T0))];
@@ -688,8 +704,8 @@ test('a notification delivered is not sent again when the ledger cannot record i
   box.snapshot.tickets = [ready('EX-10', `Leak ${SECRET_PATH}`, iso(T0))];
   // The ledger refuses the notification events (full, locked): the queue itself still works.
   box.db.exec("CREATE TRIGGER refuse BEFORE INSERT ON events WHEN NEW.kind LIKE 'notification%' BEGIN SELECT RAISE(ABORT, 'ledger refuses'); END");
-  const said = [];
-  t.mock.method(console, 'error', (line) => said.push(String(line)));
+  const said: string[] = [];
+  t.mock.method(console, 'error', (line: unknown) => said.push(String(line)));
   const done = await box.run(T0 + minute);
   assert.equal(done.sent.length, 1);
   assert.deepEqual(done.failed, []);
@@ -697,7 +713,7 @@ test('a notification delivered is not sent again when the ledger cannot record i
   box.db.exec('DROP TRIGGER refuse');
   await box.run(T0 + 30 * minute);
   assert.equal(box.sent.length, 1, 'sent once');
-  assert.equal(box.db.prepare("SELECT state FROM notify_queue WHERE key LIKE 'approval:EX-10:%'").get().state, 'sent');
+  assert.equal((box.db.prepare("SELECT state FROM notify_queue WHERE key LIKE 'approval:EX-10:%'").get() as { state: string }).state, 'sent');
 });
 
 test('an agent cannot trigger a notification: the command takes no text, and what a team writes never reaches the message', () => {
@@ -712,11 +728,11 @@ test('an agent cannot trigger a notification: the command takes no text, and wha
   assert.doesNotMatch(code, /lane_asks/);
 });
 
-const iso = (ms) => new Date(ms).toISOString();
+const iso = (ms: number) => new Date(ms).toISOString();
 
 test('notify.ts test sends the fixed test message to each adapter and says, per adapter, sent, not ready or failed by a code', async () => {
   const box = setup();
-  const got = [];
+  const got: NotifyMessage[] = [];
   const lines = await sendTest({ db: box.db, settings: box.settings, now: T0, adapters: [
     { name: 'webpush', ready: () => 'no_subscription', send: async () => assert.fail('not ready') },
     { name: 'ntfy', ready: () => null, send: async (m) => got.push(m) },
@@ -733,15 +749,15 @@ test('a real wake dispatches: the first one takes note, the next one tells ntfy 
   const { appendFileSync } = await import('node:fs');
   const { spawn } = await import('node:child_process');
   const box = sandbox();
-  const posts = [];
+  const posts: { url: string | undefined; auth: string | undefined; body: string }[] = [];
   const server = createServer((request, response) => { let body = ''; request.on('data', (c) => { body += c; }); request.on('end', () => { posts.push({ url: request.url, auth: request.headers.authorization, body }); response.writeHead(200).end('{}'); }); });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const secrets = join(scratch('cleared-notify-secrets-'), 'notify');
   mkdirSync(secrets, { mode: 0o700 });
-  writeFileSync(join(secrets, 'credentials.json'), JSON.stringify({ ntfy: { server: `http://127.0.0.1:${server.address().port}`, topic: 'cleared-test', token: 'tk_abcdefgh12345' } }), { mode: 0o600 });
+  writeFileSync(join(secrets, 'credentials.json'), JSON.stringify({ ntfy: { server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, topic: 'cleared-test', token: 'tk_abcdefgh12345' } }), { mode: 0o600 });
   appendFileSync(join(box.home, 'agents.conf'), `\n[notify]\nadapters = ntfy\nsecrets_dir = ${secrets}\n`);
-  const wake = () => new Promise((resolve) => {
+  const wake = () => new Promise<{ code: number | null; stderr: string }>((resolve) => {
     const child = spawn(join(box.home, 'wake.ts'), [], { env: { ...box.env, ...LINK_ENV } });
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr += chunk; });
@@ -756,13 +772,13 @@ test('a real wake dispatches: the first one takes note, the next one tells ntfy 
   const second = await wake();
   assert.equal(second.code, 0, second.stderr);
   assert.equal(posts.length, 1);
-  assert.equal(posts[0].auth, 'Bearer tk_abcdefgh12345');
-  const sent = JSON.parse(posts[0].body);
+  assert.equal(posts[0]!.auth, 'Bearer tk_abcdefgh12345');
+  const sent = JSON.parse(posts[0]!.body);
   assert.equal(sent.topic, 'cleared-test');
   assert.equal(sent.click, 'https://cockpit.example.ts.net/#ticket=X-4');
-  clean(posts[0].body);
+  clean(posts[0]!.body);
   const check = openLedger(join(box.state, 'ledger.db'));
-  const row = check.prepare("SELECT ticket, detail FROM events WHERE kind = 'notification_sent'").get();
+  const row = check.prepare("SELECT ticket, detail FROM events WHERE kind = 'notification_sent'").get() as { ticket: string | null; detail: string };
   check.close();
   assert.deepEqual({ ...row, detail: JSON.parse(row.detail) }, { ticket: 'X-4', detail: { event: 'rollback', adapter: 'ntfy' } });
   assert.doesNotMatch(second.stderr, /tk_abcdefgh|cleared-test|notify\//, 'nothing of the secrets on the wake output');

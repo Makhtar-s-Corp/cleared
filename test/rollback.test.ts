@@ -1,4 +1,5 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { generateKeyPairSync } from 'node:crypto';
@@ -7,25 +8,29 @@ import { tmpdir, userInfo } from 'node:os';
 import { dirname, join } from 'node:path';
 import { setTimeout as pause } from 'node:timers/promises';
 import { openLedger, addEvent } from '../lib/ledger.ts';
+import type { Conf } from '../lib/conf.ts';
 import { releaseSettings, canAutoRollback, shouldRollback, touchesMigrations,
   activeRelease, holdsMerge, rollbackRelease, watchRelease, startRelease, rollbackPreview, confirmedRollback,
   reconcileNotifications, resumeWatches, retryFetch, ownRelease } from '../lib/release.ts';
 
+// A row of the releases table, as lib/release.ts reads it.
+type Row = Parameters<typeof rollbackRelease>[3];
+
 test('release defaults are inert and repeated failures trigger only when enabled', () => {
-  const off = releaseSettings({ sections: {} });
+  const off = releaseSettings({ sections: {} } as Conf);
   assert.equal(off.autoRollback, false);
   assert.equal(off.watchMinutes, 15);
   assert.equal(off.deployGraceMinutes, 5);
   assert.equal(off.failuresToRollback, 3);
   assert.equal(shouldRollback(off, 3), false);
-  const on = releaseSettings({ sections: { release: { auto_rollback: 'true', health_command: 'true', reopen_state: 'Todo' } } });
+  const on = releaseSettings({ sections: { release: { auto_rollback: 'true', health_command: 'true', reopen_state: 'Todo' } } } as unknown as Conf);
   assert.equal(shouldRollback(on, 2), false);
   assert.equal(shouldRollback(on, 3), true);
-  assert.throws(() => releaseSettings({ sections: { release: { auto_rollback: 'true' } } }), /requires health_url or health_command/);
+  assert.throws(() => releaseSettings({ sections: { release: { auto_rollback: 'true' } } } as unknown as Conf), /requires health_url or health_command/);
   assert.throws(() => releaseSettings({ sections: { tracker: { go_state: 'Go', todo_state: 'Todo' },
-    release: { reopen_state: 'Go' } } }), /must not be the approval/);
+    release: { reopen_state: 'Go' } } } as unknown as Conf), /must not be the approval/);
   assert.throws(() => releaseSettings({ sections: { tracker: { go_state: 'Go', todo_state: 'Todo' },
-    release: { reopen_state: 'Unknown' } } }), /configured non-approval/);
+    release: { reopen_state: 'Unknown' } } } as unknown as Conf), /configured non-approval/);
 });
 
 test('declared migration paths disable automatic rollback', () => {
@@ -39,7 +44,7 @@ test('declared migration paths disable automatic rollback', () => {
 
 test('a transient base fetch failure is retried before giving up on rollback', () => {
   let calls = 0;
-  const paused = [];
+  const paused: number[] = [];
   const result = retryFetch(() => { if (++calls < 3) throw new Error('HTTP 502'); return 'fetched'; },
     (ms) => paused.push(ms));
   assert.equal(result, 'fetched');
@@ -48,12 +53,12 @@ test('a transient base fetch failure is retried before giving up on rollback', (
   assert.throws(() => retryFetch(() => { throw new Error('offline'); }, () => {}), /failed after three attempts/);
 });
 
-function releasedProject(t, { migration = false } = {}) {
+function releasedProject(t: TestContext, { migration = false }: { migration?: boolean | string } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'cleared-release-test-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   const remote = join(root, 'remote.git');
   const repo = join(root, 'project');
-  const git = (...args) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
+  const git = (...args: string[]) => execFileSync('git', ['-C', repo, ...args], { encoding: 'utf8' }).trim();
   execFileSync('git', ['init', '--bare', '-q', '-b', 'main', remote]);
   execFileSync('git', ['clone', '-q', remote, repo]);
   git('config', 'user.name', 'Test');
@@ -73,13 +78,14 @@ function releasedProject(t, { migration = false } = {}) {
   const clock = Date.now();
   db.prepare('INSERT INTO releases(ticket,pr,merge_sha,title,merged_at,status) VALUES (?,?,?,?,?,?)')
     .run('LOCAL-1', 1, sha, 'Test release', new Date(clock).toISOString(), 'watching');
-  const row = db.prepare('SELECT * FROM releases WHERE merge_sha = ?').get(sha);
+  const row = db.prepare('SELECT * FROM releases WHERE merge_sha = ?').get(sha) as Row;
   const conf = { sections: { lanes: { base: 'origin/main' }, tracker: { owner_id: 'human' },
     release: { health_command: 'true', deploy_grace_minutes: '0', watch_minutes: '2',
       failures_to_rollback: '3', auto_rollback: 'true', reopen_state: 'Todo',
-      migration_paths: 'schema.sql, db/migrations' } } };
+      migration_paths: 'schema.sql, db/migrations' } } } as unknown as Conf;
   return { repo, db, row, conf, git, clock };
 }
+type Project = ReturnType<typeof releasedProject>;
 
 test('a healthy release finishes its watch without rollback', async (t) => {
   const x = releasedProject(t);
@@ -88,26 +94,26 @@ test('a healthy release finishes its watch without rollback', async (t) => {
     currentTime: () => time, wait: async (ms) => { time += ms; },
     check: async () => ({ ok: true, detail: 'HTTP 200' }), announce: () => assert.fail('no alert expected'),
   });
-  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id).status, 'complete');
-  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'release_watch_complete'").get().n, 1);
+  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id)!.status, 'complete');
+  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'release_watch_complete'").get()!.n, 1);
 });
 
 test('three failures push one exact revert, reopen the ticket and report recovery', async (t) => {
   const x = releasedProject(t);
   let time = x.clock;
   let checks = 0;
-  const moved = [], notices = [];
+  const moved: string[][] = [], notices: string[] = [];
   await watchRelease(x.conf, x.db, x.repo, x.row.id, {
     currentTime: () => time, wait: async (ms) => { time += ms; },
     check: async () => (++checks <= 3 ? { ok: false, detail: 'HTTP 503' } : { ok: true, detail: 'HTTP 200' }),
     announce: (_conf, _ticket, body) => notices.push(body),
     performRollback: () => {
       const sha = rollbackRelease(x.conf, x.db, x.repo,
-        x.db.prepare('SELECT * FROM releases WHERE id = ?').get(x.row.id), {
+        x.db.prepare('SELECT * FROM releases WHERE id = ?').get(x.row.id) as Row, {
           automatic: true, trackerFactory: () => ({ moveTicket: (...args) => moved.push(args) }),
           announce: (_conf, _ticket, body) => notices.push(body),
         });
-      assert.equal(activeRelease(x.db).status, 'verifying_rollback', 'no second release starts before post-rollback health');
+      assert.equal(activeRelease(x.db)!.status, 'verifying_rollback', 'no second release starts before post-rollback health');
       return sha;
     },
   });
@@ -116,16 +122,16 @@ test('three failures push one exact revert, reopen the ticket and report recover
   assert.equal(readFileSync(join(x.repo, 'app.txt'), 'utf8'), 'release\n', 'the checkout is not rewritten');
   x.git('fetch', '-q', 'origin', 'main');
   assert.equal(x.git('show', 'origin/main:app.txt'), 'before');
-  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id).status, 'rolled_back');
+  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id)!.status, 'rolled_back');
   assert.deepEqual(x.db.prepare("SELECT kind FROM events WHERE kind LIKE 'rollback_%' ORDER BY event_id").all().map((r) => r.kind),
     ['rollback_started', 'rollback_pushed', 'rollback_health_ok']);
-  assert.match(notices[0], /HTTP 503/);
+  assert.match(notices[0]!, /HTTP 503/);
 });
 
 test('health still failing after revert alerts once and never reverts again', async (t) => {
   const x = releasedProject(t);
   let time = x.clock, reverts = 0;
-  const notices = [];
+  const notices: string[] = [];
   await watchRelease(x.conf, x.db, x.repo, x.row.id, {
     currentTime: () => time, wait: async (ms) => { time += ms; },
     check: async () => ({ ok: false, detail: 'HTTP 503' }),
@@ -137,15 +143,15 @@ test('health still failing after revert alerts once and never reverts again', as
     announce: (_conf, _ticket, body) => notices.push(body),
   });
   assert.equal(reverts, 1);
-  assert.match(notices[0], /still failing/);
-  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_health_still_failing'").get().n, 1);
+  assert.match(notices[0]!, /still failing/);
+  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_health_still_failing'").get()!.n, 1);
 });
 
 test('bad health with automatic rollback off is reported without a revert', async (t) => {
   const x = releasedProject(t);
-  x.conf.sections.release.auto_rollback = 'false';
+  x.conf.sections.release!.auto_rollback = 'false';
   let time = x.clock, reverts = 0;
-  const notices = [];
+  const notices: string[] = [];
   await watchRelease(x.conf, x.db, x.repo, x.row.id, {
     currentTime: () => time, wait: async (ms) => { time += ms; },
     check: async () => ({ ok: false, detail: 'HTTP 503' }),
@@ -153,12 +159,12 @@ test('bad health with automatic rollback off is reported without a revert', asyn
   });
   assert.equal(reverts, 0);
   assert.equal(notices.length, 1);
-  assert.match(notices[0], /disabled/);
+  assert.match(notices[0]!, /disabled/);
 });
 
 test('an unavailable tracker leaves the health alert in the retry outbox', async (t) => {
   const x = releasedProject(t);
-  x.conf.sections.release.auto_rollback = 'false';
+  x.conf.sections.release!.auto_rollback = 'false';
   const oldState = process.env.CLEARED_STATE_DIR;
   process.env.CLEARED_STATE_DIR = join(x.repo, '..');
   try {
@@ -171,8 +177,8 @@ test('an unavailable tracker leaves the health alert in the retry outbox', async
     const outbox = join(x.repo, '..', 'tracker-outbox');
     const files = readdirSync(outbox).filter((name) => name.endsWith('.md'));
     assert.equal(files.length, 1);
-    assert.match(readFileSync(join(outbox, files[0]), 'utf8'), /HTTP 503/);
-    assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_notification_failed'").get().n, 1);
+    assert.match(readFileSync(join(outbox, files[0]!), 'utf8'), /HTTP 503/);
+    assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_notification_failed'").get()!.n, 1);
   } finally {
     if (oldState === undefined) delete process.env.CLEARED_STATE_DIR;
     else process.env.CLEARED_STATE_DIR = oldState;
@@ -205,15 +211,15 @@ test('non-ASCII migration filenames are detected before any automatic revert', (
 test('failing health on a migration release alerts instead of auto reverting', async (t) => {
   const x = releasedProject(t, { migration: true });
   let time = x.clock, reverts = 0;
-  const notices = [];
+  const notices: string[] = [];
   await watchRelease(x.conf, x.db, x.repo, x.row.id, {
     currentTime: () => time, wait: async (ms) => { time += ms; },
     check: async () => ({ ok: false, detail: 'HTTP 503' }),
     performRollback: () => { reverts++; }, announce: (_conf, _ticket, body) => notices.push(body),
   });
   assert.equal(reverts, 0);
-  assert.match(notices[0], /migration/);
-  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_migrations_blocked'").get().n, 1);
+  assert.match(notices[0]!, /migration/);
+  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_migrations_blocked'").get()!.n, 1);
 });
 
 test('a later base commit blocks automatic rollback even without a conflict', async (t) => {
@@ -222,7 +228,7 @@ test('a later base commit blocks automatic rollback even without a conflict', as
   x.git('add', '.'); x.git('commit', '-qm', 'later unrelated change'); x.git('push', '-q', 'origin', 'main');
   const head = x.git('rev-parse', 'HEAD');
   let time = x.clock, reverts = 0;
-  const notices = [];
+  const notices: string[] = [];
   await watchRelease(x.conf, x.db, x.repo, x.row.id, {
     currentTime: () => time, wait: async (ms) => { time += ms; },
     check: async () => ({ ok: false, detail: 'HTTP 503' }),
@@ -230,7 +236,7 @@ test('a later base commit blocks automatic rollback even without a conflict', as
   });
   assert.equal(reverts, 0);
   assert.equal(x.git('ls-remote', 'origin', 'refs/heads/main').split('\t')[0], head);
-  assert.match(notices[0], /base branch moved/);
+  assert.match(notices[0]!, /base branch moved/);
 });
 
 test('direct automatic rollback is refused without a live failed watch', (t) => {
@@ -259,7 +265,7 @@ test('local human CLI previews, confirms and pushes a revert through the broker'
   writeFileSync(keyPath, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
   chmodSync(keyPath, 0o600);
   const owner = userInfo().username;
-  const configuration = (id, uid) => `[lanes]\nbase = origin/main\n[tracker]\nadapter = local\nowner_id = ${id}\nagents_uid = ${uid}\nhuman_private_key = ${keyPath}\ntodo_state = Todo\nprogress_state = Doing\nreview_state = Review\nvalidate_state = Validate\ngo_state = Go\ndone_state = Done\n[release]\nreopen_state = Todo\nauto_rollback = false\n[security]\nallow_shared_uid = true\n`;
+  const configuration = (id: string, uid: string) => `[lanes]\nbase = origin/main\n[tracker]\nadapter = local\nowner_id = ${id}\nagents_uid = ${uid}\nhuman_private_key = ${keyPath}\ntodo_state = Todo\nprogress_state = Doing\nreview_state = Review\nvalidate_state = Validate\ngo_state = Go\ndone_state = Done\n[release]\nreopen_state = Todo\nauto_rollback = false\n[security]\nallow_shared_uid = true\n`;
   const socket = join(root, 'broker.sock');
   const env = { ...process.env, CLEARED_REPO: x.repo, CLEARED_STATE_DIR: root, CLEARED_CONF: configPath, CLEARED_RELEASE_SOCKET: socket };
   writeFileSync(configPath, configuration(owner, '999999'));
@@ -267,7 +273,7 @@ test('local human CLI previews, confirms and pushes a revert through the broker'
   t.after(() => broker.kill('SIGTERM'));
   for (let i = 0; i < 100 && !existsSync(socket); i++) await pause(25);
   assert.ok(existsSync(socket));
-  const cli = (...args) => spawnSync(process.execPath, [new URL('../cleared', import.meta.url).pathname, ...args], { env, encoding: 'utf8' });
+  const cli = (...args: string[]) => spawnSync(process.execPath, [new URL('../cleared', import.meta.url).pathname, ...args], { env, encoding: 'utf8' });
   const created = cli('ticket', 'new', 'Test release');
   assert.equal(created.status, 0, created.stderr);
   const done = cli('ticket', 'move', 'LOCAL-1', 'Done');
@@ -280,13 +286,13 @@ test('local human CLI previews, confirms and pushes a revert through the broker'
   const confirmed = cli('rollback', 'LOCAL-1', '--yes');
   assert.equal(confirmed.status, 0, confirmed.stderr);
   assert.match(confirmed.stdout, /Pushed revert/);
-  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id).status, 'rolled_back');
-  assert.equal(x.db.prepare('SELECT status FROM tracker_tickets WHERE id = 1').get().status, 'Todo');
+  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id)!.status, 'rolled_back');
+  assert.equal(x.db.prepare('SELECT status FROM tracker_tickets WHERE id = 1').get()!.status, 'Todo');
 });
 
 test('a second release is held while the first is watched', (t) => {
   const x = releasedProject(t);
-  assert.equal(activeRelease(x.db).id, x.row.id);
+  assert.equal(activeRelease(x.db)!.id, x.row.id);
   x.git('checkout', '-qb', 'other');
   writeFileSync(join(x.repo, 'other.txt'), 'second\n');
   x.git('add', '.'); x.git('commit', '-qm', 'other change');
@@ -303,8 +309,8 @@ test('a second release is held while the first is watched', (t) => {
 test('no health probe records one skipped watch and does not hold the release gate', (t) => {
   const x = releasedProject(t);
   x.db.prepare("UPDATE releases SET status = 'complete' WHERE id = ?").run(x.row.id);
-  x.conf.sections.release.health_command = '';
-  x.conf.sections.release.auto_rollback = 'false';
+  x.conf.sections.release!.health_command = '';
+  x.conf.sections.release!.auto_rollback = 'false';
   let scheduled = false;
   // A different PR needs a different merge commit. The first entry is the
   // synthetic earlier release; drop it before testing the same SHA.
@@ -316,49 +322,49 @@ test('no health probe records one skipped watch and does not hold the release ga
   });
   assert.equal(scheduled, false);
   assert.equal(activeRelease(x.db), undefined);
-  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'release_health_unconfigured'").get().n, 1);
+  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'release_health_unconfigured'").get()!.n, 1);
 });
 
 test('failed ticket notification stays pending and is retried on the next wake', (t) => {
   const x = releasedProject(t);
-  const moved = [];
+  const moved: string[][] = [];
   rollbackRelease(x.conf, x.db, x.repo, x.row, {
     trackerFactory: () => ({ moveTicket: (...args) => moved.push(args) }),
     announce: () => { throw new Error('tracker down'); },
   });
-  assert.equal(x.db.prepare('SELECT notified_at FROM releases WHERE id = ?').get(x.row.id).notified_at, null);
-  const notices = [];
+  assert.equal(x.db.prepare('SELECT notified_at FROM releases WHERE id = ?').get(x.row.id)!.notified_at, null);
+  const notices: string[] = [];
   reconcileNotifications(x.conf, x.db, {
     trackerFactory: () => ({ moveTicket: (...args) => moved.push(args) }),
     announce: (_conf, _ticket, body) => notices.push(body),
   });
   assert.equal(notices.length, 1);
-  assert.ok(x.db.prepare('SELECT notified_at FROM releases WHERE id = ?').get(x.row.id).notified_at);
+  assert.ok(x.db.prepare('SELECT notified_at FROM releases WHERE id = ?').get(x.row.id)!.notified_at);
   reconcileNotifications(x.conf, x.db, { announce: () => assert.fail('already delivered') });
 });
 
 test('a stopped watch is restarted after a reboot without clearing the release gate', (t) => {
   const x = releasedProject(t);
-  const resumed = [];
+  const resumed: number[] = [];
   resumeWatches(x.conf, x.db, x.repo, {
     running: () => false, lockAvailable: () => true, schedule: (_repo, id) => resumed.push(id), announce: () => {},
   });
   assert.deepEqual(resumed, [x.row.id]);
-  assert.equal(activeRelease(x.db).id, x.row.id);
+  assert.equal(activeRelease(x.db)!.id, x.row.id);
 });
 
 test('an elapsed watch after downtime fails visibly instead of pretending health was good', (t) => {
   const x = releasedProject(t);
   x.db.prepare('UPDATE releases SET merged_at = ? WHERE id = ?')
     .run(new Date(Date.now() - 3 * 60000).toISOString(), x.row.id);
-  const notices = [];
+  const notices: string[] = [];
   resumeWatches(x.conf, x.db, x.repo, {
     running: () => false, schedule: () => assert.fail('expired watch must not restart'),
     announce: (_conf, _ticket, body) => notices.push(body),
   });
   assert.equal(activeRelease(x.db), undefined);
-  assert.match(notices[0], /could not finish monitoring/);
-  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'release_watch_failed'").get().n, 1);
+  assert.match(notices[0]!, /could not finish monitoring/);
+  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'release_watch_failed'").get()!.n, 1);
 });
 
 test('a revert pushed before process death is found and verified once', async (t) => {
@@ -367,36 +373,36 @@ test('a revert pushed before process death is found and verified once', async (t
     trackerFactory: () => ({ moveTicket: () => {} }), announce: () => {},
   });
   x.db.prepare("UPDATE releases SET status = 'rolling_back', rollback_sha = NULL, rollback_pushed_at = NULL WHERE id = ?").run(x.row.id);
-  const resumed = [];
+  const resumed: number[] = [];
   resumeWatches(x.conf, x.db, x.repo, {
     running: () => false, lockAvailable: () => true, schedule: (_repo, id) => resumed.push(id), announce: () => {},
   });
   assert.deepEqual(resumed, [x.row.id]);
-  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id).status, 'verifying_rollback');
+  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id)!.status, 'verifying_rollback');
   let time = Date.now();
   await watchRelease(x.conf, x.db, x.repo, x.row.id, {
     currentTime: () => time, wait: async (ms) => { time += ms; },
     check: async () => ({ ok: true, detail: 'HTTP 200' }), announce: () => {},
   });
-  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id).status, 'rolled_back');
-  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_health_ok'").get().n, 1);
+  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id)!.status, 'rolled_back');
+  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_health_ok'").get()!.n, 1);
 });
 
 test('a stopped rollback with no pushed revert fails visibly instead of blocking releases forever', (t) => {
   const x = releasedProject(t);
   x.db.prepare("UPDATE releases SET status = 'rolling_back' WHERE id = ?").run(x.row.id);
-  const notices = [];
+  const notices: string[] = [];
   resumeWatches(x.conf, x.db, x.repo, {
     running: () => false, lockAvailable: () => false, schedule: () => assert.fail('active revert owns the lock'),
     announce: () => assert.fail('active revert must not be declared failed'),
   });
-  assert.equal(activeRelease(x.db).status, 'rolling_back');
+  assert.equal(activeRelease(x.db)!.status, 'rolling_back');
   resumeWatches(x.conf, x.db, x.repo, {
     running: () => false, lockAvailable: () => true, schedule: () => assert.fail('no watcher should restart'),
     announce: (_conf, _ticket, body) => notices.push(body),
   });
   assert.equal(activeRelease(x.db), undefined);
-  assert.match(notices[0], /could not roll back/);
+  assert.match(notices[0]!, /could not roll back/);
 });
 
 test('a forged rollback trailer in an agent commit cannot satisfy recovery', (t) => {
@@ -410,12 +416,12 @@ test('a forged rollback trailer in an agent commit cannot satisfy recovery', (t)
   resumeWatches(x.conf, x.db, x.repo, {
     running: () => false, lockAvailable: () => true, schedule: () => assert.fail('no watcher'), announce: () => {},
   });
-  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id).status, 'failed');
-  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_pushed'").get().n, 0);
+  assert.equal(x.db.prepare('SELECT status FROM releases WHERE id = ?').get(x.row.id)!.status, 'failed');
+  assert.equal(x.db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'rollback_pushed'").get()!.n, 0);
 });
 
 // Two releases whose watches overlap: the health probe is the site's, and cannot say which one broke it.
-function secondRelease(x, { mergedAt, lane = 'fast' } = {}) {
+function secondRelease(x: Project, { mergedAt, lane = 'fast' }: { mergedAt?: number; lane?: string } = {}) {
   x.git('checkout', '-qb', `second-${mergedAt}`);
   writeFileSync(join(x.repo, `second-${mergedAt}.txt`), 'second\n');
   x.git('add', '.'); x.git('commit', '-qm', 'second change');
@@ -423,19 +429,19 @@ function secondRelease(x, { mergedAt, lane = 'fast' } = {}) {
   x.git('push', '-q', 'origin', 'main');
   const sha = x.git('rev-parse', 'HEAD');
   x.db.prepare('INSERT INTO releases(ticket,pr,merge_sha,title,merged_at,status,lane) VALUES (?,?,?,?,?,?,?)')
-    .run('LOCAL-2', 2, sha, 'Innocent change', new Date(mergedAt).toISOString(), 'watching', lane);
-  return x.db.prepare('SELECT * FROM releases WHERE merge_sha = ?').get(sha);
+    .run('LOCAL-2', 2, sha, 'Innocent change', new Date(mergedAt!).toISOString(), 'watching', lane);
+  return x.db.prepare('SELECT * FROM releases WHERE merge_sha = ?').get(sha) as Row;
 }
-async function watchFailing(x, row) {
+async function watchFailing(x: Project, row: Row) {
   let time = Date.parse(row.merged_at), reverts = 0;
-  const notices = [];
+  const notices: string[] = [];
   await watchRelease(x.conf, x.db, x.repo, row.id, {
     currentTime: () => time, wait: async (ms) => { time += ms; },
     check: async () => ({ ok: false, detail: 'HTTP 503' }),
     performRollback: () => { reverts++; }, announce: (_conf, _ticket, body) => notices.push(body),
   });
-  return { reverts, notices, status: x.db.prepare('SELECT status FROM releases WHERE id = ?').get(row.id).status,
-    events: x.db.prepare("SELECT detail FROM events WHERE kind = 'rollback_overlapping_release'").all() };
+  return { reverts, notices, status: x.db.prepare('SELECT status FROM releases WHERE id = ?').get(row.id)!.status,
+    events: x.db.prepare("SELECT detail FROM events WHERE kind = 'rollback_overlapping_release'").all() as { detail: string }[] };
 }
 
 test('overlapping releases: the watch of a later release never reverts it automatically while an earlier one is still watched; the user is told, manual rollback stays', async (t) => {
@@ -447,11 +453,11 @@ test('overlapping releases: the watch of a later release never reverts it automa
   assert.equal(watched.reverts, 0, 'the innocent change is not reverted');
   assert.equal(watched.status, 'failed');
   assert.equal(watched.events.length, 1);
-  assert.match(watched.events[0].detail, new RegExp(`health failing since ${new Date(x.clock + 10000).toISOString()}`), 'the failure was first seen before R2 went live');
-  assert.match(watched.notices[0], /another release, Test release/);
+  assert.match(watched.events[0]!.detail, new RegExp(`health failing since ${new Date(x.clock + 10000).toISOString()}`), 'the failure was first seen before R2 went live');
+  assert.match(watched.notices[0]!, /another release, Test release/);
   assert.equal(x.git('ls-remote', 'origin', 'refs/heads/main').split('\t')[0], r2.merge_sha, 'nothing was pushed');
   // The direct automatic path refuses too; the manual one does not.
-  const fresh = x.db.prepare('SELECT * FROM releases WHERE id = ?').get(r2.id);
+  const fresh = x.db.prepare('SELECT * FROM releases WHERE id = ?').get(r2.id) as Row;
   assert.throws(() => rollbackRelease(x.conf, x.db, x.repo, { ...fresh, status: 'watching' }, { automatic: true }), /overlaps this one/);
   const sha = rollbackRelease(x.conf, x.db, x.repo, fresh, { trackerFactory: () => ({ moveTicket: () => {} }), announce: () => {} });
   assert.match(sha, /^[0-9a-f]{40}$/);
@@ -466,7 +472,7 @@ test('overlapping releases: an earlier release whose watch already failed before
   const watched = await watchFailing(x, r2);
   assert.equal(watched.reverts, 0);
   assert.equal(watched.status, 'failed');
-  assert.match(watched.events[0].detail, /LOCAL-1, failing/);
+  assert.match(watched.events[0]!.detail, /LOCAL-1, failing/);
   // Once a release in between has completed its watch healthy, the old failure no longer counts.
   const y = releasedProject(t);
   y.db.prepare("UPDATE releases SET status = 'failed', failures = 3, last_health = 'HTTP 503', first_failure_at = ? WHERE id = ?").run(new Date(y.clock).toISOString(), y.row.id);
@@ -495,7 +501,7 @@ test('a fast-lane release whose health is failing holds the next merge back, and
   x.db.prepare("UPDATE releases SET lane = 'fast' WHERE id = ?").run(x.row.id);
   assert.equal(holdsMerge(x.db), undefined, 'a healthy fast-lane watch holds nothing back');
   x.db.prepare('UPDATE releases SET failures = 1, first_failure_at = ? WHERE id = ?').run(new Date(x.clock).toISOString(), x.row.id);
-  assert.equal(holdsMerge(x.db).id, x.row.id);
+  assert.equal(holdsMerge(x.db)!.id, x.row.id);
   // A merge that passed the gate just before the failure is live: it gets its row and its watch all the same.
   x.git('checkout', '-qb', 'raced');
   writeFileSync(join(x.repo, 'raced.txt'), 'raced\n');
@@ -508,7 +514,7 @@ test('a fast-lane release whose health is failing holds the next merge back, and
   startRelease(x.conf, x.db, x.repo, 'LOCAL-2', 2, { lane: 'fast', schedule: () => { scheduled++; },
     readPull: () => ({ mergeCommit: { oid: sha }, mergedAt: new Date().toISOString(), title: 'Raced' }) });
   assert.equal(scheduled, 1);
-  assert.equal(x.db.prepare('SELECT status FROM releases WHERE merge_sha = ?').get(sha).status, 'watching');
+  assert.equal(x.db.prepare('SELECT status FROM releases WHERE merge_sha = ?').get(sha)!.status, 'watching');
 });
 
 // A workspace of several services (Cleared v2, decision 21): the brokers of
@@ -522,13 +528,13 @@ test('on a ledger two repositories share, the rollback of a ticket chooses the r
   // The consumer landed after the provider, on the provider's ledger, and its own watch reverted it.
   provider.db.prepare('INSERT INTO releases(ticket,pr,merge_sha,title,merged_at,status,rollback_sha) VALUES (?,?,?,?,?,?,?)')
     .run('LOCAL-1', 1, consumer.row.merge_sha, 'Test release', new Date(provider.clock + 60_000).toISOString(), 'rolled_back', 'f'.repeat(40));
-  const newest = provider.db.prepare('SELECT * FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get('LOCAL-1');
+  const newest = provider.db.prepare('SELECT * FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get('LOCAL-1')!;
   assert.equal(newest.merge_sha, consumer.row.merge_sha, 'the ticket\'s newest row is the consumer\'s');
   assert.equal(ownRelease(provider.conf, provider.db, provider.repo, 'LOCAL-1')?.merge_sha, provider.row.merge_sha);
   assert.equal(ownRelease(provider.conf, provider.db, consumer.repo, 'LOCAL-1')?.merge_sha, consumer.row.merge_sha, 'from the consumer\'s checkout, its own');
   assert.equal(ownRelease(provider.conf, provider.db, provider.repo, 'LOCAL-2'), undefined, 'another ticket has none');
   // The provider's own merge is then reverted, exactly.
-  const sha = rollbackRelease(provider.conf, provider.db, provider.repo, ownRelease(provider.conf, provider.db, provider.repo, 'LOCAL-1'), {
+  const sha = rollbackRelease(provider.conf, provider.db, provider.repo, ownRelease(provider.conf, provider.db, provider.repo, 'LOCAL-1')!, {
     trackerFactory: () => ({ moveTicket: () => {} }), announce: () => {},
   });
   provider.git('fetch', '-q', 'origin', 'main');
