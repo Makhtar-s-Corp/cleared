@@ -88,10 +88,11 @@ const working = (id: string): FakeStep[] => [started, ...text(id, 'Still at it.'
 
 type Prepared = { readonly role: string; readonly workdir: string };
 
-function pickEffects(prepared: Prepared[], published: string[], testCommand: readonly string[] | undefined = NPM_TEST): Partial<FlowEffects> {
+// `testCommand` null: the service declares none.
+function pickEffects(prepared: Prepared[], published: string[], testCommand: readonly string[] | null = NPM_TEST): Partial<FlowEffects> {
   const base = fakeEffects([]);
   return {
-    async settings(ticket, service) { return { ...(await base.settings(ticket, service)), ...(testCommand ? { testCommand } : {}) }; },
+    async settings(service) { return { ...(await base.settings(service)), ...(testCommand ? { testCommand } : {}) }; },
     async prepareWorkdir({ ticket, role, variant: key }) {
       const workdir = `${CONFIG.workdirRoot}/${key ? variantFolder(ticket.id, key) : ticket.id}`;
       prepared.push({ role, workdir });
@@ -211,7 +212,7 @@ test('no variant passed its tests: nothing is kept by itself, the owner chooses,
   assert.equal(waiting.state, 'waiting');
   assert.deepEqual(waiting.variants.map((v) => v.tests), ['failed', 'not_run']);
   const comments = (await t.tickets.comments(ticket.id)).map((c) => c.body);
-  assert.ok(comments.includes('No variant passed `npm test` in its own session: the harness pick keeps none, and the owner chooses in the inbox.'), comments.join('\n'));
+  assert.ok(comments.includes('No variant committed a change and passed `npm test` in its own session: the harness pick keeps none, and the owner chooses in the inbox.'), comments.join('\n'));
   assert.deepEqual(harnessWins(t.store.db, 'guestbook'), [{ type: 'bug', harness: 'claude-code', runs: 2, green: 0, wins: 0 }]);
   // The owner's choice is not a win of the pick.
   await t.engine.chooseVariant(waiting.id, 1, 'u1');
@@ -220,8 +221,25 @@ test('no variant passed its tests: nothing is kept by itself, the owner chooses,
   await t.engine.close();
 });
 
+test('a variant that commits nothing is not green, however little it spent: the one with a change is kept', async () => {
+  const effects = pickEffects([], []);
+  const t = await setup({ config: ENABLED, scripts: { authors: [variant('a1', true, 500)] }, effects: {
+    ...effects,
+    async variantChanges(input) { return input.workdir.endsWith('-1') ? { files: [], diff: '' } : (effects.variantChanges as NonNullable<FlowEffects['variantChanges']>)(input); },
+  } });
+  otherHarness(t, 'codex', [variant('a2', true, 20_000)]);
+  const ticket = await bug(t);
+  await t.engine.start(ticket.id, 'u1', undefined, ['claude-code', 'codex']);
+  await until(() => item(t, ticket.id)?.state === 'handled', 'the pick');
+  assert.equal(item(t, ticket.id)?.outcome?.chosen, 2);
+  const comments = (await t.tickets.comments(ticket.id)).map((c) => c.body);
+  assert.ok(comments.some((c) => c.startsWith('Variant 2 of 2 (codex) kept by the harness pick: its `npm test` passed, and it was the only one to pass; variant 1 stopped.')), comments.join('\n'));
+  await t.engine.settled();
+  await t.engine.close();
+});
+
 test('no test command declared: nothing can be green, the owner chooses, and the comment says why', async () => {
-  const t = await setup({ scripts: { authors: [variant('a1', null, 2_000), variant('a2', null, 3_000)] }, effects: pickEffects([], [], undefined) });
+  const t = await setup({ scripts: { authors: [variant('a1', null, 2_000), variant('a2', null, 3_000)] }, effects: pickEffects([], [], null) });
   const ticket = await bug(t);
   await t.engine.start(ticket.id, 'u1', undefined, ['claude-code', 'claude-code']);
   for (const s of t.startedSessions) assert.ok(s.input.prompt.includes(pickPrompt(undefined)));

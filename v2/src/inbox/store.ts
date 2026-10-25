@@ -222,9 +222,9 @@ export class InboxStore {
 
   // A ticket's run of variants for the owner's choice (issue #271), one
   // item per run, added once one variant is done.
-  addVariants(input: Base & Pick<VariantsItem, 'round' | 'variants'>): VariantsItem {
+  addVariants(input: Base & Pick<VariantsItem, 'round' | 'variants' | 'pick'>): VariantsItem {
     const id = `variants:${input.ticket}:${input.round}`;
-    this.#insert(id, 'variants', input, '', String(input.round), this.#now().toISOString(), { round: input.round, variants: input.variants, outcome: null });
+    this.#insert(id, 'variants', input, '', String(input.round), this.#now().toISOString(), { round: input.round, variants: input.variants, ...(input.pick ? { pick: true } : {}), outcome: null });
     return this.#get(id) as VariantsItem;
   }
 
@@ -237,9 +237,9 @@ export class InboxStore {
     return this.#of('variants', filter) as VariantsItem[];
   }
 
-  // True when this call handled it: the owner chooses once.
-  handleVariants(id: string, by: UserId, chosen: number): boolean {
-    return this.#settle(id, 'variants', by, { chosen, by, at: this.#now().toISOString() });
+  // True when this call handled it: the owner chooses once, or a harness pick keeps one by `measure`.
+  handleVariants(id: string, by: UserId, chosen: number, measure?: 'tokens' | 'time'): boolean {
+    return this.#settle(id, 'variants', by, { chosen, by, at: this.#now().toISOString(), ...(measure ? { measure } : {}) });
   }
 
   #of(kind: 'contract' | 'knowledge' | 'variants', filter: { readonly ticket?: string; readonly state?: 'waiting' | 'handled' }): NextInboxItem[] {

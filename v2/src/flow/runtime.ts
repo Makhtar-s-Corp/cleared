@@ -15,6 +15,7 @@ import { lstatSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { LeverStore } from '../consumption/levers.ts';
+import { loadPlanConfig } from '../lead/plans/runner.ts';
 import { contractPort, readContract } from '../../images/fake/fake.ts';
 import { Docker } from '../container/docker.ts';
 import type { PreviewTarget } from '../container/preview.ts';
@@ -74,6 +75,8 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       clean: (text) => cleanText(text, cleanOptions()),
       release: options.release ?? ((sessions) => new Docker().releaseStopped(sessions)),
       levers: new LeverStore(store.db, config.project),
+      // The plans' week stop holds a harness pick's variants too (issue #329).
+      weekStopPercent: loadPlanConfig(env).weekStopPercent,
     });
     engine.startTimer();
     // What the last process left running is stopped and put back (decision 12 of milestone 2).

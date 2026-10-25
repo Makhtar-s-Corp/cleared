@@ -89,6 +89,19 @@
 .choice:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .levers-note { margin: 10px 0 0; color: var(--danger-text); font-size: var(--text-sm); }
 
+/* The harness pick's wins (issue #329), under the grid: a table that
+   scrolls in its own box on a phone rather than the page. */
+.wins { margin-top: 16px; }
+.wins-sub { margin: 2px 0 12px; color: var(--text-muted); font-size: var(--text-sm); text-wrap: pretty; }
+.wins-scroll { overflow-x: auto; }
+.wins-table { width: 100%; border-collapse: collapse; font-size: var(--text-md); }
+.wins-table th { padding: 6px 12px 6px 0; color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-regular); text-align: left; border-bottom: 1px solid var(--hairline); }
+.wins-table td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--hairline); white-space: nowrap; }
+.wins-table tr:last-child td { border-bottom: 0; }
+.wins-table .n { text-align: right; }
+.wins-table .num { font-variant-numeric: tabular-nums; }
+.wins-empty { margin: 0; color: var(--text-muted); font-size: var(--text-md); }
+
 .consumption-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--hairline); color: var(--text-muted); font-size: var(--text-sm); }
 .consumption-foot p { margin: 0; }
 .foot-data { display: inline-flex; align-items: center; gap: 6px; }

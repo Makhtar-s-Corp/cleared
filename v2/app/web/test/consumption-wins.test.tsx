@@ -47,14 +47,14 @@ test('no pick ended yet: the panel says so, and draws no table', () => {
   const markup = render(en, 'en', { ...data(), wins: [] });
   assert.match(markup, /data-wins="empty"/);
   assert.doesNotMatch(markup, /<table class="wins-table">/);
-  assert.ok(shown(markup).includes('No harness pick has ended yet. Start one with several agents on a ticket.'));
+  assert.ok(shown(markup).includes('No harness pick has ended yet.'));
 });
 
 test('in French, every word of the panel is the catalog\'s', () => {
   const text = shown(render(fr, 'fr', { ...data(), wins: WINS }));
-  for (const expected of ['Quel agent l’emporte', 'Type de ticket', 'Agent', 'Lancés', 'Tests réussis', 'Gardés', 'Bug', 'Autre', 'Codex', 'Cursor'])
+  for (const expected of ["Quel agent l'emporte", 'Type de ticket', 'Agent', 'Lancés', 'Tests réussis', 'Gardés', 'Bug', 'Autre', 'Codex', 'Cursor'])
     assert.ok(text.includes(expected), expected);
-  assert.ok(shown(render(fr, 'fr', { ...data(), wins: [] })).includes('Aucun choix d’agent n’est encore terminé.'));
+  assert.ok(shown(render(fr, 'fr', { ...data(), wins: [] })).includes("Aucun choix d'agent n'est encore terminé."));
   for (const key of Object.keys(loadCatalog('consumption', 'en')).filter((k) => k.startsWith('consumption_win') || k.startsWith('consumption_type_')))
     assert.ok(key in loadCatalog('consumption', 'fr'), key);
 });

@@ -57,6 +57,20 @@ export const MIGRATIONS: readonly Migration[] = [
       addColumn(db, 'flow_inbox', 'step', 'TEXT');
     },
   },
+  {
+    // A variant names its harness, and a harness pick its ticket type, its
+    // tests, its tokens, its agent time and whether it was kept (issue #329).
+    version: 3, name: 'variants name their harness and the pick', tables: ['ticket_variants'],
+    up(db) {
+      addColumn(db, 'ticket_variants', 'harness', "TEXT NOT NULL DEFAULT 'claude-code'");
+      addColumn(db, 'ticket_variants', 'pick', 'INTEGER NOT NULL DEFAULT 0');
+      addColumn(db, 'ticket_variants', 'kind', "TEXT NOT NULL DEFAULT 'other'");
+      addColumn(db, 'ticket_variants', 'tests', 'TEXT');
+      addColumn(db, 'ticket_variants', 'tokens', 'INTEGER');
+      addColumn(db, 'ticket_variants', 'work_ms', 'INTEGER');
+      addColumn(db, 'ticket_variants', 'won', 'INTEGER NOT NULL DEFAULT 0');
+    },
+  },
 ];
 
 const exists = (db: DatabaseSync, table: string): boolean =>

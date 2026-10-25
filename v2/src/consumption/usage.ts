@@ -18,6 +18,8 @@
 // The projection is the cycle-average pace, as the reference screen says it:
 // the share used divided by the time since the window opened.
 import type { DatabaseSync } from 'node:sqlite';
+import type { HarnessWins } from '../api/types.ts';
+import { harnessWins } from '../flow/harness-pick.ts';
 import type { Harness } from '../session/contract.ts';
 import { modelChoices, type Levers } from './levers.ts';
 import { lastReading, latestQuota, type LastReading } from './quota.ts';
@@ -75,6 +77,7 @@ export type Consumption = {
   readonly days: readonly string[];                // oldest first, the last is today
   readonly harnesses: readonly HarnessConsumption[];
   readonly levers: LeverChoices;
+  readonly wins: readonly HarnessWins[];           // the harness pick's, per ticket type (issue #329, flow/harness-pick.ts)
 };
 
 // The projection of a window at the pace so far. `observedAt` is when the
@@ -194,5 +197,5 @@ export function consumption(db: DatabaseSync, input: {
       costTurns: { reported, turns },
     };
   });
-  return { at: input.now.toISOString(), timeZone: zone, days, harnesses, levers: leverChoices(input.levers, input.config) };
+  return { at: input.now.toISOString(), timeZone: zone, days, harnesses, levers: leverChoices(input.levers, input.config), wins: harnessWins(db, input.project) };
 }

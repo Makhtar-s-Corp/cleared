@@ -167,11 +167,11 @@ test('a migration that throws at the start stops the process with exit 64 and th
   readFile(path, (db) => { before = [schemaOf(db), rows(db)]; });
   const result = spawnSync(process.execPath, [new URL('./failing-start.ts', import.meta.url).pathname, path], { encoding: 'utf8' });
   assert.equal(result.status, 64, result.stderr);
-  assert.match(result.stderr, /^cleared-v2: migration 3 \(planted\) failed: planted failure; the ledger is left as it was/m);
+  assert.match(result.stderr, new RegExp(`^cleared-v2: migration ${LATEST + 1} \\(planted\\) failed: planted failure; the ledger is left as it was`, 'm'));
   // The real migrations ran before the planted one, each in its own
   // transaction; the planted one left nothing.
   readFile(path, (db) => {
-    assert.deepEqual((db.prepare('SELECT version FROM v2_schema ORDER BY version').all() as { version: number }[]).map((r) => r.version), [1, 2]);
+    assert.deepEqual((db.prepare('SELECT version FROM v2_schema ORDER BY version').all() as { version: number }[]).map((r) => r.version), MIGRATIONS.map((m) => m.version));
     assert.equal(columnsOf(db, 'sessions').includes('planted'), false);
     const old = before as [unknown, Rows];
     assert.deepEqual(rows(db, Object.fromEntries(Object.keys(old[1]).map((t) => [t, columnsOf(db, t).filter((c) => !['service', 'preview_key', 'step'].includes(c))]))), old[1]);
@@ -189,7 +189,7 @@ test('a fresh ledger: the migrations wait for their tables, run after applyTable
     applyTables(store.db, users.tables);
     assert.deepEqual((store.db.prepare('SELECT version FROM v2_schema').all() as { version: number }[]).map((r) => r.version), [1]);
     applyTables(store.db, ALL_TABLES);
-    assert.deepEqual((store.db.prepare('SELECT version FROM v2_schema').all() as { version: number }[]).map((r) => r.version), [1, 2]);
+    assert.deepEqual((store.db.prepare('SELECT version FROM v2_schema').all() as { version: number }[]).map((r) => r.version), [1, 2, 3]);
     assert.ok(columnsOf(store.db, 'flow_inbox').includes('service') && columnsOf(store.db, 'flow_inbox').includes('step'));
     recordWorkspaceOf(store.db, ENV, () => '2026-10-23T08:00:00.000Z');
     assert.deepEqual({ ...store.db.prepare('SELECT id, name, created_at FROM workspaces').get() as object }, { id: 'guestbook', name: 'guestbook', created_at: '2026-10-23T08:00:00.000Z' });

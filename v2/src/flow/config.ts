@@ -10,6 +10,7 @@ import { isAbsolute, join } from 'node:path';
 import { ServiceError, parseServices, type ServiceSpec } from '../container/services.ts';
 import { parseCommand } from '../session/policy.ts';
 import { parseEditorHost } from './editor-link.ts';
+import { pickHarnessesOf, type PickHarness } from './harness-pick.ts';
 import { WorkspaceError, loadWorkspace, parseConf, serviceNameOf, type Sections, type WorkspaceConfig } from '../workspace/config.ts';
 
 // The format of agents.conf is read by workspace/config.ts, which reads the
@@ -59,6 +60,10 @@ export type FlowConfig = {
   // takes QUESTION_TIMEOUT_MINUTES and QUESTION_LEAD_MINUTES.
   readonly questionTimeoutMs?: number;
   readonly questionLeadMs?: number;
+  // The harnesses a harness pick may run (issue #329), each with its model
+  // when named: CLEARED_V2_PICK_HARNESSES. loadFlowConfig always sets it; a
+  // configuration written without it allows Claude Code alone (PICK_DEFAULT).
+  readonly pickHarnesses?: readonly PickHarness[];
 };
 
 // How long a team's question waits for the owner before the lead decides
@@ -201,6 +206,7 @@ export function loadFlowConfig(env: NodeJS.ProcessEnv = process.env): FlowConfig
   const minutes = positive(env.CLEARED_V2_IDLE_MINUTES, 'CLEARED_V2_IDLE_MINUTES', false) ?? 15;
   const editor = editorHost(env.CLEARED_V2_EDITOR_SSH_HOST);
   const question = positive(env.CLEARED_V2_QUESTION_TIMEOUT_MINUTES, 'CLEARED_V2_QUESTION_TIMEOUT_MINUTES', false) ?? QUESTION_TIMEOUT_MINUTES;
+  const pickHarnesses = pickHarnessesOf(env.CLEARED_V2_PICK_HARNESSES);
   return {
     project: workspace.id, projectDir: first.dir, repoUrl: first.url, repo: first.repo,
     base: first.base, workdirRoot,
@@ -216,6 +222,7 @@ export function loadFlowConfig(env: NodeJS.ProcessEnv = process.env): FlowConfig
     workspace,
     authorTools: true,
     steps: true,
+    pickHarnesses,
   };
 }
 

@@ -52,7 +52,7 @@ test('kept by the pick: the line says which variant, on which agent, by tokens o
   const time = shown(renderDetail(viewOf(pick({ chosen: 2, by: 'cleared-v2', at: FIXTURE_NOW.toISOString(), measure: 'time' })), en));
   assert.match(time, /its tests passed in the shortest time\./);
   const french = shown(renderDetail(viewOf(pick({ chosen: 2, by: 'cleared-v2', at: FIXTURE_NOW.toISOString(), measure: 'tokens' }), 'fr'), fr));
-  assert.match(french, /Variante 2 \(Codex\) gardée par le choix d’agent à \d\d:\d\d : ses tests sont passés avec le moins de jetons\. Les autres ont été arrêtées\./);
+  assert.match(french, /Variante 2 \(Codex\) gardée par le choix d'agent à \d\d:\d\d\u00a0: ses tests sont passés avec le moins de jetons\. Les autres ont été arrêtées\./);
   for (const expected of ['Tests réussis', 'Tests échoués', '31 200 jetons']) assert.ok(french.replace(/\s/g, ' ').includes(expected), expected);
 });
 

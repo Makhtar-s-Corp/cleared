@@ -1,4 +1,4 @@
-// A start whose third migration throws, as main.ts starts: the store opened,
+// A start whose migration after the real ones throws, as main.ts starts: the store opened,
 // then the modules' tables created by applyTables, which runs the migrations.
 //   node failing-start.ts <ledger.db>
 import approval from '../../src/modules/approval.ts';
@@ -13,6 +13,6 @@ import { applyTables, openStore } from '../../src/store/db.ts';
 import { MIGRATIONS } from '../../src/store/migrations.ts';
 
 const store = openStore(process.argv[2] as string);
-const planted = { version: 3, name: 'planted', tables: ['sessions'], up: () => { throw new Error('planted failure'); } };
+const planted = { version: MIGRATIONS.length + 1, name: 'planted', tables: ['sessions'], up: () => { throw new Error('planted failure'); } };
 applyTables(store.db, [sessions, users, tickets, flow, approval, inbox, lead, notify].flatMap((module) => module.tables), [...MIGRATIONS, planted]);
 console.log('not reached');

@@ -8,7 +8,7 @@
 //
 // Every number and date is said through Intl in the page's language and
 // every duration through lib/time.ts, never as raw milliseconds or ISO text.
-import type { Consumption, HarnessConsumption, LeverChoices, LeversChange, Projection, Quota } from '../../../../src/api/types.ts';
+import type { Consumption, HarnessConsumption, HarnessWins, LeverChoices, LeversChange, Projection, Quota } from '../../../../src/api/types.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
 import { duration } from '../../lib/time.ts';
@@ -46,7 +46,9 @@ export function readFailure(error: unknown): string {
 // ------------------------------------------------------------------ words
 
 const HARNESSES = new Set(['claude-code', 'codex']);
-export const harnessName = (harness: string, t: Translate): string => (HARNESSES.has(harness) ? t(`consumption_harness_${harness}`) : harness);
+// Cursor is named by the harness pick's wins (issue #329); the cards show Claude Code and Codex.
+const NAMED = new Set([...HARNESSES, 'cursor']);
+export const harnessName = (harness: string, t: Translate): string => (NAMED.has(harness) ? t(`consumption_harness_${harness}`) : harness);
 export const harnessMaker = (harness: string, t: Translate): string => (HARNESSES.has(harness) ? t(`consumption_maker_${harness}`) : '');
 
 // "Opus 5.5" from "claude-opus-5-5": the names are the makers', not translated.
@@ -242,3 +244,20 @@ export function leverViews(levers: LeverChoices, t: Translate): LeverView[] {
 // "Mesuré le ven. 23 oct., 23:40": when the page's figures were read.
 export const measuredAt = (data: Pick<Consumption, 'at' | 'timeZone'>, language: Language, t: Translate): string =>
   t('consumption_measured', { when: moment(data.at, data.timeZone, language) });
+
+// ------------------------------------------------------------------ the harness pick's wins
+
+const TYPE_ORDER: readonly HarnessWins['type'][] = ['bug', 'review', 'ci', 'question', 'other'];
+const HARNESS_ORDER: readonly string[] = ['claude-code', 'codex', 'cursor'];
+
+export type WinRow = { readonly key: string; readonly type: string; readonly harness: string; readonly runs: string; readonly green: string; readonly wins: string };
+
+// The wins of the harness pick (issue #329), a row per ticket type and
+// agent: in the types' order, and within a type the agent kept most often
+// first, then the one whose tests passed most often.
+export function winRows(wins: readonly HarnessWins[], t: Translate, language: Language = 'en'): WinRow[] {
+  const count = (n: number) => new Intl.NumberFormat(language).format(n);
+  return [...wins]
+    .sort((a, b) => TYPE_ORDER.indexOf(a.type) - TYPE_ORDER.indexOf(b.type) || b.wins - a.wins || b.green - a.green || HARNESS_ORDER.indexOf(a.harness) - HARNESS_ORDER.indexOf(b.harness))
+    .map((w) => ({ key: `${w.type}:${w.harness}`, type: t(`consumption_type_${w.type}`), harness: harnessName(w.harness, t), runs: count(w.runs), green: count(w.green), wins: count(w.wins) }));
+}

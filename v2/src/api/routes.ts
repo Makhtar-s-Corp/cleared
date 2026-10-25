@@ -12,7 +12,7 @@ import { sameProof } from '../modules/users.ts';
 import type { Registry, Route, RouteContext } from '../modules/registry.ts';
 import { workspaceOf } from '../flow/config.ts';
 import { CLOSE_REASON_MAX, FlowError, type FlowEngine } from '../flow/engine.ts';
-import type { Decision, UserId } from '../session/contract.ts';
+import type { Decision, Harness, UserId } from '../session/contract.ts';
 import { TicketError } from '../tickets/contract.ts';
 import { publicWorkspace } from '../workspace/config.ts';
 import { changeHub, streamChanges } from './events.ts';
@@ -182,14 +182,19 @@ export function createApiRoutes(deps: ApiDeps): Route[] {
         // 2 to 4 authors at once (issue #271), refused before the ticket exists.
         const variants = body.variants;
         if (variants !== undefined && (typeof variants !== 'number' || !Number.isInteger(variants))) throw new HttpError(400, 'variants is a whole number');
-        const refused = variants === undefined || variants === 1 ? undefined : engine.variantsRefusal(variants);
+        // The harness pick (issue #329): a variant per harness named, refused before the ticket exists too.
+        const harnesses = body.harnesses;
+        if (harnesses !== undefined && (!Array.isArray(harnesses) || harnesses.some((h) => typeof h !== 'string'))) throw new HttpError(400, 'harnesses is a list of harness names');
+        if (harnesses !== undefined && variants !== undefined && variants !== harnesses.length) throw new HttpError(400, `variants says ${variants as number} and harnesses names ${harnesses.length}`);
+        const spec = (harnesses as Harness[] | undefined) ?? (variants as number | undefined);
+        const refused = spec === undefined || spec === 1 ? undefined : engine.variantsRefusal(spec);
         if (refused) throw new HttpError(400, refused);
         const input: CreateTicketBody = {
           title, project, ...(bodyText === undefined ? {} : { body: bodyText }), ...(labels === undefined ? {} : { labels: labels as string[] }),
           ...(services === undefined ? {} : { services }),
         };
         const ticket = await engine.registry.ticketStore.create(input, { kind: 'human', id: user as UserId });
-        void engine.begin(ticket.id, user as UserId, undefined, variants as number | undefined);
+        void engine.begin(ticket.id, user as UserId, undefined, spec);
         send(c.response, 200, ticket);
       }),
     },
