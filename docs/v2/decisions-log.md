@@ -6551,7 +6551,7 @@ The behaviour is the same either way.
 
 **Captures.** `docs/v2/weekly/`, the panel on the fixtures: English at 1440, 1280, 768 and 390, light and dark, and French at 1440 and 390, taken by `app/test/consumption/week-browser.test.ts` with `CLEARED_V2_SHOTS`. Ten files, 371,250 bytes; `pngquant` and `optipng` are not installed on this host, so they are not compressed. A first set at 390 showed the table scrolling inside the panel; the phone rule above came from it, and the set was taken again.
 
-**Checks** (after the merge of `origin/v2` at `8a52fa6`, pull requests 393 and 395 merged). `npm run typecheck` passes. `npm test`: 2366 Node tests, 2266 pass, 100 skipped, 0 fail, and 355 Vitest tests pass. In Chromium: this lane's browser file (2 of 2), and with it `consumption-browser`, `wins-browser`, `a11y-browser` (axe), `redesign-browser` and `phone-fit-browser`: 30 of 30. `npm run guard -- --base origin/v2`: see the pull request.
+**Checks** (after the merge of `origin/v2` at `8a52fa6`, pull requests 393 and 395 merged). `npm run typecheck` passes. `npm test`: 2366 Node tests, 2266 pass, 100 skipped, 0 fail, and 355 Vitest tests pass. In Chromium, the CI's browser list with this lane's file, the notify file left out for the host reason already logged: 84 of 84, `a11y-browser`'s axe pass over the Consumption screen included; after the keys' rename, this lane's file and `consumption-browser` again: 6 of 6. `npm run guard -- --base origin/v2`: nothing refused (782 v2 files, and the lines added since `origin/v2`).
 
 **Resources.** No Docker object, no Claude Code login read, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no port but the tests' own ephemeral loopback ones, no tunnel, no secret.
 
