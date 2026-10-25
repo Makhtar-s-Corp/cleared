@@ -21,6 +21,8 @@
 import type { LeversChange } from '../consumption/levers.ts';
 import type { TicketCost } from '../consumption/ticket-cost.ts';
 import type { Consumption, HarnessConsumption, LeverChoices, Projection, Quota } from '../consumption/usage.ts';
+import type { ServiceMap, ServiceMapDatabase, ServiceMapLink, ServiceMapPlace, ServiceMapProblem, ServiceMapService } from '../map/build.ts';
+import type { Impact, ImpactCaller, ServiceImpact } from '../map/impact.ts';
 import type { Decision, Harness, Role, SessionId, UserId } from '../session/contract.ts';
 import type { ContextShare, Question, SessionEvent, SessionPhase, SessionState, ToolInput } from '../session/events.ts';
 import type { Verdict } from '../session/policy.ts';
@@ -838,6 +840,9 @@ export type ApiRoutes = {
   // Milestone 3, whether the proof receipt takes captures: the human's choice on the ticket (P226, issue #368, flow/proof-routes.ts).
   'GET /api/tickets/:id/captures': { readonly body: null; readonly response: CaptureChoice };
   'POST /api/tickets/:id/captures': { readonly body: CaptureChoiceBody; readonly response: CaptureChoice };
+  // Milestone 4, the service map (M6, issue #397, map/routes.ts): built at the first read; the refresh for a known user.
+  'GET /api/service-map': { readonly body: null; readonly response: ServiceMap };
+  'POST /api/service-map/refresh': { readonly body: null; readonly response: ServiceMap };
 };
 
 export type ApiRoute = keyof ApiRoutes;
@@ -912,8 +917,11 @@ const routes = {
   'GET /api/tickets/:id/production': true,
   'GET /api/tickets/:id/captures': true,
   'POST /api/tickets/:id/captures': true,
+  'GET /api/service-map': true,
+  'POST /api/service-map/refresh': true,
 } satisfies Record<ApiRoute, true>;
 export type { Consumption, HarnessConsumption, LeverChoices, LeversChange, Projection, Quota, TicketCost };
+export type { Impact, ImpactCaller, ServiceImpact, ServiceMap, ServiceMapDatabase, ServiceMapLink, ServiceMapPlace, ServiceMapProblem, ServiceMapService };
 export const API_ROUTES = Object.keys(routes) as ApiRoute[];
 
 // The preview route: lane 15 serves it (container/preview.ts), not the flow's API.
@@ -940,6 +948,9 @@ export const TERMINAL_ROUTES: readonly ApiRoute[] = [   // lane 31, terminal/ an
 
 // The routes of the Consumption screen (milestone 3, O15) and a ticket's cost (P211): the lead module's, with the schedules'.
 export const CONSUMPTION_ROUTES: readonly ApiRoute[] = ['GET /api/consumption', 'POST /api/consumption/levers', 'GET /api/tickets/:id/cost'];
+
+// The routes of the service map (milestone 4, M6): the lead module's.
+export const MAP_ROUTES: readonly ApiRoute[] = ['GET /api/service-map', 'POST /api/service-map/refresh'];
 
 // The routes milestone 2 adds: the lead module's (lanes 5 and 7), not the flow's.
 export const MILESTONE_2_ROUTES: readonly ApiRoute[] = API_ROUTES.filter((route) => route.includes('/api/lead') || route.includes('/api/plans'));

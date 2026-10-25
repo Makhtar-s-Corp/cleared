@@ -17,6 +17,8 @@ export const LEAD_TICKET = 'lead';
 export const LEAD_TOOL_NAMES = [
   'state', 'ticket', 'session', 'search_memory', 'propose_plan', 'start_ticket', 'stop_session',
   'message_session', 'answer_question', 'commit', 'fulfil', 'tell_owner', 'handover',
+  // The service map's (docs/v2/milestone-4-plan.md, section 11), whose handler is map/tools.ts's.
+  'service_impact',
 ] as const;
 export type LeadToolName = (typeof LEAD_TOOL_NAMES)[number];
 
@@ -46,6 +48,7 @@ export type LeadToolInput = {
   readonly fulfil: { readonly id: string; readonly note: string };
   readonly tell_owner: { readonly text: string };
   readonly handover: { readonly summary: string };
+  readonly service_impact: { readonly services: readonly string[] };
 };
 
 // What each handler answers. The reading tools answer cleaned text, cut at
@@ -64,6 +67,7 @@ export type LeadToolOutput = {
   readonly fulfil: { readonly id: string; readonly state: 'done' };
   readonly tell_owner: { readonly seq: number };
   readonly handover: { readonly id: string };
+  readonly service_impact: string;
 };
 
 export type LeadToolDefinition = {
@@ -174,12 +178,17 @@ export const LEAD_TOOLS: readonly LeadToolDefinition[] = [
     description: 'When asked to hand over: write what the structured record cannot know, what the owner last asked, the tone, and what you were about to do. Accepted once per generation.',
     inputSchema: object({ summary: text('Your account, at most 4 KB.') }),
   },
+  {
+    name: 'service_impact',
+    description: 'What a change of these services reaches, from the service map read at each base branch: who calls them, directly and through others, who listens to their events, who shares their databases, which callers must change with a contract, and the landing order. Call it before you propose a plan that changes a service, and give a ticket a step on each service that must change.',
+    inputSchema: object({ services: { type: 'array', items: text('A service name of the workspace.'), description: 'The services the goal changes.' } }),
+  },
 ];
 
 // The largest answer of each reading tool, in bytes (section 4.1): one
 // answer stays far below the distance between the handover point and the
 // threshold.
-export const ANSWER_CAPS: Readonly<Partial<Record<LeadToolName, number>>> = { state: 2048, ticket: 8192, session: 8192, search_memory: 8192 };
+export const ANSWER_CAPS: Readonly<Partial<Record<LeadToolName, number>>> = { state: 2048, ticket: 8192, session: 8192, search_memory: 8192, service_impact: 8192 };
 
 // Text cut to at most `limit` bytes of UTF-8, never half a character, with
 // a last line saying how many bytes went.
