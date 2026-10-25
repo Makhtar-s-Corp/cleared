@@ -7,7 +7,7 @@
   "environment_state_ready": "Ready",
   "environment_state_stale": "Out of date",
   "environment_state_failed": "Failed",
-  "environment_devcontainer_none": "No .devcontainer: built on Cleared's session image.",
+  "environment_no_devcontainer": "No .devcontainer: built on Cleared's session image.",
   "environment_devcontainer_image": "Built on the image its .devcontainer names.",
   "environment_devcontainer_dockerfile": "Built from the Dockerfile its .devcontainer names.",
   "environment_unreadable": "Its base branch is not fetched yet.",

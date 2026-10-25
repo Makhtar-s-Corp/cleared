@@ -68,7 +68,7 @@ test('each service\'s image is said, then a session on the newest ready one is t
     const made = await install();
     const before = made.fake.calls.length;
     const lines = await imagesChecks({ env: made.env, language, docker: made.docker, now: () => NOW, clock: clock() });
-    const by = Object.fromEntries(lines.filter((line) => line.id === 'image').map((line) => [line.text.split(/[ :]/)[0], line]));
+    const by = Object.fromEntries(lines.filter((line) => line.id === 'image').map((line) => [line.text.split(/[\s:]/)[0], line]));
     assert.deepEqual(Object.keys(by).sort(), ['api', 'jobs', 'old', 'web'], language);
     assert.equal(by.api?.level, 'ok');
     assert.match(by.api?.text ?? '', /cleared-v2-prep-api:[0-9a-f]{16}/);

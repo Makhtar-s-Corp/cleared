@@ -27,7 +27,7 @@ export function environmentSummary(t: Translate, view: EnvironmentView): string 
 }
 
 function ServiceLine({ t, service, now }: { readonly t: Translate; readonly service: EnvironmentService; readonly now: Date }) {
-  const what = !service.readable ? t('environment_unreadable') : service.devcontainer ? t(`environment_devcontainer_${service.devcontainer}`) : '';
+  const what = !service.readable ? t('environment_unreadable') : service.devcontainer ? t(service.devcontainer === 'none' ? 'environment_no_devcontainer' : `environment_devcontainer_${service.devcontainer}`) : '';
   return (
     <li className="setup-env-item" data-state={service.state} data-service={service.name}>
       <span className="setup-env-state">{t(`environment_state_${service.state}`)}</span>

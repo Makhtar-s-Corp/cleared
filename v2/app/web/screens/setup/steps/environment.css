@@ -4,7 +4,7 @@
    only sign. Tokens of app/DESIGN.md only. */
 .setup-step .setup-env-summary { font-weight: var(--weight-strong); }
 .setup-env { list-style: none; margin: var(--space-2) 0 var(--space-3); padding: 0; display: flex; flex-direction: column; gap: 6px; max-width: 820px; }
-.setup-env-item { display: grid; grid-template-columns: 120px minmax(0, 1fr); gap: 4px 16px; padding: 10px 12px; border-radius: var(--radius); box-shadow: inset 3px 0 0 var(--hairline); }
+.setup-env-item { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: 4px 16px; padding: 10px 12px; border-radius: var(--radius); box-shadow: inset 3px 0 0 var(--hairline); }
 .setup-env-item[data-state="ready"] { box-shadow: inset 3px 0 0 var(--success); }
 .setup-env-item[data-state="failed"] { background: var(--sunken); box-shadow: inset 3px 0 0 var(--danger-text); }
 .setup-env-item[data-state="building"], .setup-env-item[data-state="stale"] { box-shadow: inset 3px 0 0 var(--awaiting); }

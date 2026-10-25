@@ -7,7 +7,7 @@
   "environment_state_ready": "Prête",
   "environment_state_stale": "Périmée",
   "environment_state_failed": "Échec",
-  "environment_devcontainer_none": "Pas de .devcontainer\u00a0: construite sur l'image de session de Cleared.",
+  "environment_no_devcontainer": "Pas de .devcontainer\u00a0: construite sur l'image de session de Cleared.",
   "environment_devcontainer_image": "Construite sur l'image que nomme son .devcontainer.",
   "environment_devcontainer_dockerfile": "Construite depuis le Dockerfile que nomme son .devcontainer.",
   "environment_unreadable": "Sa branche de base n'est pas encore récupérée.",
