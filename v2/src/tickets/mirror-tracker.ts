@@ -1,7 +1,8 @@
 // What a tracker gives the mirror (tickets/mirror.ts): its issues changed
 // since a time, each with its state in the app's names and who made each
-// change of state; and the three writes the mirror makes on it. GitHub
-// Issues (mirror-github.ts) and Linear (mirror-linear.ts) implement it.
+// change of state, title or description; its comments since a time; and the
+// four writes the mirror makes on it. GitHub Issues (mirror-github.ts) and
+// Linear (mirror-linear.ts) implement it.
 
 // A change of an issue's state, as the tracker recorded it: by the mirror's
 // own account, by a person, or by an agent (a bot, an integration, or an
@@ -11,6 +12,26 @@ export type TrackerChange = {
   readonly actor: 'mirror' | 'person' | 'agent';
   readonly who: string;
   readonly at: string;
+};
+
+// A change of an issue's title or description (P237), when the tracker
+// names who made it; GitHub names no one for a description.
+export type TrackerEdit = {
+  readonly field: 'title' | 'body';
+  readonly actor: TrackerChange['actor'];
+  readonly who: string;
+  readonly at: string;
+};
+
+// A comment on an issue, read by its own time: a comment does not always
+// change its issue's.
+export type TrackerComment = {
+  readonly id: string;
+  readonly issue: string;                         // the issue's id, as TrackerIssue.id
+  readonly body: string;
+  readonly actor: TrackerChange['actor'];
+  readonly who: string;
+  readonly at: string;                            // its creation
 };
 
 export type TrackerIssue = {
@@ -24,6 +45,7 @@ export type TrackerIssue = {
   readonly createdAt: string;
   readonly updatedAt: string;
   readonly changes: readonly TrackerChange[];     // oldest first
+  readonly edits: readonly TrackerEdit[];         // oldest first
 };
 
 export interface Tracker {
@@ -33,7 +55,9 @@ export interface Tracker {
   changed(since: string): Promise<TrackerIssue[]>;
   create(input: { readonly title: string; readonly body: string; readonly labels: readonly string[]; readonly status: string }): Promise<TrackerIssue>;
   move(id: string, status: string): Promise<void>;
-  comment(id: string, body: string): Promise<void>;
+  edit(id: string, fields: { readonly title?: string; readonly body?: string }): Promise<void>;
+  comment(id: string, body: string): Promise<string>;           // the comment's id
+  commentsSince(since: string): Promise<TrackerComment[]>;    // updated since, oldest first
 }
 
 // A tracker's refusal or its silence. The message names the request, never

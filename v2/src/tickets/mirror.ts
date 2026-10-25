@@ -13,17 +13,23 @@
 // person: who made a change on the tracker is kept in mirror_applied and
 // read back by the rule. Its own writes on a tracker are kept in
 // mirror_writes, so that a stale read of one is not taken for a change.
+//
+// The follow-ups (issue #386, P237): a linked ticket's comments go both
+// ways, each once (mirror_comments keeps each pair); its title and its body
+// go both ways too, each settled by decide() against the value both sides
+// last agreed on (mirror_fields); and each write in the app says its ticket
+// to the change stream (MirrorDeps.changed), so an open page redraws.
 import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Language } from '../../app/src/catalog.ts';
 import { translator, type Translate } from '../../app/web/lib/i18n.ts';
 import type { UserId } from '../session/contract.ts';
-import type { Actor, Ticket, TicketId, TicketStore } from './contract.ts';
+import type { Actor, Comment, Ticket, TicketId, TicketStore } from './contract.ts';
 import { GitHubTracker } from './mirror-github.ts';
 import { LinearTracker } from './mirror-linear.ts';
-import type { Tracker, TrackerIssue } from './mirror-tracker.ts';
+import type { Tracker, TrackerComment, TrackerIssue } from './mirror-tracker.ts';
 
-export { TrackerError, type Tracker, type TrackerChange, type TrackerIssue } from './mirror-tracker.ts';
+export { TrackerError, type Tracker, type TrackerChange, type TrackerComment, type TrackerEdit, type TrackerIssue } from './mirror-tracker.ts';
 
 export const MIRROR_ACTOR: Actor = { kind: 'agents', id: 'cleared-mirror' };
 export const MIRROR_MESSAGES_DIR = new URL('./messages/', import.meta.url).pathname;
@@ -47,6 +53,28 @@ export const MIRROR_TABLES: string[] = [
   // The mirror's own writes of a state on a tracker, kept a day.
   'CREATE TABLE IF NOT EXISTS mirror_writes (tracker TEXT NOT NULL, issue TEXT NOT NULL, status TEXT NOT NULL, at TEXT NOT NULL)',
   'CREATE INDEX IF NOT EXISTS mirror_writes_issue ON mirror_writes(tracker, issue)',
+  // The follow-ups' tables (P237), new tables rather than new columns of the
+  // ones above. The time the mirror began following a link's comments and
+  // text: a comment older than it is not copied, either way.
+  'CREATE TABLE IF NOT EXISTS mirror_followed (ticket TEXT NOT NULL, tracker TEXT NOT NULL, since TEXT NOT NULL, PRIMARY KEY (ticket, tracker))',
+  // Per link and field (title, body): the value both sides last agreed on,
+  // and the tracker's as last read, with who made it, when.
+  `CREATE TABLE IF NOT EXISTS mirror_fields (
+  ticket TEXT NOT NULL, tracker TEXT NOT NULL, field TEXT NOT NULL, agreed TEXT NOT NULL,
+  remote TEXT NOT NULL, remote_kind TEXT NOT NULL, remote_who TEXT NOT NULL, remote_at TEXT NOT NULL,
+  PRIMARY KEY (ticket, tracker, field)
+)`,
+  // Who made, on a tracker, a title or a body the mirror wrote in the app.
+  `CREATE TABLE IF NOT EXISTS mirror_edits (
+  ticket TEXT NOT NULL, field TEXT NOT NULL, value TEXT NOT NULL, kind TEXT NOT NULL, who TEXT NOT NULL, tracker TEXT NOT NULL, at TEXT NOT NULL, applied_at TEXT NOT NULL
+)`,
+  'CREATE INDEX IF NOT EXISTS mirror_edits_ticket ON mirror_edits(ticket, field)',
+  // A comment's pair: its id in the app (none for the mirror's own comment
+  // on a tracker) and on the tracker.
+  `CREATE TABLE IF NOT EXISTS mirror_comments (
+  ticket TEXT NOT NULL, tracker TEXT NOT NULL, local TEXT, remote TEXT NOT NULL, at TEXT NOT NULL, UNIQUE (tracker, remote)
+)`,
+  'CREATE INDEX IF NOT EXISTS mirror_comments_local ON mirror_comments(tracker, local)',
 ];
 
 // ---- the rule ----------------------------------------------------------
@@ -57,7 +85,8 @@ export type Side = { readonly status: string; readonly kind: 'human' | 'agents';
 export type Verdict = 'none' | 'agree' | 'push' | 'pull';
 
 // push: the app's state is written on the tracker; pull: the tracker's in
-// the app. A remote of null is a state the app does not have (closed as not
+// the app. A field's text (P237) is settled the same way, its value in
+// place of the state. A remote of null is a state the app does not have (closed as not
 // planned, Canceled): it is never written in the app, and since a person
 // may have put it there, only the owner's change is written over it.
 export function decide(input: { readonly agreed: string; readonly local: Side; readonly remote: Side | null }): Verdict {
@@ -152,6 +181,8 @@ export type MirrorDeps = {
   readonly flow?: () => MirrorFlow | undefined;
   readonly now?: () => Date;
   readonly log?: (line: string) => void;
+  // A ticket the mirror wrote in the app (created, moved, edited, commented).
+  readonly changed?: (ticket: TicketId) => void;
 };
 
 // A tracker's list is read from a little before the last read, so that a
@@ -168,6 +199,8 @@ type Link = {
   readonly remote: string | null; readonly remoteKind: Side['kind']; readonly remoteWho: string; readonly remoteAt: string;
 };
 type Remote = Side & { readonly who: string };
+type Field = 'title' | 'body';
+const FIELDS: readonly Field[] = ['title', 'body'];
 
 const linkOf = (row: Row): Link => ({
   ticket: String(row.ticket), tracker: String(row.tracker), issue: String(row.issue), agreed: String(row.agreed),
@@ -252,6 +285,7 @@ export class Mirror {
       if (row) this.#read(tracker, linkOf(row), issue);
       else if (Date.parse(issue.createdAt) >= Date.parse(startedAt) && issue.status !== null) await this.#import(tracker, issue, issue.status);
     }
+    for (const comment of await tracker.commentsSince(since)) await this.#comeIn(tracker, comment);
     for (const ticket of await this.#deps.tickets.list({ project: this.#deps.project })) {
       if (Date.parse(ticket.createdAt) < Date.parse(startedAt) || !this.#holds(tracker, ticket) || this.#link(ticket.id, tracker.name)) continue;
       await this.#export(tracker, ticket);
@@ -259,7 +293,17 @@ export class Mirror {
     for (const row of this.#db.prepare('SELECT * FROM mirror_links WHERE tracker = ? ORDER BY rowid').all(tracker.name) as Row[]) {
       const link = linkOf(row);
       const ticket = await this.#deps.tickets.get(link.ticket);
-      if (ticket) await this.#settle(tracker, link, ticket);
+      if (!ticket) continue;
+      await this.#settle(tracker, link, ticket);
+      // A link made before the follow-ups' code is followed from now on.
+      const since = this.#followed(link.ticket, tracker.name);
+      if (since === undefined) {
+        this.#follow(link.ticket, tracker.name, this.#iso(), ticket);
+        continue;
+      }
+      const now = await this.#deps.tickets.get(link.ticket) ?? ticket;
+      await this.#settleFields(tracker, link, now);
+      await this.#goOut(tracker, link, now, since);
     }
     this.#db.prepare('UPDATE mirror_trackers SET read_at = ? WHERE tracker = ?').run(at, tracker.name);
     this.#db.prepare('DELETE FROM mirror_writes WHERE at < ?').run(new Date(Date.parse(at) - WRITES_KEPT_MS).toISOString());
@@ -277,6 +321,26 @@ export class Mirror {
     if (tracker.service === undefined) return true;
     const service = ticket.services?.[0]?.name ?? this.#deps.services[0];
     return service === undefined || service === tracker.service;
+  }
+
+  #changed(ticket: TicketId): void {
+    this.#deps.changed?.(ticket);
+  }
+
+  #followed(ticket: TicketId, tracker: string): string | undefined {
+    const row = this.#db.prepare('SELECT since FROM mirror_followed WHERE ticket = ? AND tracker = ?').get(ticket, tracker) as Row | undefined;
+    return row ? String(row.since) : undefined;
+  }
+
+  // Both sides agree on the text they hold now.
+  #follow(ticket: TicketId, tracker: string, since: string, text: { readonly title: string; readonly body: string }): void {
+    this.#db.prepare('INSERT OR IGNORE INTO mirror_followed (ticket, tracker, since) VALUES (?, ?, ?)').run(ticket, tracker, since);
+    const field = this.#db.prepare('INSERT OR IGNORE INTO mirror_fields (ticket, tracker, field, agreed, remote, remote_kind, remote_who, remote_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+    for (const name of FIELDS) field.run(ticket, tracker, name, text[name], text[name], 'agents', MIRROR_ACTOR.id, this.#iso());
+  }
+
+  #paired(ticket: TicketId, tracker: string, local: string | null, remote: string): void {
+    this.#db.prepare('INSERT OR IGNORE INTO mirror_comments (ticket, tracker, local, remote, at) VALUES (?, ?, ?, ?, ?)').run(ticket, tracker, local, remote, this.#iso());
   }
 
   #wrote(tracker: string, issue: string, status: string): void {
@@ -299,6 +363,7 @@ export class Mirror {
   }
 
   #read(tracker: Tracker, link: Link, issue: TrackerIssue): void {
+    this.#readFields(tracker, link, issue);
     if (issue.status === null) {
       this.#db.prepare('UPDATE mirror_links SET remote = NULL WHERE ticket = ? AND tracker = ?').run(link.ticket, tracker.name);
       return;
@@ -307,6 +372,19 @@ export class Mirror {
     // An older state the mirror wrote itself: a stale read, not a change.
     if (remote.echo && remote.status !== link.agreed) return;
     this.#setRemote(link, remote);
+  }
+
+  // The tracker's text as read, and who last changed each field. A field no
+  // one is named for (GitHub's description) reads as an agent's; a change
+  // by the mirror's account of a value it did not write is a person's.
+  #readFields(tracker: Tracker, link: Link, issue: TrackerIssue): void {
+    for (const field of FIELDS) {
+      const row = this.#db.prepare('SELECT remote FROM mirror_fields WHERE ticket = ? AND tracker = ? AND field = ?').get(link.ticket, tracker.name, field) as Row | undefined;
+      if (!row || String(row.remote) === issue[field]) continue;
+      const edit = [...issue.edits].reverse().find((e) => e.field === field);
+      this.#db.prepare('UPDATE mirror_fields SET remote = ?, remote_kind = ?, remote_who = ?, remote_at = ? WHERE ticket = ? AND tracker = ? AND field = ?')
+        .run(issue[field], edit && edit.actor !== 'agent' ? 'human' : 'agents', edit?.who ?? 'unknown', edit?.at ?? issue.updatedAt, link.ticket, tracker.name, field);
+    }
   }
 
   #setRemote(link: Pick<Link, 'ticket' | 'tracker'>, remote: Remote, agreed?: string): void {
@@ -333,6 +411,8 @@ export class Mirror {
     this.#applied(ticket.id, { ...remote, status }, tracker);
     this.#db.prepare('INSERT INTO mirror_links (ticket, tracker, issue, key, url, agreed, remote, remote_kind, remote_who, remote_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(ticket.id, tracker.name, issue.id, issue.key, issue.url, status, remote.status, remote.kind, remote.who, remote.at);
+    this.#follow(ticket.id, tracker.name, issue.createdAt, issue);
+    this.#changed(ticket.id);
     if (wanted === states.go) await this.#putBack(tracker, { ticket: ticket.id, tracker: tracker.name, issue: issue.id }, { ...ticket, status }, 'refused_go', wanted);
   }
 
@@ -341,6 +421,7 @@ export class Mirror {
     this.#wrote(tracker.name, made.id, ticket.status);
     this.#db.prepare('INSERT INTO mirror_links (ticket, tracker, issue, key, url, agreed, remote, remote_kind, remote_who, remote_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)')
       .run(ticket.id, tracker.name, made.id, made.key, made.url, ticket.status, ticket.status, 'agents', MIRROR_ACTOR.id, this.#iso());
+    this.#follow(ticket.id, tracker.name, ticket.createdAt, ticket);
   }
 
   // The app's side: who made the ticket's state. The mirror's own row is
@@ -399,13 +480,92 @@ export class Mirror {
     await this.#deps.tickets.move(ticket.id, remote.status, MIRROR_ACTOR);
     this.#applied(ticket.id, remote, tracker);
     this.#db.prepare('UPDATE mirror_links SET agreed = ? WHERE ticket = ? AND tracker = ?').run(remote.status, link.ticket, link.tracker);
+    this.#changed(ticket.id);
   }
 
   async #putBack(tracker: Tracker, link: Pick<Link, 'ticket' | 'tracker' | 'issue'>, ticket: Ticket, why: 'refused_go' | 'refused_approved' | 'refused_landing', asked: string): Promise<void> {
     await this.#push(tracker, link, ticket.status);
     const values = { state: asked, back: ticket.status, ticket: ticket.id };
     const text = why === 'refused_go' ? this.#t('refused_go', values) : why === 'refused_approved' ? this.#t('refused_approved', values) : this.#t('refused_landing', values);
-    await tracker.comment(link.issue, text);
+    this.#paired(link.ticket, tracker.name, null, await tracker.comment(link.issue, text));
+  }
+
+  // ---- the follow-ups: the text and the comments (P237) ---------------
+
+  // The app's side of a field: who made the value the mirror wrote, as
+  // mirror_edits keeps it; agents for a value the mirror did not write.
+  #localField(ticket: Ticket, field: Field): Side {
+    const row = this.#db.prepare('SELECT kind, at FROM mirror_edits WHERE ticket = ? AND field = ? AND value = ? ORDER BY rowid DESC LIMIT 1').get(ticket.id, field, ticket[field]) as Row | undefined;
+    return { status: ticket[field], kind: row?.kind === 'human' ? 'human' : 'agents', at: row ? String(row.at) : ticket.updatedAt };
+  }
+
+  // Each field as the state is (decide()); the tracker never edits a ticket
+  // the owner approved, and an empty title is not written in the app.
+  async #settleFields(tracker: Tracker, link: Link, ticket: Ticket): Promise<void> {
+    const back: [Field, string][] = [];
+    const fieldRow = this.#db.prepare('SELECT * FROM mirror_fields WHERE ticket = ? AND tracker = ? AND field = ?');
+    const remoteOf = this.#db.prepare('UPDATE mirror_fields SET remote = ?, remote_kind = ?, remote_who = ?, remote_at = ?, agreed = ? WHERE ticket = ? AND tracker = ? AND field = ?');
+    for (const field of FIELDS) {
+      const row = fieldRow.get(ticket.id, tracker.name, field) as Row | undefined;
+      if (!row) continue;
+      const local = this.#localField(ticket, field);
+      const remote: Remote = { status: String(row.remote), kind: row.remote_kind === 'human' ? 'human' : 'agents', who: String(row.remote_who), at: String(row.remote_at) };
+      const verdict = decide({ agreed: String(row.agreed), local, remote });
+      if (verdict === 'none') continue;
+      if (verdict === 'agree') {
+        this.#db.prepare('UPDATE mirror_fields SET agreed = ? WHERE ticket = ? AND tracker = ? AND field = ?').run(local.status, ticket.id, tracker.name, field);
+      } else if (verdict === 'push') {
+        await tracker.edit(link.issue, { [field]: local.status });
+        remoteOf.run(local.status, 'agents', MIRROR_ACTOR.id, this.#iso(), local.status, ticket.id, tracker.name, field);
+      } else if (field === 'title' && !remote.status.trim()) {
+        continue;
+      } else if (ticket.status === this.#deps.tickets.states.go) {
+        back.push([field, local.status]);
+      } else {
+        await this.#deps.tickets.edit(ticket.id, { [field]: remote.status }, MIRROR_ACTOR);
+        this.#db.prepare('INSERT INTO mirror_edits (ticket, field, value, kind, who, tracker, at, applied_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
+          .run(ticket.id, field, remote.status, remote.kind, remote.who, tracker.name, remote.at, this.#iso());
+        this.#db.prepare('UPDATE mirror_fields SET agreed = ? WHERE ticket = ? AND tracker = ? AND field = ?').run(remote.status, ticket.id, tracker.name, field);
+        this.#changed(ticket.id);
+      }
+    }
+    if (back.length === 0) return;
+    await tracker.edit(link.issue, Object.fromEntries(back));
+    for (const [field, value] of back) remoteOf.run(value, 'agents', MIRROR_ACTOR.id, this.#iso(), value, ticket.id, tracker.name, field);
+    this.#paired(ticket.id, tracker.name, null, await tracker.comment(link.issue, this.#t('refused_edit', { ticket: ticket.id })));
+  }
+
+  // A tracker's comment on a linked issue, written once in the app as the
+  // mirror, with who wrote it and where.
+  async #comeIn(tracker: Tracker, comment: TrackerComment): Promise<void> {
+    const link = this.#db.prepare('SELECT ticket FROM mirror_links WHERE tracker = ? AND issue = ?').get(tracker.name, comment.issue) as Row | undefined;
+    if (!link) return;
+    const ticket = String(link.ticket);
+    const since = this.#followed(ticket, tracker.name);
+    if (since === undefined || Date.parse(comment.at) < Date.parse(since)) return;
+    if (this.#db.prepare('SELECT 1 FROM mirror_comments WHERE tracker = ? AND remote = ?').get(tracker.name, comment.id)) return;
+    const made = await this.#deps.tickets.comment(ticket, `${this.#t('comment_in', { who: comment.who, tracker: tracker.title })}\n\n${comment.body}`, MIRROR_ACTOR);
+    this.#paired(ticket, tracker.name, made.id, comment.id);
+    this.#changed(ticket);
+  }
+
+  // Who wrote an app's comment, as its first line on a tracker.
+  #byLine(comment: Comment): string {
+    if (comment.by.kind === 'human') return this.#t('comment_out_owner', { who: comment.by.id });
+    if (comment.by.kind === 'other') return this.#t('comment_out_user');
+    return this.#t('comment_out_service');
+  }
+
+  // The app's comments not yet on this tracker. One that came from another
+  // tracker goes as it is; one that came from this one is paired already.
+  async #goOut(tracker: Tracker, link: Link, ticket: Ticket, since: string): Promise<void> {
+    const paired = this.#db.prepare('SELECT 1 FROM mirror_comments WHERE tracker = ? AND local = ?');
+    for (const comment of await this.#deps.tickets.comments(ticket.id)) {
+      if (Date.parse(comment.createdAt) < Date.parse(since) || paired.get(tracker.name, comment.id)) continue;
+      const mirrored = comment.by.kind === 'agents' && comment.by.id === MIRROR_ACTOR.id;
+      const remote = await tracker.comment(link.issue, mirrored ? comment.body : `${this.#byLine(comment)}\n\n${comment.body}`);
+      this.#paired(ticket.id, tracker.name, comment.id, remote);
+    }
   }
 }
 
@@ -416,6 +576,7 @@ export function createMirror(config: MirrorConfig | undefined, deps: {
   readonly db: DatabaseSync; readonly tickets: TicketStore; readonly project: string;
   readonly services: readonly { readonly name: string; readonly repo: string }[];
   readonly flow?: () => MirrorFlow | undefined; readonly now?: () => Date; readonly log?: (line: string) => void;
+  readonly changed?: (ticket: TicketId) => void;
 }): Mirror | undefined {
   if (!config) return undefined;
   const trackers: Tracker[] = [];
@@ -432,5 +593,6 @@ export function createMirror(config: MirrorConfig | undefined, deps: {
   return new Mirror({
     db: deps.db, tickets: deps.tickets, trackers, project: deps.project, services: deps.services.map((s) => s.name), language: config.language,
     ...(deps.flow ? { flow: deps.flow } : {}), ...(deps.now ? { now: deps.now } : {}), ...(deps.log ? { log: deps.log } : {}),
+    ...(deps.changed ? { changed: deps.changed } : {}),
   });
 }

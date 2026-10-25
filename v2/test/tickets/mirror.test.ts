@@ -1,6 +1,7 @@
-// The mirror's pass (P230 to P232, docs/v2/mirrors.md) on the real ticket
-// store, with a tracker kept in memory: what is created and moved each way,
-// who wins a conflict, and what a tracker never does through the mirror.
+// The mirror's pass (P230 to P232, P237, docs/v2/mirrors.md) on the real
+// ticket store, with a tracker kept in memory: what is created, moved,
+// edited and commented each way, who wins a conflict, what a tracker never
+// does through the mirror, and what the mirror says to an open page.
 import test from 'node:test';
 import { randomBytes } from 'node:crypto';
 import assert from 'node:assert/strict';
@@ -12,7 +13,8 @@ import type { TicketId } from '../../src/tickets/contract.ts';
 import { FlowError } from '../../src/flow/engine.ts';
 import { MIRROR_ACTOR, Mirror, MirrorConfigError, createMirror, loadMirrorConfig, type MirrorFlow } from '../../src/tickets/mirror.ts';
 import { scratch } from '../approval/harness.ts';
-import { AGENTS, Clock, HUMAN, MemoryTracker, openStore } from './mirror-support.ts';
+import { OWNER } from '../approval/harness.ts';
+import { AGENTS, Clock, GUEST_USER, HUMAN, MemoryTracker, openStore } from './mirror-support.ts';
 
 const PROJECT = 'guestbook';
 
@@ -21,11 +23,12 @@ function setup(options: { language?: 'fr' | 'en'; trackers?: (clock: Clock) => M
   const { db, store } = openStore(clock);
   const trackers = options.trackers ? options.trackers(clock) : [new MemoryTracker(clock)];
   const logs: string[] = [];
+  const said: TicketId[] = [];
   const mirror = new Mirror({
     db, tickets: store, trackers, project: PROJECT, services: options.services ?? [], language: options.language ?? 'fr',
-    now: clock.now, log: (line) => logs.push(line), ...(options.flow ? { flow: () => options.flow } : {}),
+    now: clock.now, log: (line) => logs.push(line), changed: (ticket) => said.push(ticket), ...(options.flow ? { flow: () => options.flow } : {}),
   });
-  return { clock, db, store, tracker: trackers[0] as MemoryTracker, trackers, mirror, logs };
+  return { clock, db, store, tracker: trackers[0] as MemoryTracker, trackers, mirror, logs, said };
 }
 
 // The tracker's issue linked to a ticket.
@@ -389,6 +392,225 @@ test('a tracker that fails is said in one line, and the other trackers go on', a
   s.clock.tick();
   await s.mirror.pass();
   assert.deepEqual(s.tracker.calls.filter((c) => c.startsWith('create')), ['create Newest entry first Todo'], 'created at the next pass');
+});
+
+// ---- comments, edits and the open page (P237, issue #386) ---------------
+
+const NB = ' ';
+const twoTrackers = (clock: Clock) => [new MemoryTracker(clock), new MemoryTracker(clock, { name: 'memory:other', title: 'GitHub' })];
+
+test('a comment in the app is written once on the tracker, saying who wrote it; one on the tracker once in the app, as the mirror', async () => {
+  const s = setup();
+  const { ticket, issue } = await linked(s);
+  s.clock.tick();
+  await s.store.comment(ticket.id, 'Please keep the old order behind a switch.', HUMAN);
+  await s.store.comment(ticket.id, 'Pull request #12 is open.', AGENTS);
+  await s.store.comment(ticket.id, 'Looks fine to me.', { kind: 'human', id: GUEST_USER as UserId });
+  s.tracker.say(issue, 'Sort them by date, please.');
+  s.clock.tick();
+  await s.mirror.pass();
+  assert.deepEqual(s.tracker.comments(issue), [
+    'Sort them by date, please.',
+    `${OWNER}, dans Cleared${NB}:\n\nPlease keep the old order behind a switch.`,
+    `Cleared${NB}:\n\nPull request #12 is open.`,
+    `Un utilisateur de Cleared${NB}:\n\nLooks fine to me.`,
+  ]);
+  const inApp = (await s.store.comments(ticket.id)).at(-1);
+  assert.equal(inApp?.body, `jane, sur Linear${NB}:\n\nSort them by date, please.`);
+  assert.deepEqual(inApp?.by, { kind: 'agents', id: MIRROR_ACTOR.id });
+  const row = s.db.prepare('SELECT actor_kind, proof FROM tracker_comments WHERE actor_id = ?').get(MIRROR_ACTOR.id);
+  assert.deepEqual({ ...row }, { actor_kind: 'agents', proof: null }, 'never a signed person\'s line');
+  s.clock.tick();
+  await s.mirror.pass();
+  assert.equal(s.tracker.comments(issue).length, 4, 'each once on the tracker');
+  assert.equal((await s.store.comments(ticket.id)).length, 4, 'and once in the app');
+});
+
+test('the comments\' first line follows the project\'s language', async () => {
+  const s = setup({ language: 'en' });
+  const { ticket, issue } = await linked(s);
+  s.clock.tick();
+  await s.store.comment(ticket.id, 'Pull request #12 is open.', AGENTS);
+  s.tracker.say(issue, 'Thanks.');
+  s.clock.tick();
+  await s.mirror.pass();
+  assert.deepEqual(s.tracker.comments(issue), ['Thanks.', 'Cleared:\n\nPull request #12 is open.']);
+  assert.equal((await s.store.comments(ticket.id)).at(-1)?.body, 'jane, on Linear:\n\nThanks.');
+});
+
+test('a comment from one tracker reaches the other as it is, and never comes back to its own', async () => {
+  const s = setup({ trackers: twoTrackers });
+  const other = s.trackers[1] as MemoryTracker;
+  const { ticket, issue } = await linked(s);
+  const otherIssue = issueOf(s.db, ticket.id, 'memory:other');
+  s.clock.tick();
+  s.tracker.say(issue, 'From Linear.');
+  other.say(otherIssue, 'From GitHub.', 'agent', 'github-actions[bot]');
+  s.clock.tick();
+  await s.mirror.pass();
+  s.clock.tick();
+  await s.mirror.pass();
+  assert.deepEqual(s.tracker.comments(issue), ['From Linear.', `github-actions[bot], sur GitHub${NB}:\n\nFrom GitHub.`]);
+  assert.deepEqual(other.comments(otherIssue), ['From GitHub.', `jane, sur Linear${NB}:\n\nFrom Linear.`]);
+  assert.equal((await s.store.comments(ticket.id)).length, 2);
+});
+
+test('the mirror\'s own comments on a tracker do not come into the app', async () => {
+  const s = setup();
+  const { ticket, issue } = await linked(s);
+  await s.store.move(ticket.id, 'Needs Approval', AGENTS);
+  s.clock.tick();
+  await s.mirror.pass();
+  s.clock.tick();
+  s.tracker.act(issue, 'Ready to Ship');
+  s.clock.tick();
+  await s.mirror.pass();
+  s.clock.tick();
+  await s.mirror.pass();
+  assert.equal(s.tracker.comments(issue).length, 1, 'the put-back\'s comment');
+  assert.deepEqual(await s.store.comments(ticket.id), []);
+});
+
+test('a link made before this code ran copies no older comment, and follows the ones after', async () => {
+  const s = setup();
+  const { ticket, issue } = await linked(s);
+  s.db.exec('DELETE FROM mirror_followed; DELETE FROM mirror_fields; DELETE FROM mirror_comments');
+  await s.store.comment(ticket.id, 'Old note.', AGENTS);
+  s.tracker.say(issue, 'Old remark.');
+  s.clock.tick();
+  await s.mirror.pass();
+  assert.deepEqual(s.tracker.comments(issue), ['Old remark.']);
+  assert.deepEqual((await s.store.comments(ticket.id)).map((c) => c.body), ['Old note.']);
+  s.clock.tick();
+  await s.store.comment(ticket.id, 'New note.', AGENTS);
+  s.tracker.say(issue, 'New remark.');
+  s.clock.tick();
+  await s.mirror.pass();
+  assert.deepEqual(s.tracker.comments(issue), ['Old remark.', 'New remark.', `Cleared${NB}:\n\nNew note.`]);
+  assert.deepEqual((await s.store.comments(ticket.id)).map((c) => c.body), ['Old note.', 'New note.', `jane, sur Linear${NB}:\n\nNew remark.`]);
+});
+
+test('a person\'s edit of the title or the description on the tracker is written in the app, as the mirror, and not written back', async () => {
+  const s = setup();
+  const { ticket, issue } = await linked(s);
+  const states = (await s.store.history(ticket.id)).length;
+  s.clock.tick();
+  s.tracker.editBy(issue, { title: 'Newest entries first', body: 'Sort by date, newest first.' });
+  s.clock.tick();
+  await s.mirror.pass();
+  const edited = await s.store.get(ticket.id);
+  assert.deepEqual([edited?.title, edited?.body], ['Newest entries first', 'Sort by date, newest first.']);
+  assert.equal((await s.store.history(ticket.id)).length, states, 'an edit is not a change of state');
+  const rows = (s.db.prepare('SELECT field, kind, who, tracker FROM mirror_edits WHERE ticket = ? ORDER BY rowid').all(ticket.id)).map((r) => ({ ...r }));
+  assert.deepEqual(rows, [
+    { field: 'title', kind: 'human', who: 'jane', tracker: 'memory:team' },
+    { field: 'body', kind: 'human', who: 'jane', tracker: 'memory:team' },
+  ]);
+  s.clock.tick();
+  await s.mirror.pass();
+  assert.deepEqual(s.tracker.calls.filter((c) => c.startsWith('edit')), [], 'nothing written back');
+});
+
+test('edits on two trackers: the later of two people wins on both, and a person beats a change no one is named for', async () => {
+  const s = setup({ trackers: twoTrackers });
+  const other = s.trackers[1] as MemoryTracker;
+  const { ticket, issue } = await linked(s);
+  const otherIssue = issueOf(s.db, ticket.id, 'memory:other');
+  s.clock.tick();
+  s.tracker.editBy(issue, { title: 'From Linear', body: 'Jane\'s words.' });
+  s.clock.tick(5);
+  other.editBy(otherIssue, { title: 'From GitHub' }, 'person', 'sam');
+  other.editBy(otherIssue, { body: 'Words no one is named for.' }, null);
+  s.clock.tick();
+  await s.mirror.pass();
+  s.clock.tick();
+  await s.mirror.pass();
+  const now = await s.store.get(ticket.id);
+  assert.deepEqual([now?.title, now?.body], ['From GitHub', 'Jane\'s words.']);
+  assert.deepEqual([s.tracker.issue(issue).title, s.tracker.issue(issue).body], ['From GitHub', 'Jane\'s words.']);
+  assert.deepEqual([other.issue(otherIssue).title, other.issue(otherIssue).body], ['From GitHub', 'Jane\'s words.']);
+  s.clock.tick();
+  await s.mirror.pass();
+  assert.equal(s.tracker.calls.filter((c) => c.startsWith('edit')).length + other.calls.filter((c) => c.startsWith('edit')).length, 2, 'settled: nothing more is written');
+});
+
+test('an approved ticket\'s title is not edited from the tracker: it is put back, with a comment', async () => {
+  const s = setup();
+  const { ticket, issue } = await linked(s);
+  const number = Number(ticket.id.slice('LOCAL-'.length));
+  s.clock.tick();
+  s.db.prepare('UPDATE tracker_tickets SET status = ? WHERE id = ?').run('Ready to Ship', number);
+  s.db.prepare("INSERT INTO tracker_history(ticket, status, actor_kind, actor_id, at) VALUES (?, 'Ready to Ship', 'human', 'demo', ?)").run(number, s.clock.iso);
+  s.clock.tick();
+  await s.mirror.pass();
+  s.clock.tick();
+  s.tracker.editBy(issue, { title: 'Changed after the approval', body: 'Other words.' });
+  s.clock.tick();
+  await s.mirror.pass();
+  const now = await s.store.get(ticket.id);
+  assert.deepEqual([now?.title, now?.body], ['Newest entry first', '']);
+  assert.deepEqual([s.tracker.issue(issue).title, s.tracker.issue(issue).body], ['Newest entry first', '']);
+  assert.equal(s.tracker.comments(issue).length, 1, 'one comment for both fields');
+  assert.match(s.tracker.comments(issue)[0] ?? '', /a reçu l'accord du propriétaire.*titre/s);
+  s.clock.tick();
+  await s.mirror.pass();
+  assert.equal(s.tracker.comments(issue).length, 1, 'said once');
+});
+
+test('a title left empty on the tracker is not written in the app', async () => {
+  const s = setup();
+  const { ticket, issue } = await linked(s);
+  s.clock.tick();
+  s.tracker.editBy(issue, { title: '  ' });
+  s.clock.tick();
+  await s.mirror.pass();
+  assert.equal((await s.store.get(ticket.id))?.title, 'Newest entry first');
+  assert.deepEqual(s.logs, []);
+});
+
+test('each write the mirror makes in the app says its ticket to an open page; a pass that writes nothing says nothing', async () => {
+  const s = setup();
+  await s.mirror.pass();
+  s.clock.tick();
+  const issue = s.tracker.open({ title: 'From the tracker', status: 'Todo' });
+  s.clock.tick();
+  await s.mirror.pass();
+  const [imported] = await s.store.list();
+  assert.ok(imported);
+  assert.deepEqual([...new Set(s.said)], [imported.id], 'a new ticket');
+  const step = async (what: string, act: () => void) => {
+    s.said.length = 0;
+    s.clock.tick();
+    act();
+    s.clock.tick();
+    await s.mirror.pass();
+    assert.deepEqual([...new Set(s.said)], [imported.id], what);
+  };
+  s.said.length = 0;
+  s.clock.tick();
+  await s.mirror.pass();
+  assert.deepEqual(s.said, [], 'nothing written, nothing said');
+  await step('a move', () => s.tracker.act(issue.id, 'In Progress'));
+  await step('a comment', () => { s.tracker.say(issue.id, 'Hello.'); });
+  await step('an edit', () => s.tracker.editBy(issue.id, { title: 'Renamed on the tracker' }));
+});
+
+test('the tickets module tells the change stream of each ticket the mirror wrote', async () => {
+  const { sayTicketChange } = await import('../../src/modules/tickets.ts');
+  const { ChangeHub, changeHub } = await import('../../src/api/events.ts');
+  const { setup: flowSetup, until } = await import('../flow/support.ts');
+  const t = await flowSetup();
+  const hub: InstanceType<typeof ChangeHub> = changeHub(t.engine);
+  const frames: string[] = [];
+  const leave = hub.join((frame) => frames.push(frame));
+  try {
+    sayTicketChange(() => t.engine)('LOCAL-7');
+    await until(() => frames.length === 1, 'the ticket\'s change');
+    assert.match(frames[0] as string, /"kind":"ticket","id":"LOCAL-7"/);
+    sayTicketChange(() => undefined)('LOCAL-8');
+  } finally {
+    leave();
+  }
 });
 
 test('the timer runs passes one at a time until close', async () => {

@@ -1,25 +1,33 @@
 // A fake of the part of Linear's GraphQL API the Linear mirror uses, on
 // loopback, port 0. It answers the mirror's named operations only, checks
 // that each query asks for the fields it answers with, and never needs a
-// real key: each token is an account of the fake.
+// real key: each token is an account of the fake. A comment does not change
+// its issue's time here: the mirror reads comments by their own.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
 type State = { id: string; name: string };
-type HistoryEntry = { createdAt: string; actor: { id: string; name: string } | null; botActor: { id: string; name: string } | null; toState: State | null };
+type Named = { id: string; name: string };
+type HistoryEntry = {
+  createdAt: string; actor: Named | null; botActor: Named | null; toState: State | null;
+  fromTitle: string | null; toTitle: string | null; updatedDescription: boolean | null;
+};
+type Comment = { id: string; body: string; createdAt: string; updatedAt: string; user: Named | null; botActor: Named | null; issueId: string };
 type Issue = {
   id: string; identifier: string; url: string; title: string; description: string | null;
-  createdAt: string; updatedAt: string; stateId: string; teamId: string; history: HistoryEntry[]; comments: { body: string; by: string }[];
+  createdAt: string; updatedAt: string; stateId: string; teamId: string; history: HistoryEntry[]; comments: Comment[];
 };
 export type FakeLinearActor = { readonly user: { id: string; name: string } } | { readonly bot: { id: string; name: string } };
 
 // The fields each operation must ask for, so that a query that drops one fails here.
 const ASKS: Record<string, readonly string[]> = {
   MirrorSetup: ['viewer', 'teams', 'states', 'name'],
-  MirrorIssues: ['issues', 'identifier', 'url', 'description', 'createdAt', 'updatedAt', 'state', 'history', 'actor', 'botActor', 'toState', 'pageInfo', 'hasNextPage', 'endCursor'],
+  MirrorIssues: ['issues', 'identifier', 'url', 'description', 'createdAt', 'updatedAt', 'state', 'history', 'actor', 'botActor', 'toState', 'fromTitle', 'toTitle', 'updatedDescription', 'pageInfo', 'hasNextPage', 'endCursor'],
   MirrorCreate: ['issueCreate', 'success', 'identifier', 'url', 'state', 'history'],
   MirrorMove: ['issueUpdate', 'success'],
-  MirrorComment: ['commentCreate', 'success'],
+  MirrorEdit: ['issueUpdate', 'success'],
+  MirrorComment: ['commentCreate', 'success', 'comment', 'id'],
+  MirrorComments: ['comments', 'body', 'createdAt', 'user', 'botActor', 'issue', 'pageInfo', 'hasNextPage', 'endCursor'],
 };
 
 export class FakeLinear {
@@ -32,6 +40,7 @@ export class FakeLinear {
   #accounts = new Map<string, { id: string; name: string }>();
   #clock: () => string;
   #next = 1;
+  #comment = 1;
 
   constructor(options: { readonly clock: () => string; readonly accounts: Record<string, { id: string; name: string }> }) {
     this.#clock = options.clock;
@@ -54,8 +63,11 @@ export class FakeLinear {
     return state;
   }
 
-  #entry(by: FakeLinearActor, toState: State | null): HistoryEntry {
-    return { createdAt: this.#clock(), actor: 'user' in by ? by.user : null, botActor: 'bot' in by ? by.bot : null, toState };
+  #entry(by: FakeLinearActor, toState: State | null, edit: Partial<Pick<HistoryEntry, 'fromTitle' | 'toTitle' | 'updatedDescription'>> = {}): HistoryEntry {
+    return {
+      createdAt: this.#clock(), actor: 'user' in by ? by.user : null, botActor: 'bot' in by ? by.bot : null, toState,
+      fromTitle: null, toTitle: null, updatedDescription: null, ...edit,
+    };
   }
 
   // An issue created on Linear by a person or an integration.
@@ -77,6 +89,31 @@ export class FakeLinear {
     issue.stateId = this.#state(state).id;
     issue.updatedAt = this.#clock();
     issue.history.push(this.#entry(by, this.#state(state)));
+  }
+
+  // A change of the title or the description: one history entry that says both.
+  edit(id: string, by: FakeLinearActor, fields: { title?: string; description?: string }): void {
+    const issue = this.issues.get(id);
+    if (!issue) throw new Error(`no issue ${id}`);
+    const retitled = fields.title !== undefined && fields.title !== issue.title;
+    const described = fields.description !== undefined && fields.description !== issue.description;
+    if (!retitled && !described) return;
+    const entry = this.#entry(by, null, {
+      ...(retitled ? { fromTitle: issue.title, toTitle: fields.title as string } : {}), ...(described ? { updatedDescription: true } : {}),
+    });
+    if (retitled) issue.title = fields.title as string;
+    if (described) issue.description = fields.description as string;
+    issue.updatedAt = this.#clock();
+    issue.history.push(entry);
+  }
+
+  comment(id: string, by: FakeLinearActor, body: string): Comment {
+    const issue = this.issues.get(id);
+    if (!issue) throw new Error(`no issue ${id}`);
+    const at = this.#clock();
+    const comment: Comment = { id: `comment-${this.#comment++}`, body, createdAt: at, updatedAt: at, user: 'user' in by ? by.user : null, botActor: 'bot' in by ? by.bot : null, issueId: id };
+    issue.comments.push(comment);
+    return comment;
   }
 
   stateOf(id: string): string | undefined {
@@ -133,6 +170,23 @@ export class FakeLinear {
       issue.history.push(this.#entry(by, state));
       return send(200, { data: { issueCreate: { success: true, issue: this.#view(issue) } } });
     }
+    if (operationName === 'MirrorComments') {
+      const filter = variables.filter as { issue: { team: { id: { eq: string } } }; updatedAt: { gte: string } };
+      const all = [...this.issues.values()].filter((i) => i.teamId === filter.issue.team.id.eq).flatMap((i) => i.comments)
+        .filter((c) => c.updatedAt >= filter.updatedAt.gte).sort((a, b) => a.updatedAt.localeCompare(b.updatedAt) || a.id.localeCompare(b.id));
+      const start = variables.after ? Number(variables.after) : 0;
+      const page = all.slice(start, start + Number(variables.first));
+      const end = start + page.length;
+      const nodes = page.map(({ issueId, updatedAt: _u, ...c }) => ({ ...c, issue: { id: issueId } }));
+      return send(200, { data: { comments: { nodes, pageInfo: { hasNextPage: end < all.length, endCursor: String(end) } } } });
+    }
+    if (operationName === 'MirrorEdit') {
+      const issue = this.issues.get(String(variables.id));
+      if (!issue) return send(200, { errors: [{ message: 'Entity not found' }] });
+      const input = variables.input as { title?: string; description?: string };
+      this.edit(issue.id, by, input);
+      return send(200, { data: { issueUpdate: { success: true } } });
+    }
     if (operationName === 'MirrorMove') {
       const issue = this.issues.get(String(variables.id));
       const state = this.states.find((s) => s.id === (variables.input as { stateId: string }).stateId);
@@ -143,7 +197,7 @@ export class FakeLinear {
     const input = variables.input as { issueId: string; body: string };
     const issue = this.issues.get(input.issueId);
     if (!issue) return send(200, { errors: [{ message: 'Entity not found' }] });
-    issue.comments.push({ body: input.body, by: viewer.id });
-    return send(200, { data: { commentCreate: { success: true } } });
+    const made = this.comment(issue.id, by, input.body);
+    return send(200, { data: { commentCreate: { success: true, comment: { id: made.id } } } });
   }
 }

@@ -6342,3 +6342,61 @@ The run made the labels `status:In Progress`, `status:In Review`, `status:Ready 
 
 - Pull request: 388, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-cleanup`.
+
+## 2026-10-25: the mirrors carry comments and edits both ways, and an open page redraws on their writes (the author's choices, lane `v2-j4-mirror-followups`, P237, issue #386)
+
+**The need.** Issue #386, the follow-ups of pull request 384: mirror the comments both ways, mirror the later edits of the title and the description with the same conflict rule, and redraw an open page of the app when the mirror writes, where before it showed at the next reload. GitHub only against the example repositories, Linear only against the fake server, with no real key asked for. The plan is section 5 of [milestone-4-plan.md](milestone-4-plan.md), committed before the tests (`0a873df`); section 4 is the cleanup lane's (pull request 388, which also takes P236, so this lane's line is P237). The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight, as earlier lanes noted; the conventions followed are those of sections 9 and 10 of `milestone-1-plan.md` (a lane changes its own module, `api/types.ts` is untouched).
+
+**Decision.**
+1. **Comments, each once, both ways.**
+   - Each comment of a mirrored ticket goes once to each of its trackers, and each comment of a mirrored issue comes once into the app.
+   - `mirror_comments` keeps each pair of ids. The mirror's own comments on a tracker (the put-backs) are kept there too, so none comes back.
+   - A comment that came from one tracker goes on to the others as it is, never back to its own.
+   - Comments are read by their own time, not through their issue's: on GitHub, the repository's issue comments since the last read; on Linear, the team's. Whether a Linear comment changes its issue's `updatedAt` is not something the code relies on.
+2. **Who wrote it.** A first line in `CLEARED_V2_APP_LANGUAGE`:
+   - on a tracker, "{who}, in Cleared:" for the owner's signed comment, "A user of Cleared:" for another user's, "Cleared:" for the service's;
+   - in the app, "{who}, on {tracker}:".
+
+   A comment from a tracker is written as the mirror (`agents`, `cleared-mirror`), never signed, so it never counts as the owner's line.
+3. **Which comments go out.** All of a mirrored ticket's, the service's notes included. The app has no comment box today; the service's notes and v1's tools are its only writers, and those notes say why a ticket moved. The example repositories are public, and so are the notes written there.
+4. **Edits.**
+   - `mirror_fields` keeps, per link and field, the text both sides last agreed on, and the tracker's text as last read with who made it. `decide()` settles each field as it does a state.
+   - Who made the change: on GitHub, a title's `renamed` event; GitHub keeps no event for a description (checked on the real run, below), so no one is named for it and it counts as an agent's, as rule 5 of 384 says. On Linear, the issue's history (`fromTitle`, `toTitle`, `updatedDescription`).
+   - In the app the mirror is the only writer of a title or a description. `mirror_edits` keeps who made the text it wrote, as `mirror_applied` does for a state.
+5. **What a tracker never edits.**
+   - An approved ticket's title or description: the tracker's text is put back to the app's, with one comment for both fields (`refused_edit`).
+   - An empty title is never written in the app.
+   - A session working on the ticket is not stopped or told: it keeps the text it started with.
+6. **The store's edit.** `TicketStore.edit(id, { title?, body? }, by)` on both stores. It writes no history row: the history is the states'.
+   - Correction of 384's plan: section 2.4 said the approval binds the title and the body through `content_hash`. In the code, `content_hash` is written on the creation row only; the approval row has none.
+   - So an edit makes the creation row of a ticket the owner wrote read as `other`: the text is no longer the one they signed. No v2 code reads a ticket's creator; every reader of `history` filters on the go state. The approval is untouched. A test pins the effect.
+7. **New tables, not new columns.** `CREATE TABLE IF NOT EXISTS` cannot add a column to the `mirror_links` 384 made. So there are four new tables: `mirror_followed`, `mirror_fields`, `mirror_edits` and `mirror_comments`.
+   - A link 384 made is followed from the first pass after the upgrade. That pass copies no older comment either way, and takes the app's text as agreed by both sides.
+   - A later read of the tracker that shows another text is a change, and goes through the rule.
+8. **The redraw.** An optional `changed(ticket)` in the mirror's dependencies. `modules/tickets.ts` (`sayTicketChange`) wires it to the engine's change hub, `ChangeHub.say('ticket', id)`. The app's `ticket` kind already refetches the ticket, the list, its steps and the plans, so the stream's types do not change. The app shows no comment yet, so a comment that came in shows to the lead (its last five) and to v1's tools. The lead's tool (`lead/tools.ts`) names every comment not signed by a person `cleared`: a comment from a public issue reaches the lead as `cleared: jane, on GitHub: ...`, text anyone can write there under Cleared's name. It is named in [mirrors.md](mirrors.md); changing the lead's tool is another lane's.
+9. **Branch.** `v2/j4-mirror-followups` cannot exist beside the local branch `v2` (git refuses a ref under another ref), so the branch is `v2-j4-mirror-followups`, B4.1's form, as 384 and 387 did.
+
+**Question for the owner** (default applied): which of the app's comments go to the trackers. Options:
+- (a) all of them, the service's notes included (recommended, applied): a person on the tracker learns why a ticket moved;
+- (b) only people's comments, the owner's and the users': the trackers stay quieter, but today nothing would go out, since no one writes a comment in the app;
+- (c) none: the comments only come in.
+
+The choice is one condition in `#goOut` (`src/tickets/mirror.ts`).
+
+**Tests first.** `4c97d46` committed the tests before any code: the pass with comments, edits, the refusal, the follow from an older link and the redraw (`mirror.test.ts`), each tracker's comments and edits against its fake, the proof's comment and edit each way on both fakes, the store's edit on both stores, and the tables' order. The fakes are no more generous than what was checked: GitHub's records `renamed` and no event for a description; Linear's does not change an issue's time for a comment, which is not checked. Of the 22 new or changed cases, 20 failed on the old code. The other two passed there, as they must: they guard against a write or a loop the old code could not make (the mirror's own comments do not come into the app; an empty title is not written). Three of 384's Linear cases failed as well, since the fake now requires the history's edit fields in the query. No expectation changed after the code.
+
+**The real GitHub run** (2026-10-25 15:15:12 to 15:15:35 UTC, the example repository `cleared-example-guestbook` of the organisation this repository lives in, the mirror's code on the real ticket store over a scratch ledger, the token of the `gh` login read from a file and never printed):
+- LOCAL-1 in In Progress became issue #25.
+- A note of the service in the app became the comment "Cleared :" with its text on #25.
+- A comment and a new title and description made on #25 with the `gh` account came into the app at the next pass: the comment as the mirror's, headed "<the gh account>, sur GitHub :"; the title as a person's change (`renamed`, the account shared with a person, P231); the description as an agent's, no one named.
+- One more pass wrote nothing: #25 held two comments, the app two.
+- The issue's events read `labeled, renamed`, and its timeline `labeled, commented, commented, renamed`. Neither holds an event for the new description: GitHub's REST API does not say who changed it.
+- LOCAL-1 moved to Done, and #25 closed as completed.
+- The change stream heard LOCAL-1, and the mirror logged nothing.
+
+**Checks.** See the pull request. Before the READY: `npm run typecheck` passes; `npm test` runs 2277 Node tests, 2179 pass, 98 skipped, 0 fail, and 349 Vitest tests pass; `npm run guard -- --base origin/v2` is run.
+
+**Resources.** No Docker object, no port opened outside the tests (port 0 on loopback), no tunnel, no secret written; no Linear key asked for or used. One issue was made and closed on the example repository, with two comments, and nothing on any other.
+
+- Pull request: 390, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-mirror-followups`.
