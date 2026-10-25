@@ -1,6 +1,6 @@
 # Cleared v2 service
 
-The core of Cleared v2, rewritten as a Node service in TypeScript. This folder holds only the skeleton: a health endpoint, its tests and its checks. The v1 code at the root of the repository is unchanged and keeps working on its own.
+The core of Cleared v2, rewritten as a Node service in TypeScript. This folder holds the service (`src/`), the web app (`app/`), the session images (`images/`), the scripts (`scripts/`) and their tests. The v1 code at the root of the repository is unchanged and keeps working on its own.
 
 ## Why a separate folder
 
@@ -53,8 +53,8 @@ The service runs tickets once it knows its project (`src/flow/config.ts`, `src/w
 | `CLEARED_V2_WORKSPACE` | none | A workspace of several services: one file in the format of `agents.conf`, an absolute path ([`examples/workspace.conf`](../examples/workspace.conf)). With `CLEARED_V2_PROJECT` set too, the two must name the same id. |
 | `CLEARED_V2_STATE_DIR` | `$XDG_STATE_HOME/cleared-v2`, else `~/.local/state/cleared-v2` | The flow's own state. |
 | `CLEARED_V2_WORKDIRS` | `<state>/work` | The sessions' checkouts, an absolute path. |
-| `CLEARED_V2_AUTHOR_MODEL` | `claude-opus-5-5` | A Quick ticket's author is `claude-haiku-5-5` (see [The fast lane](#the-fast-lane)). |
-| `CLEARED_V2_REVIEWER_MODEL` | `claude-sonnet-5-5` | Always another model than the author's. |
+| `CLEARED_V2_AUTHOR_MODEL` | `claude-opus-5-5` | A Quick ticket's author is `claude-haiku-5-5`, unless the reviewer is Haiku or a service of the ticket is `sensitivity = full` (see [The fast lane](#the-fast-lane)). |
+| `CLEARED_V2_REVIEWER_MODEL` | `claude-sonnet-5-5` | Set it to another model than the author's: the service does not check it here. |
 | `CLEARED_V2_REVIEW_ROUNDS` | `3` | A review that still asks for changes after this many rounds sends the ticket back to Todo with its last report. |
 | `CLEARED_V2_IDLE_MINUTES` | `15` | A session idle this long is stopped. |
 | `CLEARED_V2_QUESTION_TIMEOUT_MINUTES` | `30` | How long a team's question waits for the owner. Then the lead has 10 minutes to decide, then the session's declared answer applies or the ticket is parked. |
@@ -171,7 +171,7 @@ A slash command `@cleared <task>` posted to `POST /hooks/chat` creates a ticket 
 Every pull request Cleared opens starts with a receipt (P210, `src/flow/receipt.ts`, its words in `src/flow/messages/receipt.en.json` and `.fr.json`, in the project's language):
 
 - **Captures.** `before.png` of what the base runs (the origin of the service's `health_url`), `after.png` of the ticket's trial environment, and `flow.webm`, about 20 seconds of the after page scrolled down and back up (`src/flow/proof-capture.ts`). Each page reaches its own address only. Linked through the app when `CLEARED_NOTIFY_LINK_BASE` is set (see [Settings](#settings)), else "kept by Cleared". A capture that was not taken says why: no browser, no `health_url`, no trial environment, or a failure. A ticket of variants takes none.
-- **Tests.** Each review round's run of the declared `[session] test_command`, passed, failed or not run.
+- **Tests.** Each review round's run of the declared `[session] test_command`: passed, failed, not run, or run in a pipe or a list, so its exit status is not known.
 - **Cost.** Tokens and time, as [the ticket's cost](#the-cost-of-a-ticket) counts them. Dollars only when every session reported a figure.
 
 The receipt is built from structured fields only: no command output, no error text, no path of this machine.
@@ -199,7 +199,7 @@ Cleared never deploys. With `[release] production_url` set in a service's `.clea
 
 ## The fast lane
 
-A ticket with the `Quick` label opens on the fast lane, with `claude-haiku-5-5` as its author (B2.2, `src/flow/fast-lane.ts`). After each author session, and again at the head it publishes, v1's written rules judge the real diff against the base, with the `[fast_lane]` settings of the base branch's `agents.conf`. A broken rule sends the ticket back to the full circuit for good, with a comment that names the rule. The release card's "Lane" fact says which lane the ticket is on, and the approval is asked while the checks run; the merge waits for them. What v1 does and what v2 leaves out: [docs/fast-lane.md](../docs/fast-lane.md#in-cleared-v2).
+A ticket with the `Quick` label gets `claude-haiku-5-5` as its author, with the exceptions in [The flow](#the-flow) (B2.2, `src/flow/fast-lane.ts`). With the service's `[fast_lane]` on, after each author session, and again at the head it publishes, v1's written rules judge the real diff against the base, with the `[fast_lane]` settings of the base branch's `agents.conf`. A broken rule sends the ticket back to the full circuit for good, with a comment that names the rule. With the fast lane off, the card says "Full circuit for this version" and the ticket takes the full circuit. The release card's "Lane" fact says which lane the ticket is on, and the approval is asked while the checks run; the merge waits for them. What v1 does and what v2 leaves out: [docs/fast-lane.md](../docs/fast-lane.md#in-cleared-v2).
 
 ## The prompt cache
 
