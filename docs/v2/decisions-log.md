@@ -6402,9 +6402,17 @@ The behaviour is the same either way.
 - Before the commit, the guard refused a test address written with a user and a password. The test now builds it with `URL` and also checks an address with a user only.
 - After the code, two beat tests moved their clock an hour or more between beats, so the beat said `beat_late` too, which those tests are not about. They now beat hourly (`everyMs` of an hour).
 
-**Checks.** See the pull request. Before the READY: `npm run typecheck`, `npm test`, `npm run guard -- --base origin/v2`.
+**After review.** `6c2ae37` added a test before its code: the `--json` object of a status that cannot be collected now holds the same keys as one collected, empty (it held only `schema`, `project`, `checkedAt`, `ok`, `problems` and `notices`), so a script that reads `service.reachable` finds the key either way. It failed on the code before. The French monitor line reads "active, intervalle de 15 s", where "un battement toutes les 1 min" did not read as French.
 
-**Resources.** No Docker object, no port opened outside the tests (port 0 on loopback, and a port the system gave and freed for the silent service), no tunnel, no secret. No real monitoring service was called.
+**The live run** (2026-10-25 15:52:59 to 15:53:20 UTC, this branch, `node src/main.ts` on 127.0.0.1:8817, checked free with `ss -ltn` first, with no project so that no engine and no container start, `HOME` and the state folders in a scratch folder; the monitor a Node server on 127.0.0.1, port 0, its two addresses in files of mode 0600):
+- The monitor received `GET /ping` at 15:52:59.452 and at 15:53:14.437, 15 seconds apart, with no body.
+- `npm run status` said, in French: `Service répond sur 127.0.0.1:8817`, `Dernier battement à l'instant`, `Surveillance active, intervalle de 15 s`, `Problèmes aucun`, exit 0; in English the same, exit 0; `--json` gave schema 1, `ok: true`.
+- After SIGTERM (the service exited 0), the status said `Service does not answer at 127.0.0.1:8817` and the problem `The service does not answer at 127.0.0.1:8817.`, exit 1.
+- `ss -ltn` showed nothing left on either port. The service's log held its listening line and the approval key's notice, no address.
+
+**Checks.** At `7036c9b`: `npm run typecheck` passes; `npm test` runs 2333 Node tests, 2235 pass, 98 skipped, 0 fail, and 349 Vitest tests pass; `npm run guard -- --base origin/v2` refuses nothing.
+
+**Resources.** No Docker object; no port opened but port 0 on loopback in the tests and 8817 on loopback for the live run, both closed after; no tunnel, no secret. No real monitoring service was called.
 
 - Pull request: PR_NUMBER, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-heartbeat`.
