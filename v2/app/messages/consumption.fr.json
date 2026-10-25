@@ -12,7 +12,7 @@
   "consumption_wins_type": "Type",
   "consumption_wins_agent": "Agent",
   "consumption_wins_runs": "Lancées",
-  "consumption_wins_green": "Tests réussis",
+  "consumption_wins_green": "Réussies",
   "consumption_wins_kept": "Gardées",
   "consumption_wins_empty": "Aucun choix d'agent n'est encore terminé.",
   "consumption_type_bug": "Bug",

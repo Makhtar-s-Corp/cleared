@@ -99,6 +99,9 @@
 .wins-table td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--hairline); white-space: nowrap; }
 .wins-table tr:last-child td { border-bottom: 0; }
 .wins-table .n { text-align: right; }
+/* The last column ends at the panel's edge; on a phone the columns sit closer, so the table fits its panel (P221). */
+.wins-table th:last-child, .wins-table td:last-child { padding-right: 0; }
+@media (max-width: 480px) { .wins-table th, .wins-table td { padding-right: 8px; } }
 .wins-table .num { font-variant-numeric: tabular-nums; }
 .wins-empty { margin: 0; color: var(--text-muted); font-size: var(--text-md); }
 

@@ -38,7 +38,7 @@ test('the Plan tab asks about the code: the field, Ask, and what the reader read
   assert.match(ask, /role="status"/);
   const text = visibleText(ask);
   for (const expected of ['Ask about the code', 'Your question about the code', 'Ask',
-    'Read only, on the base branch of guestbook: the reader does not see this session\'s changes, and never edits, commits or pushes.'])
+    "Reads the base branch of guestbook, without this session's changes, and never edits the code."])
     assert.ok(text.includes(expected), `missing: ${expected}`);
   assert.doesNotMatch(markup, /style="/, 'no inline style');
 });
@@ -48,7 +48,7 @@ test('the card is there with no plan, while the plan waits, and on an ended sess
   assert.ok(card(html(<PlanTab view={viewOf()} plan={null} t={en} />)));
   assert.ok(card(html(<PlanTab view={viewOf()} plan={waiting} t={en} />)));
   assert.ok(card(html(<PlanTab view={viewOf({ phase: 'done', status: 'Done' })} plan={SESSION_PLAN} t={en} />)));
-  assert.ok(visibleText(card(html(<PlanTab view={viewOf()} plan={null} t={en} />))).some((line) => line.startsWith('Read only, on the base branch of every service')));
+  assert.ok(visibleText(card(html(<PlanTab view={viewOf()} plan={null} t={en} />))).some((line) => line.startsWith('Reads the base branch of every service')));
 });
 
 test('while the question is sent, the field and Ask wait; a note says what went wrong', () => {
@@ -64,7 +64,7 @@ test('while the question is sent, the field and Ask wait; a note says what went 
 test('in French, every word of the card', () => {
   const text = visibleText(card(html(<PlanTab view={viewOf({ service: 'guestbook' })} plan={SESSION_PLAN} t={fr} />)));
   for (const expected of ['Interroger le code', 'Votre question sur le code', 'Demander',
-    'Lecture seule, sur la branche de base de guestbook : le lecteur ne voit pas les changements de cette session, et ne modifie, ne valide ni ne pousse jamais rien.'])
+    'Lit la branche de base de guestbook, sans les changements de cette session, et ne modifie jamais le code.'])
     assert.ok(text.includes(expected), `missing: ${expected}`);
 });
 

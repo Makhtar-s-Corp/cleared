@@ -80,7 +80,7 @@ test('the wins table\'s headers are short enough for a phone, and French agrees 
   const header = (language: 'en' | 'fr') => [...html(<ConsumptionView data={consumption()} t={of('consumption', language)} language={language} now={FIXTURE_NOW} />)
     .matchAll(/<th scope="col"[^>]*>([^<]*)<\/th>/g)].map((m) => m[1]);
   assert.deepEqual(header('en'), ['Type', 'Agent', 'Ran', 'Tests passed', 'Kept']);
-  assert.deepEqual(header('fr'), ['Type', 'Agent', 'Lancées', 'Tests réussis', 'Gardées']);
+  assert.deepEqual(header('fr'), ['Type', 'Agent', 'Lancées', 'Réussies', 'Gardées']);
 });
 
 test('the harness pick\'s words say the rule it applies (the fewest tokens), never "cheapest", and call it the agent pick', () => {

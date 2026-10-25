@@ -1,6 +1,7 @@
 // The polish pass on a phone (lane j3-ui-polish, matrix P221), in a real
 // browser on the fixtures source, at 375 and 390 pixels, in English and in
-// French: the harness pick's wins table keeps each header on one line, and
+// French: the harness pick's wins table keeps each header on one line and
+// fits its panel, and
 // the title's placeholder of a picked template is not cut by New ticket.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/polish/phone-fit-browser.test.ts
@@ -46,7 +47,7 @@ async function onPhone(language: 'en' | 'fr', width: number, run: (page: any, ba
 
 for (const language of ['en', 'fr'] as const) {
   for (const width of WIDTHS) {
-    test(`${language} at ${width}: the wins table keeps each header on one line`, { skip }, async () => {
+    test(`${language} at ${width}: the wins table keeps each header on one line and fits its panel`, { skip }, async () => {
       await onPhone(language, width, async (page, base) => {
         await page.goto(`${base}/consumption`);
         await page.locator('[data-wins="shown"]').waitFor();
@@ -57,6 +58,9 @@ for (const language of ['en', 'fr'] as const) {
           return lines.size > 1 ? [cell.innerText] : [];
         }));
         assert.deepEqual(wrapped, [], 'no header on two lines');
+        // Nor is the table wider than its panel: no column hidden behind a scroll (the art director's pass).
+        const box = await page.locator('.wins-scroll').evaluate((scroll: any) => ({ needs: scroll.scrollWidth, room: scroll.clientWidth }));
+        assert.ok(box.needs <= box.room, `the table needs ${box.needs} px, its panel has ${box.room}`);
       });
     });
 

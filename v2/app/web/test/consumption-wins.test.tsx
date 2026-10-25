@@ -52,7 +52,7 @@ test('no pick ended yet: the panel says so, and draws no table', () => {
 
 test('in French, every word of the panel is the catalog\'s', () => {
   const text = shown(render(fr, 'fr', { ...data(), wins: WINS }));
-  for (const expected of ["Quel agent l'emporte", 'Type', 'Agent', 'Lancées', 'Tests réussis', 'Gardées', 'Bug', 'Autre', 'Codex', 'Cursor'])
+  for (const expected of ["Quel agent l'emporte", 'Type', 'Agent', 'Lancées', 'Réussies', 'Gardées', 'Bug', 'Autre', 'Codex', 'Cursor'])
     assert.ok(text.includes(expected), expected);
   assert.ok(shown(render(fr, 'fr', { ...data(), wins: [] })).includes("Aucun choix d'agent n'est encore terminé."));
   for (const key of Object.keys(loadCatalog('consumption', 'en')).filter((k) => k.startsWith('consumption_win') || k.startsWith('consumption_type_')))
