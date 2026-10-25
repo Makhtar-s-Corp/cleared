@@ -5547,3 +5547,28 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 
 - Pull request: 359, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-js-convert`.
+
+## 2026-10-25: the project page written again over a base that had not moved (the author's choices, lane `j3-flaky-page`, matrix P103, issue #360)
+
+**The need.** Issue #360: during a full `npm test`, `test/workspace/project-page.test.ts` saw the page's modification time move by about 130 ms between two updates of a base that had not moved (the tests "a fetch that finds the base unmoved" and "after a merge the page is made again"; the merge of 358 in lane `j3-mcp-access-sec` logged one). Run alone, the file passed. The issue asks for the cause, either a real rewrite or a fragile test, and a check that does not rest on time. The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight; the conventions followed are those of section 10 of `milestone-1-plan.md` (a lane changes its own files), as the earlier lanes did.
+
+**The cause: a real rewrite.** `store` writes the page beside itself and renames it over the old one, and nothing else touches the file, so a moved modification time is a write. `updateProjectPage` skips the write when the page names the base's tip (`` at `<the sha's first 12 characters>` ``). But the page's header went through the cleaner with the rest of the page, and the cleaner's phone number pattern (`0`, a digit from 1 to 9, then eight digits) matches inside a sha whose first 12 characters start with ten such digits followed by a letter. Such a page reads `` at `[removed: phone number]` `` followed by the last two characters, never names its base, and is made again, identical, at every fetch. Of 200,000 random short shas, 157 (0.08 %) are cut this way; two checks of the file are exposed, so about one full run in 600 fails. Two other paths could also write an unchanged page: `baseSha` turns any git failure into `null` (a spawn that fails under load), and `readProjectPage` turns any read error into "no page". A temporary probe logged every write of the page with its reason over 72 parallel runs of the file and three full runs of `npm test`. It found no write over an unmoved base, so neither path was seen. The phone shape is the cause the code and the new test show.
+
+**Decision.**
+1. **The header is not cleaned.** The service's name and the base's name go through `field`, as the page's other fields do. The sha's 12 characters come from git and are added after the cleaning, so the page always names its base.
+2. **The tip is read once.** `generateProjectPage` takes the sha `updateProjectPage` read, so the check and the header cannot disagree.
+3. **An unchanged page is not written.** When the check does not find the base in the page, the page is made again and written only if its text differs. Whatever made the check miss, a base that did not move rewrites nothing.
+4. **Only a missing page counts as none.** The update reads the page itself: `ENOENT` means no page; any other error is thrown, the caller logs it, and nothing is written over a page that could not be read. `readProjectPage`, which the briefing uses, is unchanged.
+5. **The test checks writes, not time.** Its two modification-time checks become the page's inode and `updateProjectPage`'s answer, `false`. Each write renames a new file over the page while the old one still exists, so a write always changes the inode, and nothing else does. No delay was raised.
+6. **No user string.** The page is in English for the sessions, as before. Nothing a person reads in the app changed, so no catalog changed.
+
+**Tests first.** `2ef6409` committed the tests alone. On the old code the new test fails twice. Its page reads `[removed: phone number]` where the sha should be; with that check set aside, a fetch over the unmoved base gives the page a new inode. Its merge is made on purpose, so the test is not a lottery: the dates are fixed, the test computes the commit's sha for `Add call.js 0`, `1`, ... until the cleaner cuts its 12 characters, then makes it with `git commit-tree` and checks the two shas are equal.
+
+**Checks** (on `origin/v2` at `8807382`). `npm run typecheck` passes. `npm test` three times in a row: each time 2065 Node tests, 1995 pass, 70 skipped (the browser tests and the gated real-harness tests), 0 fail, and 326 Vitest tests pass. `test/workspace/project-page.test.ts`, run 72 times in parallel in batches of 24, passes 13 of 13 each time. `npm run guard -- --base origin/v2`: nothing refused.
+
+**Another flaky test, left as it is.** One of the probe's full runs (before the fix) failed in `test/mcp/followups.test.ts`, "the server process whose client closed its stdout exits with 0". The failure is `EPIPE` in the test's own write to the child's stdin, after the child had exited. This lane does not touch it.
+
+**Resources.** No Docker object, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no port, no secret.
+
+- Pull request: against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-flaky-page`.
