@@ -2,6 +2,7 @@
 // service's first connection from what its base branch holds, made again
 // after a merge, and briefed to the sessions. Every test runs on a sample
 // repository made in a temporary folder: no push to any real repository.
+// Whether the page was written is read from its inode, never its clock (issue #360).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
