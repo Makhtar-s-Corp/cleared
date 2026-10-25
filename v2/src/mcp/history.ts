@@ -24,7 +24,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { StoreError } from '../store/db.ts';
 import { MARKER_TEXTS, TEXT_LIMIT, TIMELINE_TEXT_LIMIT, cutStrings, type Redactor } from './redact.ts';
-import type { Values } from '../../app/web/lib/i18n.ts';
+import { ToolError } from './rpc.ts';
 
 export const DEFAULT_LIMIT = 20;
 export const MAX_LIMIT = 100;
@@ -32,15 +32,8 @@ export const MAX_LIMIT = 100;
 export const SCAN_LIMIT = 2000;
 
 // A search the server refuses: the key of its message in the catalog.
-export class HistoryError extends Error {
+export class HistoryError extends ToolError {
   override name = 'HistoryError';
-  readonly key: string;
-  readonly values: Values;
-  constructor(key: string, values: Values = {}) {
-    super(key);
-    this.key = key;
-    this.values = values;
-  }
 }
 
 function openReadOnly(target: string): DatabaseSync {

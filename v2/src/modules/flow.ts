@@ -19,7 +19,10 @@
 // captures of a pull request's proof receipt (P210) are flow/proof-routes.ts's.
 // A ticket launched from a chat (P212), POST /hooks/chat with chat_seen,
 // chat_launches and chat_replies, is flow/chat.ts's: a batch of one on the
-// batches' runner, whose replies follow the flow's events.
+// batches' runner, whose replies follow the flow's events. The lanes' MCP
+// server (P216), POST /mcp behind the v2-mcp-token file made at start, is
+// mcp/http.ts's: it reads the engine and the store, and writes nothing.
+import { dirname } from 'node:path';
 import { LeverStore } from '../consumption/levers.ts';
 import { Docker } from '../container/docker.ts';
 import { BATCH_TABLES, BatchRunner, batchRoutes } from '../flow/batch.ts';
@@ -34,8 +37,10 @@ import { STEPS_TABLE, stepRoutes } from '../flow/steps.ts';
 import { takeoverRoutes } from '../flow/takeover.ts';
 import { VARIANTS_TABLE, variantRoutes } from '../flow/variants.ts';
 import { loadPlanConfig } from '../lead/plans/runner.ts';
+import { lanesMcpRoutes, mcpTokenPath, readOrCreateMcpToken } from '../mcp/http.ts';
+import { createRedactor } from '../mcp/redact.ts';
 import { TRAIN_TABLE } from '../release/store.ts';
-import type { Store } from '../store/db.ts';
+import { ledgerPath, type Store } from '../store/db.ts';
 import { dockerContainer } from '../terminal/container.ts';
 import { IdleWatchdog } from '../session/watchdog.ts';
 import { HumanSide } from '../terminal/human.ts';
@@ -85,6 +90,25 @@ function chatOf(registry: Registry): ChatLauncher | undefined {
   chat.listen();
   return chat;
 }
+// The ledger's folder, for the cleaner: none when it cannot be told, and then the service stops at start.
+function ledgerFolder(): string[] {
+  try { return [dirname(ledgerPath(process.env))]; } catch { return []; }
+}
+
+let mcpToken: string | undefined | null = null;
+// The lanes' MCP token, made or read once; a token that cannot be is said
+// (never its value) and leaves POST /mcp answering 503.
+function mcpTokenOf(): string | undefined {
+  if (mcpToken !== null) return mcpToken;
+  try {
+    mcpToken = readOrCreateMcpToken(mcpTokenPath(ledgerPath(process.env)));
+  } catch (error) {
+    console.error(`cleared-v2: ${error instanceof Error ? error.message : String(error)}`);
+    mcpToken = undefined;
+  }
+  return mcpToken;
+}
+
 function humanOf(registry: Registry): HumanSide | undefined {
   if (human || !store) return human;
   const engine = runtime.engine(registry);
@@ -109,6 +133,12 @@ const flow: Module = {
     ...replayRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
     ...batchRoutes({ runner: batchesOf, proof: () => runtime.proof() }),
     ...chatRoutes({ config: chatConfigOf, launcher: chatOf }),
+    ...lanesMcpRoutes({
+      engine: (registry) => runtime.engine(registry), store: () => store, token: mcpTokenOf,
+      language: process.env.CLEARED_V2_APP_LANGUAGE === 'en' ? 'en' : 'fr',
+      redactor: createRedactor({ env: process.env, paths: ledgerFolder() }),
+      log: (line) => console.error(line),
+    }),
   ],
   provide: (deps) => {
     store = deps.store;
@@ -119,12 +149,13 @@ const flow: Module = {
   // releases the stopped sessions' containers and networks. The watchdog
   // starts with it, once a minute, and so does the batches' runner, whose
   // queue a restart finishes, and the chat's replies, which a restart
-  // still sends.
+  // still sends. The lanes' MCP token is made then, for its install line.
   start: (registry) => {
     const engine = runtime.engine(registry);
     if (!engine || !store) return;
     batchesOf(registry);
     chatOf(registry);
+    mcpTokenOf();
     if (watchdog) return;
     const docker = new Docker();
     watchdog = new IdleWatchdog({
