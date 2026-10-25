@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
+import type { SpawnSyncReturns } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,7 +10,12 @@ import { createHash } from 'node:crypto';
 import { toolCall, toolCopy } from './support.ts';
 import { ORCH_HOME, loadConf, parseConf } from '../lib/conf.ts';
 
-function withProject(run) {
+// A scratch project, its home and the environment that names it.
+type Project = { root: string; project: string; env: NodeJS.ProcessEnv };
+// The same with a git repository, a commit of everything in it and the guard run on a text.
+type GuardProject = Project & { git: (...args: string[]) => Buffer; commit: () => void; check: (text: string) => SpawnSyncReturns<string> };
+
+function withProject(run: (project: Project) => void) {
   const root = mkdtempSync(join(tmpdir(), 'cleared-paths-'));
   const project = join(root, 'project');
   mkdirSync(project, { recursive: true });
@@ -17,26 +23,26 @@ function withProject(run) {
   try { run({ root, project, env }); } finally { rmSync(root, { recursive: true, force: true }); }
 }
 // What the scripts read of the project, through lib/script.ts (m), as they read it.
-function shell(env, expression) {
+function shell(env: NodeJS.ProcessEnv, expression: string) {
   return toolCall(ORCH_HOME, 'lib/script.ts', expression, env);
 }
-function nodeValue(env, expression) {
+function nodeValue(env: NodeJS.ProcessEnv, expression: string) {
   const script = `import * as conf from ${JSON.stringify(join(ORCH_HOME, 'lib', 'conf.ts'))}; console.log(${expression});`;
   return spawnSync('node', ['--input-type=module', '-e', script], { env, encoding: 'utf8' });
 }
-function trackProjectConfig(project) {
+function trackProjectConfig(project: string) {
   execFileSync('git', ['-C', project, 'init', '-q', '-b', 'main']);
   execFileSync('git', ['-C', project, 'add', '.cleared/agents.conf']);
 }
 
-function committedGuardProject(run) {
+function committedGuardProject(run: (project: GuardProject) => void) {
   return withProject(({ project, env, root }) => {
-    const git = (...args) => execFileSync('git', ['-C', project, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', ...args]);
+    const git = (...args: string[]) => execFileSync('git', ['-C', project, '-c', 'user.name=Test', '-c', 'user.email=test@example.invalid', ...args]);
     git('init', '-q', '-b', 'main');
     mkdirSync(join(project, '.cleared'), { recursive: true });
     mkdirSync(join(project, 'scripts'), { recursive: true });
     const commit = () => { git('add', '.'); git('commit', '-q', '-m', 'test configuration'); };
-    const check = (text) => {
+    const check = (text: string) => {
       const input = join(root, 'input.txt');
       writeFileSync(input, text);
       return spawnSync(join(ORCH_HOME, 'lib', 'tracker', 'guard.ts'), [input], {
@@ -48,7 +54,7 @@ function committedGuardProject(run) {
 }
 
 test('fingerprints with another salt refuse the whole guard, including headerless lists', () => committedGuardProject(({ project, commit, check }) => {
-  const hash = (value) => createHash('sha256').update(value).digest('hex');
+  const hash = (value: string) => createHash('sha256').update(value).digest('hex');
   const firstSalt = 'example-salt-a';
   const secondSalt = 'example-salt-b';
   const term = 'private meadow';
@@ -68,7 +74,7 @@ test('fingerprints with another salt refuse the whole guard, including headerles
 
 test('guard salt comes from the committed config beside the fingerprint list', () => committedGuardProject(({ project, env, root, commit, check }) => {
   const salt = 'committed-example-salt';
-  const hash = (value) => createHash('sha256').update(value).digest('hex');
+  const hash = (value: string) => createHash('sha256').update(value).digest('hex');
   const term = 'quiet valley';
   const config = join(project, '.cleared', 'agents.conf');
   writeFileSync(config, `[guard]\nsalt = ${salt}\nterms = scripts/private-terms.json\nallowed = none\n`);
@@ -205,7 +211,7 @@ test('without fingerprint lists or salt the generic guard runs and records one e
   assert.equal(check('A harmless sentence.').status, 0);
   assert.equal(check('Another harmless sentence.').status, 0);
   const db = new DatabaseSync(join(root, 'state', 'cleared', 'project', 'ledger.db'), { readOnly: true });
-  assert.equal(db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'private_terms_disabled'").get().n, 1);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'private_terms_disabled'").get()!.n, 1);
   db.close();
 }));
 
@@ -292,7 +298,7 @@ test('an untracked Cleared config is ignored and reported', () => withProject(({
   const wake = shell(env, '(m.ledgerInit(), m.ownerName())');
   assert.equal(wake.stdout.trim(), 'the user');
   const db = new DatabaseSync(join(root, 'state', 'cleared', 'project', 'ledger.db'), { readOnly: true });
-  assert.equal(db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'untracked_config_ignored'").get().n, 1);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'untracked_config_ignored'").get()!.n, 1);
   db.close();
 }));
 
@@ -327,12 +333,12 @@ test('duplicate project keys keep the first value and warn once in the ledger', 
   const config = join(project, '.cleared', 'agents.conf');
   writeFileSync(config, '[owner]\nname = First Owner\nname = Second Owner\n');
   commit();
-  assert.equal(loadConf(config).sections.owner.name, 'First Owner');
+  assert.equal(loadConf(config).sections.owner!.name, 'First Owner');
   const wake = () => shell(env, '(m.ledgerInit(), m.ownerName())');
   assert.equal(wake().stdout.trim(), 'First Owner');
   assert.equal(wake().stdout.trim(), 'First Owner');
   const db = new DatabaseSync(join(root, 'state', 'cleared', 'project', 'ledger.db'), { readOnly: true });
-  assert.equal(db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'duplicate_config_key' AND detail LIKE '%[owner] name%'").get().n, 1);
+  assert.equal(db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'duplicate_config_key' AND detail LIKE '%[owner] name%'").get()!.n, 1);
   db.close();
 }));
 
@@ -359,7 +365,7 @@ test('the example never supplies missing project keys or a merge verdict', () =>
   const loaded = loadConf(config);
   assert.equal(loaded.sections.tracker?.team, undefined);
   assert.equal(loaded.sections.merge?.verdict, undefined);
-  assert.equal(loaded.sections.limits.max_lanes, '1');
+  assert.equal(loaded.sections.limits!.max_lanes, '1');
   const missingTeam = shell(env, "m.confGet('tracker', 'team')");
   assert.notEqual(missingTeam.status, 0);
   assert.match(missingTeam.stderr, /Missing required \[tracker\] team/);

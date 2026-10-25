@@ -4,6 +4,7 @@ import { createECDH } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import net from 'node:net';
+import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { appServer, ROUTES, WRITES } from '../app/server.ts';
@@ -13,67 +14,76 @@ import { createActions } from '../app/lib/actions.ts';
 import { Authenticator } from './app-authenticator.ts';
 import { notifySettings } from '../lib/notify/contract.ts';
 import { notifyStore } from '../lib/notify/store.ts';
+import type { Passkey } from '../app/lib/credentials.ts';
+
+// What the app answers a session's JSON request, and a signed-in browser.
+type Reply = { challengeId: string; publicKey: { challenge: string }; [key: string]: unknown };
+type Browser = {
+  cookie: string;
+  post(path: string, body?: object, over?: Record<string, string>): Promise<Response>;
+  json(path: string, body?: object, over?: Record<string, string>): Promise<{ status: number; body: Reply }>;
+};
 
 const TOKEN = 'c'.repeat(64);
-const dirs = [];
+const dirs: string[] = [];
 after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
-const freePort = () => new Promise((resolve) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
+const freePort = () => new Promise<number>((resolve) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port } = s.address() as AddressInfo; s.close(() => resolve(port)); }); });
 const pub = join(import.meta.dirname, '..', 'app', 'public');
 const browserKeys = () => { const e = createECDH('prime256v1'); e.generateKeys(); return { p256dh: e.getPublicKey().toString('base64url'), auth: Buffer.from('fedcba9876543210').toString('base64url') }; };
 const SUBSCRIPTION = { endpoint: 'https://fcm.googleapis.com/fcm/send/dev-1', keys: browserKeys() };
 
-async function rig({ notify = {}, env = {}, withNotifications = true } = {}) {
+async function rig({ notify = {}, env = {}, withNotifications = true }: { notify?: Record<string, string>; env?: Record<string, string>; withNotifications?: boolean } = {}) {
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   const dir = join(mkdtempSync(join(tmpdir(), 'cleared-app-notify-')), 'notify');
   dirs.push(dir.replace(/\/notify$/, ''));
-  const records = [];
+  const records: { detail: string }[] = [];
   // The service's own settings come from its environment (here, the test's), never from agents.conf.
   const settings = notifySettings({ sections: { notify: { vapid_subject: 'mailto:ops@example.org', ...notify } } }, env);
   const store = notifyStore(dir, { create: true });
   const source = demoSource();
   // The gestures' passkey ceremony, as the app wires it (app/main.ts).
-  let passkeys = [], shift = 0;
+  let passkeys: Passkey[] = [], shift = 0;
   const actions = createActions({ source, origin: base, owner: 'alice', now: () => Date.now() + shift, readPasskeys: () => passkeys, writePasskeys: (list) => { passkeys = list; },
     run: async () => ({ ok: true }), record: (e) => records.push(e) });
   const notifications = withNotifications ? createNotifications({ settings, store, origin: base, record: (e) => records.push(e), confirm: actions }) : null;
   const server = appServer({ source, token: TOKEN, ranges: ['127.0.0.0/8'], pollMs: 50, heartbeatMs: 80, actions, notifications, origin: base, owner: 'alice' });
-  await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
-  const call = (path, init = {}) => fetch(base + path, { redirect: 'manual', ...init });
+  await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
+  const call = (path: string, init: RequestInit = {}) => fetch(base + path, { redirect: 'manual', ...init });
   const authenticator = new Authenticator({ origin: base, rpId: '127.0.0.1' });
   // A session opened with the access token: what an agent holding the token gets too.
-  const signIn = async (agent = 'Mozilla/5.0 (iPhone)') => {
+  const signIn = async (agent = 'Mozilla/5.0 (iPhone)'): Promise<Browser> => {
     const signed = await call('/session', { method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'user-agent': agent } });
-    const cookie = signed.headers.get('set-cookie').split(';')[0];
-    const me = await (await call('/api/me', { headers: { cookie } })).json();
-    const post = (path, body = {}, over = {}) => call(path, { method: 'POST', headers: { cookie, 'x-csrf-token': me.csrf, origin: base, 'content-type': 'application/json', ...over }, body: JSON.stringify(body) });
-    const json = async (path, body, over) => { const r = await post(path, body, over); return { status: r.status, body: await r.json().catch(() => ({})) }; };
+    const cookie = signed.headers.get('set-cookie')!.split(';')[0]!;
+    const me = await (await call('/api/me', { headers: { cookie } })).json() as { csrf: string };
+    const post = (path: string, body: object = {}, over: Record<string, string> = {}) => call(path, { method: 'POST', headers: { cookie, 'x-csrf-token': me.csrf, origin: base, 'content-type': 'application/json', ...over }, body: JSON.stringify(body) });
+    const json = async (path: string, body?: object, over?: Record<string, string>) => { const r = await post(path, body, over); return { status: r.status, body: await r.json().catch(() => ({})) as Reply }; };
     return { cookie, post, json };
   };
   // The human's passkey, registered the way the phone does after `cleared app passkey` (a grant only the human's Unix account gets).
-  const register = async (browser) => {
+  const register = async (browser: Browser) => {
     const { grant } = actions.mintGrant();
     const options = await browser.json('/api/passkeys/options', { grant });
     assert.equal(options.status, 200);
     assert.equal((await browser.json('/api/passkeys/finish', { grant, credential: authenticator.create(options.body.publicKey) })).status, 200);
   };
   // Turn notifications on (or off) for a subscription, confirmed with a passkey (the human's by default).
-  const confirmed = async (browser, op, payload, authn = authenticator) => {
+  const confirmed = async (browser: Browser, op: string, payload: object, authn = authenticator) => {
     const asked = await browser.json('/api/notifications/challenge', { op, ...payload });
     if (asked.status !== 200) return asked;
     return browser.json(`/api/notifications/${op}`, { ...payload, challengeId: asked.body.challengeId, assertion: authn.get(asked.body.publicKey) });
   };
-  return { base, dir, store, records, call, signIn, register, confirmed, authenticator, later: (ms) => { shift += ms; }, close: () => new Promise((r) => { server.close(r); }) };
+  return { base, dir, store, records, call, signIn, register, confirmed, authenticator, later: (ms: number) => { shift += ms; }, close: () => new Promise((r) => { server.close(r); }) };
 }
-const subscriptionFor = (n) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/dev-${n}`, keys: browserKeys() });
+const subscriptionFor = (n: number) => ({ endpoint: `https://fcm.googleapis.com/fcm/send/dev-${n}`, keys: browserKeys() });
 
 test('the app is installable: manifest, service worker and icons are served without the token and carry no data', async () => {
   const r = await rig();
   try {
     const manifest = await r.call('/manifest.webmanifest');
     assert.equal(manifest.status, 200);
-    assert.match(manifest.headers.get('content-type'), /^application\/manifest\+json/);
-    const body = await manifest.json();
+    assert.match(manifest.headers.get('content-type')!, /^application\/manifest\+json/);
+    const body = await manifest.json() as { display: string; start_url: string; icons: { sizes: string }[] };
     assert.equal(body.display, 'standalone');
     assert.equal(body.start_url, '/');
     assert.deepEqual(body.icons.map((i) => i.sizes), ['192x192', '512x512']);
@@ -85,7 +95,7 @@ test('the app is installable: manifest, service worker and icons are served with
     }
     const worker = await r.call('/sw.js');
     assert.equal(worker.status, 200);
-    assert.match(worker.headers.get('content-type'), /javascript/);
+    assert.match(worker.headers.get('content-type')!, /javascript/);
     assert.equal(worker.headers.get('cache-control'), 'no-store');
     assert.equal((await r.call('/icons/other.png')).status, 401, 'only the listed files are open');
     assert.equal((await r.call('/notify.js')).status, 401, 'the page script needs the token like the others');
@@ -141,13 +151,13 @@ test('subscribing needs the human\'s passkey: a session opened with the access t
     assert.deepEqual(await agent.json('/api/notifications/subscribe', { subscription: SUBSCRIPTION, challengeId: asked.body.challengeId, assertion }), { status: 403, body: { error: 'challenge' } }, 'a challenge belongs to the session that asked for it, and is gone once tried');
     assert.equal(r.store.subscriptions().length, 0, 'nothing kept from a refused request');
 
-    const status = await (await r.call('/api/notifications', { headers: { cookie: human.cookie } })).json();
+    const status = await (await r.call('/api/notifications', { headers: { cookie: human.cookie } })).json() as { available: boolean; publicKey: string };
     assert.equal(status.available, true);
     assert.equal(Buffer.from(status.publicKey, 'base64url').length, 65, 'the service key, made at first use');
     r.records.length = 0;
     assert.deepEqual(await r.confirmed(human, 'subscribe', { subscription: SUBSCRIPTION }), { status: 200, body: { ok: true, devices: 1 } });
     assert.deepEqual(r.store.subscriptions().map((s) => s.endpoint), [SUBSCRIPTION.endpoint]);
-    assert.match(r.store.subscriptions()[0].device, /^iPhone · /);
+    assert.match(r.store.subscriptions()[0]!.device!, /^iPhone · /);
     const noted = r.records.map((e) => JSON.parse(e.detail)).filter((e) => e.gesture === 'notifications');
     assert.deepEqual(noted.map((e) => e.result), ['subscribed']);
     for (const e of r.records) assert.doesNotMatch(e.detail, /googleapis|dev-1|p256dh/, 'the ledger never gets the address or the keys');
@@ -165,7 +175,7 @@ test('a confirmation is fresh and for one subscription and one purpose: stale, a
     const human = await r.signIn();
     await r.register(human);
     const other = subscriptionFor(2);
-    const answer = async (op, payload) => {
+    const answer = async (op: string, payload: object) => {
       const asked = await human.json('/api/notifications/challenge', { op, ...payload });
       assert.equal(asked.status, 200);
       return { challengeId: asked.body.challengeId, assertion: r.authenticator.get(asked.body.publicKey) };
@@ -258,7 +268,7 @@ test('the agents\' account cannot read the notification keys, subscriptions or c
   store.subscribe({ endpoint: SUBSCRIPTION.endpoint, keys: SUBSCRIPTION.keys });
   writeFileSync(join(dir, 'credentials.json'), '{}', { mode: 0o600 });
   for (const path of [dir, join(dir, 'vapid.json'), join(dir, 'subscriptions.json'), join(dir, 'credentials.json')]) {
-    assert.notEqual(spawnSync('sudo', ['-n', '-u', agentUser, '--', 'test', '-r', path]).status, 0, `${path} must not be readable by ${agentUser}`);
-    assert.notEqual(spawnSync('sudo', ['-n', '-u', agentUser, '--', 'test', '-w', path]).status, 0, `${path} must not be writable by ${agentUser}`);
+    assert.notEqual(spawnSync('sudo', ['-n', '-u', agentUser!, '--', 'test', '-r', path]).status, 0, `${path} must not be readable by ${agentUser}`);
+    assert.notEqual(spawnSync('sudo', ['-n', '-u', agentUser!, '--', 'test', '-w', path]).status, 0, `${path} must not be writable by ${agentUser}`);
   }
 });

@@ -11,21 +11,30 @@ import { liveSource } from '../app/sources/live.ts';
 import { diffSnapshots } from '../app/lib/events.ts';
 import { checkRanges, ensureToken, hostAllowed, readToken, TAILSCALE } from '../app/lib/access.ts';
 import { spawnSync } from 'node:child_process';
+import type { AddressInfo } from 'node:net';
+import type { Conf } from '../lib/conf.ts';
+
+// The lib's own types, which it does not export.
+type AppOptions = Parameters<typeof appServer>[0];
+type Tracker = NonNullable<NonNullable<Parameters<typeof boardCollector>[0]>['trackerClient']>;
+// A ticket of the demonstration with what it shows, as these tests read it.
+type DemoTicket = NonNullable<Awaited<ReturnType<ReturnType<typeof demoSource>['ticket']>>>
+  & { show: { kind: string; before: { url: string }[]; after: unknown[]; tests: unknown[]; touches: unknown } };
 
 const TOKEN = 'a'.repeat(64);
 // Amber (token or value) may appear only in the rules of what waits for the human, the banner of a state chosen on purpose, the project dot and the token definitions.
 const ALLOWED_AMBER = /\.key\b|\.card\.ready|\.card\.question|\.ph-question|\.ph-ask|\.chip\.q|\.chip\.wait|\.wait-line|\.mode-pill|\.amber-bar|\.project::before|data-col="awaiting"|\.d-awaiting|st-awaiting|^\s*(--|:root)|^\s*--awaiting/;
 const AMBER = /var\(--(?:awaiting|e-awaiting)[^)]*\)|#F5A623|#AB570A|#FFFBF2|#FCE2B3|245,\s*166,\s*35|171,\s*87,\s*10/i;
-const amberViolations = (css) => css.split('\n').filter((line) => AMBER.test(line) && !ALLOWED_AMBER.test(line)).map((line) => line.trim().slice(0, 80));
-const dirs = [];
+const amberViolations = (css: string) => css.split('\n').filter((line) => AMBER.test(line) && !ALLOWED_AMBER.test(line)).map((line) => line.trim().slice(0, 80));
+const dirs: string[] = [];
 const scratch = () => { const d = mkdtempSync(join(tmpdir(), 'cleared-app-')); dirs.push(d); return d; };
 after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
 
-async function serve(options = {}) {
+async function serve(options: Partial<AppOptions> = {}) {
   const server = appServer({ source: demoSource(), token: TOKEN, ranges: ['127.0.0.0/8'], pollMs: 50, heartbeatMs: 80, ...options });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const base = `http://127.0.0.1:${server.address().port}`;
-  const call = (path, init = {}) => fetch(base + path, { redirect: 'manual', signal: AbortSignal.timeout(3000), ...init });
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+  const call = (path: string, init: RequestInit = {}) => fetch(base + path, { redirect: 'manual', signal: AbortSignal.timeout(3000), ...init });
   return { base, call, close: () => new Promise((r) => { server.close(r); }) };
 }
 const auth = { authorization: `Bearer ${TOKEN}` };
@@ -81,7 +90,7 @@ test('a peer outside the allowed ranges, a wrong host and a missing or wrong tok
     assert.equal((await s.call('/session', { method: 'POST', headers: { authorization: 'Bearer wrong' } })).status, 401);
     const session = await s.call('/session', { method: 'POST', headers: auth });
     assert.equal(session.status, 204);
-    const cookie = session.headers.get('set-cookie');
+    const cookie = session.headers.get('set-cookie')!;
     assert.match(cookie, /HttpOnly/); assert.match(cookie, /SameSite=Strict/);
     const withCookie = await s.call('/api/snapshot', { headers: { cookie: cookie.split(';')[0] } });
     assert.equal(withCookie.status, 200);
@@ -96,7 +105,7 @@ test('responses carry a content policy that forbids loading anything from anothe
   try {
     const r = await s.call('/', { headers: auth });
     assert.equal(r.status, 200);
-    assert.match(r.headers.get('content-security-policy'), /default-src 'self'/);
+    assert.match(r.headers.get('content-security-policy')!, /default-src 'self'/);
     assert.equal(r.headers.get('cache-control'), 'no-store');
   } finally { await s.close(); }
   for (const f of readdirSync(join(import.meta.dirname, '..', 'app', 'public')).filter((n) => /\.(html|css|js)$/.test(n))) {
@@ -109,22 +118,22 @@ test('responses carry a content policy that forbids loading anything from anothe
 test('the demo data covers the seven cases, with no money amount, path or secret', async () => {
   const snap = await demoSource().snapshot();
   const byId = Object.fromEntries(snap.tickets.map((t) => [t.id, t]));
-  assert.ok(byId['EX-31'].screen && byId['EX-31'].waiting && byId['EX-31'].column === 'awaiting', 'a screen ticket that waits for the human');
-  assert.ok(!byId['EX-34'].screen, 'a ticket without a screen');
+  assert.ok(byId['EX-31']!.screen && byId['EX-31']!.waiting && byId['EX-31']!.column === 'awaiting', 'a screen ticket that waits for the human');
+  assert.ok(!byId['EX-34']!.screen, 'a ticket without a screen');
   assert.ok(Object.values(byId).some((t) => t.queued && /slot|place/.test(t.reason)), 'a team waiting for a place');
   assert.ok(snap.fuel.some((f) => !f.measured), 'a subscription that is not measured');
   assert.ok(!snap.health.ok && snap.health.problems.length, 'a problem reported by status');
-  const screen = await demoSource().ticket('EX-31');
+  const screen = await demoSource().ticket('EX-31') as DemoTicket;
   assert.ok(screen.show.kind === 'screen' && screen.show.before.length && screen.show.after.length);
-  const code = await demoSource().ticket('EX-34');
+  const code = await demoSource().ticket('EX-34') as DemoTicket;
   assert.ok(code.show.kind === 'code' && code.show.tests.length && code.show.touches);
   const everything = JSON.stringify([snap, screen, code]);
   assert.doesNotMatch(everything, /[€$]|cost|euro|dollar|\/home\/|\/tmp\/|sk-/i);
-  const sample = await demoSource().ticket('EX-31');
+  const sample = await demoSource().ticket('EX-31') as DemoTicket;
   assert.ok(sample.where.length <= 3 && sample.blackBox.every((e) => e.text && e.at && e.raw));
   const en = JSON.parse(readFileSync(join(import.meta.dirname, '..', 'lib', 'i18n', 'en.json'), 'utf8'));
-  for (const id of Object.keys(byId)) for (const member of (await demoSource().ticket(id)).squad) assert.ok(en[`app_role_${member.role.replace(/ /g, '_')}`], `role ${member.role} has a label`);
-  assert.ok(await demoSource().media(screen.show.before[0].url.split('/').pop()), 'the capture is served by the app');
+  for (const id of Object.keys(byId)) for (const member of (await demoSource().ticket(id))!.squad) assert.ok(en[`app_role_${member.role.replace(/ /g, '_')}`], `role ${member.role} has a label`);
+  assert.ok(await demoSource().media(screen.show.before[0]!.url.split('/').pop()!), 'the capture is served by the app');
 });
 
 test('the stream sends a snapshot, then changes as named events, and a heartbeat', async () => {
@@ -133,12 +142,12 @@ test('the stream sends a snapshot, then changes as named events, and a heartbeat
   try {
     const response = await s.call('/events', { headers: auth });
     assert.equal(response.status, 200);
-    assert.match(response.headers.get('content-type'), /text\/event-stream/);
-    const reader = response.body.getReader();
+    assert.match(response.headers.get('content-type')!, /text\/event-stream/);
+    const reader = response.body!.getReader();
     let buffer = '';
-    const read = async (until) => { while (!until(buffer)) { const { value, done } = await reader.read(); if (done) break; buffer += new TextDecoder().decode(value); } };
+    const read = async (until: (buffer: string) => boolean) => { while (!until(buffer)) { const { value, done } = await reader.read(); if (done) break; buffer += new TextDecoder().decode(value); } };
     await read((b) => b.includes('event: snapshot'));
-    const first = JSON.parse(/event: snapshot\ndata: (.*)\n/.exec(buffer)[1]);
+    const first = JSON.parse(/event: snapshot\ndata: (.*)\n/.exec(buffer)![1]!);
     assert.equal(first.type, 'snapshot'); assert.ok(first.id && first.at && first.data.tickets.length);
     // A card changes column: the next frame says so, without the whole state.
     source.move('EX-36', 'review');
@@ -189,19 +198,19 @@ test('plain-language lines come from runs and events; nothing sensitive passes t
 });
 
 test('the app messages exist in English and French', () => {
-  const read = (l) => JSON.parse(readFileSync(join(import.meta.dirname, '..', 'lib', 'i18n', `${l}.json`), 'utf8'));
-  const keys = (c) => Object.keys(c).filter((k) => k.startsWith('app_')).sort();
+  const read = (l: string) => JSON.parse(readFileSync(join(import.meta.dirname, '..', 'lib', 'i18n', `${l}.json`), 'utf8'));
+  const keys = (c: Record<string, unknown>) => Object.keys(c).filter((k) => k.startsWith('app_')).sort();
   assert.deepEqual(keys(read('fr')), keys(read('en')));
   const js = readFileSync(join(import.meta.dirname, '..', 'app', 'public', 'app.js'), 'utf8');
   const html = readFileSync(join(import.meta.dirname, '..', 'app', 'public', 'index.html'), 'utf8');
-  const used = new Set([...js.matchAll(/\bt\('(app_[a-z_]+)'/g), ...html.matchAll(/data-i="(app_[a-z_]+)"/g)].map((m) => m[1]));
+  const used = new Set([...js.matchAll(/\bt\('(app_[a-z_]+)'/g), ...html.matchAll(/data-i="(app_[a-z_]+)"/g)].map((m) => m[1]!));
   for (const k of used) assert.ok(read('en')[k], `missing ${k}`);
 });
 
 test('the cookie never holds the token, and a range without a prefix length is refused', async () => {
   const s = await serve();
   try {
-    const cookie = (await s.call('/session', { method: 'POST', headers: auth })).headers.get('set-cookie');
+    const cookie = (await s.call('/session', { method: 'POST', headers: auth })).headers.get('set-cookie')!;
     assert.ok(!cookie.includes(TOKEN), 'the cookie is a random session id, not the token');
     assert.equal((await s.call('/api/snapshot', { headers: { cookie: `cleared_app=${TOKEN}` } })).status, 401, 'the token itself is not a cookie');
     assert.equal((await s.call('/events', { method: 'HEAD', headers: auth })).status, 200, 'HEAD on the stream does not open one');
@@ -217,9 +226,9 @@ test('a failed read ends the heartbeat: the page cannot take stale cards for liv
   source.snapshot = async () => { if (fail) throw new Error('down'); return real(); };
   const s = await serve({ source, pollMs: 30, heartbeatMs: 60 });
   try {
-    const reader = (await s.call('/events', { headers: auth })).body.getReader();
+    const reader = (await s.call('/events', { headers: auth })).body!.getReader();
     let buffer = '', pending = null;
-    const pump = async (ms) => { const end = Date.now() + ms; while (Date.now() < end) { pending ??= reader.read(); const r = await Promise.race([pending, new Promise((res) => setTimeout(() => res(null), 40))]); if (r) { pending = null; if (r.value) buffer += new TextDecoder().decode(r.value); } } };
+    const pump = async (ms: number) => { const end = Date.now() + ms; while (Date.now() < end) { pending ??= reader.read(); const r = await Promise.race([pending, new Promise((res) => setTimeout(() => res(null), 40))]); if (r) { pending = null; if (r.value) buffer += new TextDecoder().decode(r.value); } } };
     await pump(250);
     assert.match(buffer, /event: heartbeat/);
     fail = true; await pump(100); buffer = '';
@@ -234,7 +243,7 @@ test('`cleared app` refuses a bad range and prints the address of the bind it is
   const file = join(scratch(), 'token');
   ensureToken(file, {});
   const conf = join(dir, 'agents.conf');
-  const run = (extra, ranges) => {
+  const run = (extra: string[], ranges: string) => {
     writeFileSync(conf, `[app]\nranges = ${ranges}\ntoken_file = ${file}\n`);
     return spawnSync(process.execPath, [join(import.meta.dirname, '..', 'cleared'), 'app', ...extra], { encoding: 'utf8', env: { ...process.env, CLEARED_CONF: conf, CLEARED_REPO: dir } });
   };
@@ -282,8 +291,8 @@ test('the design is followed: no gradient, fonts served by the app, light by def
 });
 
 const boardConf = (adapter = 'local') => ({ sections: { owner: { language: 'en' }, heartbeat: { wake_interval_minutes: '1' },
-  tracker: { adapter, repository: 'owner/repo', progress_state: 'In Progress', review_state: 'In Review', validate_state: 'Needs Approval', go_state: 'Ready to Ship' } } });
-async function boardFixture(adapter = 'local', imageUrl = null) {
+  tracker: { adapter, repository: 'owner/repo', progress_state: 'In Progress', review_state: 'In Review', validate_state: 'Needs Approval', go_state: 'Ready to Ship' } } }) as unknown as Conf;
+async function boardFixture(adapter = 'local', imageUrl: string | null = null) {
   const dir = scratch();
   process.env.ORCH_LEDGER = join(dir, 'ledger.db'); process.env.CLEARED_STATE_DIR = dir; process.env.ORCH_STATE_DIR = dir;
   const { openLedger } = await import('../lib/ledger.ts');
@@ -291,7 +300,7 @@ async function boardFixture(adapter = 'local', imageUrl = null) {
   db.exec('CREATE TABLE heartbeat_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE heartbeat_incidents (id TEXT PRIMARY KEY, first_seen TEXT, last_seen TEXT, active INTEGER);');
   db.prepare('INSERT INTO heartbeat_state VALUES (?,?)').run('last_wake_at', new Date().toISOString());
   const png = Buffer.from('89504e470d0a1a0a0000000d49484452000000010000000108060000001f15c489', 'hex');
-  const pngAfter = Buffer.from(png); pngAfter[pngAfter.length - 1] ^= 1;
+  const pngAfter = Buffer.from(png); pngAfter[pngAfter.length - 1]! ^= 1;
   const digest = (await import('node:crypto')).createHash('sha256').update(png).digest('hex');
   const digestAfter = (await import('node:crypto')).createHash('sha256').update(pngAfter).digest('hex');
   if (adapter === 'local') {
@@ -307,7 +316,7 @@ async function boardFixture(adapter = 'local', imageUrl = null) {
   writeFileSync(join(dir, 'validations', `${ref}.json`), JSON.stringify({ ticket: ref, at: new Date().toISOString(), pulls: [{ pr: 7, head: 'b'.repeat(40) }] }));
   const url = imageUrl || `local://capture/${digest}`;
   const afterUrl = imageUrl ? `${imageUrl}?after=1` : `local://capture/${digestAfter}`;
-  const trackerClient = {
+  const trackerClient: Tracker = {
     listTickets: ({ status }) => status === 'Needs Approval' ? [ticket] : [],
     getTicket: () => ticket,
     downloadCapture: () => png,
@@ -334,7 +343,7 @@ test('a hung tracker cannot delay the app response from the last snapshot', asyn
       const start = performance.now();
       const response = await s.call('/api/snapshot', { headers: auth });
       assert.equal(response.status, 200);
-      assert.equal((await response.json()).tickets.length, 1);
+      assert.equal((await response.json() as { tickets: unknown[] }).tickets.length, 1);
       assert.ok(performance.now() - start < 200, 'served in under 200 ms');
     } finally { await s.close(); }
   } finally { f.close(); }
@@ -356,40 +365,40 @@ test('missing, stale and unknown-version snapshots are visible as health problem
   const f = await boardFixture();
   try {
     const source = liveSource({ conf: f.conf, dir: f.dir });
-    assert.match((await source.snapshot()).health.problems[0].message, /No board snapshot/);
+    assert.match((await source.snapshot()).health.problems[0]!.message, /No board snapshot/);
     const snap = await boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }).snapshot();
     snap.generatedAt = new Date(Date.now() - 5 * 60000).toISOString();
     writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
-    assert.match((await source.snapshot()).health.problems[0].message, /5 min old/);
+    assert.match((await source.snapshot()).health.problems[0]!.message, /5 min old/);
     snap.schema = 99;
     writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
-    assert.match((await source.snapshot()).health.problems[0].message, /format is unknown/);
+    assert.match((await source.snapshot()).health.problems[0]!.message, /format is unknown/);
     snap.schema = 1; delete snap.owner;
     writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
-    assert.match((await source.snapshot()).health.problems[0].message, /cannot be read/);
+    assert.match((await source.snapshot()).health.problems[0]!.message, /cannot be read/);
     snap.owner = { name: 'Owner' }; snap.generatedAt = new Date().toISOString();
-    snap.details[snap.tickets[0].id] = {};
+    snap.details[snap.tickets[0]!.id] = {};
     writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
-    assert.match((await source.snapshot()).health.problems[0].message, /cannot be read/);
+    assert.match((await source.snapshot()).health.problems[0]!.message, /cannot be read/);
     snap.details = (await boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }).snapshot()).details;
     snap.fuel = [null];
     writeFileSync(join(f.dir, 'snapshot.json'), JSON.stringify(snap));
-    assert.match((await source.snapshot()).health.problems[0].message, /cannot be read/);
+    assert.match((await source.snapshot()).health.problems[0]!.message, /cannot be read/);
   } finally { f.close(); }
 });
 
 test('[Linear adapter] the wake caches captures for all three trackers', async () => {
   const realFetch = globalThis.fetch;
   try {
-    for (const [adapter, url] of [['local', null], ['github', 'https://github.com/owner/repo/raw/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/captures/a.png'], ['linear', 'https://uploads.linear.app/a.png']]) {
+    for (const [adapter, url] of [['local', null], ['github', 'https://github.com/owner/repo/raw/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/captures/a.png'], ['linear', 'https://uploads.linear.app/a.png']] as [string, string | null][]) {
       const f = await boardFixture(adapter, url);
       globalThis.fetch = async () => new Response(f.png, { status: 200 });
       try {
         await writeBoardSnapshot({ collector: boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }), dir: f.dir });
         const source = liveSource({ conf: f.conf, dir: f.dir });
         const snap = await source.snapshot();
-        assert.equal(snap.tickets[0].captures.before, `/media/${f.digest}`, adapter);
-        assert.deepEqual((await source.media(f.digest)).body, f.png, adapter);
+        assert.equal((snap.tickets[0]!.captures as { before: string }).before, `/media/${f.digest}`, adapter);
+        assert.deepEqual((await source.media(f.digest))!.body, f.png, adapter);
       } finally { f.close(); }
     }
   } finally { globalThis.fetch = realFetch; }
@@ -435,18 +444,18 @@ test('renaming a new snapshot pushes an event on the existing stream', async () 
     const source = liveSource({ conf: f.conf, dir: f.dir });
     const s = await serve({ source, pollMs: 10000, heartbeatMs: 10000 });
     try {
-      const reader = (await s.call('/events', { headers: auth })).body.getReader();
+      const reader = (await s.call('/events', { headers: auth })).body!.getReader();
       const next = async () => {
         let buffer = '';
         while (!buffer.includes('\n\n')) {
-          const result = await Promise.race([reader.read(), new Promise((_, reject) => setTimeout(() => reject(new Error('no snapshot event')), 1000))]);
+          const result = await Promise.race([reader.read(), new Promise((_, reject) => setTimeout(() => reject(new Error('no snapshot event')), 1000))]) as { value?: Uint8Array };
           buffer += new TextDecoder().decode(result.value);
         }
         return buffer;
       };
       assert.match(await next(), /event: snapshot/);
       const path = join(f.dir, 'snapshot.json');
-      const changed = JSON.parse(readFileSync(path));
+      const changed = JSON.parse(readFileSync(path) as unknown as string);
       changed.generatedAt = new Date(Date.now() + 1000).toISOString();
       changed.tickets[0].title = 'Updated from new snapshot';
       writeFileSync(`${path}.tmp`, JSON.stringify(changed));
@@ -465,26 +474,26 @@ test('Landed today keeps the tracker title for a remote adapter', async () => {
     addEvent(db, { kind: 'merged_by_script', ticket: '1' });
     db.close();
     const snap = await boardCollector({ conf: f.conf, trackerClient: f.trackerClient, fuelReader: async () => [] }).snapshot();
-    assert.equal(snap.landed[0].title, 'Screen before and after');
+    assert.equal((snap.landed as { title: string }[])[0]!.title, 'Screen before and after');
   } finally { f.close(); }
 });
 
 // ---- every text on screen goes through the message catalog ----------------------------------------------
-const publicFile = (name) => readFileSync(join(import.meta.dirname, '..', 'app', 'public', name), 'utf8');
-const catalogOf = (l) => JSON.parse(readFileSync(join(import.meta.dirname, '..', 'lib', 'i18n', `${l}.json`), 'utf8'));
+const publicFile = (name: string) => readFileSync(join(import.meta.dirname, '..', 'app', 'public', name), 'utf8');
+const catalogOf = (l: string) => JSON.parse(readFileSync(join(import.meta.dirname, '..', 'lib', 'i18n', `${l}.json`), 'utf8'));
 // What a page shows on its own: text outside an element marked data-i, and a literal aria-label / title / placeholder / alt.
-const literalTexts = (html) => {
+const literalTexts = (html: string) => {
   const found = [];
   const body = html.replace(/<script[\s\S]*?<\/script>/g, '').replace(/<svg[\s\S]*?<\/svg>/g, '');
   for (const m of body.matchAll(/<([a-z0-9]+)\b([^>]*)>([^<]*)/g)) {
-    const [, tag, attributes, text] = m;
+    const [, tag, attributes, text] = m as unknown as [string, string, string, string];
     if (text.trim() && /[A-Za-z]{2,}/.test(text) && !/\sdata-i="app_[a-z_]+"/.test(attributes)) found.push(`<${tag}> ${text.trim().slice(0, 40)}`);
-    for (const a of attributes.matchAll(/\s(aria-label|title|placeholder|alt)="([^"]*[A-Za-z]{2,}[^"]*)"/g)) found.push(`${tag} ${a[1]}="${a[2].slice(0, 40)}"`);
+    for (const a of attributes.matchAll(/\s(aria-label|title|placeholder|alt)="([^"]*[A-Za-z]{2,}[^"]*)"/g)) found.push(`${tag} ${a[1]}="${a[2]!.slice(0, 40)}"`);
   }
   return found;
 };
 // What a script puts on screen on its own: a literal with words given to textContent, title, placeholder, aria-label or alt.
-const literalScriptTexts = (code) => {
+const literalScriptTexts = (code: string) => {
   const found = [];
   for (const m of code.matchAll(/(?:textContent|placeholder|title|ariaLabel|alt)\s*[:=]\s*(['"`])((?:\\.|(?!\1)[^\\])*)\1|setAttribute\(\s*'(?:aria-label|title|placeholder)'\s*,\s*(['"`])((?:\\.|(?!\3)[^\\])*)\3/g)) {
     const literal = (m[2] ?? m[4] ?? '').replace(/\$\{[^}]*\}/g, '');
@@ -498,7 +507,7 @@ test('no text of the interface is written in a page or a script: it all comes fr
   for (const page of ['index.html', 'login.html', 'register.html']) {
     const html = publicFile(page);
     assert.deepEqual(literalTexts(html), [], `${page}: text outside the catalog`);
-    for (const key of [...html.matchAll(/data-i(?:-aria|-title|-placeholder)?="(app_[a-z_]+)"/g)].map((m) => m[1])) assert.ok(en[key] !== undefined && fr[key] !== undefined, `${page}: ${key} is missing from a catalog`);
+    for (const key of [...html.matchAll(/data-i(?:-aria|-title|-placeholder)?="(app_[a-z_]+)"/g)].map((m) => m[1]!)) assert.ok(en[key] !== undefined && fr[key] !== undefined, `${page}: ${key} is missing from a catalog`);
   }
   for (const script of ['app.js', 'actions.js', 'notify.js', 'login.js', 'register.js']) assert.deepEqual(literalScriptTexts(publicFile(script)), [], `${script}: text outside the catalog`);
   // the check can fail
@@ -509,11 +518,11 @@ test('no text of the interface is written in a page or a script: it all comes fr
 
 test('English is the default and French a complete translation: the pages and the demonstration follow the owner\'s language', async () => {
   const en = catalogOf('en'), fr = catalogOf('fr');
-  const keys = (c) => Object.keys(c).filter((k) => k.startsWith('app_')).sort();
+  const keys = (c: Record<string, unknown>) => Object.keys(c).filter((k) => k.startsWith('app_')).sort();
   assert.deepEqual(keys(fr), keys(en));
   for (const key of keys(en)) assert.ok(en[key].trim() && fr[key].trim(), key);
   // the interface says nothing in English once French is chosen, and nothing in French by default
-  for (const [language, other] of [['en', 'fr'], ['fr', 'en']]) {
+  for (const [language, other] of [['en', 'fr'], ['fr', 'en']] as [string, string][]) {
     const s = await serve({ language });
     try {
       const html = await (await s.call('/login')).text();
@@ -530,8 +539,8 @@ test('English is the default and French a complete translation: the pages and th
     const snapshot = await demoSource(language).snapshot();
     assert.equal(snapshot.language, language);
     assert.equal(snapshot.mode.short, catalogOf(language).app_srv_mode_short);
-    assert.equal(snapshot.health.problems[0].message, catalogOf(language).app_srv_problem_wake_late.replace('{minutes}', '4'));
+    assert.equal(snapshot.health.problems[0]!.message, catalogOf(language).app_srv_problem_wake_late.replace('{minutes}', '4'));
   }
-  const titles = await Promise.all(['en', 'fr'].map(async (l) => (await demoSource(l).snapshot()).tickets[0].title));
+  const titles = await Promise.all(['en', 'fr'].map(async (l) => (await demoSource(l).snapshot()).tickets[0]!.title));
   assert.notEqual(titles[0], titles[1]);
 });

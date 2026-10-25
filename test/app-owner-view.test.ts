@@ -16,8 +16,21 @@ import { changes } from '../lib/wake.ts';
 import { validBoard } from '../app/sources/live.ts';
 import { demoSource } from '../app/sources/demo.ts';
 import { createActions } from '../app/lib/actions.ts';
+import type { Conf } from '../lib/conf.ts';
+import type { Question } from '../lib/board-report.ts';
+import type { Version } from '../app/lib/events.ts';
+import type { Passkey } from '../app/lib/credentials.ts';
 
-const dirs = [];
+// What the tests read of the collector's snapshot: a card, and the details of its ticket.
+type Change = { pr?: unknown; files: number | null; additions: number | null; deletions: number | null; lines: number | null; checks: string | null; draft: boolean | null };
+type Card = { id: string; kind: string; column: string; title: string; reason: string; since: string | null; waiting: boolean; questions: Question[];
+  approval: { at: string; versions: Version[] } | null; quotaShare: number | null; change: Change; statusLine: string; trackerUrl: string | null };
+type Detail = { report: { done: string[]; remaining: string[] } | null; blackBox: { kind: string }[]; quotaShare: number | null; change: Change;
+  show: { kind: string; before: unknown[]; after: unknown[]; missing: string | null }; trackerUrl: string | null };
+type Snap = { tickets: [Card, ...Card[]]; details: { 'EX-7': Detail } };
+type RunOver = { ticket?: string; role?: string; started?: string; ended?: string | null; outcome?: string; tokens?: number; pr?: number | null; lines?: number | null };
+
+const dirs: string[] = [];
 after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
 
 // The shape a team really ended on (first flight, 2026-10-14): one numbered line, the question and its recommendation together.
@@ -28,12 +41,12 @@ test('a numbered question with its recommendation inline is one question, whole,
   for (const [text, question, recommendation] of [
     [FRENCH, "Faut-il ajouter le titre « Entrées et sorties » au-dessus de la liste d'À venir, qui n'en a pas aujourd'hui ?", /^Je recommande que non : le nom de la page, « À venir », le dit déjà, et un second titre ferait doublon sur un écran de téléphone \(PR #314\)\.$/],
     [ENGLISH, 'Should we add the heading “Comings and goings” above the Upcoming list, which has none today?', /^I recommend no: the page name, “Upcoming”, already says it, and a second heading would repeat it on a phone screen \(PR #314\)\.$/],
-  ]) {
+  ] as [string, string, RegExp][]) {
     const found = questionsOf(text);
     assert.equal(found.length, 1, 'one question, not an option');
-    assert.equal(found[0].text, question, 'not clipped');
-    assert.match(found[0].recommendation, recommendation);
-    assert.deepEqual(found[0].options, []);
+    assert.equal(found[0]!.text, question, 'not clipped');
+    assert.match(found[0]!.recommendation!, recommendation);
+    assert.deepEqual(found[0]!.options, []);
   }
   assert.ok(FRENCH.length > 160, 'longer than the old 160-character cut');
 });
@@ -41,20 +54,20 @@ test('a numbered question with its recommendation inline is one question, whole,
 test('choices are the short lines under a question; a numbered line that asks is a question; nothing is taken for a recommendation without the words', () => {
   const asked = questionsOf('Which colour for the button?\n- Blue\n1. Green\nA) Red\nB) Yellow\nC) Purple\nRecommendation: blue, like the other buttons.');
   assert.equal(asked.length, 1);
-  assert.deepEqual(asked[0].options, ['Blue', 'Green', 'Red', 'Yellow'], 'four at most');
-  assert.equal(asked[0].recommendation, 'Recommendation: blue, like the other buttons.');
+  assert.deepEqual(asked[0]!.options, ['Blue', 'Green', 'Red', 'Yellow'], 'four at most');
+  assert.equal(asked[0]!.recommendation, 'Recommendation: blue, like the other buttons.');
   const two = questionsOf('1. Rename the tab? I recommend yes.\n2. Move the button to the left?\n- Yes\n- No');
   assert.deepEqual(two.map((q) => [q.text, q.recommendation, q.options]), [['Rename the tab?', 'I recommend yes.', []], ['Move the button to the left?', null, ['Yes', 'No']]]);
   const plain = questionsOf('Faut-il garder le titre recommandé par la charte ?\n- Une longue explication qui dépasse largement quatre-vingts caractères et qui ne peut donc pas être un bouton de réponse.');
-  assert.equal(plain[0].recommendation, null, 'a word inside the question is not a recommendation');
-  assert.deepEqual(plain[0].options, [], 'a long line is context, not a button');
-  assert.match(plain[0].text, /longue explication/);
+  assert.equal(plain[0]!.recommendation, null, 'a word inside the question is not a recommendation');
+  assert.deepEqual(plain[0]!.options, [], 'a long line is context, not a button');
+  assert.match(plain[0]!.text, /longue explication/);
   assert.deepEqual(questionsOf('None.'), []);
   assert.deepEqual(questionsOf('Aucune.'), []);
 });
 
 test('four long questions reach the ledger whole: the event keeps four times what the app shows of one, cut on a character', () => {
-  const long = (n) => `${n}. Faut-il ${'élargir la colonne « À venir » '.repeat(36).trim()} ? Je recommande que oui : ${'la liste se lit mieux sur un téléphone, '.repeat(7).trim()}`;
+  const long = (n: number) => `${n}. Faut-il ${'élargir la colonne « À venir » '.repeat(36).trim()} ? Je recommande que oui : ${'la liste se lit mieux sur un téléphone, '.repeat(7).trim()}`;
   const asked = [1, 2, 3, 4].map(long).join('\n');
   assert.ok(asked.length > 4 * 1400 && asked.length <= ASKED_MAX, `${asked.length} characters`);
   assert.ok(long(1).length > 1500 - 400 && long(1).length < QUESTION_MAX);
@@ -64,7 +77,7 @@ test('four long questions reach the ledger whole: the event keeps four times wha
   assert.equal(found.length, 4);
   for (const [i, q] of found.entries()) {
     assert.match(q.text, /colonne « À venir » \?$/, `question ${i + 1} whole`);
-    assert.match(q.recommendation, /sur un téléphone,$/);
+    assert.match(q.recommendation!, /sur un téléphone,$/);
   }
   // Longer than four questions' worth: cut at the cap, on a character (an accent is never split).
   const huge = spawnSync(process.execPath, [join(import.meta.dirname, '..', 'lib', 'board-report.ts'), 'clip-asked'], { input: 'é'.repeat(ASKED_MAX + 50), encoding: 'utf8' }).stdout;
@@ -95,25 +108,25 @@ test('the report sections are read in either language and whatever their heading
 });
 
 // A project, a ledger and a tracker with one ticket, for the collector.
-async function project({ status = 'In Progress', title = 'Rename the screen title', approval = false, keptIn = null } = {}) {
+async function project({ status = 'In Progress', title = 'Rename the screen title', approval = false, keptIn = null }: { status?: string; title?: string; approval?: boolean; keptIn?: string | null } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'cleared-owner-')); dirs.push(dir);
   process.env.ORCH_LEDGER = join(dir, 'ledger.db'); process.env.CLEARED_STATE_DIR = dir; process.env.ORCH_STATE_DIR = dir;
   const { openLedger } = await import('../lib/ledger.ts');
   const db = openLedger();
   db.exec('CREATE TABLE heartbeat_state (key TEXT PRIMARY KEY, value TEXT NOT NULL); CREATE TABLE heartbeat_incidents (id TEXT PRIMARY KEY, first_seen TEXT, last_seen TEXT, active INTEGER);');
   db.exec(`CREATE TABLE memory_entries (id TEXT PRIMARY KEY, type TEXT NOT NULL, scope TEXT NOT NULL, content TEXT NOT NULL, source_who TEXT NOT NULL, source_where TEXT NOT NULL, source_when TEXT NOT NULL, status TEXT NOT NULL, links TEXT NOT NULL, supersedes TEXT, last_used_at TEXT)`);
-  const ticket = { id: 'EX-7', identifier: 'EX-7', title, body: '', status };
+  const ticket: { id: string; identifier: string; title: string; body: string; status: string; url?: string } = { id: 'EX-7', identifier: 'EX-7', title, body: '', status };
   if (approval) {
     mkdirSync(join(dir, 'validations'), { recursive: true });
     writeFileSync(join(dir, 'validations', 'EX-7.json'), JSON.stringify({ ticket: 'EX-7', at: '2026-10-14T15:00:00.000Z', pulls: [{ pr: 314, head: 'a'.repeat(40) }] }));
   }
   const conf = { sections: { owner: { language: 'fr' }, heartbeat: { wake_interval_minutes: '1' }, lanes: { push_roles: 'dev mechanical talk', ...(keptIn ? { kept_in: keptIn } : {}) },
-    tracker: { adapter: 'github', repository: 'owner/repo', writeup_role: 'writing', progress_state: 'In Progress', review_state: 'In Review', validate_state: 'Needs Approval', go_state: 'Ready to Ship' } } };
-  const trackerClient = { listTickets: ({ status: s }) => (s === ticket.status ? [ticket] : []), getTicket: () => ticket, comments: () => [] };
-  const run = (id, over = {}) => db.prepare('INSERT INTO runs (run_id, ticket, role, model, provider, started_at, ended_at, outcome, tokens_total, pr_number, lines_changed) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+    tracker: { adapter: 'github', repository: 'owner/repo', writeup_role: 'writing', progress_state: 'In Progress', review_state: 'In Review', validate_state: 'Needs Approval', go_state: 'Ready to Ship' } } } as unknown as Conf;
+  const trackerClient = { listTickets: ({ status: s }: { status: string }) => (s === ticket.status ? [ticket] : []), getTicket: () => ticket, comments: () => [] };
+  const run = (id: string, over: RunOver = {}) => db.prepare('INSERT INTO runs (run_id, ticket, role, model, provider, started_at, ended_at, outcome, tokens_total, pr_number, lines_changed) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
     .run(id, over.ticket ?? 'EX-7', over.role ?? 'dev', 'claude-opus-5-5', 'claude', over.started ?? new Date(Date.now() - 3600e3).toISOString(), over.ended === undefined ? new Date(Date.now() - 1800e3).toISOString() : over.ended, over.outcome ?? 'done', over.tokens ?? 1000, over.pr ?? null, over.lines ?? null);
-  const collect = () => boardCollector({ conf, trackerClient, fuelReader: async () => [] });
-  const report = (id, body) => { mkdirSync(join(dir, 'reports'), { recursive: true }); writeFileSync(join(dir, 'reports', `${id}.md`), `---\nformat: lane-report/1\noutcome: done\n---\n\n## Report\n\n${body}\n\n## Changed files\n\n- M shared/x.mjs\n`); };
+  const collect = () => boardCollector({ conf, trackerClient, fuelReader: async () => [] }) as unknown as { snapshot(): Promise<Snap> };
+  const report = (id: string, body: string) => { mkdirSync(join(dir, 'reports'), { recursive: true }); writeFileSync(join(dir, 'reports', `${id}.md`), `---\nformat: lane-report/1\noutcome: done\n---\n\n## Report\n\n${body}\n\n## Changed files\n\n- M shared/x.mjs\n`); };
   return { dir, db, ticket, run, collect, report, close: () => { db.close(); delete process.env.ORCH_LEDGER; delete process.env.CLEARED_STATE_DIR; delete process.env.ORCH_STATE_DIR; } };
 }
 
@@ -128,8 +141,8 @@ test('the question card carries the whole question, the recommendation and the t
     assert.equal(card.kind, 'question');
     assert.equal(card.column, 'awaiting');
     assert.equal(card.questions.length, 1);
-    assert.match(card.questions[0].text, /qui n'en a pas aujourd'hui \?$/);
-    assert.match(card.questions[0].recommendation, /^Je recommande que non/);
+    assert.match(card.questions[0]!.text, /qui n'en a pas aujourd'hui \?$/);
+    assert.match(card.questions[0]!.recommendation!, /^Je recommande que non/);
     assert.ok(card.since && Date.parse(card.since) < Date.now());
     assert.equal(card.title, 'Rename the screen title', 'the ticket title stays the title');
     assert.ok(validBoard(snap), 'the app accepts it');
@@ -147,21 +160,21 @@ test('Where we are comes from the team report to the user, never from its handov
     assert.ok(snap.details['EX-7'].blackBox.some((e) => e.kind === 'handover'), 'the Black box says a handover exists');
     p.report('r1-dev-a1', '## Fait\n\n- Le titre de l’écran devient « À venir » (PR #314).\n\n## Reste à faire\n\n- Rien.\n\n## Questions pour l’utilisateur\n\nAucune.');
     snap = await p.collect().snapshot();
-    const report = snap.details['EX-7'].report;
+    const report = snap.details['EX-7'].report!;
     assert.deepEqual(report.done, ['Le titre de l’écran devient « À venir » (PR #314).']);
     assert.deepEqual(report.remaining, []);
     assert.doesNotMatch(JSON.stringify(snap), /Searched every occurrence/);
     // The formatted report of the same run (the write-up) is the newer one: it wins.
     p.run('r1-writing-a1', { role: 'writing', started: new Date(Date.now() - 1700e3).toISOString(), ended: new Date(Date.now() - 1600e3).toISOString() });
     p.report('r1-writing-a1', '## Fait\n\n- Version mise en forme pour vous.');
-    assert.deepEqual((await p.collect().snapshot()).details['EX-7'].report.done, ['Version mise en forme pour vous.']);
+    assert.deepEqual((await p.collect().snapshot()).details['EX-7'].report!.done, ['Version mise en forme pour vous.']);
   } finally { p.close(); }
 });
 
 test('Where we are is the report of the team that wrote the change (or its rewrite for the user), never a later triage, cleanup or lead run', async () => {
   const p = await project();
   try {
-    const at = (minutes) => new Date(Date.now() - minutes * 60e3).toISOString();
+    const at = (minutes: number) => new Date(Date.now() - minutes * 60e3).toISOString();
     p.run('b1-dev-a1', { started: at(120), ended: at(100) });
     p.report('b1-dev-a1', '## Done\n\n- The title now reads Upcoming.');
     p.run('b2-triage-a1', { role: 'triage', started: at(50), ended: at(40) });
@@ -173,15 +186,15 @@ test('Where we are is the report of the team that wrote the change (or its rewri
     // The rewrite of the triage run is not the team's report either.
     p.run('b2-writing-a1', { role: 'writing', started: at(39), ended: at(38) });
     p.report('b2-writing-a1', '## Done\n\n- Triage, formatted.');
-    assert.deepEqual((await p.collect().snapshot()).details['EX-7'].report.done, ['The title now reads Upcoming.']);
+    assert.deepEqual((await p.collect().snapshot()).details['EX-7'].report!.done, ['The title now reads Upcoming.']);
     // The rewrite of the dev run is, and wins over the dev's own words.
     p.run('b1-writing-a1', { role: 'writing', started: at(99), ended: at(98) });
     p.report('b1-writing-a1', '## Done\n\n- The screen title is now “Upcoming”.');
-    assert.deepEqual((await p.collect().snapshot()).details['EX-7'].report.done, ['The screen title is now “Upcoming”.']);
+    assert.deepEqual((await p.collect().snapshot()).details['EX-7'].report!.done, ['The screen title is now “Upcoming”.']);
     // A newer session of a pushed role (a second dev round) takes over.
     p.run('b4-mechanical-a1', { role: 'mechanical', started: at(10), ended: at(5) });
     p.report('b4-mechanical-a1', '## Done\n\n- Round two: the test name follows.');
-    assert.deepEqual((await p.collect().snapshot()).details['EX-7'].report.done, ['Round two: the test name follows.']);
+    assert.deepEqual((await p.collect().snapshot()).details['EX-7'].report!.done, ['Round two: the test name follows.']);
   } finally { p.close(); }
 });
 
@@ -194,8 +207,8 @@ test('a ticket in the approval status without a request from Cleared is not read
     assert.deepEqual([card.kind, card.waiting, card.approval, card.column], ['tracker', false, null, 'awaiting']);
     assert.match(card.reason, /Cleared/);
     assert.ok(validBoard(snap));
-    const actions = createActions({ source: { snapshot: async () => snap }, origin: 'https://cockpit.example', readPasskeys: () => [{ id: 'k' }], writePasskeys: () => {}, run: async () => ({ ok: true }) });
-    await assert.rejects(actions.begin({ id: 's' }, { gesture: 'clear', ticket: 'EX-7', versions: [{ pr: 314, head: 'a'.repeat(40) }] }), (error) => error.code === 'not_waiting');
+    const actions = createActions({ source: { snapshot: async () => snap }, origin: 'https://cockpit.example', readPasskeys: () => [{ id: 'k' } as Passkey], writePasskeys: () => {}, run: async () => ({ ok: true }) });
+    await assert.rejects(actions.begin({ id: 's' }, { gesture: 'clear', ticket: 'EX-7', versions: [{ pr: 314, head: 'a'.repeat(40) }] }), (error: { code?: string }) => error.code === 'not_waiting');
   } finally { p.close(); }
   const asked = await project({ status: 'Needs Approval', approval: true });
   try {
@@ -203,7 +216,7 @@ test('a ticket in the approval status without a request from Cleared is not read
     const card = (await asked.collect().snapshot()).tickets[0];
     assert.deepEqual([card.kind, card.waiting], ['ready', true]);
     assert.equal(card.since, '2026-10-14T15:00:00.000Z', 'waiting since the request');
-    assert.deepEqual(card.approval.versions, [{ pr: 314, head: 'a'.repeat(40) }]);
+    assert.deepEqual(card.approval!.versions, [{ pr: 314, head: 'a'.repeat(40) }]);
   } finally { asked.close(); }
 });
 
@@ -217,7 +230,7 @@ test(`the share of the week's usage is shown only once ${SHARE_MIN_TICKETS} tick
     assert.equal(snap.details['EX-7'].quotaShare, null);
     for (let n = 9; n < 9 + SHARE_MIN_TICKETS - 2; n++) p.run(`o${n}-dev-a1`, { ticket: `EX-${n}`, tokens: 1000 });
     snap = await p.collect().snapshot();
-    assert.ok(Number.isFinite(snap.tickets[0].quotaShare) && snap.tickets[0].quotaShare > 0);
+    assert.ok(Number.isFinite(snap.tickets[0].quotaShare) && snap.tickets[0].quotaShare! > 0);
     assert.ok(validBoard(snap));
   } finally { p.close(); }
 });
@@ -272,19 +285,20 @@ test('a screen ticket shows the captures the team kept, or says there is none an
 test('the app refuses a question that is not of the expected shape, and the demo covers every owner case', async () => {
   const demo = demoSource();
   const snap = await demo.snapshot();
-  const details = {};
+  // The details of the demo's tickets differ by kind (a screen ticket's captures, a code ticket's tests): read loosely.
+  const details: Record<string, any> = {};
   for (const t of snap.tickets) details[t.id] = await demo.ticket(t.id);
   const board = { ...snap, details };
   assert.ok(validBoard(board));
   const by = Object.fromEntries(snap.tickets.map((t) => [t.id, t]));
-  assert.ok(by['EX-39'].questions[0].options.length && by['EX-39'].questions[0].recommendation, 'a question with choices and a recommendation');
-  assert.ok(!by['EX-40'].questions[0].options.length, 'a question without choices');
-  assert.ok(by['EX-31'].change.checks && by['EX-36'].change.checks === 'running', 'pull requests with checks');
+  assert.ok(by['EX-39']!.questions[0]!.options.length && by['EX-39']!.questions[0]!.recommendation, 'a question with choices and a recommendation');
+  assert.ok(!by['EX-40']!.questions[0]!.options.length, 'a question without choices');
+  assert.ok(by['EX-31']!.change!.checks && by['EX-36']!.change!.checks === 'running', 'pull requests with checks');
   assert.ok(details['EX-31'].show.after.length && details['EX-40'].show.missing, 'a screen ticket with and without captures');
-  assert.ok(by['EX-29'].kind === 'tracker' && !by['EX-29'].waiting, 'a ticket the tracker alone holds');
+  assert.ok(by['EX-29']!.kind === 'tracker' && !by['EX-29']!.waiting, 'a ticket the tracker alone holds');
   assert.ok(Object.values(details).some((d) => d.report === null) && Object.values(details).some((d) => d.report), 'with and without a report');
   const broken = structuredClone(board);
-  broken.tickets.find((t) => t.id === 'EX-39').questions[0].options = ['a', 'b', 'c', 'd', 'e'];
+  broken.tickets.find((t) => t.id === 'EX-39')!.questions[0]!.options = ['a', 'b', 'c', 'd', 'e'];
   assert.equal(validBoard(broken), false);
   const tooLong = structuredClone(board);
   tooLong.details['EX-40'].questions = [{ text: 'x'.repeat(1501), recommendation: null, options: [] }];

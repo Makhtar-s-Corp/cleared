@@ -4,21 +4,30 @@ import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { appendFileSync, chmodSync, symlinkSync, writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import type { AddressInfo } from 'node:net';
+import type { Conf } from '../lib/conf.ts';
 import { openLedger } from '../lib/ledger.ts';
 import { collectStatus, diagnose, initHeartbeat, recordIncidents, sendHeartbeat, heartbeatSettings, matchesClearedCommand, statusJson,
   canReap, localReapActor, reapOrphans } from '../lib/heartbeat.ts';
 import { sandbox, scratch } from './support.ts';
 
-const conf = { sections: { heartbeat: {} } };
+// The lib's own types, which it does not export.
+type Snapshot = Parameters<typeof statusJson>[0]['snapshot'];
+type Problem = Parameters<typeof recordIncidents>[1][number];
+type Proc = Parameters<typeof reapOrphans>[0][number];
+// A snapshot as these tests write it: only the fields a check reads.
+type Loose = Record<string, unknown>;
+
+const conf = { sections: { heartbeat: {} } } as unknown as Conf;
 const now = Date.parse('2026-10-12T12:00:00Z');
-const base = () => ({ lastWake: new Date(now - 60_000).toISOString(), wakeIntervalMinutes: 1,
+const base = (): Loose => ({ lastWake: new Date(now - 60_000).toISOString(), wakeIntervalMinutes: 1,
   pendingSince: null, lastAction: null, services: {}, lanes: [], processes: [], watches: [] });
 
 test('one successful wake pings once; a failed wake calls the failure URL', async () => {
   const db = openLedger(':memory:');
-  const urls = [];
-  const settings = heartbeatSettings({ sections: { heartbeat: { ping_url: 'https://example.invalid/ping', fail_url: 'https://example.invalid/fail' } } });
-  const fetcher = async (url, options) => { urls.push([url, options.body]); return { ok: true }; };
+  const urls: [string, string][] = [];
+  const settings = heartbeatSettings({ sections: { heartbeat: { ping_url: 'https://example.invalid/ping', fail_url: 'https://example.invalid/fail' } } } as unknown as Conf);
+  const fetcher = async (url: string, options: RequestInit) => { urls.push([url, options.body as string]); return { ok: true }; };
   await sendHeartbeat(db, settings, [], true, { fetcher, now });
   await sendHeartbeat(db, settings, [], false, { fetcher, now });
   assert.deepEqual(urls.map(([url]) => url), [settings.pingUrl, settings.failUrl]);
@@ -27,16 +36,16 @@ test('one successful wake pings once; a failed wake calls the failure URL', asyn
 
 test('real wake exits call the success and failure URLs once each', async (t) => {
   const box = sandbox();
-  const calls = [];
+  const calls: (string | undefined)[] = [];
   const server = createServer((request, response) => {
     calls.push(request.url);
     request.resume(); response.writeHead(200); response.end('ok');
   });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
-  const port = server.address().port;
+  const port = (server.address() as AddressInfo).port;
   appendFileSync(join(box.home, 'agents.conf'), `\n[heartbeat]\nping_url = http://127.0.0.1:${port}/ping\nfail_url = http://127.0.0.1:${port}/fail\n`);
-  const wake = (env = {}) => new Promise((resolve) => {
+  const wake = (env: NodeJS.ProcessEnv = {}) => new Promise<{ code: number | null; stderr: string }>((resolve) => {
     const child = spawn(join(box.home, 'wake.ts'), [], { env: { ...box.env, ...env } });
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr += chunk; });
@@ -84,7 +93,7 @@ test('an invalid heartbeat setting is visible in the ledger and service log', ()
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /timeout_secs/);
   const db = openLedger(join(box.state, 'ledger.db'));
-  assert.equal(db.prepare("SELECT count(*) n FROM events WHERE kind = 'heartbeat_diagnostic_failed'").get().n, 1);
+  assert.equal(db.prepare("SELECT count(*) n FROM events WHERE kind = 'heartbeat_diagnostic_failed'").get()!.n, 1);
   db.close();
 });
 
@@ -120,13 +129,13 @@ test('the reaper refuses a service UID altered in writable state', () => {
 
 test('failed heartbeat does not throw and is logged at most once per hour', async () => {
   const db = openLedger(':memory:');
-  const settings = heartbeatSettings({ sections: { heartbeat: { ping_url: 'https://example.invalid/ping' } } });
+  const settings = heartbeatSettings({ sections: { heartbeat: { ping_url: 'https://example.invalid/ping' } } } as unknown as Conf);
   const fetcher = async () => { throw new Error('offline'); };
   await sendHeartbeat(db, settings, [], true, { fetcher, now });
   await sendHeartbeat(db, settings, [], true, { fetcher, now: now + 30_000 });
-  assert.equal(db.prepare("SELECT count(*) n FROM events WHERE kind = 'heartbeat_delivery_failed'").get().n, 1);
+  assert.equal(db.prepare("SELECT count(*) n FROM events WHERE kind = 'heartbeat_delivery_failed'").get()!.n, 1);
   await sendHeartbeat(db, settings, [], true, { fetcher, now: now + 3_600_001 });
-  assert.equal(db.prepare("SELECT count(*) n FROM events WHERE kind = 'heartbeat_delivery_failed'").get().n, 2);
+  assert.equal(db.prepare("SELECT count(*) n FROM events WHERE kind = 'heartbeat_delivery_failed'").get()!.n, 2);
   db.close();
 });
 
@@ -142,19 +151,19 @@ test('all five silent stalls appear in status, trigger fail URL and log once per
   snapshot.lanes = [{ name: 'dev/one', branchMovedAt: new Date(now - 121 * 60_000).toISOString(),
     ledgerMovedAt: new Date(now - 121 * 60_000).toISOString() }];
   snapshot.processes = [{ pid: 222, kind: 'session', startedAt: new Date(now - 7 * 3600_000).toISOString(), attached: false }];
-  const problems = diagnose(snapshot, heartbeatSettings(conf), now);
+  const problems = diagnose(snapshot as Partial<Snapshot>, heartbeatSettings(conf), now);
   assert.deepEqual([...new Set(problems.map((p) => p.code))].sort(),
     ['lane_idle', 'orphan_process', 'pending_stalled', 'service_unreachable', 'wake_late']);
   recordIncidents(db, problems, now);
   recordIncidents(db, problems, now + 60_000);
-  assert.equal(db.prepare("SELECT count(*) n FROM events WHERE kind = 'heartbeat_problem'").get().n, problems.length);
-  const urls = [];
-  await sendHeartbeat(db, heartbeatSettings({ sections: { heartbeat: { ping_url: 'https://example.invalid/ping', fail_url: 'https://example.invalid/fail' } } }), problems, true,
-    { fetcher: async (url, options) => { urls.push([url, options.body]); return { ok: true }; }, now });
-  assert.equal(urls[0][0], 'https://example.invalid/fail');
-  assert.ok(urls[0][1].includes('orphan_process'));
-  assert.ok(!urls[0][1].includes('dev/one'), 'external body does not expose lane or ticket text');
-  const stable = statusJson({ project: 'example', problems, snapshot }, now);
+  assert.equal(db.prepare("SELECT count(*) n FROM events WHERE kind = 'heartbeat_problem'").get()!.n, problems.length);
+  const urls: [string, string][] = [];
+  await sendHeartbeat(db, heartbeatSettings({ sections: { heartbeat: { ping_url: 'https://example.invalid/ping', fail_url: 'https://example.invalid/fail' } } } as unknown as Conf), problems, true,
+    { fetcher: async (url: string, options: RequestInit) => { urls.push([url, options.body as string]); return { ok: true }; }, now });
+  assert.equal(urls[0]![0], 'https://example.invalid/fail');
+  assert.ok(urls[0]![1].includes('orphan_process'));
+  assert.ok(!urls[0]![1].includes('dev/one'), 'external body does not expose lane or ticket text');
+  const stable = statusJson({ project: 'example', problems, snapshot } as Parameters<typeof statusJson>[0], now);
   assert.deepEqual(Object.keys(stable), ['schema', 'project', 'checkedAt', 'ok', 'lastWake', 'lastLead',
     'services', 'lanes', 'waiting', 'quota', 'watching', 'problems', 'notices']);
   db.close();
@@ -162,12 +171,12 @@ test('all five silent stalls appear in status, trigger fail URL and log once per
 
 test('heartbeat body contains neither configured URL secrets nor ticket content', async () => {
   const db = openLedger(':memory:');
-  const bodies = [];
+  const bodies: unknown[] = [];
   const settings = heartbeatSettings({ sections: { heartbeat: {
-    ping_url: 'https://example.invalid/success/secret-token', fail_url: 'https://example.invalid/failure/secret-token' } } });
+    ping_url: 'https://example.invalid/success/secret-token', fail_url: 'https://example.invalid/failure/secret-token' } } } as unknown as Conf);
   await sendHeartbeat(db, settings, [{ code: 'pending_stalled', id: 'TICKET-17',
-    message: 'Private ticket title and its content' }], true,
-  { now, fetcher: async (_url, options) => { bodies.push(options.body); return { ok: true }; } });
+    message: 'Private ticket title and its content' }] as Problem[], true,
+  { now, fetcher: async (_url: string, options: RequestInit) => { bodies.push(options.body); return { ok: true }; } });
   assert.deepEqual(bodies, ['Cleared health: blocked\npending_stalled']);
   db.close();
 });
@@ -176,44 +185,44 @@ test('monitoring URLs can be stored outside the tracked project configuration', 
   const dir = scratch('cleared-heartbeat-secret-');
   const file = join(dir, 'ping-url');
   writeFileSync(file, 'https://example.invalid/ping/secret-token\n', { mode: 0o600 });
-  const settings = heartbeatSettings({ sections: { heartbeat: { ping_url_file: file } } });
+  const settings = heartbeatSettings({ sections: { heartbeat: { ping_url_file: file } } } as unknown as Conf);
   assert.equal(settings.pingUrl, 'https://example.invalid/ping/secret-token');
-  assert.equal(heartbeatSettings({ sections: { heartbeat: { quota_url_file: file } } }).quotaUrl,
+  assert.equal(heartbeatSettings({ sections: { heartbeat: { quota_url_file: file } } } as unknown as Conf).quotaUrl,
     'https://example.invalid/ping/secret-token');
   assert.throws(() => heartbeatSettings({ sections: { heartbeat: { ping_url_file: file,
-    ping_url: 'https://example.invalid/other' } } }), /either ping_url or ping_url_file/);
+    ping_url: 'https://example.invalid/other' } } } as unknown as Conf), /either ping_url or ping_url_file/);
   chmodSync(file, 0o644);
-  assert.throws(() => heartbeatSettings({ sections: { heartbeat: { ping_url_file: file } } }), /private regular file/);
+  assert.throws(() => heartbeatSettings({ sections: { heartbeat: { ping_url_file: file } } } as unknown as Conf), /private regular file/);
   chmodSync(file, 0o600);
   symlinkSync(file, join(dir, 'linked'));
-  assert.throws(() => heartbeatSettings({ sections: { heartbeat: { ping_url_file: join(dir, 'linked') } } }), /private regular file/);
-  assert.throws(() => heartbeatSettings({ sections: { heartbeat: { ping_url: 'http://example.invalid/ping' } } }), /HTTPS, or HTTP on loopback/);
+  assert.throws(() => heartbeatSettings({ sections: { heartbeat: { ping_url_file: join(dir, 'linked') } } } as unknown as Conf), /private regular file/);
+  assert.throws(() => heartbeatSettings({ sections: { heartbeat: { ping_url: 'http://example.invalid/ping' } } } as unknown as Conf), /HTTPS, or HTTP on loopback/);
 });
 
 test('a newly opened lane is not called idle because its base commit is old', () => {
   const snapshot = base();
   snapshot.lanes = [{ name: 'dev/one', openedAt: new Date(now - 60_000).toISOString(),
     branchMovedAt: new Date(now - 4 * 3600_000).toISOString(), ledgerMovedAt: null }];
-  assert.equal(diagnose(snapshot, heartbeatSettings(conf), now).some((p) => p.code === 'lane_idle'), false);
+  assert.equal(diagnose(snapshot as Partial<Snapshot>, heartbeatSettings(conf), now).some((p) => p.code === 'lane_idle'), false);
 });
 
 test('a lane waiting for approval is not called idle after its session ended', () => {
   const snapshot = base();
   snapshot.lanes = [{ name: 'dev/one', active: false,
     branchMovedAt: new Date(now - 4 * 3600_000).toISOString(), ledgerMovedAt: new Date(now - 4 * 3600_000).toISOString() }];
-  assert.equal(diagnose(snapshot, heartbeatSettings(conf), now).some((p) => p.code === 'lane_idle'), false);
+  assert.equal(diagnose(snapshot as Partial<Snapshot>, heartbeatSettings(conf), now).some((p) => p.code === 'lane_idle'), false);
 });
 
 test('a lead session past its time limit is reported despite successful wakes', () => {
   const snapshot = base();
   snapshot.leadBusySince = new Date(now - 21 * 60_000).toISOString();
   snapshot.leadMaxMinutes = 20;
-  assert.equal(diagnose(snapshot, heartbeatSettings(conf), now).some((p) => p.code === 'lead_stuck'), true);
+  assert.equal(diagnose(snapshot as Partial<Snapshot>, heartbeatSettings(conf), now).some((p) => p.code === 'lead_stuck'), true);
 });
 
 test('reap is restricted to a verified local human and acts only on stale unattached Cleared processes', () => {
-  const local = { sections: { tracker: { adapter: 'local', owner_id: 'alice', agents_uid: '1002' } } };
-  const remote = { sections: { tracker: { adapter: 'github' }, heartbeat: { reap_owner_uid: '1001' } } };
+  const local = { sections: { tracker: { adapter: 'local', owner_id: 'alice', agents_uid: '1002' } } } as unknown as Conf;
+  const remote = { sections: { tracker: { adapter: 'github' }, heartbeat: { reap_owner_uid: '1001' } } } as unknown as Conf;
   const sudo = { effectiveUid: 0, sudoUid: '1001', sudoUser: 'alice', serviceUid: '1002' };
   assert.equal(localReapActor(local, sudo).kind, 'human');
   assert.equal(localReapActor(local, { ...sudo, sudoUid: undefined }).kind, 'other');
@@ -224,9 +233,9 @@ test('reap is restricted to a verified local human and acts only on stale unatta
   assert.equal(localReapActor(remote, { ...sudo, sudoUid: '1002' }).kind, 'other');
   assert.equal(canReap({ kind: 'agents', id: 'bot' }, 'human'), false);
   assert.equal(canReap({ kind: 'human', id: 'human' }, 'human'), true);
-  const killed = [];
-  assert.throws(() => reapOrphans([{ pid: 10, orphan: true }], { actor: { kind: 'agents', id: 'bot' }, owner: 'human', kill: (pid) => killed.push(pid) }), /human/);
-  reapOrphans([{ pid: 10, orphan: true }, { pid: 11, orphan: false }],
+  const killed: number[] = [];
+  assert.throws(() => reapOrphans([{ pid: 10, orphan: true }] as Proc[], { actor: { kind: 'agents', id: 'bot' }, owner: 'human', kill: (pid) => killed.push(pid) }), /human/);
+  reapOrphans([{ pid: 10, orphan: true }, { pid: 11, orphan: false }] as Proc[],
     { actor: { kind: 'human', id: 'human' }, owner: 'human', kill: (pid) => killed.push(pid) });
   assert.deepEqual(killed, [10]);
 });
@@ -234,7 +243,7 @@ test('reap is restricted to a verified local human and acts only on stale unatta
 test('status fails closed if lane inventory cannot be inspected', async () => {
   const db = openLedger(':memory:');
   const directory = scratch('cleared-heartbeat-no-git-');
-  await assert.rejects(collectStatus(db, { roles: { dev: 'a' }, sections: { lanes: { root: directory } } },
+  await assert.rejects(collectStatus(db, { roles: { dev: 'a' }, sections: { lanes: { root: directory } } } as unknown as Conf,
     { repo: directory, state: directory, probe: false }), /Cannot inspect project worktrees/);
   db.close();
 });
@@ -259,9 +268,9 @@ test('accepted shared-UID mode is a standing notice: status stays ok, exit 0, th
   assert.equal(result.status, 0, result.stderr);
   const status = JSON.parse(result.stdout);
   assert.equal(status.ok, true);
-  const notice = status.notices.find((p) => p.message === sharedUidMessage);
+  const notice = status.notices.find((p: Problem) => p.message === sharedUidMessage);
   assert.equal(notice?.level, 'notice');
-  assert.ok(status.problems.some((p) => p.code === 'release_lock_unseparated' && p.level === 'notice'));
+  assert.ok(status.problems.some((p: Problem) => p.code === 'release_lock_unseparated' && p.level === 'notice'));
   const text = spawnSync(process.execPath, [join(box.home, 'lib/heartbeat.ts'), 'status'], { env: box.env, encoding: 'utf8' });
   assert.equal(text.status, 0, text.stderr);
   assert.match(text.stdout, new RegExp(`Notice {11}${sharedUidMessage}`));
@@ -276,15 +285,15 @@ test('shared-UID mode without the explicit opt-in still fails the status', () =>
   assert.equal(result.status, 1, result.stderr);
   const status = JSON.parse(result.stdout);
   assert.equal(status.ok, false);
-  assert.equal(status.problems.find((p) => p.code === 'release_lock_unseparated')?.level, 'problem');
+  assert.equal(status.problems.find((p: Problem) => p.code === 'release_lock_unseparated')?.level, 'problem');
   assert.deepEqual(status.notices, []);
 });
 
 test('a notice keeps the monitor green; a failing problem still fails it, even in shared mode', async () => {
   const db = openLedger(':memory:');
-  const urls = [];
-  const settings = heartbeatSettings({ sections: { heartbeat: { ping_url: 'https://example.invalid/ping', fail_url: 'https://example.invalid/fail' } } });
-  const fetcher = async (url) => { urls.push(url); return { ok: true }; };
+  const urls: string[] = [];
+  const settings = heartbeatSettings({ sections: { heartbeat: { ping_url: 'https://example.invalid/ping', fail_url: 'https://example.invalid/fail' } } } as unknown as Conf);
+  const fetcher = async (url: string) => { urls.push(url); return { ok: true }; };
   const notice = { code: 'release_lock_unseparated', id: 'release', message: sharedUidMessage, level: 'notice' };
   const stall = { code: 'lane_idle', id: 'dev/one', message: 'idle', level: 'problem' };
   await sendHeartbeat(db, settings, [notice], true, { fetcher, now });

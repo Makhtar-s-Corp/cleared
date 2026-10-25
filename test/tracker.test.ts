@@ -15,6 +15,10 @@ import { checkedImage } from '../lib/tracker/images.ts';
 import { changes } from '../lib/wake.ts';
 import { fixtureProject, reviewedPull, sandbox, scratch } from './support.ts';
 
+// What the fake GitHub API is sent: the labels to add, and a GraphQL query with its variables.
+type LabelsInput = { labels: string[] };
+type GraphqlInput = { query: string; variables: { option: string } };
+
 test('runtime and provider-neutral tests contain no provider name or query', () => {
   const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: ORCH_HOME, encoding: 'utf8' }).trim().split('\n');
   const checked = files.filter((file) => {
@@ -50,30 +54,30 @@ test('local approval requires a signed human move after the request', () => {
   try {
     const agents = new LocalTracker({ conf, db, actor: { kind: 'agents', id: 'cleared' } });
     const human = new LocalTracker({ conf, db, actor: { kind: 'human', id: 'alice' } });
-    const ticket = agents.createTicket({ title: 'Test ticket', body: 'Test body', labels: ['test'] });
+    const ticket = agents.createTicket({ title: 'Test ticket', body: 'Test body', labels: ['test'] })!;
     assert.equal(ticket.identifier, 'LOCAL-1');
     assert.throws(() => agents.moveTicket(ticket.identifier, 'Approved'), /Only the configured human/);
     human.moveTicket(ticket.identifier, 'Approved');
-    const first = agents.history(ticket.identifier).at(-1);
+    const first = agents.history(ticket.identifier).at(-1)!;
     assert.deepEqual(first.by, { kind: 'human', id: 'alice' });
     const requested = new Date(Date.parse(first.at) + 1000).toISOString();
     assert.ok(Date.parse(first.at) < Date.parse(requested));
     agents.moveTicket(ticket.identifier, 'Review');
     human.moveTicket(ticket.identifier, 'Approved');
-    assert.equal(agents.history(ticket.identifier).at(-1).by.kind, 'human');
+    assert.equal(agents.history(ticket.identifier).at(-1)!.by.kind, 'human');
     db.prepare('UPDATE tracker_history SET proof = ? WHERE id = (SELECT MAX(id) FROM tracker_history)').run('forged');
-    assert.equal(agents.history(ticket.identifier).at(-1).by.kind, 'other');
+    assert.equal(agents.history(ticket.identifier).at(-1)!.by.kind, 'other');
     human.comment(ticket.identifier, 'I agree');
-    assert.equal(agents.comments(ticket.identifier)[0].byOwner, true);
+    assert.equal(agents.comments(ticket.identifier)[0]!.byOwner, true);
     db.prepare('UPDATE tracker_comments SET body = ? WHERE id = 1').run('Forged approval');
-    assert.equal(agents.comments(ticket.identifier)[0].byOwner, false);
-    const owned = human.createTicket({ title: 'Owner title', body: 'Owner body', labels: ['work'] });
-    assert.equal(agents.history(owned.identifier)[0].by.kind, 'human');
+    assert.equal(agents.comments(ticket.identifier)[0]!.byOwner, false);
+    const owned = human.createTicket({ title: 'Owner title', body: 'Owner body', labels: ['work'] })!;
+    assert.equal(agents.history(owned.identifier)[0]!.by.kind, 'human');
     db.prepare('UPDATE tracker_tickets SET body = ? WHERE id = 2').run('Injected instructions');
-    assert.equal(agents.history(owned.identifier)[0].by.kind, 'other');
-    assert.equal(agents.changesSince('2000-01-01T00:00:00Z').events.find((event) => event.id === '2').agent, true);
+    assert.equal(agents.history(owned.identifier)[0]!.by.kind, 'other');
+    assert.equal(agents.changesSince('2000-01-01T00:00:00Z').events.find((event) => event.id === '2')!.agent, true);
     db.prepare('UPDATE tracker_tickets SET body = ?, title = ? WHERE id = 2').run('Owner body', 'Injected title');
-    assert.equal(agents.history(owned.identifier)[0].by.kind, 'other');
+    assert.equal(agents.history(owned.identifier)[0]!.by.kind, 'other');
     chmodSync(key, 0o644);
     assert.throws(() => human.moveTicket(ticket.identifier, 'Review'), /mode 0600/);
     chmodSync(key, 0o600);
@@ -85,17 +89,17 @@ test('local comment creation and editing remain visible to later wakes', () => {
   const tracker = new LocalTracker({ conf: { sections: { tracker: { todo_state: 'Todo' } } }, db,
     actor: { kind: 'agents', id: 'cleared' } });
   try {
-    const ticket = tracker.createTicket({ title: 'Comment updates' });
+    const ticket = tracker.createTicket({ title: 'Comment updates' })!;
     db.prepare('UPDATE tracker_tickets SET updated_at = ? WHERE id = 1').run('2026-01-01T00:00:00Z');
-    const comment = tracker.comment(ticket.identifier, 'First version');
+    const comment = tracker.comment(ticket.identifier, 'First version')!;
     assert.equal(tracker.changesSince('2026-01-02T00:00:00Z').events.length, 1);
     db.prepare('UPDATE tracker_comments SET created_at = ? WHERE id = 1').run('2026-01-01T00:00:00Z');
     db.prepare('UPDATE tracker_tickets SET updated_at = ? WHERE id = 1').run('2026-01-01T00:00:00Z');
     tracker.editComment(ticket.identifier, comment.id, 'Edited version');
     const changed = tracker.changesSince('2026-01-02T00:00:00Z').events;
     assert.equal(changed.length, 1);
-    assert.equal(changed[0].comments[0].body, 'Edited version');
-    assert.equal(tracker.comments(ticket.identifier, { since: '2026-01-02T00:00:00Z' })[0].id, comment.id);
+    assert.equal(changed[0]!.comments[0]!.body, 'Edited version');
+    assert.equal(tracker.comments(ticket.identifier, { since: '2026-01-02T00:00:00Z' })[0]!.id, comment.id);
   } finally { db.close(); }
 });
 
@@ -105,13 +109,13 @@ test('the local ticket CLI creates, reads, comments, and moves without a network
   symlinkSync('cleared.ts', join(box.home, 'cleared'));
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, readFile(confPath, 'utf8').replace('adapter = local',
-    `adapter = local\nowner_id = alice\nagents_uid = ${process.getuid()}`));
-  const run = (...args) => {
+    `adapter = local\nowner_id = alice\nagents_uid = ${process.getuid!()}`));
+  const run = (...args: string[]) => {
     const result = execFileSync(join(box.home, 'cleared'), ['ticket', ...args], { env: box.env, encoding: 'utf8' });
     return JSON.parse(result);
   };
   const ticket = run('new', 'Try local tracking');
-  const wrongState = { ...box.env };
+  const wrongState: NodeJS.ProcessEnv = { ...box.env };
   delete wrongState.ORCH_STATE_DIR;
   delete wrongState.CLEARED_STATE_DIR;
   const missingState = spawnSync(join(box.home, 'cleared'), ['ticket', 'show', 'LOCAL-1'], { env: wrongState, encoding: 'utf8' });
@@ -138,7 +142,7 @@ test('generic tracker comments keep the agent marker and hourly limit', () => {
   copyFileSync(join(ORCH_HOME, 'tracker.ts'), join(box.home, 'tracker.ts'));
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, readFile(confPath, 'utf8').replace('adapter = local',
-    `adapter = local\nowner_id = alice\nagents_uid = ${process.getuid()}\ncomments_per_hour = 1`));
+    `adapter = local\nowner_id = alice\nagents_uid = ${process.getuid!()}\ncomments_per_hour = 1`));
   execFileSync(join(box.home, 'cleared'), ['ticket', 'new', 'Comment limit'], { env: box.env });
   const file = join(box.home, 'note.md');
   writeFileSync(file, 'A useful update.');
@@ -177,21 +181,21 @@ test('capture roots accept a nested lane wildcard and skip absent roots', () => 
 test('GitHub status labels preserve the actor from the issue timeline', () => {
   const issue = { number: 12, title: 'Test ticket', body: 'Body', labels: [{ name: 'status:Todo' }],
     html_url: 'https://example.test/issues/12', created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' };
-  const timeline = [];
+  const timeline: unknown[] = [];
   let identity = 'app';
-  const api = (path, method, body) => {
+  const api = (path: string, method?: string, body?: unknown) => {
     if (path === '/installation/repositories') { if (identity === 'app') return { repositories: [] }; throw new Error('not an installation'); }
     if (path === '/user') return { login: 'alice' };
     if (path.endsWith('/issues/12/timeline?per_page=100')) return timeline;
     if (path.endsWith('/issues/12/labels') && method === 'POST') {
-      issue.labels.push(...body.labels.map((name) => ({ name })));
-      timeline.push({ event: 'labeled', label: { name: body.labels[0] },
+      issue.labels.push(...(body as LabelsInput).labels.map((name) => ({ name })));
+      timeline.push({ event: 'labeled', label: { name: (body as LabelsInput).labels[0] },
         actor: { login: identity === 'app' ? 'cleared[bot]' : 'alice', type: identity === 'app' ? 'Bot' : 'User' },
         created_at: new Date().toISOString() });
       return issue;
     }
     if (path.includes('/issues/12/labels/') && method === 'DELETE') {
-      issue.labels = issue.labels.filter((label) => label.name !== decodeURIComponent(path.split('/').at(-1)));
+      issue.labels = issue.labels.filter((label) => label.name !== decodeURIComponent(path.split('/').at(-1)!));
       return {};
     }
     if (path.endsWith('/issues/12')) return issue;
@@ -201,26 +205,26 @@ test('GitHub status labels preserve the actor from the issue timeline', () => {
   const tracker = new GithubTracker({ conf, api });
   assert.throws(() => tracker.moveTicket('GH-12', 'Approved'), /Only the configured human/);
   tracker.moveTicket('GH-12', 'Review');
-  assert.deepEqual(tracker.history('GH-12').at(-1).by, { kind: 'agents', id: 'cleared[bot]' });
+  assert.deepEqual(tracker.history('GH-12').at(-1)!.by, { kind: 'agents', id: 'cleared[bot]' });
   identity = 'human';
   tracker.moveTicket('GH-12', 'Approved');
-  assert.deepEqual(tracker.history('GH-12').at(-1).by, { kind: 'human', id: 'alice' });
+  assert.deepEqual(tracker.history('GH-12').at(-1)!.by, { kind: 'human', id: 'alice' });
 });
 
 test('a failed GitHub status change restores its old label without replacing unrelated labels', () => {
   const issue = { number: 5, title: 'Ticket', body: '', labels: [{ name: 'status:Todo' }, { name: 'priority:high' }],
     html_url: 'https://example.test/issues/5', created_at: '2026-10-01T00:00:00Z', updated_at: '2026-10-01T00:00:00Z' };
   let failNextAdd = true;
-  const api = (path, method, body) => {
+  const api = (path: string, method?: string, body?: unknown) => {
     if (path === '/installation/repositories') return { repositories: [] };
     if (path.endsWith('/issues/5') && method === 'GET') return issue;
     if (path.includes('/issues/5/labels/') && method === 'DELETE') {
-      issue.labels = issue.labels.filter((label) => label.name !== decodeURIComponent(path.split('/').at(-1)));
+      issue.labels = issue.labels.filter((label) => label.name !== decodeURIComponent(path.split('/').at(-1)!));
       return {};
     }
     if (path.endsWith('/issues/5/labels') && method === 'POST') {
       if (failNextAdd) { failNextAdd = false; throw new Error('GitHub rejected the status update'); }
-      issue.labels.push(...body.labels.map((name) => ({ name })));
+      issue.labels.push(...(body as LabelsInput).labels.map((name) => ({ name })));
       return issue.labels;
     }
     throw new Error(`Unexpected request: ${path}`);
@@ -232,10 +236,10 @@ test('a failed GitHub status change restores its old label without replacing unr
 });
 
 test('an unclassified GitHub issue does not stop other tickets from waking', () => {
-  const issue = (number, labels) => ({ number, title: `Ticket ${number}`, body: '', labels,
+  const issue = (number: number, labels: { name: string }[]) => ({ number, title: `Ticket ${number}`, body: '', labels,
     html_url: `https://example.test/issues/${number}`, created_at: '2026-01-01T00:00:00Z',
     updated_at: '2026-10-12T00:00:00Z', user: { login: 'alice', type: 'User' } });
-  const api = (path) => {
+  const api = (path: string) => {
     if (path.includes('/issues?')) return [issue(1, []), issue(2, [{ name: 'status:Todo' }])];
     if (path.endsWith('/issues/2/comments?per_page=100')) return [];
     if (path.endsWith('/issues/1')) return issue(1, []);
@@ -250,12 +254,12 @@ test('an unclassified GitHub issue does not stop other tickets from waking', () 
 
 test('an edited GitHub human comment cannot authorize a team choice', () => {
   const conf = { sections: { tracker: { repository: 'example/project', owner_id: 'alice', app_login: 'cleared[bot]' } } };
-  const api = (path) => {
+  const api = (path: string) => {
     if (path.endsWith('/issues/12/comments?per_page=100')) return [{ id: 1, body: 'Teams: both',
       created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:01:00Z', user: { login: 'alice', type: 'User' } }];
     throw new Error(`Unexpected request: ${path}`);
   };
-  const comment = new GithubTracker({ conf, api }).comments('GH-12')[0];
+  const comment = new GithubTracker({ conf, api }).comments('GH-12')[0]!;
   assert.equal(comment.byOwner, false);
   assert.equal(comment.by.kind, 'other');
 });
@@ -264,7 +268,7 @@ test('a ticket classified after creation and its earlier comments reach the next
   const issue = { number: 30, title: 'Older ticket', body: 'Please implement it', labels: [{ name: 'status:Todo' }],
     html_url: 'https://example.test/issues/30', created_at: '2026-10-01T00:00:00Z',
     updated_at: '2026-10-12T10:59:00Z', user: { login: 'alice', type: 'User' } };
-  const api = (path) => {
+  const api = (path: string) => {
     if (path.includes('/issues?')) return [issue];
     if (path.endsWith('/issues/30/comments?per_page=100')) return [{ id: 9, body: 'The acceptance criteria',
       created_at: '2026-10-01T00:01:00Z', updated_at: '2026-10-01T00:01:00Z',
@@ -281,7 +285,7 @@ test('a ticket classified after creation and its earlier comments reach the next
 
 test('GitHub bot comments use the configured agent identity with either login form', () => {
   const conf = { sections: { tracker: { repository: 'example/project', owner_id: 'alice', app_login: 'cleared' } } };
-  const api = (path) => {
+  const api = (path: string) => {
     if (path.endsWith('/issues/12/comments?per_page=100')) return [{ id: 1, body: 'Agent update',
       created_at: '2026-10-12T00:00:00Z', updated_at: '2026-10-12T00:00:00Z',
       user: { login: 'cleared[bot]', type: 'Bot' } }];
@@ -289,7 +293,7 @@ test('GitHub bot comments use the configured agent identity with either login fo
     throw new Error(`Unexpected request: ${path}`);
   };
   const tracker = new GithubTracker({ conf, api });
-  assert.deepEqual(tracker.comments('GH-12')[0].by, { kind: 'agents', id: 'cleared' });
+  assert.deepEqual(tracker.comments('GH-12')[0]!.by, { kind: 'agents', id: 'cleared' });
 });
 
 test('GitHub App token is renewed when fewer than five minutes remain', () => {
@@ -303,7 +307,7 @@ test('GitHub App token is renewed when fewer than five minutes remain', () => {
   clock += 2 * 60_000;
   assert.equal(tokens.get(), 'installation-2');
   assert.equal(requested, 2);
-  tokens.current.expiresAt = new Date(clock - 1000).toISOString();
+  tokens.current!.expiresAt = new Date(clock - 1000).toISOString();
   assert.equal(tokens.get(), 'installation-3', 'an expired token is never sent to GitHub');
 });
 
@@ -321,12 +325,12 @@ test('GitHub App installation request signs a short-lived JWT and rejects an exp
   const clock = Date.parse('2026-10-12T12:00:00Z');
   const settings = { app_id: '123', installation_id: '456', app_private_key_file: key };
   try {
-    const request = (endpoint, jwt) => {
+    const request = (endpoint: string, jwt: string) => {
       assert.equal(endpoint, 'https://api.github.com/app/installations/456/access_tokens');
       const [header, payload, signature] = jwt.split('.');
-      assert.equal(JSON.parse(Buffer.from(header, 'base64url')).alg, 'RS256');
-      assert.equal(JSON.parse(Buffer.from(payload, 'base64url')).iss, '123');
-      assert.equal(createVerify('RSA-SHA256').update(`${header}.${payload}`).verify(publicKey, Buffer.from(signature, 'base64url')), true);
+      assert.equal(JSON.parse(Buffer.from(header!, 'base64url') as unknown as string).alg, 'RS256');
+      assert.equal(JSON.parse(Buffer.from(payload!, 'base64url') as unknown as string).iss, '123');
+      assert.equal(createVerify('RSA-SHA256').update(`${header}.${payload}`).verify(publicKey, Buffer.from(signature!, 'base64url')), true);
       return { token: 'fresh', expires_at: new Date(clock + 60 * 60_000).toISOString() };
     };
     assert.equal(mintInstallationToken(settings, { now: () => clock, request }).token, 'fresh');
@@ -338,10 +342,10 @@ test('GitHub App installation request signs a short-lived JWT and rejects an exp
 test('GitHub Project v2 uses the configured single-select status and event actor', () => {
   let status = 'Todo';
   let identity = 'app';
-  const events = [];
+  const events: unknown[] = [];
   const issue = { number: 12, title: 'Test', body: '', labels: [], html_url: 'https://example.test/12',
     created_at: '2026-01-01T00:00:00Z', updated_at: '2026-01-01T00:00:00Z' };
-  const api = (path, method, input) => {
+  const api = (path: string, method?: string, input?: unknown) => {
     if (path === '/installation/repositories') { if (identity === 'app') return { repositories: [] }; throw new Error('not app'); }
     if (path === '/user') return { login: 'alice' };
     if (path.includes('/issues?state=all&since=')) return [];
@@ -349,7 +353,7 @@ test('GitHub Project v2 uses the configured single-select status and event actor
     if (path.endsWith('/issues/12/comments?per_page=100')) return [];
     if (path.endsWith('/issues/12')) return issue;
     if (path !== 'graphql') throw new Error(`Unexpected request: ${path}`);
-    const q = input.query;
+    const q = (input as GraphqlInput).query;
     if (q.includes('items(first:100')) return { data: { node: { items: { nodes: [{ updatedAt: new Date().toISOString(),
       content: { number: 12, repository: { nameWithOwner: 'example/project' } }, fieldValueByName: { name: status } }],
       pageInfo: { hasNextPage: false, endCursor: null } } } } };
@@ -360,7 +364,7 @@ test('GitHub Project v2 uses the configured single-select status and event actor
       { id: 'o1', name: 'Todo' }, { id: 'o2', name: 'Review' }, { id: 'o3', name: 'Approved' },
     ] } } } };
     if (q.includes('updateProjectV2ItemFieldValue')) {
-      status = input.variables.option === 'o2' ? 'Review' : 'Approved';
+      status = (input as GraphqlInput).variables.option === 'o2' ? 'Review' : 'Approved';
       events.push({ status, createdAt: new Date().toISOString(), actor: { login: identity === 'app' ? 'cleared' : 'alice',
         __typename: identity === 'app' ? 'Bot' : 'User' },
         project: { id: 'project1' }, wasAutomated: false });
@@ -374,14 +378,14 @@ test('GitHub Project v2 uses the configured single-select status and event actor
   const tracker = new GithubTracker({ conf, api });
   assert.throws(() => tracker.moveTicket('GH-12', 'Approved'), /Only the configured human/);
   tracker.moveTicket('GH-12', 'Review');
-  assert.equal(tracker.getTicket('GH-12').status, 'Review');
+  assert.equal(tracker.getTicket('GH-12')!.status, 'Review');
   identity = 'human';
   tracker.moveTicket('GH-12', 'Approved');
-  assert.equal(tracker.history('GH-12').at(-1).by.kind, 'human');
-  assert.equal(tracker.listTickets({ status: 'Approved' })[0].identifier, 'GH-12');
+  assert.equal(tracker.history('GH-12').at(-1)!.by.kind, 'human');
+  assert.equal(tracker.listTickets({ status: 'Approved' })[0]!.identifier, 'GH-12');
   const changed = tracker.changesSince('2026-10-01T00:00:00Z');
-  assert.equal(changed.events[0].status, 'Approved');
-  assert.ok(Date.parse(changed.events[0].updatedAt) > Date.parse('2026-10-01T00:00:00Z'),
+  assert.equal(changed.events[0]!.status, 'Approved');
+  assert.ok(Date.parse(changed.events[0]!.updatedAt) > Date.parse('2026-10-01T00:00:00Z'),
     'a field-only move must be visible to the next wake');
 });
 
@@ -390,14 +394,14 @@ test('a GitHub capture passes OCR and the text guard before any image bytes reac
   const file = join(dir, 'capture.png');
   writeFileSync(file, Buffer.from('89504e470d0a1a0a00000000', 'hex'));
   const bin = scratch('cleared-ocr-bin-');
-  writeFileSync(join(bin, 'tesseract'), '#!/usr/bin/env bash\nprintf "%s" "$FAKE_OCR_TEXT"\n', { mode: 0o755 });
+  writeFileSync(join(bin, 'tesseract'), `#!${process.execPath}\nprocess.stdout.write(process.env.FAKE_OCR_TEXT ?? '');\n`, { mode: 0o755 });
   const old = { PATH: process.env.PATH, ORCH_REPO: process.env.ORCH_REPO,
     ORCH_GUARD_REF: process.env.ORCH_GUARD_REF, FAKE_OCR_TEXT: process.env.FAKE_OCR_TEXT };
   process.env.PATH = `${bin}:${old.PATH}`;
   process.env.ORCH_REPO = fixtureProject();
   process.env.ORCH_GUARD_REF = 'HEAD';
-  const calls = [];
-  const api = (path, method, body) => {
+  const calls: [string, string | undefined, unknown][] = [];
+  const api = (path: string, method?: string, body?: unknown) => {
     calls.push([path, method, body]);
     if (path === '/installation/repositories') return { repositories: [] };
     if (path.endsWith('/git/ref/heads/cleared-captures')) return { object: { sha: 'base' } };
@@ -434,7 +438,7 @@ test('local ticket moves through request, verified approval, guarded merge, and 
   writeFileSync(key, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
   const settings = { todo_state: 'Todo', validate_state: 'À valider', go_state: 'Go MEP',
     done_state: 'Done', progress_state: 'In Progress', review_state: 'In Review', owner_id: 'alice',
-    agents_uid: String(process.getuid()), human_private_key: key,
+    agents_uid: String(process.getuid!()), human_private_key: key,
     human_public_key: Buffer.from(publicKey.export({ type: 'spki', format: 'pem' })).toString('base64') };
   const confPath = join(box.home, 'agents.conf');
   const lines = Object.entries(settings).map(([name, value]) => `${name} = ${value}`).join('\n');
@@ -445,25 +449,25 @@ test('local ticket moves through request, verified approval, guarded merge, and 
   const agents = new LocalTracker({ conf, db, actor: { kind: 'agents', id: 'cleared' }, approvalDir });
   const human = new LocalTracker({ conf, db, actor: { kind: 'human', id: 'alice' }, approvalDir });
   try {
-    assert.equal(human.createTicket({ title: 'Test ticket', body: 'Body' }).identifier, 'LOCAL-1');
+    assert.equal(human.createTicket({ title: 'Test ticket', body: 'Body' })!.identifier, 'LOCAL-1');
     assert.ok(agents.getTicket('LOCAL-1'));
     human.moveTicket('LOCAL-1', 'Go MEP');
-    const earlier = db.prepare('SELECT status, actor_kind, actor_id, at, proof FROM tracker_history ORDER BY id DESC LIMIT 1').get();
+    const earlier = db.prepare('SELECT status, actor_kind, actor_id, at, proof FROM tracker_history ORDER BY id DESC LIMIT 1').get() as { status: string; actor_kind: string; actor_id: string; at: string; proof: string | null };
     const asked = pull.ask();
     assert.equal(asked.status, 0, asked.stderr);
-    assert.equal(agents.getTicket('LOCAL-1').status, 'À valider');
+    assert.equal(agents.getTicket('LOCAL-1')!.status, 'À valider');
     assert.equal(pull.merge(['-', '--dry-run'], {}, 'Announcement.').status, 6);
     assert.throws(() => agents.moveTicket('LOCAL-1', 'Go MEP'), /Only the configured human/);
     db.prepare('UPDATE tracker_tickets SET status = ? WHERE id = 1').run('Go MEP');
     db.prepare('INSERT INTO tracker_history(ticket, status, actor_kind, actor_id, at, proof) VALUES (1, ?, ?, ?, ?, ?)')
       .run(earlier.status, earlier.actor_kind, earlier.actor_id, earlier.at, earlier.proof);
     assert.equal(pull.merge(['-'], {}, 'Announcement.').status, 6, 'an old signed move is not approval of the later request');
-    assert.equal(agents.getTicket('LOCAL-1').status, 'À valider');
+    assert.equal(agents.getTicket('LOCAL-1')!.status, 'À valider');
     db.prepare('UPDATE tracker_tickets SET status = ? WHERE id = 1').run('Go MEP');
     db.prepare('INSERT INTO tracker_history(ticket, status, actor_kind, actor_id, at) VALUES (1, ?, ?, ?, ?)')
       .run('Go MEP', 'agents', 'cleared', new Date().toISOString());
     assert.equal(pull.merge(['-'], {}, 'Announcement.').status, 6, 'an agent status change is not a human approval');
-    assert.equal(agents.getTicket('LOCAL-1').status, 'À valider');
+    assert.equal(agents.getTicket('LOCAL-1')!.status, 'À valider');
     human.moveTicket('LOCAL-1', 'Go MEP');
     const validationFile = join(approvalDir, 'LOCAL-1.json');
     const authenticRequest = readFile(validationFile, 'utf8');
@@ -478,7 +482,7 @@ test('local ticket moves through request, verified approval, guarded merge, and 
     assert.equal(approved.status, 0, approved.stderr);
     const shipped = pull.merge(['-'], {}, 'Announcement.');
     assert.equal(shipped.status, 0, shipped.stderr);
-    assert.equal(agents.getTicket('LOCAL-1').status, 'Done');
+    assert.equal(agents.getTicket('LOCAL-1')!.status, 'Done');
   } finally { db.close(); }
 });
 
@@ -489,14 +493,14 @@ test('GitHub Issues ticket moves through request, actor checks, guarded merge, a
   const appKey = join(box.home, 'github-app.pem');
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   writeFileSync(appKey, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
-  writeFileSync(join(box.home, 'bin', 'curl'), `#!/usr/bin/env bash
-cat > /dev/null
-printf '{"token":"fake-installation-token","expires_at":"%s"}\n' "$(date -u -d '1 hour' +%Y-%m-%dT%H:%M:%SZ)"
+  writeFileSync(join(box.home, 'bin', 'curl'), `#!${process.execPath}
+try { process.getBuiltinModule('node:fs').readFileSync(0); } catch { /* no input */ }
+process.stdout.write('{"token":"fake-installation-token","expires_at":"' + new Date(Date.now() + 3_600_000).toISOString().replace(/\\.\\d{3}Z$/, 'Z') + '"}\\n');
 `, { mode: 0o755 });
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, readFile(confPath, 'utf8').replace('adapter = local',
     `adapter = github\nrepository = example/project\nowner_id = alice\napp_login = cleared[bot]\napp_id = 123\ninstallation_id = 456\napp_private_key_file = ${appKey}`));
-  box.env.GH_TOKEN = 'stale-token';
+  (box.env as NodeJS.ProcessEnv).GH_TOKEN = 'stale-token';
   const stateFile = join(box.home, 'fake-issue.json');
   const state = { issue: { number: 12, title: 'Test ticket', body: 'Body', node_id: 'node12',
     labels: [{ name: 'status:Todo' }], html_url: 'https://example.test/issues/12',
@@ -534,13 +538,16 @@ else if (path.endsWith('/issues/12/comments') && method === 'POST') {
 writeFileSync(file, JSON.stringify(state));
 console.log(JSON.stringify(result));
 `);
-  writeFileSync(join(box.home, 'bin', 'gh'), `#!/usr/bin/env bash
-if [ "$1" = api ] && [[ " $* " == *"/repos/example/project/issues/12"* || " $* " == *"/installation/repositories"* ]]; then
-  [ "$GH_TOKEN" = fake-installation-token ] || exit 97
-  node ${fake} "\${@:2}"
-else exec ${original} "$@"; fi
+  writeFileSync(join(box.home, 'bin', 'gh'), `#!${process.execPath}
+const { spawnSync } = process.getBuiltinModule('node:child_process');
+const args = process.argv.slice(2);
+const line = ' ' + args.join(' ') + ' ';
+if (args[0] === 'api' && (line.includes('/repos/example/project/issues/12') || line.includes('/installation/repositories'))) {
+  if (process.env.GH_TOKEN !== 'fake-installation-token') process.exitCode = 97;
+  else process.exitCode = spawnSync('node', [${JSON.stringify(fake)}, ...args.slice(1)], { stdio: 'inherit' }).status ?? 1;
+} else process.exitCode = spawnSync(${JSON.stringify(original)}, args, { stdio: 'inherit' }).status ?? 1;
 `, { mode: 0o755 });
-  const externalMove = (who, at) => {
+  const externalMove = (who: string, at: string) => {
     const data = JSON.parse(readFile(stateFile, 'utf8'));
     data.issue.labels = [{ name: 'status:Go MEP' }];
     data.timeline.push({ event: 'labeled', label: { name: 'status:Go MEP' },
@@ -606,15 +613,16 @@ if (query.includes('commentCreate')) {
 writeFileSync(file, JSON.stringify(state));
 console.log(JSON.stringify({data}));
 `);
-  writeFileSync(join(box.home, 'bin', 'curl'), `#!/usr/bin/env bash
-node ${fake} "$@"
+  writeFileSync(join(box.home, 'bin', 'curl'), `#!${process.execPath}
+const { spawnSync } = process.getBuiltinModule('node:child_process');
+process.exitCode = spawnSync('node', [${JSON.stringify(fake)}, ...process.argv.slice(2)], { stdio: 'inherit' }).status ?? 1;
 `, { mode: 0o755 });
   const env = { LINEAR_APP_CLIENT_ID: 'app', LINEAR_APP_CLIENT_SECRET: 'secret' };
   const asked = pull.ask('Please approve this version.', env);
   assert.equal(asked.status, 0, asked.stderr);
   assert.equal(JSON.parse(readFile(stateFile, 'utf8')).status, 'À valider');
   const requested = JSON.parse(readFile(join(box.state, 'validations', 'X-5.json'), 'utf8')).at;
-  const externalMove = (who, at) => {
+  const externalMove = (who: string, at: string) => {
     const next = JSON.parse(readFile(stateFile, 'utf8'));
     next.status = 'Go MEP';
     next.history.push({ createdAt: at, actorId: who, actor: { id: who, app: who === 'agent' },
@@ -659,8 +667,18 @@ test('GitHub private captures use the installation token and repository contents
 test('[Linear adapter] private capture download uses the tracker authorization header', () => {
   const box = sandbox();
   const marker = join(box.home, 'capture-header');
-  writeFileSync(join(box.home, 'bin', 'curl'), `#!/bin/bash\nprev=\nfor arg in "$@"; do\n  if [ "$prev" = -H ]; then cat "\${arg#@}" > '${marker}'; fi\n  prev=$arg\ndone\nprintf '\\211PNG\\r\\n\\032\\n'\n`, { mode: 0o755 });
-  const run = (url) => spawnSync(join(box.home, 'lib', 'tracker', 'adapters', 'linear.ts'), ['download-capture', url],
+  writeFileSync(join(box.home, 'bin', 'curl'), `#!${process.execPath}
+const fs = process.getBuiltinModule('node:fs');
+const args = process.argv.slice(2);
+args.forEach((arg, i) => {
+  if (args[i - 1] !== '-H') return;
+  const file = arg.replace(/^@/, '');
+  fs.writeFileSync(${JSON.stringify(marker)}, '');
+  try { fs.writeFileSync(${JSON.stringify(marker)}, fs.readFileSync(file)); } catch (error) { process.stderr.write('cat: ' + file + ': ' + (error.code === 'ENOENT' ? 'No such file or directory' : error.message) + '\\n'); }
+});
+process.stdout.write(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+`, { mode: 0o755 });
+  const run = (url: string) => spawnSync(join(box.home, 'lib', 'tracker', 'adapters', 'linear.ts'), ['download-capture', url],
     { env: { ...box.env, LINEAR_API_KEY: 'test-key' } });
   const ok = run('https://uploads.linear.app/workspace/asset');
   assert.equal(ok.status, 0, ok.stderr.toString());

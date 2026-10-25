@@ -2,46 +2,68 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import net from 'node:net';
+import type { AddressInfo } from 'node:net';
 import { appServer, WRITES } from '../app/server.ts';
 import { demoSource, DEMO_HEAD, DEMO_HEAD_NEXT } from '../app/sources/demo.ts';
 import { createActions } from '../app/lib/actions.ts';
+import type { WriteRequest, WriteResult } from '../app/lib/actions.ts';
+import type { Passkey } from '../app/lib/credentials.ts';
 import { grantServer, requestGrant } from '../app/lib/grant-socket.ts';
 import { Authenticator } from './app-authenticator.ts';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+// What /api/me tells a session, what the app answers a JSON request, and a signed-in browser.
+type Me = { csrf: string; actions: { confirm: boolean; reason: string; pending: { id: string | null; state: string }[] } };
+type Reply = { challengeId: string; pendingId: string; publicKey: { challenge: string; authenticatorSelection: { userVerification: string }; attestation: string }; [key: string]: unknown };
+type Answer = { status: number; body: Reply };
+type Browser = {
+  cookie: string; csrf: string; me: Me;
+  post(path: string, body?: object, over?: Record<string, string | undefined>): Promise<Response>;
+  json(path: string, body?: object, over?: Record<string, string | undefined>): Promise<Answer>;
+};
+// A gesture as the ledger notes it, and a grace delay held by the test instead of a real timer.
+type Noted = { gesture: string; result: string; version: string[]; device: string };
+type FakeTimer = { fn: () => unknown; ms: number; cancelled: boolean; unref(): void };
+type Rigged = {
+  base: string; demo: ReturnType<typeof demoSource>; ran: WriteRequest[]; records: Noted[]; timers: FakeTimer[]; actions: ReturnType<typeof createActions>;
+  authenticator: Authenticator; close(): Promise<unknown>; store(): Passkey[];
+  browser(): Promise<Browser>; register(browser: Browser, authn?: Authenticator): Promise<void>;
+  confirmClear(browser: Browser, over?: object): Promise<{ asked: Answer; confirmed: Answer }>;
+};
+
 const TOKEN = 'b'.repeat(64);
 const HEAD_A = DEMO_HEAD;
 const VERSIONS = [{ pr: 88, head: HEAD_A }];
-const dirs = [];
+const dirs: string[] = [];
 after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
 
-const freePort = () => new Promise((resolve) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
+const freePort = () => new Promise<number>((resolve) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port } = s.address() as AddressInfo; s.close(() => resolve(port)); }); });
 
-async function rig({ origin = true, passkeys = true, run } = {}) {
+async function rig({ origin = true, passkeys = true, run }: { origin?: boolean; passkeys?: boolean; run?: (request: WriteRequest) => Promise<WriteResult> } = {}) {
   const port = await freePort();
   const base = `http://127.0.0.1:${port}`;
   const demo = demoSource();
-  const ran = [], records = [], timers = [];
-  let store = [];
-  const schedule = (fn, ms) => { const timer = { fn, ms, cancelled: false, unref() {} }; timers.push(timer); return timer; };
-  const cancel = (timer) => { timer.cancelled = true; };
+  const ran: WriteRequest[] = [], records: Noted[] = [], timers: FakeTimer[] = [];
+  let store: Passkey[] = [];
+  const schedule = (fn: () => unknown, ms: number) => { const timer = { fn, ms, cancelled: false, unref() {} }; timers.push(timer); return timer; };
+  const cancel = (timer: FakeTimer) => { timer.cancelled = true; };
   const actions = createActions({ source: demo, origin: origin ? base : '', owner: 'alice', schedule, cancel,
     readPasskeys: () => store, writePasskeys: (list) => { store = list; },
     run: run ?? (async (request) => { ran.push(request); return { ok: true, author: 'alice', verified: true }; }), record: (entry) => records.push(JSON.parse(entry.detail)) });
   const server = appServer({ source: demo, token: TOKEN, ranges: ['127.0.0.0/8'], pollMs: 50, heartbeatMs: 80, actions, origin: origin ? base : '', owner: 'alice' });
-  await new Promise((resolve) => server.listen(port, '127.0.0.1', resolve));
+  await new Promise<void>((resolve) => server.listen(port, '127.0.0.1', resolve));
   const authenticator = new Authenticator({ origin: base, rpId: '127.0.0.1' });
-  const rigged = { base, demo, ran, records, timers, actions, authenticator, close: () => new Promise((r) => { server.close(r); }), store: () => store };
+  const rigged = { base, demo, ran, records, timers, actions, authenticator, close: () => new Promise((r) => { server.close(r); }), store: () => store } as Rigged;
   // A signed-in browser: a session cookie and the anti-forgery token that goes with it.
   rigged.browser = async () => {
     const signedIn = await fetch(`${base}/session`, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'user-agent': 'Mozilla/5.0 (iPhone)' } });
     assert.equal(signedIn.status, 204);
-    const cookie = signedIn.headers.get('set-cookie').split(';')[0];
-    const me = await (await fetch(`${base}/api/me`, { headers: { cookie } })).json();
-    const post = (path, body = {}, over = {}) => fetch(base + path, { method: 'POST', headers: { cookie, 'x-csrf-token': me.csrf, origin: base, 'content-type': 'application/json', ...over }, body: JSON.stringify(body) });
-    const json = async (path, body, over) => { const r = await post(path, body, over); return { status: r.status, body: await r.json().catch(() => ({})) }; };
+    const cookie = signedIn.headers.get('set-cookie')!.split(';')[0]!;
+    const me = await (await fetch(`${base}/api/me`, { headers: { cookie } })).json() as Me;
+    const post = (path: string, body: object = {}, over: Record<string, string | undefined> = {}) => fetch(base + path, { method: 'POST', headers: { cookie, 'x-csrf-token': me.csrf, origin: base, 'content-type': 'application/json', ...over } as Record<string, string>, body: JSON.stringify(body) });
+    const json = async (path: string, body?: object, over?: Record<string, string | undefined>) => { const r = await post(path, body, over); return { status: r.status, body: await r.json().catch(() => ({})) as Reply }; };
     return { cookie, csrf: me.csrf, post, json, me };
   };
   // Registers the authenticator's passkey, the way the phone does after `cleared app passkey`.
@@ -54,7 +76,7 @@ async function rig({ origin = true, passkeys = true, run } = {}) {
   };
   rigged.confirmClear = async (browser, over = {}) => {
     const asked = await browser.json('/api/actions/challenge', { gesture: 'clear', ticket: 'EX-31', versions: VERSIONS });
-    if (asked.status !== 200) return { asked };
+    if (asked.status !== 200) return { asked } as { asked: Answer; confirmed: Answer };
     const confirmed = await browser.json('/api/actions/confirm', { challengeId: asked.body.challengeId, assertion: authenticator.get(asked.body.publicKey), ...over });
     return { asked, confirmed };
   };
@@ -88,11 +110,11 @@ test('the session cookie is HttpOnly and SameSite=Strict, Secure behind a TLS pr
   const r = await rig();
   try {
     const plain = await fetch(`${r.base}/session`, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}` } });
-    const cookie = plain.headers.get('set-cookie');
+    const cookie = plain.headers.get('set-cookie')!;
     assert.match(cookie, /HttpOnly/); assert.match(cookie, /SameSite=Strict/); assert.doesNotMatch(cookie, /Secure/, 'plain http on this machine');
     assert.ok(!cookie.includes(TOKEN));
     const proxied = await fetch(`${r.base}/session`, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, 'x-forwarded-proto': 'https' } });
-    assert.match(proxied.headers.get('set-cookie'), /; Secure/);
+    assert.match(proxied.headers.get('set-cookie')!, /; Secure/);
     for (let i = 0; i < 10; i++) assert.equal((await fetch(`${r.base}/session`, { method: 'POST', headers: { authorization: 'Bearer wrong' } })).status, 401);
     assert.equal((await fetch(`${r.base}/session`, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}` } })).status, 204, 'a good token still works');
     assert.equal((await fetch(`${r.base}/session`, { method: 'POST', headers: { authorization: 'Bearer wrong' } })).status, 429, 'after ten failures, a pause for wrong tokens');
@@ -175,7 +197,7 @@ test('a passkey confirmation is needed for Clear to land and Send back: no asser
     asked = await ask();
     const good = r.authenticator.get(asked.body.publicKey);
     assert.equal((await browser.json('/api/actions/confirm', { challengeId: asked.body.challengeId, assertion: good })).status, 200);
-    const waitingOne = (await fetch(`${r.base}/api/me`, { headers: { cookie: browser.cookie } }).then((x) => x.json())).actions.pending[0];
+    const waitingOne = (await fetch(`${r.base}/api/me`, { headers: { cookie: browser.cookie } }).then((x) => x.json() as Promise<Me>)).actions.pending[0]!;
     await browser.json('/api/actions/undo', { pendingId: waitingOne.id });
     const replay = await ask();
     r.authenticator.counter -= 1;
@@ -198,14 +220,14 @@ test('Clear to land: the grace delay is held on the server, and the agreement is
     assert.equal(confirmed.status, 200, JSON.stringify(confirmed.body));
     assert.equal(confirmed.body.graceMs, 60000);
     assert.equal(r.timers.length, 1);
-    assert.equal(r.timers[0].ms, 60000, 'sixty seconds, on the server');
-    assert.deepEqual(r.ran, [], 'nothing is written during the grace delay');
+    assert.equal(r.timers[0]!.ms, 60000, 'sixty seconds, on the server');
+    assert.deepEqual(r.ran, [] as WriteRequest[], 'nothing is written during the grace delay');
     assert.equal((await r.browser()).me.actions.pending.length, 1, 'every device of the human sees it');
-    assert.equal((await fetch(`${r.base}/api/me`, { headers: { cookie: browser.cookie } }).then((x) => x.json())).actions.pending[0].state, 'waiting');
-    await r.timers[0].fn();
+    assert.equal((await fetch(`${r.base}/api/me`, { headers: { cookie: browser.cookie } }).then((x) => x.json() as Promise<Me>)).actions.pending[0]!.state, 'waiting');
+    await r.timers[0]!.fn();
     assert.equal(r.ran.length, 1); assert.deepEqual({ ...r.ran[0], at: undefined }, { op: 'approve', ticket: 'EX-31', versions: VERSIONS, at: undefined });
-    assert.match(r.ran[0].at, /^\d{4}-\d\d-\d\dT/, 'the request the agreement answers is named');
-    const written = r.records.find((e) => e.result === 'written');
+    assert.match(r.ran[0]!.at!, /^\d{4}-\d\d-\d\dT/, 'the request the agreement answers is named');
+    const written = r.records.find((e) => e.result === 'written')!;
     assert.equal(written.gesture, 'clear');
     assert.deepEqual(written.version, ['88:a1b2c3d']);
     assert.match(written.device, /^iPhone · [0-9a-f]{4}$/);
@@ -222,16 +244,16 @@ test('Undo during the grace delay writes nothing; too late is too late', async (
     const other = await r.browser();
     assert.equal((await other.json('/api/actions/undo', { pendingId: confirmed.body.pendingId })).status, 404, 'another session cannot undo it');
     // Another device sees it waiting, without the means to undo it.
-    const seen = (await fetch(`${r.base}/api/me`, { headers: { cookie: other.cookie } }).then((x) => x.json())).actions.pending;
-    assert.equal(seen.length, 1); assert.equal(seen[0].id, null);
+    const seen = (await fetch(`${r.base}/api/me`, { headers: { cookie: other.cookie } }).then((x) => x.json() as Promise<Me>)).actions.pending;
+    assert.equal(seen.length, 1); assert.equal(seen[0]!.id, null);
     assert.equal((await browser.json('/api/actions/undo', { pendingId: confirmed.body.pendingId })).status, 200);
-    assert.equal(r.timers[0].cancelled, true);
-    await r.timers[0].fn();
+    assert.equal(r.timers[0]!.cancelled, true);
+    await r.timers[0]!.fn();
     assert.deepEqual(r.ran, [], 'nothing was written');
     assert.deepEqual(r.records.filter((e) => e.gesture === 'clear').map((e) => e.result), ['confirmed', 'undone']);
     // A second gesture, left to run: Undo after the write answers "too late".
     const second = await r.confirmClear(browser);
-    await r.timers[1].fn();
+    await r.timers[1]!.fn();
     assert.equal(r.ran.length, 1);
     assert.equal((await browser.json('/api/actions/undo', { pendingId: second.confirmed.body.pendingId })).status, 409);
   } finally { await r.close(); }
@@ -246,9 +268,9 @@ test('the agreement is for the version shown: a newer version makes it impossibl
     const { confirmed } = await r.confirmClear(browser);
     assert.equal(confirmed.status, 200);
     r.demo.newVersion('EX-31');
-    await r.timers[0].fn();
+    await r.timers[0]!.fn();
     assert.deepEqual(r.ran, [], 'the writer was never called for an old version');
-    assert.equal(r.records.at(-1).result, 'refused_new_version');
+    assert.equal(r.records.at(-1)!.result, 'refused_new_version');
     // The page still shows the old version: the challenge itself is refused.
     const stale = await browser.json('/api/actions/challenge', { gesture: 'clear', ticket: 'EX-31', versions: VERSIONS });
     assert.equal(stale.status, 409); assert.equal(stale.body.error, 'new_version');
@@ -271,7 +293,7 @@ test('Send back needs the text and the passkey, and writes the comment and the m
     const done = await browser.json('/api/actions/confirm', { challengeId: asked.body.challengeId, assertion: r.authenticator.get(asked.body.publicKey), text: 'Round the figure to the cent.' });
     assert.equal(done.status, 200); assert.equal(done.body.ok, true);
     assert.deepEqual(r.ran, [{ op: 'sendback', ticket: 'EX-31', text: 'Round the figure to the cent.', versions: VERSIONS }]);
-    assert.equal(r.records.at(-1).gesture, 'sendback');
+    assert.equal(r.records.at(-1)!.gesture, 'sendback');
     // Not offered on a card that is not waiting for an agreement.
     assert.equal((await browser.json('/api/actions/challenge', { gesture: 'sendback', ticket: 'EX-34', versions: VERSIONS, text: 'x' })).status, 409);
     assert.equal((await browser.json('/api/actions/challenge', { gesture: 'sendback', ticket: 'EX-39', versions: VERSIONS, text: 'x' })).status, 409, 'a question is answered, not sent back');
@@ -291,10 +313,10 @@ test('Answer needs the session only, only on a question, and writes the text as 
     assert.equal((await browser.json('/api/actions/answer', { ticket: 'EX-39', text: 'x'.repeat(4001) })).status, 400);
     assert.equal((await browser.json('/api/actions/answer', { ticket: '../etc', text: 'x' })).status, 400);
     assert.equal(r.ran.length, 1);
-    assert.equal(r.records.at(-1).gesture, 'answer');
+    assert.equal(r.records.at(-1)!.gesture, 'answer');
     // The demo question carries the team's options for the buttons.
-    const board = await (await fetch(`${r.base}/api/snapshot`, { headers: { cookie: browser.cookie } })).json();
-    assert.deepEqual(board.tickets.find((t) => t.id === 'EX-39').options, ['Yes, take the charges out first', 'No, count the full amount']);
+    const board = await (await fetch(`${r.base}/api/snapshot`, { headers: { cookie: browser.cookie } })).json() as { tickets: { id: string; options: string[] }[] };
+    assert.deepEqual(board.tickets.find((t) => t.id === 'EX-39')!.options, ['Yes, take the charges out first', 'No, count the full amount']);
   } finally { await r.close(); }
 });
 
@@ -304,12 +326,12 @@ test('a writer that fails, or that is refused by the tracker, is reported and re
     const browser = await r.browser();
     const done = await browser.json('/api/actions/answer', { ticket: 'EX-39', text: 'Yes' });
     assert.equal(done.body.ok, false); assert.equal(done.body.code, 'identity');
-    assert.equal(r.records.at(-1).result, 'failed_identity');
+    assert.equal(r.records.at(-1)!.result, 'failed_identity');
     await r.register(browser);
     const { confirmed } = await r.confirmClear(browser);
-    await r.timers[0].fn();
-    assert.equal(r.records.at(-1).result, 'failed_identity');
-    const pending = (await (await fetch(`${r.base}/api/me`, { headers: { cookie: browser.cookie } })).json()).actions.pending.find((p) => p.id === confirmed.body.pendingId);
+    await r.timers[0]!.fn();
+    assert.equal(r.records.at(-1)!.result, 'failed_identity');
+    const pending = (await (await fetch(`${r.base}/api/me`, { headers: { cookie: browser.cookie } })).json() as Me).actions.pending.find((p) => p.id === confirmed.body.pendingId)!;
     assert.equal(pending.state, 'failed');
   } finally { await r.close(); }
 });
@@ -317,7 +339,7 @@ test('a writer that fails, or that is refused by the tracker, is reported and re
 test('the registration socket gives a grant to the human account and to nobody else', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'cleared-grant-')); dirs.push(dir);
   const path = join(dir, 'app.sock');
-  let minted = 0; const seen = [];
+  let minted = 0; const seen: { result: string }[] = [];
   const human = 1234;
   const server = grantServer({ path, humanUid: human, mint: () => { minted += 1; return { grant: 'g', expiresAt: 1, origin: 'https://x' }; }, peer: () => peerNow, record: (e) => seen.push(JSON.parse(e.detail)) });
   let peerNow = 5555; // an agent's UID
@@ -366,8 +388,8 @@ test('a Send back withdraws a Clear still in its grace delay, from any device; o
     const asked = await laptop.json('/api/actions/challenge', { gesture: 'sendback', ticket: 'EX-31', versions: VERSIONS, text: 'No: round it.' });
     const done = await laptop.json('/api/actions/confirm', { challengeId: asked.body.challengeId, assertion: r.authenticator.get(asked.body.publicKey), text: 'No: round it.' });
     assert.equal(done.status, 200);
-    assert.equal(r.timers[0].cancelled, true, 'the waiting clear is withdrawn');
-    await r.timers[0].fn();
+    assert.equal(r.timers[0]!.cancelled, true, 'the waiting clear is withdrawn');
+    await r.timers[0]!.fn();
     assert.deepEqual(r.ran.map((x) => x.op), ['sendback'], 'the agreement is never written after the send back');
     assert.deepEqual(r.records.filter((e) => e.gesture === 'clear').map((e) => e.result), ['confirmed', 'undone_by_sendback']);
   } finally { await r.close(); }
@@ -380,30 +402,30 @@ test('an agreement answers the request that was on screen: a request made again 
     await r.register(browser);
     await r.confirmClear(browser);
     r.demo.askAgain('EX-31'); // same commit, a new request (the agent asked again)
-    await r.timers[0].fn();
+    await r.timers[0]!.fn();
     assert.deepEqual(r.ran, []);
-    assert.equal(r.records.at(-1).result, 'refused_new_version');
+    assert.equal(r.records.at(-1)!.result, 'refused_new_version');
   } finally { await r.close(); }
 });
 
 test('with an https address configured, a session made over plain http writes nothing; behind the local TLS proxy it does; the cookie is Secure', async () => {
   const origin = 'https://cockpit.example.ts.net';
-  const demo = demoSource(); const ran = [];
+  const demo = demoSource(); const ran: WriteRequest[] = [];
   const actions = createActions({ source: demo, origin, owner: 'alice', readPasskeys: () => [], writePasskeys: () => {}, run: async (q) => { ran.push(q); return { ok: true }; } });
   const server = appServer({ source: demo, token: TOKEN, ranges: ['127.0.0.0/8'], actions, origin, owner: 'alice' });
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  const base = `http://127.0.0.1:${server.address().port}`;
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
   try {
-    const sign = async (extra = {}) => {
+    const sign = async (extra: Record<string, string> = {}) => {
       const signed = await fetch(`${base}/session`, { method: 'POST', headers: { authorization: `Bearer ${TOKEN}`, ...extra } });
-      const cookie = signed.headers.get('set-cookie'); assert.match(cookie, /; Secure/);
-      const c = cookie.split(';')[0];
-      const me = await (await fetch(`${base}/api/me`, { headers: { cookie: c } })).json();
-      return (path, body) => fetch(base + path, { method: 'POST', headers: { cookie: c, 'x-csrf-token': me.csrf, origin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+      const cookie = signed.headers.get('set-cookie')!; assert.match(cookie, /; Secure/);
+      const c = cookie.split(';')[0]!;
+      const me = await (await fetch(`${base}/api/me`, { headers: { cookie: c } })).json() as Me;
+      return (path: string, body: object) => fetch(base + path, { method: 'POST', headers: { cookie: c, 'x-csrf-token': me.csrf, origin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
     };
     const plain = await sign();
     const refused = await plain('/api/actions/answer', { ticket: 'EX-39', text: 'Yes' });
-    assert.equal(refused.status, 403); assert.equal((await refused.json()).error, 'insecure_session');
+    assert.equal(refused.status, 403); assert.equal((await refused.json() as { error: string }).error, 'insecure_session');
     const proxied = await sign({ 'x-forwarded-proto': 'https' });
     assert.equal((await proxied('/api/actions/answer', { ticket: 'EX-39', text: 'Yes' })).status, 200);
     assert.equal(ran.length, 1);
@@ -420,13 +442,13 @@ test('without a secure address, even an answer is refused', async () => {
 });
 
 test('a Send back is refused while the Clear of the same ticket is being written', async () => {
-  let release; const gate = new Promise((resolve) => { release = resolve; });
+  let release!: () => void; const gate = new Promise<void>((resolve) => { release = resolve; });
   const r = await rig({ run: async (q) => { if (q.op === 'approve') await gate; return { ok: true }; } });
   try {
     const browser = await r.browser();
     await r.register(browser);
     await r.confirmClear(browser);
-    const writing = r.timers[0].fn();
+    const writing = r.timers[0]!.fn();
     await new Promise((resolve) => setImmediate(resolve));
     const asked = await browser.json('/api/actions/challenge', { gesture: 'sendback', ticket: 'EX-31', versions: VERSIONS, text: 'Stop' });
     const done = await browser.json('/api/actions/confirm', { challengeId: asked.body.challengeId, assertion: r.authenticator.get(asked.body.publicKey), text: 'Stop' });

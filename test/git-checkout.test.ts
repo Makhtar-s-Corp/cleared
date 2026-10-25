@@ -9,31 +9,43 @@ import { foreignTest, fixtureProject, scratch } from './support.ts';
 
 const REAL_GIT = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 
+// The stand-in: the directory to put first on PATH, and the log it writes.
+type FakeGit = { bin: string; log: string };
+// One recorded call: its arguments, and its GIT_CONFIG_* environment.
+type Call = { args: string; config: Record<string, string> };
+
 // A git stand-in on PATH. It records each call with its GIT_CONFIG_* environment, and refuses a checkout
 // owned by another user (FAKE_GIT_OWNED) unless the command declares that path safe, as git does.
 // FAKE_GIT_REFUSE_ALL refuses every command, for the message a human sees.
-function fakeGit() {
+function fakeGit(): FakeGit {
   const dir = scratch('orch-fake-git-');
   const log = join(dir, 'calls.log');
-  const script = [
-    '#!/usr/bin/env bash',
-    '{ echo "ARGS $*"; env | grep "^GIT_CONFIG_" | sort; echo END; } >> "$FAKE_GIT_LOG"',
-    'if [ "$1" = "-C" ] && [ -n "$2" ]; then',
-    '  path=$(readlink -f -- "$2")',
-    '  declared=0',
-    '  count=${GIT_CONFIG_COUNT:-0}',
-    '  for ((i = 0; i < count; i++)); do',
-    '    key=GIT_CONFIG_KEY_$i; value=GIT_CONFIG_VALUE_$i',
-    '    if [ "${!key}" = safe.directory ] && [ "${!value}" = "$path" ]; then declared=1; fi',
-    '  done',
-    '  if [ -n "$FAKE_GIT_REFUSE_ALL" ] || { [ "$declared" = 0 ] && [ "$path" = "$FAKE_GIT_OWNED" ]; }; then',
-    '    echo "fatal: detected dubious ownership in repository at \'$path\'" >&2',
-    '    exit 128',
-    '  fi',
-    'fi',
-    'exec "$FAKE_GIT_REAL" "$@"',
-    '',
-  ].join('\n');
+  const script = `#!${process.execPath}
+const fs = process.getBuiltinModule('node:fs');
+const { basename, dirname, join } = process.getBuiltinModule('node:path');
+const { spawnSync } = process.getBuiltinModule('node:child_process');
+const args = process.argv.slice(2);
+const env = process.env;
+const lines = Object.entries(env).map(([name, value]) => name + '=' + value).join('\\n').split('\\n');
+const record = 'ARGS ' + args.join(' ') + '\\n' + lines.filter((line) => line.startsWith('GIT_CONFIG_')).sort().map((line) => line + '\\n').join('') + 'END\\n';
+try { fs.appendFileSync(env.FAKE_GIT_LOG ?? '', record); } catch (error) { process.stderr.write(error.message + '\\n'); }
+let refused = false;
+if (args[0] === '-C' && args[1]) {
+  // readlink -f: every part but the last must exist; nothing when it cannot be resolved.
+  let path = '';
+  try { path = fs.realpathSync(args[1]); } catch { try { path = join(fs.realpathSync(dirname(args[1])), basename(args[1])); } catch { path = ''; } }
+  let declared = false;
+  const count = Number(env.GIT_CONFIG_COUNT || 0);
+  for (let i = 0; i < count; i++) {
+    if (env['GIT_CONFIG_KEY_' + i] === 'safe.directory' && (env['GIT_CONFIG_VALUE_' + i] ?? '') === path) declared = true;
+  }
+  if (env.FAKE_GIT_REFUSE_ALL || (!declared && path === (env.FAKE_GIT_OWNED ?? ''))) {
+    process.stderr.write("fatal: detected dubious ownership in repository at '" + path + "'\\n");
+    refused = true;
+  }
+}
+process.exitCode = refused ? 128 : spawnSync(env.FAKE_GIT_REAL ?? '', args, { stdio: 'inherit' }).status ?? 1;
+`;
   writeFileSync(join(dir, 'git'), script);
   chmodSync(join(dir, 'git'), 0o755);
   return { bin: dir, log };
@@ -41,25 +53,25 @@ function fakeGit() {
 
 // The environment of a child process: the test's own, without the project named by the machine and without any git
 // settings the runner exported, with the stand-in first.
-function childEnv(fake, extra = {}) {
-  const env = { ...process.env, PATH: `${fake.bin}:${process.env.PATH}`, FAKE_GIT_LOG: fake.log, FAKE_GIT_REAL: REAL_GIT };
+function childEnv(fake: FakeGit, extra: NodeJS.ProcessEnv = {}) {
+  const env: NodeJS.ProcessEnv = { ...process.env, PATH: `${fake.bin}:${process.env.PATH}`, FAKE_GIT_LOG: fake.log, FAKE_GIT_REAL: REAL_GIT };
   for (const name of Object.keys(env)) if (/^GIT_CONFIG_/.test(name) || ['CLEARED_REPO', 'ORCH_REPO', 'FAKE_GIT_OWNED', 'FAKE_GIT_REFUSE_ALL'].includes(name)) delete env[name];
   return { ...env, ...extra };
 }
 
-function calls(fake) {
-  const out = [];
-  let current = null;
+function calls(fake: FakeGit) {
+  const out: Call[] = [];
+  let current: Call | null = null;
   for (const line of readFileSync(fake.log, 'utf8').split('\n')) {
     if (line.startsWith('ARGS ')) current = { args: line.slice(5), config: {} };
-    else if (line === 'END') { out.push(current); current = null; }
-    else if (current) { const [name, ...value] = line.split('='); current.config[name] = value.join('='); }
+    else if (line === 'END') { out.push(current!); current = null; }
+    else if (current) { const [name, ...value] = line.split('='); current.config[name!] = value.join('='); }
   }
   return out;
 }
 
 // The GIT_CONFIG_* entries of an environment, in order.
-const entriesOf = (env) => Array.from({ length: Number(env.GIT_CONFIG_COUNT) }, (_, i) => [env[`GIT_CONFIG_KEY_${i}`], env[`GIT_CONFIG_VALUE_${i}`]]);
+const entriesOf = (env: NodeJS.ProcessEnv) => Array.from({ length: Number(env.GIT_CONFIG_COUNT) }, (_, i) => [env[`GIT_CONFIG_KEY_${i}`], env[`GIT_CONFIG_VALUE_${i}`]]);
 
 test('the read environment declares one checkout safe and overrides what its configuration could run, for one command only', () => {
   const dir = realpathSync(scratch('orch-checkout-'));
@@ -98,7 +110,7 @@ test('the read environment reads an unreadable count as none, resolves a relativ
   // A relative path is taken from the current directory (it must exist now: a missing one is refused below).
   assert.equal(checkoutReadEnv(relative(process.cwd(), dir), {}).GIT_CONFIG_VALUE_0, dir);
   assert.throws(() => checkoutReadEnv(''), CheckoutPathError);
-  assert.throws(() => checkoutReadEnv(undefined), CheckoutPathError);
+  assert.throws(() => checkoutReadEnv(undefined as unknown as string), CheckoutPathError);
   assert.throws(() => checkoutReadEnv(join(dir, 'gone')), /the checkout .*gone does not exist or cannot be reached/);
   assert.throws(() => checkoutReadEnv('~/project'), /starts with "~", which Cleared does not expand/);
 });
@@ -232,7 +244,7 @@ test('cleared status says why the project configuration cannot be read: one JSON
   mkdirSync(join(plain, '.cleared'));
   writeFileSync(join(plain, '.cleared', 'agents.conf'), '[lanes]\nbase = main\n');
   const state = scratch('orch-status-state-');
-  const run = (repo, json, refuse) => spawnSync(process.execPath, [join(ORCH_HOME, 'cleared'), 'status', ...(json ? ['--json'] : [])],
+  const run = (repo: string, json: boolean, refuse: boolean) => spawnSync(process.execPath, [join(ORCH_HOME, 'cleared'), 'status', ...(json ? ['--json'] : [])],
     { encoding: 'utf8', env: childEnv(fakeGit(), { CLEARED_REPO: repo, CLEARED_STATE_DIR: state, ...(refuse ? { FAKE_GIT_REFUSE_ALL: '1' } : {}) }) });
 
   const refused = run(project, true, true);
@@ -266,7 +278,7 @@ foreignTest('the read environment stops every planted setting a read can reach, 
   const root = realpathSync(scratch('orch-vectors-'));
   const repo = join(root, 'repo');
   const marker = join(root, 'ran.log');
-  const git = (...args) => execFileSync(REAL_GIT, ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' }).trim();
+  const git = (...args: string[]) => execFileSync(REAL_GIT, ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' }).trim();
   execFileSync(REAL_GIT, ['init', '-q', '-b', 'main', repo]);
   writeFileSync(join(repo, 'a.txt'), 'one\n');
   git('add', '.'); git('commit', '-qm', 'one');
@@ -284,9 +296,9 @@ foreignTest('the read environment stops every planted setting a read can reach, 
   for (const hook of ['post-index-change', 'reference-transaction']) { writeFileSync(join(hooks, hook), `#!/bin/sh\necho "hook ${hook}" >> '${marker}'\n`); chmodSync(join(hooks, hook), 0o755); }
   writeFileSync(join(root, 'included.conf'), `[core]\n\tfsmonitor = ${plant}\n`);
   for (const [key, value] of [['include.path', join(root, 'included.conf')], ['core.hooksPath', hooks], ['diff.external', plant],
-    ['log.showSignature', 'true'], ['gpg.program', plant], ['remote.evil.url', repo], ['remote.evil.uploadpack', plant]]) git('config', key, value);
+    ['log.showSignature', 'true'], ['gpg.program', plant], ['remote.evil.url', repo], ['remote.evil.uploadpack', plant]] as [string, string][]) git('config', key, value);
   const owner = { ...process.env, GIT_TEST_ASSUME_DIFFERENT_OWNER: '1' };
-  const runs = (args, env) => {
+  const runs = (args: string[], env: NodeJS.ProcessEnv) => {
     try { execFileSync(REAL_GIT, ['-C', repo, ...args], { env, stdio: 'ignore' }); } catch { /* refused or failed: only what ran counts */ }
     const ran = existsSync(marker) ? readFileSync(marker, 'utf8') : '';
     writeFileSync(marker, '');
@@ -321,7 +333,7 @@ foreignTest('the read environment stops every planted setting a read can reach, 
 // The guard carries its own copy of the read environment (it is copied alone from a git ref): the same text,
 // and the same result for the same input.
 test('the guard\'s copy of the read environment is the helper\'s, word for word and in behaviour', async () => {
-  const shared = (text) => {
+  const shared = (text: string) => {
     const start = text.indexOf('// --- shared with lib/guard/private-terms.ts');
     const end = text.indexOf('// --- end of the shared part ---');
     assert.ok(start >= 0 && end > start, 'the shared part is marked');
@@ -337,15 +349,15 @@ test('the guard\'s copy of the read environment is the helper\'s, word for word 
     for (const path of [repo, join(repo, 'sub')]) assert.deepEqual(guard.checkoutReadEnv(path, env), checkoutReadEnv(path, env));
   }
   for (const bad of ['~/x', join(repo, 'gone'), '']) {
-    assert.throws(() => guard.checkoutReadEnv(bad, {}), (error) => error.message === (() => { try { checkoutReadEnv(bad, {}); } catch (e) { return e.message; } })());
+    assert.throws(() => guard.checkoutReadEnv(bad, {}), (error: Error) => error.message === (() => { try { checkoutReadEnv(bad, {}); } catch (e) { return (e as Error).message; } })());
   }
 });
 
 // ---- Static checks of the sources ----
 
 const sourceFiles = () => {
-  const files = [];
-  const walk = (dir) => {
+  const files: string[] = [];
+  const walk = (dir: string) => {
     for (const entry of readdirSync(join(ORCH_HOME, dir), { withFileTypes: true })) {
       const name = dir ? `${dir}/${entry.name}` : entry.name;
       if (entry.isDirectory()) { if (!['node_modules', 'test', '.git', 'docs'].includes(entry.name) && !entry.name.startsWith('.') && !(dir === '' && ['v2', 'examples'].includes(entry.name))) walk(name); }
@@ -357,7 +369,7 @@ const sourceFiles = () => {
   return files;
 };
 // The text of the call that opens at `open` (a parenthesis), strings and template literals skipped.
-function callAt(text, open) {
+function callAt(text: string, open: number) {
   let depth = 0;
   for (let i = open; i < text.length; i++) {
     const c = text[i];
@@ -369,10 +381,10 @@ function callAt(text, open) {
   }
   throw new Error(`unclosed call at ${open}`);
 }
-const withoutComments = (text) => text.split('\n').filter((line) => !/^\s*(\/\/|#)/.test(line)).join('\n');
+const withoutComments = (text: string) => text.split('\n').filter((line) => !/^\s*(\/\/|#)/.test(line)).join('\n');
 const GIT_SPAWN = /\b(?:execFileSync|spawnSync|spawn|execFile|command|run)\(\s*['"]git['"]|\b(?:execSync|exec)\(\s*[`'"]git\s/g;
-function gitCalls(text) {
-  const out = [];
+function gitCalls(text: string) {
+  const out: { at: number; text: string }[] = [];
   for (const match of text.matchAll(GIT_SPAWN)) {
     const open = text.indexOf('(', match.index);
     out.push({ at: open, text: callAt(text, open) });
@@ -419,10 +431,10 @@ test('no shell script declares a checkout safe, and those a human command reache
   const all = sourceFiles();
   const shells = all.filter((name) => name.endsWith('.sh'));
   for (const name of shells) assert.doesNotMatch(withoutComments(readFileSync(join(ORCH_HOME, name), 'utf8')), /safe\.directory/, `${name} declares a checkout safe`);
-  const named = (text) => {
-    const out = new Set();
+  const named = (text: string) => {
+    const out = new Set<string>();
     for (const match of text.matchAll(/([\w./-]*[\w-]+\.sh)\b/g)) {
-      const token = match[1].replace(/^\.?\//, '');
+      const token = match[1]!.replace(/^\.?\//, '');
       for (const shell of shells) if (shell === token || shell.endsWith(`/${token}`)) out.add(shell);
     }
     return out;
@@ -430,18 +442,18 @@ test('no shell script declares a checkout safe, and those a human command reache
   // The Node files the human's commands run (cleared and what it starts for status, app passkey and rollback),
   // and the scripts they start: the first argument of a spawn.
   const human = ['cleared', 'lib/heartbeat.ts', 'app/main.ts', 'release-request.ts'];
-  const reached = new Set();
-  const queue = [];
+  const reached = new Set<string>();
+  const queue: string[] = [];
   for (const name of human) {
     const text = withoutComments(readFileSync(join(ORCH_HOME, name), 'utf8'));
     for (const match of text.matchAll(/\b(?:execFileSync|spawnSync|spawn|execFile|command|run)\(/g)) {
       const call = callAt(text, match.index + match[0].length - 1);
-      queue.push(...named(call.split(/,\s*[[{]/)[0]));
+      queue.push(...named(call.split(/,\s*[[{]/)[0]!));
     }
   }
-  assert.deepEqual(queue, [], 'the human commands start no shell script: cleared status asks the tracker through tracker.ts');
+  assert.deepEqual<string[]>(queue, [], 'the human commands start no shell script: cleared status asks the tracker through tracker.ts');
   while (queue.length) {
-    const name = queue.shift();
+    const name = queue.shift()!;
     if (reached.has(name)) continue;
     reached.add(name);
     for (const line of withoutComments(readFileSync(join(ORCH_HOME, name), 'utf8')).split('\n')) {
