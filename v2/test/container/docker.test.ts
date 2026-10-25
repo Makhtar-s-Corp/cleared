@@ -1,5 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { ChildProcessWithoutNullStreams } from 'node:child_process';
+import { EventEmitter } from 'node:events';
+import { PassThrough } from 'node:stream';
 import { Docker, LABEL, LabelRuleError, assertLabelRule, assertSessionId, commandRunner, type ContainerSpec } from '../../src/container/docker.ts';
 import { FakeDocker, type Call } from './fake-docker.ts';
 
@@ -7,16 +10,16 @@ const SESSION = '0b7f3c1e-5d0a-4a6e-9f3b-1c2d3e4f5a6b';
 const OTHER = '9a8b7c6d-5e4f-4a3b-8c1d-0e9f8a7b6c5d';
 
 const CREATES = new Set(['create', 'build', 'network create', 'volume create']);
-const LISTS = new Set(['ps', 'network ls', 'volume ls']);
-const TARGETED = new Set(['start', 'stop', 'rm', 'exec', 'inspect', 'logs', 'network rm', 'network inspect', 'volume rm']);
+const LISTS = new Set(['ps', 'network ls', 'volume ls', 'image ls']);
+const TARGETED = new Set(['start', 'stop', 'rm', 'exec', 'inspect', 'logs', 'network rm', 'network inspect', 'volume rm', 'image inspect', 'image rm']);
 
 const verbOf = (args: readonly string[]): string =>
-  args[0] === 'network' || args[0] === 'volume' ? `${args[0]} ${args[1]}` : (args[0] ?? '');
+  args[0] === 'network' || args[0] === 'volume' || args[0] === 'image' ? `${args[0]} ${args[1]}` : (args[0] ?? '');
 
 const hasPair = (args: readonly string[], flag: string, value: string): boolean =>
   args.some((arg, index) => arg === flag && args[index + 1] === value);
 
-// The ids a list printed: container and network rows carry an ID, volume rows a Name.
+// The ids a list printed: container, network and image rows carry an ID, volume rows a Name.
 function listedIds(call: Call): string[] {
   return call.result.stdout.split('\n').filter(Boolean).map((line) => {
     const row = JSON.parse(line) as { ID?: string; Name?: string };
@@ -59,6 +62,9 @@ async function everyMethod(docker: Docker): Promise<void> {
   // attach spawns `docker start --attach --interactive`: recorded like the other calls.
   await docker.version();
   await docker.build({ context: '/images/session', tag: 'cleared-v2-session:test' });
+  await docker.build({ context: '/work/ticket', dockerfile: '/state/ticket-layer/Dockerfile', tag: `cleared-v2-${SESSION}-sib-api:ticket`, network: 'none', session: SESSION });
+  await docker.image('cleared-v2-session:test');
+  await docker.images(SESSION);
   await docker.createNetwork({ name: `cleared-v2-${SESSION}`, session: SESSION, internal: true });
   await docker.createVolume({ name: `cleared-v2-${SESSION}-config`, session: SESSION });
   await docker.createContainer(spec(`cleared-v2-${SESSION}-session`, { command: ['sleep', 'infinity'], interactive: true }));
@@ -97,7 +103,7 @@ test('removing a session never touches an unlabelled object or another session',
   }
 
   const removed = await docker.removeSession(SESSION);
-  assert.deepEqual(removed, { containers: 1, networks: 1 });
+  assert.deepEqual(removed, { containers: 1, networks: 1, images: 0 });
   assert.equal(await docker.removeVolumes(SESSION), 1);
 
   assert.deepEqual(fake.withLabel('cleared.session', SESSION), []);
@@ -150,6 +156,12 @@ test('the gate refuses a command line that breaks the label rule', () => {
     ['container', 'prune', '-f'],
     ['kill', '--', 'abc'],
     ['pull', 'postgres:16'],
+    ['image', 'ls'],
+    ['image', 'ls', '--filter', 'reference=x'],
+    ['image', 'rm', '--', 'other'],
+    ['image', 'inspect', '--', 'other'],
+    ['image', 'prune', '-af'],
+    ['rmi', 'abc'],
     [],
   ];
   for (const args of refused) assert.throws(() => assertLabelRule(args, owned), LabelRuleError, args.join(' '));
@@ -160,8 +172,76 @@ test('the gate refuses a command line that breaks the label rule', () => {
     ['ps', '-a', '--filter', `label=${LABEL}`],
     ['rm', '-f', '--', 'abc'],
     ['exec', '--', 'abc', 'rm', '-rf', '/tmp/x'],
+    ['image', 'ls', '--filter', `label=${LABEL}`],
+    ['image', 'rm', '--force', '--', 'abc'],
   ];
   for (const args of accepted) assert.doesNotThrow(() => assertLabelRule(args, owned), args.join(' '));
+});
+
+// Milestone 2, decision 20: a sibling's ticket layer is built with no
+// network, for the session, so that it goes with the session.
+test('a build may run with no network and carry the session label', async () => {
+  const fake = new FakeDocker();
+  await new Docker(fake.runner).build({ context: '/work/ticket', dockerfile: '/state/layer/Dockerfile', tag: `cleared-v2-${SESSION}-sib-api:ticket`, network: 'none', session: SESSION });
+  const args = fake.calls[0]?.args ?? [];
+  const end = args.indexOf('--');
+  assert.ok(hasPair(args, '--network', 'none') && args.indexOf('--network') < end, args.join(' '));
+  assert.ok(hasPair(args, '--label', LABEL) && hasPair(args, '--label', `cleared.session=${SESSION}`), args.join(' '));
+  assert.deepEqual(args.slice(end), ['--', '/work/ticket']);
+  const plain = new FakeDocker();
+  await new Docker(plain.runner).build({ context: '/images/fake', tag: 'cleared-v2-fake:1' });
+  assert.ok(!(plain.calls[0]?.args ?? []).includes('--network'), 'a base image is built with the default network');
+  await assert.rejects(new Docker(plain.runner).build({ context: '/x', tag: 'x:1', session: '--all' }));
+});
+
+test('a session\'s images are removed with it, each confirmed labelled by inspect before the removal', async () => {
+  const fake = new FakeDocker();
+  const docker = new Docker(fake.runner);
+  await docker.build({ context: '/a', tag: `cleared-v2-${SESSION}-sib-api:ticket`, network: 'none', session: SESSION });
+  await docker.build({ context: '/b', tag: `cleared-v2-${OTHER}-sib-api:ticket`, network: 'none', session: OTHER });
+  await docker.build({ context: '/c', tag: 'cleared-v2-base-api:cafe0b1ec7ed' });
+  fake.images.push({ id: 'sha256:' + 'f'.repeat(64), name: 'production:latest', labels: {} });
+  const removed = await docker.removeSession(SESSION);
+  assert.deepEqual(removed, { containers: 0, networks: 0, images: 1 });
+  assert.deepEqual(fake.images.map((image) => image.name).sort(), [`cleared-v2-${OTHER}-sib-api:ticket`, 'cleared-v2-base-api:cafe0b1ec7ed', 'production:latest'].sort());
+  assertLog(fake.calls);
+  const rm = fake.calls.findIndex((call) => verbOf(call.args) === 'image rm');
+  assert.ok(rm > 0 && verbOf(fake.calls[rm - 1]?.args ?? []) === 'image inspect', 'inspected just before the removal');
+
+  // A CLI that ignored the filters lists the unlabelled image: inspect
+  // shows it has no label, and nothing is removed.
+  const broken = new FakeDocker();
+  broken.images.push({ id: 'sha256:' + 'f'.repeat(64), name: 'production:latest', labels: {} });
+  broken.honourFilters = false;
+  await assert.rejects(new Docker(broken.runner).removeSession(SESSION), LabelRuleError);
+  assert.ok(!broken.calls.some((call) => verbOf(call.args) === 'image rm'));
+  assert.equal(broken.images.length, 1);
+});
+
+test('an image is found by its tag among the labelled images, with its working folder', async () => {
+  const fake = new FakeDocker();
+  const docker = new Docker(fake.runner);
+  await docker.build({ context: '/c', tag: 'cleared-v2-base-api:cafe0b1ec7ed' });
+  fake.images.push({ id: 'sha256:' + 'f'.repeat(64), name: 'node:24-slim', labels: {} });
+  const found = await docker.image('cleared-v2-base-api:cafe0b1ec7ed');
+  assert.equal(found?.workdir, '/app');
+  assert.equal(found?.labels['cleared.dev'], 'v2');
+  assert.equal(await docker.image('node:24-slim'), undefined, 'an image without the label is not one of ours');
+  assert.equal(await docker.image('cleared-v2-missing:1'), undefined);
+  await assert.rejects(docker.image('--all'));
+  assertLog(fake.calls);
+});
+
+test('a labelled image is removed by its tag; an unlabelled one never is', async () => {
+  const fake = new FakeDocker();
+  const docker = new Docker(fake.runner);
+  await docker.build({ context: '/c', tag: 'cleared-v2-base-api:cafe0b1ec7ed' });
+  fake.images.push({ id: 'sha256:' + 'f'.repeat(64), name: 'node:24-slim', labels: {} });
+  assert.equal(await docker.removeImage('cleared-v2-base-api:cafe0b1ec7ed'), true);
+  assert.equal(await docker.removeImage('node:24-slim'), false);
+  assert.equal(await docker.removeImage('cleared-v2-base-api:cafe0b1ec7ed'), false, 'already gone');
+  assert.deepEqual(fake.images.map((image) => image.name), ['node:24-slim']);
+  assertLog(fake.calls);
 });
 
 test('a session id that could be read as an option or a pattern is refused', async () => {
@@ -234,4 +314,90 @@ test('the CLI runner reports a command that exits without reading its input, or 
   const result = await commandRunner('true')([], { input });
   assert.equal(result.code, 0);
   await assert.rejects(commandRunner('cleared-v2-no-such-command')([], { input }), /ENOENT/);
+});
+
+// The web terminal (milestone 2, decision 32, lane 31): `docker exec
+// --interactive --tty` on the owned id, as the session's user, in its
+// checkout, under the host's `script`; what the human types goes to the
+// process's input and never into a command line.
+test('the terminal runs docker exec --interactive --tty on the owned id under script, and a typed line reaches the input only', async () => {
+  const fake = new FakeDocker();
+  const docker = new Docker(fake.runner, fake.spawner, (args) => {
+    scripted.push([...args]);
+    const child = new EventEmitter() as unknown as ChildProcessWithoutNullStreams;
+    Object.assign(child, { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
+    children.push(child);
+    return child;
+  });
+  const scripted: string[][] = [];
+  const children: ChildProcessWithoutNullStreams[] = [];
+  const name = `cleared-v2-${SESSION}-session`;
+  await docker.createContainer(spec(name));
+  const id = fake.containers[0]!.id;
+  const child = await docker.terminal(SESSION, name, { user: '1000:1000', workdir: '/workspace', command: ['sh', '-c', 'echo $$ > /tmp/.cleared-terminal.pid; exec bash -l'] });
+  assertLog(fake.calls);
+  assert.equal(scripted.length, 1);
+  const args = scripted[0]!;
+  assert.deepEqual([...args.slice(0, 4), args.at(-1)], ['--quiet', '--return', '--flush', '--command', '/dev/null']);
+  assert.equal(args[4], `'docker' 'exec' '--interactive' '--tty' '--env' 'TERM=xterm-256color' '--user' '1000:1000' '--workdir' '/workspace' '--' '${id}' 'sh' '-c' 'echo $$ > /tmp/.cleared-terminal.pid; exec bash -l'`);
+
+  const typed: Buffer[] = [];
+  child.stdin.on('data', (chunk: Buffer) => typed.push(chunk));
+  child.stdin.write("git push; echo '$(rm -rf /)'\r");
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(Buffer.concat(typed).toString(), "git push; echo '$(rm -rf /)'\r");
+  assert.equal(scripted.length, 1, 'no new command line');
+  assert.ok(!scripted[0]!.join(' ').includes('git push'));
+
+  await assert.rejects(docker.terminal(SESSION, name, { user: "1000; rm -rf /", workdir: '/workspace', command: ['bash'] }), /invalid user/);
+  await assert.rejects(docker.terminal(SESSION, name, { user: '1000:1000', workdir: "/workspace'; id; '", command: ['bash'] }), /invalid workdir/);
+  await assert.rejects(docker.terminal(OTHER, name, { user: '1000:1000', workdir: '/workspace', command: ['bash'] }), /no container named/, 'another session\'s container is not found');
+  assert.equal(scripted.length, 1);
+});
+
+test('releaseStopped removes by name the containers, then the networks, of the stopped sessions only; never a volume, an image nor a prune (issue 265)', async () => {
+  const fake = new FakeDocker();
+  const ours = (session: string, extra: Record<string, string> = {}) => ({ [LABEL.split('=')[0] as string]: 'v2', 'cleared.session': session, ...extra });
+  const STOPPED = SESSION;
+  const LIVE = OTHER;
+  fake.containers.push(
+    { id: 'c1', name: `cleared-v2-${STOPPED}-session`, labels: ours(STOPPED), state: 'exited' },
+    { id: 'c2', name: `cleared-v2-${STOPPED}-egress`, labels: ours(STOPPED), state: 'running' },
+    { id: 'c3', name: `cleared-v2-${STOPPED}-sib-filter-api`, labels: ours(STOPPED), state: 'running' },
+    { id: 'c4', name: `cleared-v2-${LIVE}-session`, labels: ours(LIVE), state: 'running' },
+    // The stopped session's label on a name that is not its own: left alone.
+    { id: 'c5', name: 'cleared-guestbook', labels: ours(STOPPED), state: 'running' },
+    // The same name without the label: the labelled list never returns it.
+    { id: 'c6', name: `cleared-v2-${STOPPED}-svc-db`, labels: { 'cleared.session': STOPPED }, state: 'running' },
+  );
+  fake.networks.push(
+    { id: 'n1', name: `cleared-v2-${STOPPED}`, labels: ours(STOPPED) },
+    { id: 'n2', name: `cleared-v2-${STOPPED}-out`, labels: ours(STOPPED) },
+    { id: 'n3', name: `cleared-v2-${LIVE}`, labels: ours(LIVE) },
+    { id: 'n4', name: 'bridge-of-someone-else', labels: {} },
+  );
+  fake.volumes.push({ id: `cleared-v2-${STOPPED}-config`, name: `cleared-v2-${STOPPED}-config`, labels: ours(STOPPED) });
+  const docker = new Docker(fake.runner);
+  const released = await docker.releaseStopped([STOPPED]);
+  assert.deepEqual(released, {
+    containers: [`cleared-v2-${STOPPED}-session`, `cleared-v2-${STOPPED}-egress`, `cleared-v2-${STOPPED}-sib-filter-api`],
+    networks: [`cleared-v2-${STOPPED}`, `cleared-v2-${STOPPED}-out`],
+  });
+  assert.deepEqual(fake.containers.map((c) => c.id), ['c4', 'c5', 'c6']);
+  assert.deepEqual(fake.networks.map((n) => n.id), ['n3', 'n4']);
+  assert.equal(fake.volumes.length, 1, 'the config volume stays');
+  const lines = fake.calls.map((c) => c.args.join(' '));
+  assert.deepEqual(fake.calls.map((c) => verbOf(c.args)), ['ps', 'rm', 'network ls', 'network rm']);
+  for (const call of fake.calls.filter((c) => LISTS.has(verbOf(c.args)))) assert.ok(hasPair(call.args, '--filter', `label=${LABEL}`), call.args.join(' '));
+  assert.ok(!lines.some((line) => /--volumes|volume rm|image rm|prune/.test(line)), lines.join('\n'));
+  assert.deepEqual(fake.calls[1]?.args, ['rm', '--force', '--', `cleared-v2-${STOPPED}-session`, `cleared-v2-${STOPPED}-egress`, `cleared-v2-${STOPPED}-sib-filter-api`]);
+  assert.deepEqual(fake.calls[3]?.args, ['network', 'rm', '--', `cleared-v2-${STOPPED}`, `cleared-v2-${STOPPED}-out`]);
+});
+
+test('releaseStopped with no session asks Docker nothing, and refuses what is not a session id before any call', async () => {
+  const fake = new FakeDocker();
+  const docker = new Docker(fake.runner);
+  assert.deepEqual(await docker.releaseStopped([]), { containers: [], networks: [] });
+  await assert.rejects(docker.releaseStopped([SESSION, '--all']), /not a session id/);
+  assert.equal(fake.calls.length, 0);
 });

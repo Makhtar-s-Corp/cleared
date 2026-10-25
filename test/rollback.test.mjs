@@ -9,7 +9,7 @@ import { setTimeout as pause } from 'node:timers/promises';
 import { openLedger, addEvent } from '../lib/ledger.mjs';
 import { releaseSettings, canAutoRollback, shouldRollback, touchesMigrations,
   activeRelease, holdsMerge, rollbackRelease, watchRelease, startRelease, rollbackPreview, confirmedRollback,
-  reconcileNotifications, resumeWatches, retryFetch } from '../lib/release.mjs';
+  reconcileNotifications, resumeWatches, retryFetch, ownRelease } from '../lib/release.mjs';
 
 test('release defaults are inert and repeated failures trigger only when enabled', () => {
   const off = releaseSettings({ sections: {} });
@@ -509,4 +509,38 @@ test('a fast-lane release whose health is failing holds the next merge back, and
     readPull: () => ({ mergeCommit: { oid: sha }, mergedAt: new Date().toISOString(), title: 'Raced' }) });
   assert.equal(scheduled, 1);
   assert.equal(x.db.prepare('SELECT status FROM releases WHERE merge_sha = ?').get(sha).status, 'watching');
+});
+
+// A workspace of several services (Cleared v2, decision 21): the brokers of
+// two repositories share one ledger, so one ticket has a release row per
+// repository. A manual rollback asked of one repository's broker reverts that
+// repository's own merge, never the newest row of the ticket when it is the
+// other repository's.
+test('on a ledger two repositories share, the rollback of a ticket chooses the release of its own repository', (t) => {
+  const provider = releasedProject(t);
+  const consumer = releasedProject(t, { migration: 'consumer.txt' });   // another change: two repositories never share a merge commit
+  // The consumer landed after the provider, on the provider's ledger, and its own watch reverted it.
+  provider.db.prepare('INSERT INTO releases(ticket,pr,merge_sha,title,merged_at,status,rollback_sha) VALUES (?,?,?,?,?,?,?)')
+    .run('LOCAL-1', 1, consumer.row.merge_sha, 'Test release', new Date(provider.clock + 60_000).toISOString(), 'rolled_back', 'f'.repeat(40));
+  const newest = provider.db.prepare('SELECT * FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get('LOCAL-1');
+  assert.equal(newest.merge_sha, consumer.row.merge_sha, 'the ticket\'s newest row is the consumer\'s');
+  assert.equal(ownRelease(provider.conf, provider.db, provider.repo, 'LOCAL-1')?.merge_sha, provider.row.merge_sha);
+  assert.equal(ownRelease(provider.conf, provider.db, consumer.repo, 'LOCAL-1')?.merge_sha, consumer.row.merge_sha, 'from the consumer\'s checkout, its own');
+  assert.equal(ownRelease(provider.conf, provider.db, provider.repo, 'LOCAL-2'), undefined, 'another ticket has none');
+  // The provider's own merge is then reverted, exactly.
+  const sha = rollbackRelease(provider.conf, provider.db, provider.repo, ownRelease(provider.conf, provider.db, provider.repo, 'LOCAL-1'), {
+    trackerFactory: () => ({ moveTicket: () => {} }), announce: () => {},
+  });
+  provider.git('fetch', '-q', 'origin', 'main');
+  assert.equal(provider.git('rev-parse', 'origin/main'), sha);
+  assert.equal(provider.git('show', 'origin/main:app.txt'), 'before');
+});
+
+test('a ticket whose only release rows are another repository\'s has no release of this one', (t) => {
+  const provider = releasedProject(t);
+  const consumer = releasedProject(t, { migration: 'consumer.txt' });   // another change: two repositories never share a merge commit
+  provider.db.prepare('DELETE FROM releases').run();
+  provider.db.prepare('INSERT INTO releases(ticket,pr,merge_sha,title,merged_at,status) VALUES (?,?,?,?,?,?)')
+    .run('LOCAL-1', 1, consumer.row.merge_sha, 'Test release', new Date().toISOString(), 'complete');
+  assert.equal(ownRelease(provider.conf, provider.db, provider.repo, 'LOCAL-1'), undefined);
 });

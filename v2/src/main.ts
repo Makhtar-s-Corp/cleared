@@ -1,12 +1,19 @@
 // Starts the v2 service: node src/main.ts (or npm start).
-// It opens ledger.db, creates the modules' tables, assembles the six modules
-// (src/modules/) and serves their routes, with /health from server.ts. A
-// lane fills its module; it does not edit this file.
+// It opens ledger.db, creates the modules' tables, assembles the nine
+// modules (src/modules/) and serves their routes, with /health from
+// server.ts. A lane fills its module; it does not edit this file (lead and
+// notify were added once, by milestone 2's first lane: decision 14;
+// knowledge once, by the replan's lane 24: decision 27; the modules' start,
+// once, by lane j2-proof-clean-base, so that the restart recovery runs
+// without waiting for a request).
 import { createServer } from 'node:http';
 import { ConfigError, readConfig, type Config } from './config.ts';
 import approval from './modules/approval.ts';
 import flow from './modules/flow.ts';
 import inbox from './modules/inbox.ts';
+import knowledge from './modules/knowledge.ts';
+import lead from './modules/lead.ts';
+import notify from './modules/notify.ts';
 import { assemble, dispatch, type App } from './modules/registry.ts';
 import sessions from './modules/sessions.ts';
 import tickets from './modules/tickets.ts';
@@ -26,7 +33,7 @@ function orExit<T>(make: () => T): T {
 
 const { host, port }: Config = orExit(() => readConfig());
 const store: Store = orExit(() => openStore(ledgerPath()));
-const modules = { sessions, users, tickets, flow, approval, inbox };
+const modules = { sessions, users, tickets, flow, approval, inbox, lead, notify, knowledge };
 applyTables(store.db, Object.values(modules).flatMap((module) => module.tables));
 const app: App = assemble(modules, { store });
 
@@ -39,6 +46,7 @@ server.on('error', (error: NodeJS.ErrnoException) => {
 });
 server.listen(port, host, () => {
   console.log(`cleared-v2: listening on http://${address} (health: /health)`);
+  app.start?.();
 });
 
 // server.close waits for every open connection to end, and the event
@@ -52,8 +60,10 @@ for (const signal of ['SIGINT', 'SIGTERM'] as const) {
     if (closing) return;
     closing = true;
     server.close(() => {
-      store.close();
-      process.exit(0);
+      void (app.stop?.() ?? Promise.resolve()).finally(() => {
+        store.close();
+        process.exit(0);
+      });
     });
     server.closeAllConnections();
   });

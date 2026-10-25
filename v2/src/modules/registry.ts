@@ -1,5 +1,5 @@
 // How the service is put together (docs/v2/milestone-1-plan.md, section 10).
-// Six modules, one file each under src/modules/, each declaring its tables,
+// Nine modules, one file each under src/modules/, each declaring its tables,
 // its routes and the registry slots it fills. main.ts assembles them; a lane
 // fills its own module and never edits main.ts or another module. Every
 // slot has an in-memory default, so a module that is still a stub leaves
@@ -79,9 +79,19 @@ export type Module = {
   readonly tables: readonly string[];                  // CREATE TABLE IF NOT EXISTS statements
   readonly routes: readonly Route[];
   readonly provide: (deps: ModuleDeps) => Partial<Registry>;
+  // Called once the service listens, with the assembled registry: what must
+  // not wait for the first request (the flow's restart recovery, the lead's
+  // stopped sessions released). Never throws.
+  readonly start?: (registry: Registry) => void;
+  // Called once at the service's stop, before the store closes: what a
+  // module started on a timer is ended and the pass it runs awaited.
+  // Never throws.
+  readonly stop?: () => Promise<void>;
 };
 
-export const MODULE_NAMES = ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox'] as const;
+// lead and notify: milestone 2 (docs/v2/milestone-2-plan.md, decision 14);
+// knowledge: the replanned milestone 2 (decision 27, lane 24).
+export const MODULE_NAMES = ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox', 'lead', 'notify', 'knowledge'] as const;
 export type ModuleName = (typeof MODULE_NAMES)[number];
 
 export const emptyModule: Module = { tables: [], routes: [], provide: () => ({}) };
@@ -116,6 +126,8 @@ export type App = {
   readonly registry: Registry;
   readonly tables: readonly string[];
   readonly routes: readonly Route[];
+  readonly start?: () => void;                         // each module's start, in module order (assemble sets it)
+  readonly stop?: () => Promise<void>;                 // each module's stop, in reverse module order, awaited (assemble sets it)
 };
 
 // The modules' tables and routes in module order, and the registry with
@@ -145,7 +157,18 @@ export function assemble(modules: Readonly<Record<ModuleName, Module>>, deps: Mo
       slots[slot] = value;
     }
   }
-  return { registry: slots as Registry, tables, routes };
+  const registry = slots as Registry;
+  const start = () => {
+    for (const name of MODULE_NAMES) {
+      try { modules[name].start?.(registry); } catch (error) { console.error(`cleared-v2: the ${name} module could not start (${error instanceof Error ? error.name : typeof error})`); }
+    }
+  };
+  const stop = async () => {
+    for (const name of [...MODULE_NAMES].reverse()) {
+      try { await modules[name].stop?.(); } catch (error) { console.error(`cleared-v2: the ${name} module could not stop (${error instanceof Error ? error.name : typeof error})`); }
+    }
+  };
+  return { registry, tables, routes, start, stop };
 }
 
 export type Match =

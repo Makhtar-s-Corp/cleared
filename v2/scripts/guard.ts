@@ -23,6 +23,8 @@ function git(cwd: string, args: string[]): string {
   return execFileSync('git', ['-C', cwd, '-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null', ...args], {
     encoding: 'utf8',
     stdio: ['ignore', 'pipe', 'pipe'],
+    // A diff that changes package-lock.json can pass Node's 1 MB default.
+    maxBuffer: 256 * 1024 * 1024,
     env: { ...process.env, GIT_OPTIONAL_LOCKS: '0', GIT_PAGER: 'cat', GIT_TERMINAL_PROMPT: '0' },
   });
 }
@@ -55,14 +57,17 @@ const entry = (file: string): Stats | undefined => {
   try { return lstatSync(join(root, file)); }
   catch { return undefined; }
 };
-// The app's web fonts are binary, and the guard's tree mode reads text only
-// (lib/guard/codex-guard.mjs expects a snapshot pruned of non-text files).
-// Only these are left out, by exact place and name; any other binary under
-// v2/ is still refused.
+// The app's web fonts and its three icons are binary, and the guard's tree
+// mode reads text only (lib/guard/codex-guard.mjs expects a snapshot pruned
+// of non-text files). Only these are left out, by exact place and name; any
+// other binary under v2/ is still refused.
 const FONT = /^v2\/app\/public\/fonts\/[A-Za-z0-9-]+\.woff2$/;
+const ICON = /^v2\/app\/public\/icons\/(?:icon-192|icon-512|apple-touch-icon)\.png$/;
 const fonts = [...files].filter((file) => FONT.test(file) && entry(file)?.isFile());
-const present = [...files].filter((file) => { const stat = entry(file); return stat !== undefined && !stat.isDirectory() && !fonts.includes(file); }).sort();
+const icons = [...files].filter((file) => ICON.test(file) && entry(file)?.isFile());
+const present = [...files].filter((file) => { const stat = entry(file); return stat !== undefined && !stat.isDirectory() && !fonts.includes(file) && !icons.includes(file); }).sort();
 if (fonts.length > 0) console.log(`guard: ${fonts.length} font files of v2/app/public/fonts left out (binary)`);
+if (icons.length > 0) console.log(`guard: ${icons.length} icons of v2/app/public/icons left out (binary)`);
 if (present.length === 0) {
   console.error('guard: no file to check');
   process.exit(1);
@@ -131,8 +136,12 @@ try {
   let clean = guard(`${present.length} v2 files`, ['--tree', snapshot]);
   if (base) {
     // Added and removed lines only (no context): what this change brings, not the text around it.
+    // The lock file is left out of this strict pass: npm writes it (registry addresses, integrity
+    // hashes, version ranges), and the strict "assigned secret" rule reads the dependency
+    // js-tokens, followed by its version range, as a secret. The tree pass above
+    // still checks the whole lock file.
     const changes = join(work, 'changes.diff');
-    writeFileSync(changes, git(root, ['diff', '-U0', '--no-ext-diff', '--no-color', '--no-textconv', `${base}...HEAD`]));
+    writeFileSync(changes, git(root, ['diff', '-U0', '--no-ext-diff', '--no-color', '--no-textconv', `${base}...HEAD`, '--', '.', ':(exclude)v2/package-lock.json']));
     clean = guard(`the lines changed since ${base}`, ['--strict', changes]) && clean;
   }
   status = clean ? 0 : 1;

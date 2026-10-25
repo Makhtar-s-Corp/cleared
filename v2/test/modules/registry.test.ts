@@ -2,17 +2,25 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
+import lead from '../../src/modules/lead.ts';
 import { MODULE_NAMES, assemble, dispatch, emptyModule, matchRoute, type Module, type Route } from '../../src/modules/registry.ts';
 import { handle as health } from '../../src/server.ts';
 import { MemoryTicketStore } from '../../src/tickets/contract.ts';
 
 // Lanes 6, 7 and 8 filled the users, sessions, flow, inbox, tickets and
-// approval modules (their own tests); the registry tests use empty modules for all six.
-const stubs = { sessions: emptyModule, users: emptyModule, tickets: emptyModule, flow: emptyModule, approval: emptyModule, inbox: emptyModule };
+// approval modules (their own tests); the registry tests use empty modules
+// for those six. Milestone 2 adds lead and notify (decision 14): lane 5
+// filled lead and lane 6 filled notify (their own tests, test/lead/ and
+// test/notify/). The replanned milestone 2 adds knowledge (decision 27, lane
+// 24, its own tests in test/knowledge/).
+const stubs = { sessions: emptyModule, users: emptyModule, tickets: emptyModule, flow: emptyModule, approval: emptyModule, inbox: emptyModule, lead: emptyModule, notify: emptyModule, knowledge: emptyModule };
 const deps = { store: undefined as never };
 
 test('the module stubs are empty and assemble into the in-memory defaults', async () => {
-  assert.deepEqual([...MODULE_NAMES], ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox']);
+  assert.deepEqual([...MODULE_NAMES], ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox', 'lead', 'notify', 'knowledge']);
+  assert.equal(MODULE_NAMES.length, 9);
+  // Lane 5 filled the lead module (its own test, test/lead/module.test.ts): it provides no slot.
+  assert.deepEqual(lead.provide(deps), {});
   for (const [name, module] of Object.entries(stubs)) {
     assert.deepEqual([module.tables, module.routes, module.provide(deps)], [[], [], {}], name);
   }
@@ -77,4 +85,19 @@ test('the dispatcher serves module routes and leaves /health and unknown paths t
     assert.equal(failed.status, 500);
     assert.deepEqual(await failed.json(), { error: 'internal error' });
   });
+});
+
+test('start runs each module\'s start once, in module order, with the assembled registry; one that throws is said and the others still start', () => {
+  const seen: string[] = [];
+  const starting = (name: string, fail = false): Module => ({ ...emptyModule, start: (registry) => { seen.push(`${name}:${registry.ticketStore instanceof MemoryTicketStore}`); if (fail) throw new Error('no'); } });
+  const app = assemble({ ...stubs, flow: starting('flow', true), lead: starting('lead') }, deps);
+  assert.deepEqual(seen, [], 'assembling starts nothing');
+  app.start?.();
+  assert.deepEqual(seen, ['flow:true', 'lead:true']);
+});
+
+test('the flow and the lead modules start at once, without waiting for a request (the restart recovery, issue 265)', async () => {
+  const flow = (await import('../../src/modules/flow.ts')).default;
+  assert.equal(typeof flow.start, 'function');
+  assert.equal(typeof lead.start, 'function');
 });

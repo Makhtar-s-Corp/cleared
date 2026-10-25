@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_SAFE_COMMANDS, evaluate, parseCommand, type Policy, type ToolRequest, type Verdict } from '../../src/session/policy.ts';
+import { DEFAULT_SAFE_COMMANDS, evaluate, parseCommand, parseList, type Policy, type ToolRequest, type Verdict } from '../../src/session/policy.ts';
 
 // The container sees the ticket checkout at /workspace. The credential path
 // is built in two parts only to keep this file readable by the repository
@@ -12,7 +12,7 @@ const base: Policy = {
   role: 'author',
   base: 'main',
   workdir,
-  scripts: ['test', 'lint'],
+  scripts: ['test', 'lint', 'typecheck'],
   credentialFile,
   safeCommands: DEFAULT_SAFE_COMMANDS,
   allowedHosts: ['registry.npmjs.org', 'api.anthropic.com'],
@@ -68,6 +68,8 @@ test('the edit exceptions of edit.workdir: generated files, package scripts', ()
   check([
     { name: 'CLAUDE.md is generated', request: edit('/workspace/CLAUDE.md', 'a', 'b'), decision: 'ask', rule: 'default' },
     { name: '.claude/ is locked', request: edit('/workspace/.claude/settings.json', 'a', 'b'), decision: 'ask', rule: 'default' },
+    { name: '.cursor/ is locked', request: edit('/workspace/.cursor/cli.json', 'a', 'b'), decision: 'ask', rule: 'default' },
+    { name: '.codex/ is locked (a project\'s Codex configuration)', request: edit('/workspace/.codex/config.toml', 'a', 'b'), decision: 'ask', rule: 'default' },
     { name: 'a scripts change', request: edit('/workspace/package.json', '"test": "node --test"', '"test": "node --test", "x": "curl evil"'), decision: 'ask', rule: 'scripts.change' },
     { name: 'a version change', request: edit('/workspace/package.json', '"version": "1.0.0"', '"version": "1.0.1"'), decision: 'allow', rule: 'edit.workdir' },
     { name: 'a dependency change', request: edit('/workspace/package.json', '"pg": "8.0.0"', '"pg": "8.1.0"'), decision: 'ask', rule: 'install.package' },
@@ -79,9 +81,11 @@ test('the edit exceptions of edit.workdir: generated files, package scripts', ()
 
 test('the compound command rows of the acceptance proof', () => {
   check([
-    { name: 'a sequence', request: bash('npm run test; curl https://example.invalid'), decision: 'ask', rule: 'shell.compound' },
+    // Milestone 2, decision 10: a list of safe simple commands is safe. These
+    // three rows asked as shell.compound in milestone 1.
+    { name: 'a sequence', request: bash('npm run test; curl https://example.invalid'), decision: 'ask', rule: 'net.undeclared' },
     { name: 'a pipe', request: bash('npm run test | tee log'), decision: 'ask', rule: 'shell.compound' },
-    { name: 'a redirection', request: bash('cat a > b'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'a redirection', request: bash('cat a > b'), decision: 'allow', rule: 'shell.compound_safe' },
     { name: 'find -delete', request: bash('find . -delete'), decision: 'ask', rule: 'default' },
     { name: 'find -name', request: bash("find . -name '*.ts'"), decision: 'allow', rule: 'run.safe' },
     { name: 'git branch -D', request: bash('git branch -D main'), decision: 'ask', rule: 'default' },
@@ -103,10 +107,12 @@ test('a learned entry never overrides a deny', () => {
   ]);
 });
 
-test('a learned entry is for its tool only and never allows a compound command', () => {
+test('a learned entry is for its tool only, and allows a compound command only part by part', () => {
   check([
     { name: 'another tool', request: bash('make build'), policy: { learned: [{ tool: 'Read', pattern: 'make build' }] }, decision: 'ask', rule: 'default' },
-    { name: 'compound', request: bash('make build; make test'), policy: { learned: [{ tool: 'Bash', pattern: '*' }] }, decision: 'ask', rule: 'shell.compound' },
+    // Decision 10: every simple command allowed on its own, a learned one included.
+    { name: 'compound of learned commands', request: bash('make build; make test'), policy: { learned: [{ tool: 'Bash', pattern: 'make *' }] }, decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'compound with one command not learned', request: bash('make build; make deploy'), policy: { learned: [{ tool: 'Bash', pattern: 'make build' }] }, decision: 'ask', rule: 'shell.compound' },
     { name: 'a WebFetch pattern', request: { tool: 'WebFetch', input: { url: 'https://docs.example.org/page', prompt: 'read' } }, policy: { learned: [{ tool: 'WebFetch', pattern: 'https://docs.example.org/*' }] }, decision: 'allow', rule: 'learned' },
   ]);
 });
@@ -206,7 +212,7 @@ test('secret.read looks at the paths a request names, never at the text it write
 });
 
 test('the reviewer role cannot edit, commit or push', () => {
-  const reviewer = { role: 'reviewer' as const };
+  const reviewer = { role: 'reviewer' as const, testCommand: ['npm', 'test'] };
   check([
     { name: 'Write', request: { tool: 'Write', input: { file_path: '/workspace/a.ts', content: 'x' } }, policy: reviewer, decision: 'deny', rule: 'reviewer.edit' },
     { name: 'MultiEdit', request: { tool: 'MultiEdit', input: { file_path: '/workspace/a.ts', edits: [] } }, policy: reviewer, decision: 'deny', rule: 'reviewer.edit' },
@@ -214,7 +220,7 @@ test('the reviewer role cannot edit, commit or push', () => {
     { name: 'git commit', request: bash('git commit -m done'), policy: reviewer, decision: 'deny', rule: 'reviewer.edit' },
     { name: 'git push to the ticket branch', request: bash('git push origin ticket-1'), policy: reviewer, decision: 'deny', rule: 'reviewer.edit' },
     { name: 'reading stays allowed', request: { tool: 'Read', input: { file_path: '/workspace/a.ts' } }, policy: reviewer, decision: 'allow', rule: 'read.workdir' },
-    { name: 'tests stay allowed', request: bash('npm test'), policy: reviewer, decision: 'allow', rule: 'run.safe' },
+    { name: 'the declared tests stay allowed', request: bash('npm test'), policy: reviewer, decision: 'allow', rule: 'reviewer.tests' },
   ]);
 });
 
@@ -292,7 +298,7 @@ test('a commit message or an echo that names a secret file is no read of it (rev
 });
 
 test('anything the parser cannot read word for word goes to ask', () => {
-  for (const command of ['cat $HOME/x', 'ls ~', 'ls *.ts', 'cat a?', 'echo {a,b}', 'npm test &', 'npm test # note', 'echo "$(id)"', 'echo "`id`"', 'ls\nid', 'echo "open', 'echo a\\', 'cat <in', 'npm test 2>err', 'npm test &>out', '(ls)', '']) {
+  for (const command of ['cat $HOME/x', 'ls ~', 'ls *.ts', 'cat a?', 'echo {a,b}', 'npm test &', 'npm test # note', 'echo "$(id)"', 'echo "`id`"', 'ls\nid', 'echo "open', 'echo a\\', 'cat <in', '(ls)', '', 'npm test |& tail', 'npm test && ', '; npm test', 'npm test ;; ls', 'npm test | | tail', 'cat a >| b', "cat a > ''", 'cat a >', 'npm test 2>&x', 'npm test >&out', 'npm test <<EOF']) {
     const verdict = evaluate(bash(command), base, context);
     assert.deepEqual([verdict.decision, verdict.rule], ['ask', 'shell.compound'], JSON.stringify(command));
   }
@@ -326,7 +332,9 @@ test('installs, deletions and network commands ask with their own rule', () => {
     { name: 'git checkout -- .', request: bash('git checkout -- .'), decision: 'ask', rule: 'delete.outside_ticket' },
     { name: 'git reset --hard', request: bash('git reset --hard HEAD~1'), decision: 'ask', rule: 'delete.outside_ticket' },
     { name: 'rm of a file outside the ticket', request: bash('rm README.md'), decision: 'ask', rule: 'delete.outside_ticket' },
-    { name: 'rm of a ticket file', request: bash('rm src/app.ts'), decision: 'ask', rule: 'default' },
+    // Milestone 2, decision 11: the author deletes a file its ticket changed without asking.
+    { name: 'rm of a ticket file', request: bash('rm src/app.ts'), decision: 'allow', rule: 'delete.ticket' },
+    { name: 'rm -r of a ticket file', request: bash('rm -r src/app.ts'), decision: 'ask', rule: 'delete.outside_ticket' },
     { name: 'wget', request: bash('wget https://example.org/x'), decision: 'ask', rule: 'net.undeclared' },
     { name: 'ssh', request: bash('ssh host.example.org'), decision: 'ask', rule: 'net.undeclared' },
     { name: 'nc', request: bash('nc example.org 80'), decision: 'ask', rule: 'net.undeclared' },
@@ -355,4 +363,230 @@ test('the shell-word parser reads quotes and escapes, and nothing else', () => {
   for (const text of ['a;b', 'a && b', 'a || b', 'a | b', 'a > b', 'a >> b', 'a < b', 'a 2> b', 'a &> b', '$(a)', '`a`', 'a\nb', '"a', "'a", 'a\\', '', '   ', '$X', '"$X"']) {
     assert.equal(parseCommand(text), undefined, JSON.stringify(text));
   }
+});
+
+// The proofs' driver passes `globs` (scripts/proof-inbox.ts, review 1 of PR
+// 279); the policy never does, and a bare glob stays refused by it.
+test('the parser reads a bare glob only when asked, and only one that names files of the current folder', () => {
+  for (const text of ['ls *', 'grep -r x --include=*', 'wc -l *.ts', 'ls a?c', 'ls [ab]']) {
+    assert.equal(parseCommand(text), undefined, text);
+    assert.equal(parseList(text), undefined, text);
+  }
+  assert.deepEqual(parseCommand('ls *', { globs: true }), ['ls', '*']);
+  assert.deepEqual(parseCommand('wc -l *.ts', { globs: true }), ['wc', '-l', '*.ts']);
+  assert.deepEqual(parseCommand('grep -r x --include=*', { globs: true }), ['grep', '-r', 'x', '--include=*']);
+  assert.deepEqual(parseList('npm test | tail; ls *.md', { globs: true })?.map((c) => c.words), [['npm', 'test'], ['tail'], ['ls', '*.md']]);
+  for (const text of ['ls src/*', 'cat .*', 'cd ".."*', 'ls /etc/*', 'ls ./*', 'cat .?']) assert.equal(parseCommand(text, { globs: true }), undefined, text);
+  // Everything else the parser refuses stays refused with it.
+  for (const text of ['a;b', '$(a)', '`a`', 'a\nb', '$X', 'ls {a,b}*']) assert.equal(parseCommand(text, { globs: true }), undefined, JSON.stringify(text));
+  // The policy's own verdict on a bare glob still asks.
+  assert.equal(evaluate(bash('ls *.ts'), { ...base, role: 'reviewer' }).decision, 'ask');
+});
+
+// docs/v2/milestone-2-plan.md, decision 10 and the acceptance of lane 1: a
+// command made of simple commands each allowed on its own is allowed as
+// shell.compound_safe; a redirection writes only where an Edit would.
+test('compound commands of safe simple commands, and their redirections (milestone 2, decision 10)', () => {
+  check([
+    { name: 'npm test 2>&1 | tail -20', request: bash('npm test 2>&1 | tail -20'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'npm test && git commit -m x', request: bash('npm test && git commit -m x'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'npm run typecheck; npm test', request: bash('npm run typecheck; npm test'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'cat a > notes.txt', request: bash('cat a > notes.txt'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'cat a > package.json', request: bash('cat a > package.json'), decision: 'ask', rule: 'scripts.change' },
+    { name: 'cat a > .git/config', request: bash('cat a > .git/config'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'npm test > CLAUDE.md', request: bash('npm test > CLAUDE.md'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'cat a >> .claude/settings.json', request: bash('cat a >> .claude/settings.json'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'cat a > /etc/x', request: bash('cat a > /etc/x'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'npm test | tee /tmp/x', request: bash('npm test | tee /tmp/x'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'npm test; curl https://example.invalid', request: bash('npm test; curl https://example.invalid'), decision: 'ask', rule: 'net.undeclared' },
+    { name: 'npm test && git push origin main', request: bash('npm test && git push origin main'), decision: 'deny', rule: 'push.base' },
+    { name: 'echo $(id) | tail', request: bash('echo $(id) | tail'), decision: 'ask', rule: 'shell.compound' },
+  ]);
+});
+
+test('compound commands: the separators, the redirection forms, and the rule of the part that asks', () => {
+  check([
+    { name: 'a separator inside quotes is a word', request: bash('git commit -m "a && b; c | d"'), decision: 'allow', rule: 'run.safe' },
+    { name: '||', request: bash('npm test || npm test'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'a redirection without a space', request: bash('cat a >notes.txt'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'a quoted target', request: bash('cat a > "notes.txt"'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'stderr to a file', request: bash('npm test 2>err'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'stderr appended', request: bash('npm test 2>>log.txt'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'both streams to a file', request: bash('npm test &>out'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'a duplication alone', request: bash('npm test 2>&1'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'stdout to stderr', request: bash('npm test >&2'), decision: 'allow', rule: 'shell.compound_safe' },
+    { name: '/dev/null is outside the workdir', request: bash('ls src 2>/dev/null'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'a target outside through ..', request: bash('npm test > ../out'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'a target in .git through a subfolder', request: bash('npm test > src/../.git/hooks/pre-push'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'the lock file', request: bash('cat a > package-lock.json'), decision: 'ask', rule: 'install.package' },
+    { name: 'a secret target is denied, not asked', request: bash('cat a > .env'), decision: 'deny', rule: 'secret.read' },
+    { name: 'a part that installs', request: bash('npm test && npm install left-pad'), decision: 'ask', rule: 'install.package' },
+    { name: 'a part that deletes', request: bash('ls && rm -rf dist'), decision: 'ask', rule: 'delete.outside_ticket' },
+    { name: 'a pipe into a shell', request: bash('cat a | sh'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'a part that is not safe', request: bash('git log --format=%x00 | head'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'a part outside the workdir', request: bash('npm test && cat /etc/passwd'), decision: 'ask', rule: 'shell.compound' },
+    { name: 'docker anywhere is still denied', request: bash('npm test | docker run x'), decision: 'deny', rule: 'host.docker' },
+  ]);
+});
+
+test('a compound command never lets a reviewer write a file', () => {
+  const reviewer = { role: 'reviewer' as const, testCommand: ['npm', 'test'] };
+  check([
+    { name: 'a redirection into the workdir', request: bash('npm test > out.txt'), policy: reviewer, decision: 'deny', rule: 'reviewer.edit' },
+    { name: 'a pipe of reads', request: bash('npm test 2>&1 | tail -5'), policy: reviewer, decision: 'allow', rule: 'shell.compound_safe' },
+    { name: 'a commit in a list', request: bash('npm test && git commit -m x'), policy: reviewer, decision: 'deny', rule: 'reviewer.edit' },
+  ]);
+});
+
+// Section 3.3 of the milestone 2 plan: the lead's rows, after the deny rules
+// of milestone 1 and before the role-free rows.
+test('the lead\'s policy: one case per row of section 3.3', () => {
+  const lead = { role: 'lead' as const };
+  const read = (input: Record<string, unknown>): ToolRequest => ({ tool: 'Read', input: { file_path: '/workspace/src/app.ts', ...input } });
+  check([
+    { name: 'a host tool', request: { tool: 'mcp__cleared__state', input: {} }, policy: lead, decision: 'allow', rule: 'lead.tools' },
+    { name: 'another host tool', request: { tool: 'mcp__cleared__propose_plan', input: { goal: 'g' } }, policy: lead, decision: 'allow', rule: 'lead.tools' },
+    { name: 'a Read with a limit', request: read({ limit: 400 }), policy: lead, decision: 'allow', rule: 'read.workdir' },
+    { name: 'Glob', request: { tool: 'Glob', input: { pattern: 'src/**/*.ts' } }, policy: lead, decision: 'allow', rule: 'read.workdir' },
+    { name: 'Grep', request: { tool: 'Grep', input: { pattern: 'x', path: 'src' } }, policy: lead, decision: 'allow', rule: 'read.workdir' },
+    { name: 'a Read without a limit', request: read({}), policy: lead, decision: 'deny', rule: 'lead.read_cap' },
+    { name: 'a Read above the cap', request: read({ limit: 401 }), policy: lead, decision: 'deny', rule: 'lead.read_cap' },
+    { name: 'a Read with a limit that is not a count', request: read({ limit: '100' }), policy: lead, decision: 'deny', rule: 'lead.read_cap' },
+    { name: 'git log --oneline', request: bash('git log --oneline'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'Edit', request: { tool: 'Edit', input: { file_path: '/workspace/src/app.ts', old_string: 'a', new_string: 'b' } }, policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'npm test', request: bash('npm test'), policy: lead, decision: 'deny', rule: 'lead.command' },
+  ]);
+});
+
+test('the lead reads git and the workdir through head, and runs nothing else', () => {
+  const lead = { role: 'lead' as const };
+  check([
+    { name: 'git -c', request: bash('git -c core.pager=x log'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'a redirection', request: bash('git log > x'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'git -C .', request: bash('git -C . log --oneline'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'git status', request: bash('git status'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'git branch --show-current', request: bash('git branch --show-current'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'git show into head', request: bash('git show HEAD | head -n 400'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'git diff into head -nN', request: bash('git diff main | head -n200'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'head above the cap', request: bash('git diff | head -n 401'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'head of nothing', request: bash('git diff | head -n 0'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'git log with a format escape', request: bash('git log --format=%x00'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'git log --output', request: bash('git log --output=x'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'git branch -D', request: bash('git branch -D x'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'ls into head', request: bash('ls src | head -n 50'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'grep into head', request: bash('grep -rn TODO src | head -n 20'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'find into head', request: bash("find . -name '*.ts' | head -n 100"), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'head of a file', request: bash('head -n 100 src/app.ts'), policy: lead, decision: 'allow', rule: 'lead.git_read' },
+    { name: 'head without a count', request: bash('head src/app.ts'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'a second count', request: bash('head -n 5 -n 99999 src/app.ts'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'a byte count', request: bash('head -n 5 -c 999999 src/app.ts'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'several files', request: bash('head -n 400 src/a.ts src/b.ts src/c.ts'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'a second count after a pipe', request: bash('git log | head -n 5 -n 99999'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'ls not piped into head', request: bash('ls src'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'ls outside the workdir', request: bash('ls / | head -n 5'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'find -exec', request: bash('find . -exec cat {} + | head -n 5'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'cat is not the lead\'s reader', request: bash('cat src/app.ts'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'tail is not either', request: bash('tail -n 5 src/app.ts | head -n 5'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'three parts', request: bash('git log | head -n 20 | head -n 5'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'a list', request: bash('git log && git status'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'head reading a file after a pipe', request: bash('git log | head -n 5 src/app.ts'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'a duplication', request: bash('git log 2>&1 | head -n 5'), policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'git commit', request: bash('git commit -m x'), policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'git push to a ticket branch', request: bash('git push origin ticket-1'), policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'git push to the base is milestone 1\'s deny', request: bash('git push origin main'), policy: lead, decision: 'deny', rule: 'push.base' },
+    { name: 'git checkout', request: bash('git checkout -b x'), policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'git add in a list', request: bash('git status && git add .'), policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'Write', request: { tool: 'Write', input: { file_path: '/workspace/a.ts', content: 'x' } }, policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'MultiEdit', request: { tool: 'MultiEdit', input: { file_path: '/workspace/a.ts', edits: [] } }, policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'NotebookEdit', request: { tool: 'NotebookEdit', input: { notebook_path: '/workspace/a.ipynb', new_source: 'x' } }, policy: lead, decision: 'deny', rule: 'lead.edit' },
+    { name: 'WebFetch', request: { tool: 'WebFetch', input: { url: 'https://registry.npmjs.org/pg', prompt: 'read' } }, policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'WebSearch', request: { tool: 'WebSearch', input: { query: 'x' } }, policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'Agent', request: { tool: 'Agent', input: { prompt: 'x' } }, policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'Task', request: { tool: 'Task', input: { prompt: 'x' } }, policy: lead, decision: 'deny', rule: 'lead.command' },
+    { name: 'a secret is milestone 1\'s deny', request: { tool: 'Read', input: { file_path: '/workspace/.env', limit: 10 } }, policy: lead, decision: 'deny', rule: 'secret.read' },
+    { name: 'a Read outside the workdir falls to the role-free rows', request: { tool: 'Read', input: { file_path: '/etc/hosts', limit: 10 } }, policy: lead, decision: 'ask', rule: 'default' },
+    { name: 'a host tool is the lead\'s only', request: { tool: 'mcp__cleared__state', input: {} }, decision: 'ask', rule: 'default' },
+  ]);
+  const capped = evaluate({ tool: 'Read', input: { file_path: '/workspace/src/app.ts' } }, { ...base, role: 'lead' }, context);
+  assert.equal(capped.decision, 'deny');
+  if (capped.decision === 'deny') assert.match(capped.message, /limit of at most 400 lines/);
+});
+
+// Milestone 2, decision 28 (lane 25): the reader answers a question about
+// the code. The reviewer's rows (no edit, no commit, no push), the lead's
+// 400-line cap on a Read, and nothing that waits for a person: nobody
+// answers a reader's requests, so what would ask is refused, and an
+// "Always in this project" answer never widens what it may do.
+test('the reader\'s policy: one case per row', () => {
+  const reader = { role: 'reader' as const };
+  const read = (input: Record<string, unknown>): ToolRequest => ({ tool: 'Read', input: { file_path: '/workspace/guestbook/src/page.ts', ...input } });
+  check([
+    { name: 'a Read with a limit', request: read({ limit: 400 }), policy: reader, decision: 'allow', rule: 'read.workdir' },
+    { name: 'a Read with an offset and a limit', request: read({ offset: 400, limit: 200 }), policy: reader, decision: 'allow', rule: 'read.workdir' },
+    { name: 'a Read without a limit', request: read({}), policy: reader, decision: 'deny', rule: 'reader.read_cap' },
+    { name: 'a Read above the cap', request: read({ limit: 401 }), policy: reader, decision: 'deny', rule: 'reader.read_cap' },
+    { name: 'a Read with a limit that is not a count', request: read({ limit: '100' }), policy: reader, decision: 'deny', rule: 'reader.read_cap' },
+    { name: 'Glob', request: { tool: 'Glob', input: { pattern: '**/*.ts' } }, policy: reader, decision: 'allow', rule: 'read.workdir' },
+    { name: 'Grep', request: { tool: 'Grep', input: { pattern: 'x', path: 'guestbook/src' } }, policy: reader, decision: 'allow', rule: 'read.workdir' },
+    { name: 'a safe command', request: bash('grep -rn health guestbook/src'), policy: reader, decision: 'allow', rule: 'run.safe' },
+    { name: 'Edit', request: { tool: 'Edit', input: { file_path: '/workspace/guestbook/src/page.ts', old_string: 'a', new_string: 'b' } }, policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'Write', request: { tool: 'Write', input: { file_path: '/workspace/notes.md', content: 'x' } }, policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'MultiEdit', request: { tool: 'MultiEdit', input: { file_path: '/workspace/a.ts', edits: [] } }, policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'NotebookEdit', request: { tool: 'NotebookEdit', input: { notebook_path: '/workspace/a.ipynb', new_source: 'x' } }, policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'git commit', request: bash('git commit -m done'), policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'git push to a branch', request: bash('git push origin ticket-1'), policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'git push to the base', request: bash('git push origin main'), policy: reader, decision: 'deny', rule: 'push.base' },
+    { name: 'a secret', request: read({ file_path: '/workspace/guestbook/.env', limit: 10 }), policy: reader, decision: 'deny', rule: 'secret.read' },
+    { name: 'a question to a person', request: { tool: 'AskUserQuestion', input: { questions: [] } }, policy: reader, decision: 'deny', rule: 'reader.question' },
+    { name: 'an install, which would ask', request: bash('npm install left-pad'), policy: reader, decision: 'deny', rule: 'reader.ask' },
+    { name: 'the network, which would ask', request: bash('curl https://example.com'), policy: reader, decision: 'deny', rule: 'reader.ask' },
+    { name: 'a fetch, which would ask', request: { tool: 'WebFetch', input: { url: 'https://example.com', prompt: 'x' } }, policy: reader, decision: 'deny', rule: 'reader.ask' },
+    { name: 'a subagent, which would ask', request: { tool: 'Task', input: { prompt: 'x' } }, policy: reader, decision: 'deny', rule: 'reader.ask' },
+    { name: 'a host tool, which a reader has none of', request: { tool: 'mcp__cleared__propose_plan', input: {} }, policy: reader, decision: 'deny', rule: 'reader.ask' },
+    { name: 'a redirection, which writes a file', request: bash('cat a > b'), policy: reader, decision: 'deny', rule: 'reader.edit' },
+    { name: 'a compound command, which would ask', request: bash('ls; wget https://example.com'), policy: reader, decision: 'deny', rule: 'reader.ask' },
+    { name: 'a learned answer does not widen it', request: bash('make build'), policy: { ...reader, learned: [{ tool: 'Bash', pattern: 'make build' }] }, decision: 'deny', rule: 'reader.ask' },
+  ]);
+  const verdict = evaluate(bash('npm install left-pad'), { ...base, role: 'reader' });
+  assert.ok(verdict.decision === 'deny' && verdict.message.includes('npm install'), 'the refusal keeps the reason it would have asked for');
+});
+
+// Review followup of pull request 204 (issue 207, item 4): an author whose
+// session plan waits for its Go reads and runs the checks, and changes
+// nothing but its HANDOVER.md, which the runner's Stop hook asks for at the
+// end of every turn. The flow sets `planning` (flow/engine.ts, policyFor).
+test('an author before its Go changes nothing but its handover', () => {
+  const planning = { planning: true };
+  const edit = (path: string): ToolRequest => ({ tool: 'Edit', input: { file_path: path, old_string: 'a', new_string: 'b' } });
+  check([
+    { name: 'Edit', request: edit('/workspace/src/app.ts'), policy: planning, decision: 'deny', rule: 'plan.before_go' },
+    { name: 'Write', request: { tool: 'Write', input: { file_path: '/workspace/src/new.ts', content: 'x' } }, policy: planning, decision: 'deny', rule: 'plan.before_go' },
+    { name: 'its handover', request: { tool: 'Write', input: { file_path: '/workspace/HANDOVER.md', content: 'x' } }, policy: planning, decision: 'allow', rule: 'edit.workdir' },
+    { name: 'a handover in a folder', request: { tool: 'Write', input: { file_path: '/workspace/src/HANDOVER.md', content: 'x' } }, policy: planning, decision: 'deny', rule: 'plan.before_go' },
+    { name: 'git commit', request: bash('git commit -m wip'), policy: planning, decision: 'deny', rule: 'plan.before_go' },
+    { name: 'git add', request: bash('git add src/app.ts'), policy: planning, decision: 'deny', rule: 'plan.before_go' },
+    { name: 'a branch push', request: bash('git push origin ticket-1'), policy: planning, decision: 'deny', rule: 'plan.before_go' },
+    { name: 'a delete', request: bash('rm src/app.ts'), policy: planning, decision: 'deny', rule: 'plan.before_go' },
+    { name: 'a read', request: { tool: 'Read', input: { file_path: '/workspace/src/app.ts' } }, policy: planning, decision: 'allow', rule: 'read.workdir' },
+    { name: 'the tests', request: bash('npm test'), policy: planning, decision: 'allow', rule: 'run.safe' },
+    { name: 'after the Go', request: edit('/workspace/src/app.ts'), policy: { planning: false }, decision: 'allow', rule: 'edit.workdir' },
+    { name: 'a reviewer is not concerned', request: edit('/workspace/src/app.ts'), policy: { role: 'reviewer', planning: true }, decision: 'deny', rule: 'reviewer.edit' },
+  ]);
+});
+
+// B5.5b (the owner's decision of 2026-10-25 06:06): the runner reads the user
+// setting source, which in the container is the session's config volume. A
+// settings file written there would bring hooks and permission rules into the
+// session's next query, so no rule lets an edit there through without the
+// human, nor into the skills mounted from the base branch.
+test('the config folder the user source reads is not written without the human', () => {
+  const config = '/var/lib/cleared/claude-config';
+  check([
+    { name: 'Write its settings', request: { tool: 'Write', input: { file_path: `${config}/settings.json`, content: '{"hooks":{}}' } }, decision: 'ask', rule: 'default' },
+    { name: 'Edit its settings', request: { tool: 'Edit', input: { file_path: `${config}/settings.json`, old_string: 'a', new_string: 'b' } }, decision: 'ask', rule: 'default' },
+    { name: 'Write a skill', request: { tool: 'Write', input: { file_path: `${config}/skills/cleared-guestbook/SKILL.md`, content: 'x' } }, decision: 'ask', rule: 'default' },
+    { name: 'a shell write', request: bash(`echo {} > ${config}/settings.json`), decision: 'ask', rule: 'shell.compound' },
+    // "Always in this project" on that exact write opens it, as for any path: the human's answer.
+    { name: 'the human\'s always for that file', request: { tool: 'Write', input: { file_path: `${config}/settings.json`, content: '{}' } }, policy: { learned: [{ tool: 'Write', pattern: `${config}/settings.json` }] }, decision: 'allow', rule: 'learned' },
+  ]);
 });

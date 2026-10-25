@@ -80,9 +80,9 @@ function hasPrivateTerm(text: string, terms: PrivateTerms): boolean {
 // fingerprints say that a term is there, not where.
 // The identifiers Cleared, the SDK and the API generate: a UUID, or a
 // prefix and an underscore before letters and digits (toolu_..., msg_...).
-const GENERATED_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-z]{2,10}_[A-Za-z0-9]{8,64})$/;
+export const GENERATED_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|[a-z]{2,10}_[A-Za-z0-9]{8,64})$/;
 // The keys of a CUSTOM value or a state that hold an identifier.
-const ID_KEYS: ReadonlySet<string> = new Set(['requestId', 'toolCallId', 'sessionId', 'session', 'messageId', 'runId', 'threadId']);
+export const ID_KEYS: ReadonlySet<string> = new Set(['requestId', 'toolCallId', 'sessionId', 'session', 'messageId', 'runId', 'threadId']);
 
 export function cleanText(text: string, options: CleanOptions): string {
   let out = text;

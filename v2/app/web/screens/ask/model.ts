@@ -1,0 +1,190 @@
+// A question to the code (decision 28, lane 25's reader): the /ask/:id
+// screen shows the question and what it is about (a service, a file and a
+// line, or the whole platform), each turn with its answer and its cost, the
+// sum with the week share once measured, and a follow-up field. The model
+// and the wording are pure, so the tests run them under Node; Ask.tsx draws
+// the screen and polls the ask while a turn runs.
+//
+// The tower's bar asks (askBody, startAsk) and opens this screen. Every
+// call goes through the app's forwarding with the signed-in user; the
+// reader's own checks (MAX_QUESTION, a target's service, three asks at once)
+// stay the service's, and the screen checks the length before it sends.
+import type { Ask, AskAnswer, AskBody, AskCitation } from '../../../../src/api/types.ts';
+import type { Translate } from '../../lib/i18n.ts';
+import { ApiError, type ScreenContext } from '../../lib/screen.ts';
+import { count, fixed } from '../../lib/time.ts';
+
+// The longest question the reader takes (MAX_QUESTION of
+// src/reader/service.ts, which the browser cannot import; a test keeps the two equal).
+export const QUESTION_MAX = 4000;
+// How often the screen reads an ask while its turn runs.
+export const POLL_MS = 2000;
+
+type Api = ScreenContext['api'];
+type Language = 'en' | 'fr';
+
+export const askPath = (id: string) => `/asks/${encodeURIComponent(id)}`;
+export const askHref = (id: string) => `/ask/${encodeURIComponent(id)}`;
+
+// The ask an address names: /ask/<id>.
+export function askIdOf(path: string): string | undefined {
+  const raw = /^\/ask\/([^/]+)$/.exec(path)?.[1];
+  if (!raw) return undefined;
+  try { return decodeURIComponent(raw); } catch { return undefined; }
+}
+
+export const running = (ask: Pick<Ask, 'state'>) => ask.state === 'starting' || ask.state === 'running';
+
+// The screen reads the ask again while a turn runs, and stops once it ended.
+export const pollDelay = (ask: Pick<Ask, 'state'>): number | null => (running(ask) ? POLL_MS : null);
+
+// ------------------------------------------------------------------ words
+
+export function targetLine(ask: Pick<Ask, 'service' | 'target'>, t: Translate): string {
+  if (ask.target) return t('ask_target', { service: ask.target.service, path: ask.target.path, line: ask.target.line });
+  return ask.service ?? t('ask_platform');
+}
+
+export function stateLine(ask: Pick<Ask, 'state'>, t: Translate): string {
+  return t(`ask_state_${ask.state}`);
+}
+
+// A turn: answered, still waiting for its answer, or lost (its reader
+// stopped or failed before it answered).
+export type TurnView = { readonly turn: AskAnswer; readonly kind: 'answered' | 'waiting' | 'lost' };
+
+export function turnsOf(ask: Pick<Ask, 'turns' | 'state'>): TurnView[] {
+  return ask.turns.map((turn) => ({ turn, kind: turn.answer !== null ? 'answered' : running(ask) ? 'waiting' : 'lost' }));
+}
+
+const decimals = fixed;
+
+// A reader's turn costs a fraction of a cent: under a cent it reads to the
+// hundredth of a cent, else in cents.
+export const money = (usd: number, language: Language, t: Translate) => t('ask_cost', { amount: decimals(usd, usd < 0.01 ? 4 : 2, language) });
+
+// "$0.0023 · 38,064 tokens in, 1,017 out", once the turn has its cost.
+export function usageLine(usage: Pick<AskAnswer, 'costUsd' | 'inputTokens' | 'outputTokens'>, language: Language, t: Translate): string | undefined {
+  if (usage.costUsd === null) return undefined;
+  return t('ask_usage', { cost: money(usage.costUsd, language, t), input: count(usage.inputTokens, language), output: count(usage.outputTokens, language) });
+}
+
+// The ask's sum, and the week as its reader last saw it, once measured.
+export function totalLine(ask: Pick<Ask, 'costUsd' | 'inputTokens' | 'outputTokens' | 'weekPercent' | 'turns'>, language: Language, t: Translate): string | undefined {
+  if (!ask.turns.some((turn) => turn.costUsd !== null)) return undefined;
+  const usage = usageLine(ask, language, t) as string;
+  return ask.weekPercent === null ? usage : `${usage} · ${t('ask_week', { n: Math.round(ask.weekPercent) })}`;
+}
+
+// -------------------------------------------------------------- citations
+
+// The code an answer cites (P215): the service checked each mention at the
+// commit the reader read and linked it to GitHub. The screen draws a link
+// only where the service sent one, and only to https://github.com/; an
+// address the reader wrote stays text.
+export type AnswerPart = { readonly text: string; readonly url?: string; readonly commit?: string };
+
+const GITHUB = 'https://github.com/';
+const linked = (citation: AskCitation) => citation.url !== null && citation.url.startsWith(GITHUB) && citation.text !== '';
+// A mention stands whole as the service reads it (src/reader/citations.ts):
+// not inside a longer path, nor before more digits or a range.
+const whole = (answer: string, at: number, end: number) => !/[A-Za-z0-9_./-]/.test(answer[at - 1] ?? '') && !/^(?:[0-9]|[-–][0-9])/.test(answer.slice(end));
+
+export function answerParts(answer: string, citations: readonly AskCitation[] | undefined): AnswerPart[] {
+  const found: { at: number; citation: AskCitation }[] = [];
+  for (const citation of (citations ?? []).filter(linked)) {
+    for (let at = answer.indexOf(citation.text); at !== -1; at = answer.indexOf(citation.text, at + 1)) {
+      if (whole(answer, at, at + citation.text.length)) found.push({ at, citation });
+    }
+  }
+  // From the start, the longer mention first where two start together; one inside another is left.
+  found.sort((a, b) => a.at - b.at || b.citation.text.length - a.citation.text.length);
+  const parts: AnswerPart[] = [];
+  let end = 0;
+  for (const { at, citation } of found) {
+    if (at < end) continue;
+    if (at > end) parts.push({ text: answer.slice(end, at) });
+    parts.push({ text: citation.text, url: citation.url as string, ...(citation.commit ? { commit: citation.commit } : {}) });
+    end = at + citation.text.length;
+  }
+  if (end < answer.length || parts.length === 0) parts.push({ text: answer.slice(end) });
+  return parts;
+}
+
+export const uncheckedOf = (turn: Pick<AskAnswer, 'citations'>): AskCitation[] => (turn.citations ?? []).filter((citation) => citation.url === null);
+
+const short = (commit: string) => commit.slice(0, 7);
+
+// "src/x.ts:3: no such file at commit 5b2d8e1".
+export function citationNote(citation: AskCitation, t: Translate): string {
+  if (citation.commit === null) return t('ask_citation_not_read', { mention: citation.text, service: citation.service });
+  switch (citation.problem) {
+    case 'no_line': return t('ask_citation_no_line', { mention: citation.text, commit: short(citation.commit) });
+    case 'no_repository': return t('ask_citation_no_repository', { mention: citation.text, service: citation.service });
+    case 'unchecked': return t('ask_citation_unchecked', { mention: citation.text });
+    default: return t('ask_citation_no_file', { mention: citation.text, commit: short(citation.commit) });
+  }
+}
+
+export const citationTitle = (citation: Pick<AskCitation, 'commit'> | AnswerPart, t: Translate) => t('ask_citation_open', { commit: short(citation.commit ?? '') });
+
+// -------------------------------------------------------------- questions
+
+export function questionProblem(text: string): 'empty' | 'too_long' | undefined {
+  const question = text.trim();
+  if (!question) return 'empty';
+  return question.length > QUESTION_MAX ? 'too_long' : undefined;
+}
+
+// A `service:path:line` the question names. A service of the workspace
+// only, when the workspace is known; else the service checks it.
+const TARGET = /(?:^|[\s(])([A-Za-z0-9][A-Za-z0-9._-]*):([^\s:]+):(\d+)(?=$|[\s,.;?!)])/g;
+
+export function targetIn(text: string, services: readonly string[]): string | undefined {
+  for (const match of text.matchAll(TARGET)) {
+    const [, service, path, line] = match as unknown as [string, string, string, string];
+    if (/^\d+$/.test(service) || /^\d+$/.test(path)) continue;          // a time, 10:30:15, is no target
+    if (services.length === 0 || services.includes(service)) return `${service}:${path}:${line}`;
+  }
+  return undefined;
+}
+
+// What the tower's bar sends: the question; its target when it names one;
+// else the one service picked; else nothing, a question to every service.
+export function askBody(text: string, services: readonly string[], picked: readonly string[]): AskBody {
+  const question = text.trim();
+  const target = targetIn(question, services);
+  if (target) return { question, target };
+  return picked.length === 1 ? { question, service: picked[0] as string } : { question };
+}
+
+// --------------------------------------------------------------- gestures
+
+export async function startAsk(api: Api, body: AskBody): Promise<Ask> {
+  return await api<Ask>('/asks', { method: 'POST', body });
+}
+
+export async function readAsk(api: Api, id: string): Promise<Ask> {
+  return await api<Ask>(askPath(id));
+}
+
+// A follow-up the screen refuses never reaches the service.
+export async function followAsk(api: Api, id: string, text: string): Promise<Ask> {
+  const problem = questionProblem(text);
+  if (problem) throw new Error(problem === 'empty' ? 'ask_question_empty' : 'ask_question_long');
+  return await api<Ask>(`${askPath(id)}/follow`, { method: 'POST', body: { question: text.trim() } });
+}
+
+// How a refusal of the reader's routes reads (src/reader/routes.ts): 409 is
+// three asks at once for a new one, a turn that runs for a follow-up.
+export function askFailure(error: unknown, gesture: 'ask' | 'follow' | 'read'): string {
+  if (!(error instanceof ApiError)) return gesture === 'read' ? 'ask_load_failed' : 'ask_failed';
+  switch (error.status) {
+    case 401: return 'signed_out';
+    case 400: return 'ask_failed_invalid';
+    case 404: return 'ask_failed_gone';
+    case 409: return gesture === 'ask' ? 'ask_failed_busy' : 'ask_failed_running';
+    case 503: return 'ask_failed_off';
+    default: return gesture === 'read' ? 'ask_load_failed' : 'ask_failed';
+  }
+}

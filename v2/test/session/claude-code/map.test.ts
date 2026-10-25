@@ -74,6 +74,9 @@ test('a recorded two-turn session maps to the exact event list of section 4, cle
     { type: 'RUN_STARTED', threadId: SESSION, runId: id(1) },
     delta({ phase: 'working', status: 'Working' }),
     ...tool('toolu_01', 'Read', { kind: 'read', path: 'notes.txt' }, 'Reading notes.txt'),
+    // The rate_limit_event of the recording: its two unified windows.
+    { type: 'CUSTOM', name: 'cleared.rate_limit', value: { window: 'five_hour', usedPercent: 26, resetsAt: '2026-10-21T20:30:00.000Z' } },
+    { type: 'CUSTOM', name: 'cleared.rate_limit', value: { window: 'seven_day', usedPercent: 8, resetsAt: '2026-10-27T09:00:00.000Z' } },
     result(`${id(8)}-0`, 'toolu_01', { kind: 'read', path: 'notes.txt', bytes: 14 }),
     ...tool('toolu_02', 'Edit', { kind: 'edit', path: 'notes.txt', added: 1, removed: 1 }, 'Editing notes.txt'),
     { type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId: id(10), decision: 'allow_once', by: 'policy', rule: 'edit.workdir' } },
@@ -188,12 +191,26 @@ test('a question, a cancelled request, a runner error and a runner that dies', (
 test('frames outside the subset map to nothing; a subagent frame keeps its tool calls', () => {
   const mapper = createMapper({ sessionId: SESSION });
   mapper.start('claude-haiku-5-5');
-  for (const message of [{ type: 'rate_limit_event' }, { type: 'system', subtype: 'hook_started' }, { type: 'stream_event' }, { type: 'command_lifecycle', state: 'queued' }, 'not an object'])
+  for (const message of [{ type: 'rate_limit_event' }, { type: 'rate_limit_event', rate_limit_info: { status: 'allowed', rateLimitType: 'overage', utilization: 0.5 } }, { type: 'system', subtype: 'compact_boundary' }, { type: 'system', subtype: 'hook_started' }, { type: 'stream_event' }, { type: 'command_lifecycle', state: 'queued' }, 'not an object'])
     assert.deepEqual(mapper.line({ type: 'sdk', message }), [], JSON.stringify(message));
   const frame = { type: 'assistant', uuid: id(30), parent_tool_use_id: 'toolu_20', message: { id: 'msg_09', content: [{ type: 'thinking', thinking: 'secret plan', signature: 's' }, { type: 'tool_use', id: 'toolu_21', name: 'Bash', input: { command: 'ls' } }] } };
   const events = mapper.line({ type: 'sdk', message: frame });
   assert.deepEqual(events.map((event) => event.type), ['RUN_STARTED', 'STATE_DELTA', 'REASONING_START', 'REASONING_END', 'TOOL_CALL_START', 'TOOL_CALL_ARGS', 'TOOL_CALL_END', 'STATE_DELTA']);
   assert.ok(!JSON.stringify(events).includes('secret plan'), 'reasoning content is never emitted');
+});
+
+// Issue #335 (P219): with the preset's per-session sections excluded, the SDK
+// gives them to the model in a user message of its own. Should a frame of it
+// reach the runner's stdout, it is no event: the thread shows only what a
+// person or Cleared sent, and a user frame counts only its tool results.
+test('a user frame of text alone, such as the context the SDK moves out of the system prompt, maps to nothing in a turn', () => {
+  const mapper = createMapper({ sessionId: SESSION });
+  mapper.start('claude-haiku-5-5');
+  const turn = mapper.line({ type: 'sdk', message: { type: 'system', subtype: 'init', user_message_uuids: [id(40)] } });
+  assert.deepEqual(turn.map((event) => event.type), ['RUN_STARTED', 'STATE_DELTA']);
+  const context = { type: 'user', uuid: id(41), message: { role: 'user', content: [{ type: 'text', text: 'Working directory: /workspace\nGit status: on branch cleared/LOCAL-12' }] } };
+  assert.deepEqual(mapper.line({ type: 'sdk', message: context }), []);
+  assert.deepEqual(mapper.line({ type: 'sdk', message: { ...context, uuid: id(42), message: { role: 'user', content: 'Working directory: /workspace' } } }), []);
 });
 
 test('a token in a command output and an edit outside the workdir are cleaned', () => {
@@ -224,4 +241,72 @@ test('a resumed session: the empty result the CLI prints before the first turn i
   assert.deepEqual(mapper.line({ type: 'sdk', message: { type: 'system', subtype: 'init', model: 'claude-haiku-5-5' } }), []);
   assert.deepEqual(mapper.line({ type: 'sdk', message: { type: 'result', subtype: 'success', is_error: false, stop_reason: null, result: '', num_turns: 0, usage: { input_tokens: 0, output_tokens: 0 }, modelUsage: {}, total_cost_usd: 0.0054 } }), []);
   assert.deepEqual(mapper.line({ type: 'sdk', message: { type: 'command_lifecycle', state: 'started', command_uuid: id(50) } }).map((e) => e.type), ['RUN_STARTED', 'STATE_DELTA']);
+});
+
+// Milestone 2 (lane 4).
+const ctx = (after: 'turn' | 'tool', percentage: number, extra: Record<string, unknown> = {}): RunnerOutput =>
+  ({ type: 'context', after, detail: 'summary', ms: 3, totalTokens: percentage * 2000, maxTokens: 200_000, rawMaxTokens: 200_000, percentage, isAutoCompactEnabled: true, autoCompactThreshold: 167_000, ...extra }) as RunnerOutput;
+
+test('a context line is a cleared.context_usage event and the session state\'s context, also in a later snapshot', () => {
+  const mapper = createMapper({ sessionId: SESSION });
+  mapper.start('claude-haiku-5-5');
+  assert.deepEqual(mapper.line(ctx('tool', 12)), [
+    { type: 'CUSTOM', name: 'cleared.context_usage', value: { percent: 12, totalTokens: 24_000, maxTokens: 200_000, rawMaxTokens: 200_000, autoCompactThreshold: 167_000, isAutoCompactEnabled: true } },
+    { type: 'STATE_DELTA', delta: [{ op: 'add', path: '/context', value: { percent: 12, totalTokens: 24_000, maxTokens: 200_000 } }] },
+  ]);
+  const [usage] = mapper.line({ ...ctx('turn', 31), rawMaxTokens: undefined, autoCompactThreshold: undefined, isAutoCompactEnabled: false } as unknown as RunnerOutput);
+  assert.deepEqual(usage, { type: 'CUSTOM', name: 'cleared.context_usage', value: { percent: 31, totalTokens: 62_000, maxTokens: 200_000, isAutoCompactEnabled: false } });
+  assert.deepEqual(mapper.state().context, { percent: 31, totalTokens: 62_000, maxTokens: 200_000 });
+  // An unreadable measure maps to nothing.
+  assert.deepEqual(mapper.line({ type: 'context', after: 'turn' } as unknown as RunnerOutput), []);
+});
+
+test('Claude Code compacting on its own is recorded as cleared.compacted', () => {
+  const mapper = createMapper({ sessionId: SESSION });
+  const frame = (metadata: Record<string, unknown>): RunnerOutput => ({ type: 'sdk', message: { type: 'system', subtype: 'compact_boundary', compact_metadata: metadata, uuid: id(9), session_id: SESSION } });
+  assert.deepEqual(mapper.line(frame({ trigger: 'auto', pre_tokens: 167_500, post_tokens: 21_000, duration_ms: 9000 })), [
+    { type: 'CUSTOM', name: 'cleared.compacted', value: { trigger: 'auto', preTokens: 167_500, postTokens: 21_000 } },
+  ]);
+  assert.deepEqual(mapper.line(frame({ trigger: 'manual', pre_tokens: 50_000 })), [{ type: 'CUSTOM', name: 'cleared.compacted', value: { trigger: 'manual', preTokens: 50_000 } }]);
+  assert.deepEqual(mapper.line(frame({ trigger: 'other', pre_tokens: 1 })), []);
+});
+
+test('a rate limit window is said when it changes, from the unified windows or the frame\'s own window', () => {
+  const mapper = createMapper({ sessionId: SESSION });
+  const frame = (info: Record<string, unknown>): RunnerOutput => ({ type: 'sdk', message: { type: 'rate_limit_event', rate_limit_info: info, uuid: id(9), session_id: SESSION } });
+  const windows = { five_hour: { utilization: 0.26, resetsAt: 1792614600 }, seven_day: { utilization: 0.08, resetsAt: 1793091600 } };
+  assert.equal(mapper.line(frame({ status: 'allowed', unifiedWindows: windows })).length, 2);
+  // The same measure again says nothing; a changed one says that window only.
+  assert.deepEqual(mapper.line(frame({ status: 'allowed', unifiedWindows: windows })), []);
+  assert.deepEqual(mapper.line(frame({ status: 'allowed', unifiedWindows: { ...windows, seven_day: { utilization: 0.091, resetsAt: 1793091600 } } })), [
+    { type: 'CUSTOM', name: 'cleared.rate_limit', value: { window: 'seven_day', usedPercent: 9.1, resetsAt: '2026-10-27T09:00:00.000Z' } },
+  ]);
+  // Without unified windows: the frame's own documented window, if it has a utilization.
+  assert.deepEqual(mapper.line(frame({ status: 'allowed_warning', rateLimitType: 'five_hour', utilization: 0.8, resetsAt: 1792614600 })), [
+    { type: 'CUSTOM', name: 'cleared.rate_limit', value: { window: 'five_hour', usedPercent: 80, resetsAt: '2026-10-21T20:30:00.000Z' } },
+  ]);
+  assert.deepEqual(mapper.line(frame({ status: 'allowed', rateLimitType: 'seven_day' })), []);
+});
+
+test('a login error ends the turn as cancelled, not failed, and the session waits for a new login', () => {
+  const mapper = createMapper({ sessionId: SESSION });
+  mapper.start('claude-haiku-5-5');
+  mapper.line({ type: 'sdk', message: { type: 'command_lifecycle', state: 'started', command_uuid: id(1) } });
+  assert.equal(mapper.turn(), id(1));
+  assert.deepEqual(mapper.line({ type: 'login', state: 'failed' }), [{ type: 'STATE_DELTA', delta: [{ op: 'replace', path: '/phase', value: 'waiting_human' }, { op: 'replace', path: '/status', value: 'Waiting for a new login' }] }]);
+  const events = mapper.line({ type: 'sdk', message: { type: 'result', subtype: 'success', is_error: true, result: 'Failed to authenticate.', total_cost_usd: 0 } });
+  assert.deepEqual(events.map((event) => event.type), ['RUN_FINISHED', 'STATE_DELTA']);
+  assert.ok(events[0]?.type === 'RUN_FINISHED' && events[0].outcome.type === 'cancelled' && events[0].result.stopReason === 'cancelled');
+  assert.equal(mapper.state().status, 'Waiting for a new login');
+  assert.equal(mapper.turn(), undefined);
+  assert.deepEqual(mapper.line({ type: 'login', state: 'renewed' }), []);
+  // The next failure of a turn is an error again.
+  mapper.line({ type: 'sdk', message: { type: 'command_lifecycle', state: 'started', command_uuid: id(2) } });
+  assert.deepEqual(mapper.line({ type: 'sdk', message: { type: 'result', subtype: 'success', is_error: true, result: 'overloaded' } }).map((event) => event.type), ['RUN_ERROR', 'STATE_DELTA']);
+});
+
+test('a host call line and a measure line are the adapter\'s, not events', () => {
+  const mapper = createMapper({ sessionId: SESSION });
+  assert.deepEqual(mapper.line({ type: 'host_call', callId: 'c', toolUseId: 't', name: 'state', input: {} }), []);
+  assert.deepEqual(mapper.line({ type: 'measure', summaryMs: [], fullMs: [] }), []);
 });

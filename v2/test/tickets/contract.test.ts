@@ -39,3 +39,15 @@ test('the go state is never written through move: only the approval writer recor
   assert.equal(approved.status, 'Ready to Ship');
   await assert.rejects(store.recordApproval('LOCAL-1', service as never), /human/);
 });
+
+test('histories reads several tickets\' history in one call, each as history reads it; an unknown id is left out', async () => {
+  const store = new MemoryTicketStore();
+  await store.create({ title: 'One', project: 'guestbook' }, owner);
+  await store.create({ title: 'Two', project: 'guestbook' }, owner);
+  await store.move('LOCAL-2', 'In Progress', service);
+  const read = await store.histories(['LOCAL-1', 'LOCAL-2', 'LOCAL-9']);
+  assert.deepEqual([...read.keys()], ['LOCAL-1', 'LOCAL-2']);
+  assert.deepEqual(read.get('LOCAL-1'), await store.history('LOCAL-1'));
+  assert.deepEqual(read.get('LOCAL-2'), await store.history('LOCAL-2'));
+  assert.deepEqual((await store.histories([])).size, 0);
+});

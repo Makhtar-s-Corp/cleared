@@ -20,6 +20,12 @@ jobs:
   verify:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # Every opt-out of the front end's packages: Scarf's install report (pulled in
+    # by CopilotKit; v2/.npmrc also runs no install script) and CopilotKit's telemetry.
+    env:
+      SCARF_ANALYTICS: 'false'
+      DO_NOT_TRACK: '1'
+      COPILOTKIT_TELEMETRY_DISABLED: 'true'
     defaults:
       run:
         working-directory: v2
@@ -34,13 +40,94 @@ jobs:
           cache-dependency-path: v2/package-lock.json
       - name: Install
         run: npm ci
-      - name: Tests
-        run: npm test
       - name: Types
-        run: npx tsc --noEmit
+        # The service, the app's server and the React front end (tsc -p app/web).
+        run: npm run typecheck
+      - name: Tests
+        # npm test builds first (Vite builds the front end into app/dist, which the app serves), then node --test for
+        # the service and the app's server, then Vitest for the components. No separate Build step: it built twice (issue 185, item 4).
+        run: npm test
       - name: Private terms and secrets guard
         # github.base_ref is empty on a push. A push checks from the commit before it, or from HEAD~1 when that
         # commit is all zeros (a new branch). The checkout has fetch-depth 0, so the commit is present.
         env:
           GUARD_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || (github.event.before != '0000000000000000000000000000000000000000' && github.event.before || 'HEAD~1') }}
         run: npm run guard -- --base "$GUARD_BASE"
+
+  # The browser tests that the verify job skips: each runs only when CLEARED_V2_PLAYWRIGHT names an installed
+  # playwright-core. Here it is the dev dependency of v2/package.json, and the Chromium headless shell it drives
+  # is installed by the same package. A skipped browser test fails this job, so none can pass unrun.
+  browser:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SCARF_ANALYTICS: 'false'
+      DO_NOT_TRACK: '1'
+      COPILOTKIT_TELEMETRY_DISABLED: 'true'
+    defaults:
+      run:
+        working-directory: v2
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: v2/package-lock.json
+      - name: Install
+        run: npm ci
+      - name: Build
+        # The app serves app/dist, which the browser tests load.
+        run: npm run build
+      - name: Chromium
+        # --with-deps installs the shared libraries the browser needs on the runner. The full Chromium build, not the
+        # headless shell: the notifications test is refused its permission by the shell (Notification.permission stays
+        # "denied" after grantPermissions) and passes on the full build.
+        run: npx --no-install playwright-core install --with-deps chromium
+      - name: Browser tests
+        # The browser tests of app/test, run with the installed package and its Chromium: eight, and lane 34's
+        # (the tab-switch budget, three runs in CI, and the session stack and the screens' boundary), and lane 35's (the
+        # palette, the keys and the sidebar). The TAP output is
+        # kept for the summary. Every test that ran must pass, none may be skipped, and there must be at least as many tests
+        # as listed files, so an emptied file or a failed run fails the job without a fixed count to keep up to date.
+        run: |
+          set -o pipefail
+          export CLEARED_V2_PLAYWRIGHT="$PWD/node_modules/playwright-core"
+          export CLEARED_V2_CHROME="$(node -p "require('$CLEARED_V2_PLAYWRIGHT').chromium.executablePath()")"
+          files="app/test/choices-browser.test.ts app/test/notify/browser.test.ts app/test/session/tabs-browser.test.ts
+            app/test/session/terminal-browser.test.ts app/test/foundation/budget-browser.test.ts
+            app/test/foundation/stack-browser.test.ts app/test/shell/shell-browser.test.ts
+            app/test/session/continuity-browser.test.ts app/test/inbox/inbox-browser.test.ts
+            app/test/polish/first-paint-browser.test.ts app/test/i18n-browser.test.ts
+            app/test/session/replay-browser.test.ts app/test/session/ticket-cost-browser.test.ts
+            app/test/tower-templates-browser.test.ts
+            app/test/consumption/wins-browser.test.ts
+            app/test/ask/citations-browser.test.ts app/test/inbox/mobile-browser.test.ts
+            app/test/session/production-browser.test.ts test/flow/production-capture.test.ts
+            app/test/session/plan-ask-browser.test.ts app/test/polish/phone-fit-browser.test.ts"
+          node --test --test-reporter=tap $files | tee "$RUNNER_TEMP/browser.tap"
+          count() { grep -E "^# $1 " "$RUNNER_TEMP/browser.tap" | awk '{print $3}'; }
+          test "$(count skipped)" = 0 || { echo "::error::$(count skipped) browser test(s) skipped"; exit 1; }
+          test "$(count pass)" = "$(count tests)" || { echo "::error::$(count pass) of $(count tests) browser tests passed"; exit 1; }
+          test "$(count tests)" -ge "$(echo $files | wc -w)" || { echo "::error::fewer browser tests than listed files"; exit 1; }
+      - name: Job summary
+        # A test prints a line "measure <name> <value>"; the TAP stream carries it as "# measure ...", and it is copied here.
+        if: always()
+        run: |
+          {
+            echo "## Browser tests"
+            echo
+            if [ -s "$RUNNER_TEMP/browser.tap" ]; then
+              grep -E '^# (tests|pass|fail|skipped) ' "$RUNNER_TEMP/browser.tap" | sed 's/^# /- /'
+            else
+              echo "- no result: the test run did not finish"
+            fi
+            echo
+            echo "### Measures"
+            echo
+            if grep -q '^# measure ' "$RUNNER_TEMP/browser.tap" 2>/dev/null; then
+              grep '^# measure ' "$RUNNER_TEMP/browser.tap" | sed 's/^# /- /'
+            else
+              echo "- none in this run"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

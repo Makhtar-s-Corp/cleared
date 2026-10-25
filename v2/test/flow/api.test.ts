@@ -2,8 +2,16 @@ import test, { after, before } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { API_ROUTES, SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, type ApiRoute, type InboxItem, type SessionDetail, type SessionSummary } from '../../src/api/types.ts';
+import { API_ROUTES, ASK_ROUTES, BATCH_ROUTES, CONSUMPTION_ROUTES, KNOWLEDGE_ROUTES, MILESTONE_2_ROUTES, RECIPE_ROUTES, SERVICE_PROOF_HEADER, SESSION_PLAN_ROUTES, SESSION_PREVIEW_ROUTE, SESSION_TABS_ROUTES, STEP_ROUTES, SERVICE_USER_HEADER, TERMINAL_ROUTES, VARIANT_ROUTES, type ApiRoute, type InboxItem, type SessionDetail, type SessionSummary } from '../../src/api/types.ts';
 import { createApiRoutes } from '../../src/api/routes.ts';
+import { editorRoutes } from '../../src/flow/editor.ts';
+import { filesRoutes } from '../../src/flow/files.ts';
+import { planGateRoutes } from '../../src/flow/plan-gate.ts';
+import { proofRoutes } from '../../src/flow/proof-routes.ts';
+import { stepRoutes } from '../../src/flow/steps.ts';
+import { takeoverRoutes } from '../../src/flow/takeover.ts';
+import { variantRoutes } from '../../src/flow/variants.ts';
+import { terminalRoutes } from '../../src/terminal/routes.ts';
 import { dispatch, matchRoute, type App } from '../../src/modules/registry.ts';
 import { handle } from '../../src/server.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
@@ -18,7 +26,7 @@ let base = '';
 before(async () => {
   t = await setup();
   parked = await t.tickets.create({ title: 'Parked', project: 'guestbook' }, { kind: 'human', id: 'u1' });
-  const routes = createApiRoutes({ engine: () => t.engine, proof: () => PROOF });
+  const routes = [...createApiRoutes({ engine: () => t.engine, proof: () => PROOF }), ...variantRoutes({ engine: () => t.engine, proof: () => PROOF })];
   const app: App = { registry: t.engine.registry, tables: [], routes };
   server = createServer((request, response) => dispatch(app, request, response, handle));
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -40,9 +48,32 @@ async function call(method: string, path: string, headers: Record<string, string
 }
 
 test('the service declares every route of the API but the approval, which is lane 8\'s', () => {
-  const routes = createApiRoutes({ engine: () => t.engine, proof: () => PROOF });
-  const declared = routes.map((r) => `${r.method} ${r.path}`).sort();
-  const wanted = API_ROUTES.filter((r) => r !== 'POST /api/tickets/:id/approve').sort();
+  // The flow's API: the routes of api/routes.ts, the session plan's Go and
+  // Change (lane 17, flow/plan-gate.ts), and the Editor tab's files and Take
+  // over and Give back (lane 20, flow/files.ts and flow/takeover.ts), the
+  // web terminal and the editor's save (lane 31, terminal/routes.ts and
+  // flow/files.ts), which the flow module registers. A file's route is one
+  // route per depth, since the registry matches a fixed number of segments:
+  // it is files/* here.
+  const deps = { engine: () => t.engine, proof: () => PROOF, human: () => undefined };
+  const routes = [...createApiRoutes(deps), ...planGateRoutes(deps), ...takeoverRoutes(deps), ...editorRoutes(deps), ...filesRoutes(deps), ...stepRoutes(deps), ...variantRoutes(deps), ...terminalRoutes(deps), ...proofRoutes(deps)];
+  const declared = [...new Set(routes.map((r) => `${r.method} ${r.path.replace(/\/files\/:p0(?:\/:p\d+)*$/, '/files/*')}`))].sort();
+  // The preview is lane 15's (container/preview.ts). The ticket's steps and
+  // the contract item's Approve and Send back are lane 23's (flow/steps.ts).
+  // The recipes and the schedules are the lead module's (lane 26:
+  // recipes/routes.ts and schedules/routes.ts, with the plan runner).
+  // Written ahead by lane 17: the knowledge
+  // items and the skill, lane 24's (knowledge/); the questions to the code,
+  // lane 25's (reader/), each of which rewrites this comment to name its
+  // module.
+  // The batches' three routes are flow/batch.ts's, registered by the flow module (requirement C6).
+  const ahead = [...KNOWLEDGE_ROUTES, ...ASK_ROUTES, ...RECIPE_ROUTES, ...CONSUMPTION_ROUTES, ...BATCH_ROUTES];
+  assert.ok(SESSION_PLAN_ROUTES.every((route) => declared.includes(route)), 'lane 17 serves the Go and the Change');
+  assert.ok(SESSION_TABS_ROUTES.every((route) => declared.includes(route)), 'lane 20 serves the files, the take over and the give back');
+  assert.ok(STEP_ROUTES.every((route) => declared.includes(route)), 'lane 23 serves the steps and the contract item');
+  assert.ok(VARIANT_ROUTES.every((route) => declared.includes(route)), 'issue #271 serves the variants and their choice');
+  assert.ok(TERMINAL_ROUTES.every((route) => declared.includes(route)), 'lane 31 serves the web terminal and the editor\'s save');
+  const wanted = API_ROUTES.filter((r) => r !== 'POST /api/tickets/:id/approve' && r !== SESSION_PREVIEW_ROUTE && !MILESTONE_2_ROUTES.includes(r) && !ahead.includes(r)).sort();
   assert.deepEqual(declared, wanted);
 });
 
@@ -61,6 +92,8 @@ const cases = (): Case[] => {
     { route: 'POST /api/tickets', path: () => '/api/tickets', body: () => ({ title: 'Second', project: 'guestbook' }), ok: 200 },
     { route: 'GET /api/tickets/:id', path: () => `/api/tickets/${t.ticket.id}`, ok: 200 },
     { route: 'POST /api/tickets/:id/move', path: () => `/api/tickets/${parked.id}/move`, body: () => ({ status: 'In Review' }), ok: 200 },
+    { route: 'POST /api/tickets/:id/set-aside', path: () => `/api/tickets/${parked.id}/set-aside`, ok: 200 },
+    { route: 'POST /api/tickets/:id/close', path: () => `/api/tickets/${parked.id}/close`, body: () => ({ reason: 'A rehearsal ticket.' }), ok: 200 },
     { route: 'GET /api/inbox', path: () => '/api/inbox', ok: 200 },
   ];
 };
@@ -106,6 +139,8 @@ test('a write needs a user the service knows; a read does not', async () => {
     ['POST', `/api/sessions/${id}/requests/r/answer`, { decision: { kind: 'allow_once' } }],
     ['POST', '/api/tickets', { title: 'x', project: 'guestbook' }],
     ['POST', `/api/tickets/${parked.id}/move`, { status: 'In Review' }],
+    ['POST', `/api/tickets/${parked.id}/set-aside`, undefined],
+    ['POST', `/api/tickets/${parked.id}/close`, { reason: 'x' }],
   ] as const;
   for (const [method, path, body] of writes) {
     assert.equal((await call(method, path, { ...signed, 'content-type': 'application/json' }, body)).status, 403, `${path} without a user`);
@@ -151,6 +186,15 @@ test('tickets: create, list, get, move; the move to go is refused; an unknown ti
   assert.equal(created.status, 'Todo');
   assert.equal((await call('POST', '/api/tickets', person, { title: '', project: 'guestbook' })).status, 400);
   assert.equal((await call('POST', '/api/tickets', person, { title: 'x' })).status, 400);
+  // Variants (issue #271): 2 to 4, refused before the ticket exists.
+  const before = ((await call('GET', '/api/tickets', signed)).json as Ticket[]).length;
+  for (const variants of [0, null, '3', 5, 2.5])
+    assert.equal((await call('POST', '/api/tickets', person, { title: 'Variants', project: 'guestbook', variants })).status, 400, `variants ${variants}`);
+  // The harness pick (issue #329): 2 to 4 harnesses the owner enabled, a count that agrees.
+  for (const harnesses of ['codex', ['claude-code'], ['claude-code', 'codex'], ['claude-code', 7], ['claude-code', 'claude-code', 'claude-code', 'claude-code', 'claude-code']])
+    assert.equal((await call('POST', '/api/tickets', person, { title: 'Pick', project: 'guestbook', harnesses })).status, 400, `harnesses ${JSON.stringify(harnesses)}`);
+  assert.equal((await call('POST', '/api/tickets', person, { title: 'Pick', project: 'guestbook', harnesses: ['claude-code', 'claude-code'], variants: 3 })).status, 400);
+  assert.equal(((await call('GET', '/api/tickets', signed)).json as Ticket[]).length, before, 'no ticket is created');
   assert.equal(((await call('GET', '/api/tickets', signed)).json as Ticket[]).some((x) => x.id === created.id), true);
   assert.equal(((await call('GET', `/api/tickets/${created.id}`, signed)).json as Ticket).id, created.id);
   assert.equal((await call('GET', '/api/tickets/LOCAL-99', signed)).status, 404);
@@ -228,7 +272,7 @@ test('events: a stream from a sequence number, resumed with Last-Event-ID, and r
 });
 
 test('the module routes of the flow never collide with each other (assemble would stop the service)', () => {
-  const routes = createApiRoutes({ engine: () => t.engine, proof: () => PROOF });
+  const routes = [...createApiRoutes({ engine: () => t.engine, proof: () => PROOF }), ...variantRoutes({ engine: () => t.engine, proof: () => PROOF })];
   assert.equal(new Set(routes.map((r) => `${r.method} ${r.path}`)).size, routes.length);
   assert.ok(matchRoute(routes, 'POST', '/api/tickets/LOCAL-1/approve') === undefined || 'allow' in (matchRoute(routes, 'POST', '/api/tickets/LOCAL-1/approve') ?? {}));
 });
@@ -269,4 +313,27 @@ test('a ticket waiting for approval can be sent back from the inbox with a move 
     sending.closeAllConnections();
     await new Promise<void>((resolve) => sending.close(() => resolve()));
   }
+});
+
+// Issue #271: the variants' routes, over HTTP.
+test('variants: the routes check the proof, the user and the body, and name an unknown ticket or item', async () => {
+  assert.equal((await call('GET', `/api/tickets/${parked.id}/variants`, {})).status, 401);
+  assert.deepEqual((await call('GET', `/api/tickets/${parked.id}/variants`, signed)).json, []);
+  assert.equal((await call('GET', '/api/tickets/LOCAL-99/variants', signed)).status, 404);
+  assert.equal((await call('POST', '/api/variants/variants:LOCAL-99:1/choose', { ...signed, 'content-type': 'application/json' }, { variant: 1 })).status, 403);
+  for (const body of [{}, { variant: '2' }, { variant: 0 }, { variant: 5 }, { variant: 1.5 }])
+    assert.equal((await call('POST', '/api/variants/variants:LOCAL-99:1/choose', person, body)).status, 400, JSON.stringify(body));
+  assert.equal((await call('POST', '/api/variants/variants:LOCAL-99:1/choose', person, { variant: 1 })).status, 404);
+});
+
+test('close: a reason is mandatory, an unknown ticket and a done one are refused, and a close keeps its reason', async () => {
+  const path = `/api/tickets/${parked.id}/close`;
+  for (const body of [undefined, {}, { reason: '' }, { reason: '   ' }, { reason: 5 }, { reason: 'x'.repeat(2001) }])
+    assert.equal((await call('POST', path, person, body)).status, 400, JSON.stringify(body));
+  assert.equal((await call('POST', '/api/tickets/LOCAL-999/close', person, { reason: 'why' })).status, 404);
+  const done = await t.tickets.create({ title: 'Done', project: 'guestbook' }, { kind: 'human', id: 'u1' });
+  await t.tickets.move(done.id, 'Done', { kind: 'agents', id: 'cleared-v2' });
+  assert.equal((await call('POST', `/api/tickets/${done.id}/close`, person, { reason: 'why' })).status, 409);
+  assert.deepEqual((await call('POST', path, person, { reason: 'A rehearsal ticket.' })).json, { sessions: 0, items: 0 });
+  assert.match((await t.tickets.comments(parked.id)).at(-1)?.body ?? '', /A rehearsal ticket\./);
 });

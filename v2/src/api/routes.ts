@@ -1,6 +1,7 @@
 // The service's HTTP and server-sent events routes (docs/v2/milestone-1-plan.md,
 // lane 7), the handlers of the shapes in types.ts. The approval route
-// (POST /api/tickets/:id/approve) is lane 8's and is not declared here.
+// (POST /api/tickets/:id/approve) is lane 8's and is not declared here, nor
+// is a session's preview (GET /api/sessions/:id/preview/*), lane 15's.
 //
 // Every request is checked for the proof first (SERVICE_PROOF_HEADER): only
 // the app holds it, a session's container does not. A request that writes
@@ -9,9 +10,13 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { sameProof } from '../modules/users.ts';
 import type { Registry, Route, RouteContext } from '../modules/registry.ts';
-import { FlowError, type FlowEngine } from '../flow/engine.ts';
-import type { Decision, UserId } from '../session/contract.ts';
+import { workspaceOf } from '../flow/config.ts';
+import { CLOSE_REASON_MAX, FlowError, type FlowEngine } from '../flow/engine.ts';
+import type { Decision, Harness, UserId } from '../session/contract.ts';
 import { TicketError } from '../tickets/contract.ts';
+import { typeLabelProblem } from '../tickets/templates.ts';
+import { publicWorkspace } from '../workspace/config.ts';
+import { changeHub, streamChanges } from './events.ts';
 import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, sseFrame, type CreateTicketBody } from './types.ts';
 
 export type ApiDeps = {
@@ -82,6 +87,18 @@ function decision(value: unknown): Decision {
     }
     default: throw new HttpError(400, 'the decision is not one a person can give');
   }
+}
+
+// The services a new ticket names: each a service of the workspace, once.
+function serviceNames(value: unknown, engine: FlowEngine): string[] | undefined {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.some((name) => typeof name !== 'string')) throw new HttpError(400, 'services is a list of service names');
+  if (value.length === 0) throw new HttpError(400, 'services names at least one service, or is left out');
+  const workspace = workspaceOf(engine.config);
+  const known = new Set(workspace.services.map((service) => service.name));
+  for (const name of value as string[]) if (!known.has(name)) throw new HttpError(400, `${name.slice(0, 100)} is not a service of workspace ${workspace.id}`);
+  if (new Set(value).size !== value.length) throw new HttpError(400, 'services names a service more than once');
+  return value as string[];
 }
 
 export function createApiRoutes(deps: ApiDeps): Route[] {
@@ -161,10 +178,26 @@ export function createApiRoutes(deps: ApiDeps): Route[] {
         const labels = body.labels;
         if (labels !== undefined && (!Array.isArray(labels) || labels.some((l) => typeof l !== 'string' || l.length > 100)))
           throw new HttpError(400, 'labels is a list of short texts');
+        const typeProblem = labels === undefined ? null : typeLabelProblem(labels as string[]);
+        if (typeProblem) throw new HttpError(400, typeProblem);
         if (project !== engine.config.project) throw new HttpError(400, `this service runs project ${engine.config.project}, not ${project}`);
-        const input: CreateTicketBody = { title, project, ...(bodyText === undefined ? {} : { body: bodyText }), ...(labels === undefined ? {} : { labels: labels as string[] }) };
+        const services = serviceNames(body.services, engine);
+        // 2 to 4 authors at once (issue #271), refused before the ticket exists.
+        const variants = body.variants;
+        if (variants !== undefined && (typeof variants !== 'number' || !Number.isInteger(variants))) throw new HttpError(400, 'variants is a whole number');
+        // The harness pick (issue #329): a variant per harness named, refused before the ticket exists too.
+        const harnesses = body.harnesses;
+        if (harnesses !== undefined && (!Array.isArray(harnesses) || harnesses.some((h) => typeof h !== 'string'))) throw new HttpError(400, 'harnesses is a list of harness names');
+        if (harnesses !== undefined && variants !== undefined && variants !== harnesses.length) throw new HttpError(400, `variants says ${variants as number} and harnesses names ${harnesses.length}`);
+        const spec = (harnesses as Harness[] | undefined) ?? (variants as number | undefined);
+        const refused = spec === undefined || spec === 1 ? undefined : engine.variantsRefusal(spec);
+        if (refused) throw new HttpError(400, refused);
+        const input: CreateTicketBody = {
+          title, project, ...(bodyText === undefined ? {} : { body: bodyText }), ...(labels === undefined ? {} : { labels: labels as string[] }),
+          ...(services === undefined ? {} : { services }),
+        };
         const ticket = await engine.registry.ticketStore.create(input, { kind: 'human', id: user as UserId });
-        void engine.begin(ticket.id, user as UserId);
+        void engine.begin(ticket.id, user as UserId, undefined, spec);
         send(c.response, 200, ticket);
       }),
     },
@@ -196,13 +229,39 @@ export function createApiRoutes(deps: ApiDeps): Route[] {
         send(c.response, 200, moved);
       }),
     },
+    // The owner sets a ticket aside: out of the flow, nothing of it waiting,
+    // in Todo, and not started again (FlowEngine.setAside).
+    {
+      method: 'POST', path: '/api/tickets/:id/set-aside',
+      handle: guarded(true, async (engine, user, c) => send(c.response, 200, await engine.setAside(param(c, 'id'), user as UserId))),
+    },
+    // The owner closes a ticket with a reason: set aside, and the reason kept
+    // on its release card and its comments (FlowEngine.closeTicket, issue #249).
+    {
+      method: 'POST', path: '/api/tickets/:id/close',
+      handle: guarded(true, async (engine, user, c) => {
+        const body = await readJson(c.request);
+        const reason = text(body.reason, 'a reason', CLOSE_REASON_MAX) as string;
+        send(c.response, 200, await engine.closeTicket(param(c, 'id'), reason, user as UserId));
+      }),
+    },
   ];
 
   const inboxRoutes: Route[] = [
     { method: 'GET', path: '/api/inbox', handle: guarded(false, (engine, _u, c) => send(c.response, 200, engine.inbox.list())) },
   ];
 
-  return [...sessionRoutes, ...ticketRoutes, ...inboxRoutes];
+  // The tickets module serves it (modules/tickets.ts).
+  const workspaceRoutes: Route[] = [
+    { method: 'GET', path: '/api/workspace', handle: guarded(false, (engine, _u, c) => send(c.response, 200, publicWorkspace(workspaceOf(engine.config)))) },
+  ];
+
+  // What changed, for the app's cache (api/events.ts, lane 34).
+  const changeRoutes: Route[] = [
+    { method: 'GET', path: '/api/events', handle: guarded(false, (engine, _u, c) => streamChanges(changeHub(engine), c.response, c.request, header(c.request, 'last-event-id'))) },
+  ];
+
+  return [...sessionRoutes, ...ticketRoutes, ...inboxRoutes, ...workspaceRoutes, ...changeRoutes];
 
   // The event stream: what is stored after the number given, then what
   // comes. The Last-Event-ID of a reconnect wins over a stale ?after.

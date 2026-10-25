@@ -14,11 +14,12 @@ const main = new URL('../main.ts', import.meta.url).pathname;
 const state = mkdtempSync(join(tmpdir(), 'cleared-v2-app-main-'));
 after(() => rmSync(state, { recursive: true, force: true }));
 
-test('the app listens on 127.0.0.1:8792 by default, reads the service on 8791, and uses the live service', () => {
+test('the app listens on 127.0.0.1:8792 by default, reads the service on 8791, uses the live service, and speaks French', () => {
   assert.equal(DEFAULT_APP_PORT, 8792);
   assert.deepEqual(readAppConfig({}), {
-    host: '127.0.0.1', port: 8792, source: 'service', serviceUrl: 'http://127.0.0.1:8791', language: 'en', project: '', publicOrigin: undefined,
+    host: '127.0.0.1', port: 8792, source: 'service', serviceUrl: 'http://127.0.0.1:8791', language: 'fr', project: '', publicOrigin: undefined,
   });
+  assert.equal(readAppConfig({ CLEARED_V2_APP_LANGUAGE: 'en' }).language, 'en', 'English when asked');
   const set = readAppConfig({
     CLEARED_V2_APP_PORT: '18792', CLEARED_V2_APP_SOURCE: 'fixtures', CLEARED_V2_PORT: '18791', CLEARED_V2_APP_LANGUAGE: 'fr', CLEARED_REPO: '/srv/checkouts/guestbook',
   });
@@ -44,7 +45,10 @@ async function freePort(): Promise<number> {
 
 test('node app/main.ts serves the sign-in page and makes the proof file beside the ledger', async () => {
   const port = await freePort();
-  const env: NodeJS.ProcessEnv = { ...process.env, CLEARED_STATE_DIR: state, CLEARED_V2_APP_PORT: String(port), CLEARED_V2_APP_SOURCE: 'fixtures' };
+  // The preview listener (lane 20) on a free port too, never 8794 in a test.
+  const previewPort = await freePort();
+  const env: NodeJS.ProcessEnv = { ...process.env, CLEARED_STATE_DIR: state, CLEARED_V2_APP_PORT: String(port), CLEARED_V2_APP_SOURCE: 'fixtures', CLEARED_V2_PREVIEW_PORT: String(previewPort) };
+  delete env.CLEARED_V2_PREVIEW_ORIGIN;
   delete env.ORCH_LEDGER;
   const child = spawn(process.execPath, [main], { env });
   try {
@@ -52,6 +56,10 @@ test('node app/main.ts serves the sign-in page and makes the proof file beside t
     assert.match(String(line), new RegExp(`^cleared-v2-app: listening on http://127\\.0\\.0\\.1:${port} \\(fixtures\\)`));
     assert.equal((await fetch(`http://127.0.0.1:${port}/login`)).status, 200);
     assert.equal(statSync(join(state, PROOF_FILE)).mode & 0o777, 0o600);
+    // The preview listener answers previews only, on its own loopback port.
+    let preview: Response | undefined;
+    for (let tries = 0; !preview && tries < 50; tries++) preview = await fetch(`http://127.0.0.1:${previewPort}/`).catch(() => new Promise<undefined>((resolve) => setTimeout(() => resolve(undefined), 20)));
+    assert.equal(preview?.status, 404);
   } finally {
     child.kill('SIGTERM');
     await once(child, 'exit');

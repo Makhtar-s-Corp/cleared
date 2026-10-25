@@ -279,6 +279,84 @@ doctor: all checks passed
 
 The whole output (274 lines, every docker command line and every stored event) is in the lane's pull request.
 
+### Host tools, context and login in a container (2026-10-22)
+
+Run on this server on 2026-10-22 by lane `v2-j2-runner-host-tools` with `node v2/scripts/doctor.ts host-tools lead`, which builds the session image first; the `claude-code` section of milestone 1 passed on the same image. The setup was the same as the run above: Claude Code 2.1.306, `@anthropic-ai/claude-agent-sdk` 0.3.306, zod 4.6.7 (now pinned), `claude-haiku-5-5`, objects labelled `cleared.dev=v2` only, and the service account's login named by `CLEARED_CLAUDE_CREDENTIALS`, mounted read only and never read by the lane or the doctor. The login check below used a token file the doctor wrote itself. The three sessions of the `host-tools` section reported 0.0017 USD (the lead), 0.0012 USD (the author) and 0 USD (the invalid login). The proxy saw `api.anthropic.com:443` only.
+
+What the run established (milestone 2 plan, section 13, lane 4's unknowns):
+
+- **An in-process MCP server works in the container with `settingSources: []`.** The runner passes `createSdkMcpServer({ name: 'cleared', tools, alwaysLoad: true, timeout })` in `mcpServers`. `system/init` lists `{"name":"cleared","status":"connected","source":"sdk"}` and the tool `mcp__cleared__ping`. The model called it with `{"word":"plum"}`, the host ran the handler, and the model replied with the code on the answer's first line.
+- **`tool()` takes a zod raw shape, not a JSON Schema** (`sdk.d.ts`: `tool<Schema extends AnyZodRawShape>`). The runner builds the shape from the host's schema subset with the image's zod (`v2/images/session/runner/schema.ts`).
+- **The call's tool use id.** The handler's second argument carries `_meta['claudecode/toolUseId']`, besides `signal`, `requestId` and the MCP transport's own keys. So `cleared.host_call` is journaled under the id of the `tool_use` block.
+- **Permission.** In `default` mode the CLI asks `canUseTool` for a host tool call; the policy answers `allow_once` under `lead.tools`.
+- **`getContextUsage()`**, ten calls of each detail between turns:
+  - Speed: `summary` had a median of 9 ms. `full` had a median of 10 ms, but its first call of a session took 0.6 s and 1 s in two runs.
+  - Fields: `totalTokens`, `maxTokens`, `rawMaxTokens`, `percentage` (a whole number), `autoCompactThreshold` and `isAutoCompactEnabled`.
+  - Window: for `claude-haiku-5-5`, `maxTokens` and `rawMaxTokens` are 1 000 000 and `autoCompactThreshold` is 967 000. Claude Code does not compact below 50 % on its own, and no `compact_boundary` frame was seen; `settings.autoCompactWindow` was not tried.
+  - Before a turn the two details differed: `summary` read 19 181 tokens and `full` 17 829. After the turn they agreed (20 999).
+- **The measure after a tool call lags.** Taken in `PostToolUse`, `summary` answers from the last response's usage, which does not count the tool's own answer yet. With an 8 461-byte answer the measure read 19 181 tokens before the call, 19 181 right after it, and 20 999 at the end of the turn.
+- **Rate limits.** One `rate_limit_event` in the lead's two turns. Its `rate_limit_info` has no top-level `utilization`. The two windows are in `unifiedWindows`, which `sdk.d.ts` does not declare: `{"five_hour":{"utilization":0.03,"resetsAt":1792650600},"seven_day":{"utilization":0.15,"resetsAt":1793091600}}`. Read as the CLI's own code reads them (`Math.round(utilization * 100)`, `new Date(resets_at * 1000)`), that is 3 % and 15 %, with reset times in seconds.
+- **The experimental usage call** (`usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET({ skipBehaviors: true })`) answered `rate_limits_available: false`, with no subscription type, for a session logged in with `CLAUDE_CODE_OAUTH_TOKEN`. It is recorded, not adopted.
+- **The Stop hook by role.** A lead's two turns ended with no `HANDOVER.md` request. An author's turn ended with `HANDOVER.md` written, all five headings present.
+- **Commit identity.** In an author session, `git commit` then `git log -1 --format=identity:%an/%ae/%cn/%ce` printed `identity:Cleared//Cleared/`: the name `Cleared` and no address. Without the variables, git 2.39 in the image refuses to commit.
+- **An expired or revoked login.** With an invalid token, the CLI printed `system/api_retry` with `error: "authentication_failed"` and `error_status: 401`. The runner printed `login failed` and the turn ended as cancelled. 15 seconds later the session still waited, with the status "Waiting for a new login".
+  - A rewrite of the token file in place was seen through the bind mount. The runner printed `login renewed`, resumed the same session in the same container, and failed again on the new, still invalid, token.
+  - A rename over the file (a new inode) was not seen: a single-file bind mount keeps the inode it was given. So re-reading the login helps only if the host CLI rewrites its credentials file in place, which was not measured.
+- **Still unknown:**
+  - a valid token after a failure (only the owner may put a `setup-token` token into the service's token file, plan question 1);
+  - whether the host CLI rewrites its credentials file in place when it refreshes;
+  - the week share against `/usage` on the host.
+
+Raw lines of the `host-tools` section, edited as above: ids are `<id>`, the host's paths `<scratch>`, `<state>` and `<login file>`, and a long line is cut around `...`. The doctor's own check lines come first, then the runner lines it printed (`<<`).
+
+```console
+$ CLEARED_CLAUDE_CREDENTIALS=<login file> node scripts/doctor.ts host-tools lead
+== host-tools (milestone 2, lane 4)
+PASS the login file (the Claude Code credentials file named by CLEARED_CLAUDE_CREDENTIALS) is a file of the service's account that only it can read: mode 600
+PASS the CLI lists the in-process MCP server cleared as connected, with mcp__cleared__ping
+PASS the model called mcp__cleared__ping and the host ran the handler once, with the model's input: [{"word":"plum"}]
+PASS the call is journaled as cleared.host_call ok, under the tool call's own id: {"calls":[{"toolCallId":"<id>","name":"ping","input":{"word":"plum"},"outcome":"ok"}],"started":["<id>"]}
+PASS the model read the host's answer: CODE-5E26A50F
+OBSERVED the host tool's permission: canUseTool asked for mcp__cleared__ping; policy answers in the turn: [["allow_once","lead.tools"]]
+PASS the context is measured after the tool call and after the turn, as cleared.context_usage with a percentage and rawMaxTokens: 3 events
+OBSERVED the summary measure around a 8461-byte tool answer: 19181 tokens after the first turn, 19181 after the tool call, 20999 after the turn
+PASS getContextUsage() timed over ten calls of each detail: summary: median 8.100000000000001 ms, max 9 ms; full: median 8.8 ms, max 9.6 ms
+OBSERVED the full measure across the tool call's turn: 17829 tokens before, 20999 after (the turn added the prompt, the call, a 8461-byte answer and the reply)
+OBSERVED summary and full after the turn: 20999 and 20999 tokens, 2 % and 2 %; autoCompactThreshold 967000, isAutoCompactEnabled true, maxTokens 1000000, rawMaxTokens 1000000
+OBSERVED the experimental usage call: {"subscriptionType":null,"rateLimitsAvailable":false,"windows":{}}
+OBSERVED rate_limit_event frames: 1
+OBSERVED compact_boundary frames: 0
+PASS the lead's turns ended without the Stop hook asking for HANDOVER.md: 2 turn ends
+PASS a commit in the session carries the runner's identity: Cleared, no address: ["identity:Cleared//Cleared/","/workspace\n/workspace\nmaster\nfdb70eb probe"]
+PASS an author still writes HANDOVER.md, asked by the Stop hook: 5 of 5 headings
+PASS with an invalid token, the runner reports the login error and the turn ends as cancelled, not failed: ["failed"]
+PASS 15 s later the runner still waits, and the session says it waits for a new login: status "Waiting for a new login", exited false
+PASS a rewrite of the file in place is read: the runner resumes the session in the same container with the new token (which fails again, being invalid): ["failed","renewed","failed"]
+OBSERVED a rename over the login file (a new inode), 25 s later: not seen by the runner: the bind mount still shows the old file
+NOT MEASURED the recovering half (a valid token after a failure): no setup-token token in the service's token file (plan question 1); the proof observes a natural refresh
+PASS nothing with the sessions' labels remains (containers, networks, volumes): 0 objects
+PASS no new listening socket on the host from this run: none (0 new from other processes)
+<< system/init {"claude_code_version":"2.1.306","model":"claude-haiku-5-5","mcp_servers":[{"name":"cleared","status":"connected","source":"sdk"}],"cleared_tools":["mcp__cleared__ping"]}
+<< {"type":"context","after":"turn","detail":"summary","ms":50.4,"totalTokens":19181,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true}
+<< (before the tool call) {"type":"measure","summaryMs":[10.5,10.2,11.4,10,9.2,9,10.5,8.4,8.5,8.3],"fullMs":[730.7,9.2,9,10.5,8.7,9.5,8.7,7,7.1,7.4],"summary":{"totalTokens":19181,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"full":{"totalTokens":17829,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"usage":{"subscriptionType":null,"rateLimitsAvailable":false,"windows":{}}}
+<< {"type":"host_call","callId":"<id>","toolUseId":"<id>","name":"ping","input":{"word":"plum"}}
+<< stderr cleared-runner: a host call's extra has the keys signal,sessionId,_meta,sendNotification,sendRequest,authInfo,requestId,requestInfo,taskId,taskStore,taskRequestedTtl,closeSSEStream,closeStandaloneSSEStream; its _meta claudecode/toolUseId,progressToken
+<< {"type":"context","after":"tool","detail":"summary","ms":17.7,"totalTokens":19181,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true}
+<< {"type":"context","after":"turn","detail":"summary","ms":14,"totalTokens":20999,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true}
+<< (after the tool call's turn) {"type":"measure","summaryMs":[8.3,7.4,9,8.9,7.1,7.7,8.4,6.6,7.9,8.9],"fullMs":[8.9,8.8,9.6,8.3,8.8,7.5,7.5,8.4,8.8,9.1],"summary":{"totalTokens":20999,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"full":{"totalTokens":20999,"maxTokens":1000000,"rawMaxTokens":1000000,"percentage":2,"autoCompactThreshold":967000,"isAutoCompactEnabled":true},"usage":{"subscriptionType":null,"rateLimitsAvailable":false,"windows":{}}}
+<< sdk {"type":"system","subtype":"api_retry","error":"authentication_failed","error_status":401}
+<< sdk {"type":"system","subtype":"api_retry","error":"authentication_failed","error_status":401}
+<< sdk {"type":"assistant","error":"authentication_failed","text":"Failed to authenticate. API Error: 401 Invalid bearer token"}
+<< {"type":"login","state":"failed"}
+<< sdk {"type":"result","subtype":"success","is_error":true,"result":"Failed to authenticate. API Error: 401 Invalid bearer token"}
+<< {"type":"login","state":"failed"}
+<< {"type":"login","state":"renewed"}
+<< {"type":"login","state":"failed"}
+<< rate_limit_info {"status":"allowed","resetsAt":1792650600,"rateLimitType":"five_hour","overageStatus":"rejected","overageDisabledReason":"out_of_credits","isUsingOverage":false,"unifiedWindows":{"five_hour":{"utilization":0.05,"resetsAt":1792650600},"seven_day":{"utilization":0.16,"resetsAt":1793091600}}}
+```
+
+The whole output, with every docker command line and every stored event, is in the lane's pull request.
+
 ### Proof
 
 Commands as run on 2026-10-21 (the resume step of proof 3, and proofs 8, 9 and 10, were run again the same day for review round 1, to save raw output). `$T` is a temporary directory under the session scratchpad. JSON lines are raw output with these edits only: UUIDs, tool IDs and message IDs are replaced with `<id>`, the scratchpad path is shown as `$T` and the home directory as `~`, and long parts are cut, shown as `...`; the text on each side of a `...` is copied unchanged. Lines starting with `>>` (sent) and `<<` (received) are printed by the probe scripts; the script for proofs 9 and 10 is inlined there, and the scripts and their output files stayed in the scratchpad.
@@ -600,6 +678,155 @@ Usage: codex queue [OPTIONS] --thread <THREAD> --message <TEXT>
 ```
 
 Also run without pasting: `claude mcp --help`, `claude mcp serve --help`, `claude auth --help`, `codex resume --help`, `codex mcp --help`, `codex login --help`, `codex features list`, `codex debug --help`. `codex mcp-server --help` and `codex proto --help` print the top-level help: neither is a subcommand in 0.163.0.
+
+### The system prompt and the prompt cache (2026-10-25, issue #335, not verified by a run)
+
+Lane `j3-prompt-cache` (P219) gives `query()` `systemPrompt: { type: 'preset', preset: 'claude_code', append: <CLAUDE.md>, excludeDynamicSections: true, snapshot: true }`. Read in `sdk.d.ts` of `@anthropic-ai/claude-agent-sdk` 0.3.306, the version the image pins:
+
+- `excludeDynamicSections` takes the per-user sections out of the system prompt: the working directory, auto-memory and git status. The SDK gives them to the model again as the first user message. The SDK states the tradeoff: that context steers the model "marginally less" from a user message than from the system prompt.
+- `snapshot`, the default, records the system prompt on the first request and sends the record as is for the rest of the session.
+
+Neither was run against the real CLI: a run needs the session image and the service's login, and this lane used neither. These checks are the ones to run again:
+
+- the `claude-code` section of the doctor: the briefing's codeword (MAPLE);
+- a question about the working directory or the branch, answered from that first message;
+- a second session started with the same CLAUDE.md within 5 minutes, whose `cachedInputTokens` should then cover the briefing. This one settles whether the change gains anything. The same `sdk.d.ts` says blocks after the preset's static part are not eligible for cross-session caching, and the briefing comes after it (the decisions log of 2026-10-25, P219, the lower bound).
+
+`v2/src/session/adapters/claude-code/map.ts` turns a user frame into events only for its tool results. A context message the SDK might print therefore reaches neither the ledger nor the thread (`test/session/claude-code/map.test.ts`).
+
+### The user setting source alone (2026-10-25, B5.5b, not verified by a run)
+
+Lane `j3-skills-user` (the owner's decision of 2026-10-25 06:06, option A) gives `query()` `settingSources: ['user']` instead of `[]`. Read in `sdk.d.ts` of `@anthropic-ai/claude-agent-sdk` 0.3.306: `'user'` is "Global user settings (`~/.claude/settings.json`)", `'project'` the checkout's `.claude/settings.json`, `'local'` its `.claude/settings.local.json`; "Must include `'project'` to load CLAUDE.md files". `skills`, left unset, keeps "the CLI's own defaults".
+
+In the session container the user folder is `CLAUDE_CONFIG_DIR`, the session's config volume (`/var/lib/cleared/claude-config`), not a home folder of the host, so the isolation from the host's own hooks, plugins and MCP servers ([Configuration isolation](#configuration-isolation)) holds. The base branch's `.claude/skills` is mounted read only at `skills/` in that volume (lane 15). The briefing is still appended to the system prompt, as [above](#claude-code-verified-in-a-container-2026-10-21) says.
+
+Not run against the real CLI: a run needs the session image built again (the runner is copied into it) and the service's login, and this lane used neither. The `claude-code` section of the doctor now checks it: `system/init` lists `doctor-skill`, mounted from a skills folder, and neither `checkout-skill` from the checkout's `.claude/skills` nor a marker written by a hook of the checkout's `.claude/settings.json`.
+
+## Cursor harness (milestone 3, lane j3-cursor-harness)
+
+Written on 2026-10-23 with **no Cursor account and no Cursor program on this server**. Everything below is split in two: what the official pages say (read that day, not run) and what the tests prove against fakes. Nothing here was observed from a real Cursor run. The owner's trial list is at the end.
+
+### From the documentation (not verified by a run)
+
+Sources: cursor.com/docs/cli/overview, /cli/reference/parameters, /cli/reference/output-format, /cli/reference/permissions, /agent/hooks.
+
+- The program is `agent` in the current pages (`cursor-agent` earlier). The adapter looks for both.
+- `agent -p "<prompt>" --output-format stream-json --model <m>` runs one turn and prints one JSON object per line: `system/init` (with `session_id`, the chat's id), `user`, `assistant`, `tool_call` (`started` then `completed`, correlated by `call_id`), then `result/success`. The page documents **no token counts and no cost** in these lines. A failed turn has no `result` line; the error goes to stderr.
+- `agent --resume <chatId>` resumes a chat, `agent create-chat` makes an empty one, `agent status` shows the authentication state, `agent login` signs in. `CURSOR_API_KEY` (or `--api-key`) authenticates. `--force` allows commands unless explicitly denied.
+- Permissions are a JSON file, `<project>/.cursor/cli.json` or `~/.cursor/cli-config.json`, with `allow` and `deny` lists of `Shell(cmd)`, `Shell(cmd:args)`, `Read(glob)`, `Write(glob)`, `WebFetch(domain)`, `Mcp(server:tool)`. Deny wins over allow. Print mode has no prompt.
+- Hooks (`beforeShellExecution`, `beforeReadFile`, `preToolUse`, with allow / deny / ask answers) are documented for the desktop app. The pages do not say the CLI runs them. The adapter therefore does not depend on them.
+
+### How the adapter drives it
+
+| Need | Claude Code | Cursor (this adapter) |
+| --- | --- | --- |
+| Process | one runner per session, stdin and stdout kept | one `docker exec` per message, the prompt on its standard input, resumed on the chat id from Cursor's first line (held in memory; also written to `<state>/cursor-chats/<session>.chat`, which nothing reads back yet: a restarted service does not resume a session, as with Claude Code) |
+| Login | the mounted file, read in the container into the harness's environment | the mounted Cursor API key file (`CLEARED_CURSOR_API_KEY_FILE`, else `<state>/cursor.key`), read in the container into `CURSOR_API_KEY`; never `--api-key` |
+| Guard | policy asked before every call, an ask waits in the inbox | **two layers, failing closed** (below) |
+| Usage | tokens, cost, context share, rate windows | the model only, `total_cost_usd: null`; nothing estimated |
+| Take over | the runner releases its harness, `claude --resume <id>` in the web terminal | the running turn ends, `agent --resume <chat> --model <m>` in the web terminal, messages refused until Give back |
+| Give back | the runner reloads the transcript | the next turn resumes the chat the human left |
+
+**Guard.** Print mode gives no way to hold a call until a person answers, so an inbox "ask" cannot work mid-turn. The adapter:
+
+1. Compiles the session's policy into `.cursor/cli.json` before each turn (`cursor/permissions.ts`): deny first (the credential file, `.env*`, `*.pem`, `/proc/*/environ`, writes to `.git`, `.claude`, `.cursor` and `CLAUDE.md`, `printenv`, `env`, `sudo`, `curl`, `ssh`, `docker`), then a narrow allow (reads in the checkout; writes there for an author whose plan is approved; the policy's safe commands and package scripts word by word). `--force` is never passed. The write is mandatory: if the file cannot be written (a reviewer's or reader's checkout is read only) the launcher exits 4 and the program never starts (`cursor_permissions`). The file is kept out of git (`.cursor/` is in the checkout's exclude list) and the policy denies the session's own writes to `.cursor`.
+2. Evaluates every `tool_call` Cursor reports with the unchanged policy (`policy.ts`). Only an allow lets the turn go on. A deny, **and an ask**, end the turn: the program is killed in the container, the thread shows the refusal (`cleared.permission_answered`, rule from the policy) and an error with the code `policy_stop`, and the session waits for the next message. This layer sees a call when it starts, so it is a tripwire, not a prevention; layer 1 is what refuses.
+
+**Failures** are classified by exit code and a stderr pattern into fixed sentences (`cursor_login`, `cursor_not_installed`, `cursor_permissions`, `cursor_exit`, `cursor_launch`). The program's own words are never journaled.
+
+**Reachability.** The adapter is registered as `cursor` and the terminal route picks the adapter by the session's own harness, so a Take over of a Cursor session reaches it. But the flow and the lead start every session as `claude-code` (`HARNESS` in `flow/engine.ts` and `lead/engine.ts`), so no ticket can name `cursor` yet: choosing a harness per project or ticket is a later lane. Until then a trial starts a session through the adapter directly (`createCursorAdapter(...).start({ harness: 'cursor', ... })`).
+
+**The harness pick (2026-10-25, P213, issue #329).** A ticket started with `harnesses` runs one author variant per harness named (`flow/harness-pick.ts`), so it is the first flow path that can start a `cursor` or `codex` author. It starts only the harnesses `CLEARED_V2_PICK_HARNESSES` names (`claude-code` alone by default; `codex` on `gpt-6-luna` unless `codex=<model>`; `cursor=<model>`, as this adapter has no default model). The variable stays unset until the owner's trials above are done; the tests run fake adapters under the three names.
+
+**Image.** The session image does not contain Cursor. No pinned, verifiable install source was found (the documented install is `curl https://cursor.com/install | bash`, unpinned), so nothing was added to `images/session/Dockerfile`. A turn in an image without it ends with `cursor_not_installed`. `CursorRuntime.image` names an image that has it.
+
+**Probe.** `node scripts/doctor.ts cursor` runs `--version` and `status` only, never `login`, and prints `not_installed`, `not_signed_in` or `ready`. On this server (2026-10-23, no Cursor): `cursor: not_installed`, exit 0.
+
+### Proven with fakes (`test/session/cursor/`)
+
+- The mapper on lines written from the documented format (`fixtures.ts`, labelled as not recorded): text, read, write, shell, result, errors, no tokens and no cost, the model as usage.
+- The adapter on a fake launcher, no Docker: prompt on stdin and never in a command word, chat id kept and resumed, a denied read stops the turn, an ask stops the turn and leaves nothing in the inbox, allowed calls pass, failures by code without the program's words, interrupt, stop, handover rejected, Take over ends the turn and refuses messages, Give back resumes the chat, a malformed chat id is not kept.
+- The launcher programs run by this machine's `sh` with a stand-in `agent`: the key reaches the environment only, the permissions file is written, the former program name is found, exit 127 and 3.
+- The permissions compiled from the policy; the probe with stand-in programs; `docker exec` built on the labelled container only.
+
+### Needs a real Cursor trial by the owner
+
+1. Record one real `stream-json` turn and replace `fixtures.ts` with it (tool names other than `read` and `write` are guessed: `shell`, `grep`, `glob`, `edit`, `delete`; any unknown tool is sent to the policy under its own name, which asks, so it stops the turn).
+2. Confirm that `.cursor/cli.json` is honoured in print mode, that deny lists refuse without `--force`, and that the `Shell(cmd:args)` form matches `npm test` and `git commit -m x`. A syntax that does not match only makes the agent unable to run the command (it fails closed).
+3. Confirm `CURSOR_CONFIG_DIR` is honoured so chats persist on the session volume, and that `--resume` finds the chat after a stopped and restarted container.
+4. Confirm the sign-in the session can use: an API key file is supported; the host's existing browser login (owner note of 2026-10-22) is not, since where it lives is unverified.
+5. Confirm the egress hosts (`CURSOR_HOSTS` in `cursor.ts`) and install Cursor in a session image.
+6. Confirm Cursor reads the generated `CLAUDE.md` or an `AGENTS.md` for the briefing.
+7. Whether the CLI runs hooks: if it does, a `beforeShellExecution` hook would give a true ask and make layer 2 a real gate.
+8. `dockerLauncher.start` has no test (it needs a Docker fake for `startSession`): it runs `sleep infinity` as the container's command, which assumes the image has no runner entrypoint, and Cursor must honour the egress proxy variables the container sets.
+9. Known side effects on the other harness: the policy now denies a Claude Code author's edits under any `.cursor/` folder, and the Cursor launcher overwrites a tracked `.cursor/cli.json` in the checkout.
+10. A project that tracks its own `.cursor/cli.json` or `.cursor/rules`: git's exclude list does not hide a change to a tracked file, so an author's commit could carry Cleared's permissions file, and a Claude Code author cannot edit those paths. Not restored at the end of a turn.
+11. `doctor cursor` runs whatever `agent` is first on the PATH (`--version`, `status`); the name is generic. Its output is never printed.
+12. Layer 2 sees a call only on `tool_call/started`; check a real stream does not send a call only as `completed`.
+13. Take over: the human's terminal runs under the same permissions file; check it is usable, and that Give back leaves the chat saved.
+
+## Codex harness (milestone 3, lane j3-codex-harness)
+
+Written on 2026-10-24 **without a Codex account, a Codex session or a single model call**: the owner decided that Codex is tested without an account (O6). The Codex program on this server was asked for `--help` only. Everything below separates what was recorded on 2026-10-21 (the proofs earlier on this page), what the documentation and the TypeScript SDK's item types say (not run), and what the tests prove against fakes. The owner's trial list is at the end.
+
+### Which mode, and the decision gate
+
+The recommendation above names the app server for the v2 adapter, but its decision gate is **still open**: no run on the pinned version has shown which `approvalPolicy` sends every command and file write to the client, and this lane could not run one. The adapter therefore uses the mode the gate allows, `codex exec --json` (labelled "Stable", recorded in proofs 7 and 8), with approvals `never`, which is the same position as the Cursor adapter: nobody can be asked mid-turn, so an `ask` of the policy ends the turn. The app server stays the target once the gate passes (a true ask in the inbox, `turn/interrupt`, `turn/steer`).
+
+### From the help of `codex-cli 0.163.0` on this server (2026-10-24, `--help` only)
+
+- `codex exec [OPTIONS] [PROMPT]`: the prompt is read from the standard input when it is `-`. Options used: `--json`, `--skip-git-repo-check`, `-m`, `-c key=value` (TOML value). Not used: `--ephemeral` (an ephemeral thread cannot be resumed), `--dangerously-bypass-approvals-and-sandbox`, `--approve-for-me`.
+- `codex exec resume [OPTIONS] [SESSION_ID] [PROMPT]` has `--json`, `-m`, `-c` but **no `--sandbox`**: the adapter passes the sandbox as `-c sandbox_mode="..."` on every turn.
+- `codex resume [OPTIONS] [SESSION_ID]` (the interactive program) has `--no-daemon` ("without the shared background server") and `--include-non-interactive` (threads started by `exec`), `-m`, `-s`, `-a`, `-c`.
+- A rollout file of this server (`$CODEX_HOME/sessions/YYYY/MM/DD/rollout-<time>-<thread>.jsonl`, written by a v1 run) has `token_count` lines whose `rate_limits` hold a `primary` and a `secondary` window, each with `used_percent` (a percent), `window_minutes` (10080 for the week) and `resets_at` (seconds), and whose `info.total_token_usage.total_tokens` is `input_tokens + output_tokens`. Only the shape was read; no value was kept.
+
+### How the adapter drives it
+
+| Need | Cursor | Codex (this adapter) |
+| --- | --- | --- |
+| Process | one `docker exec` per message | one `docker exec` per message: `codex exec --json ... -`, then `codex exec resume --json ... <thread> -` on the thread from Codex's `thread.started` line (held in memory; also written to `<state>/codex-threads/<session>.thread`, which nothing reads back yet) |
+| Login | API key file into `CURSOR_API_KEY` | the mounted Codex API key file (`CLEARED_CODEX_API_KEY_FILE`, else `<state>/codex.key`), read in the container into `CODEX_API_KEY`; never a command word, `codex login` never run, so no credential is written to the session's volume; `OPENAI_API_KEY` unset; `shell_environment_policy.exclude` names both so Codex's commands do not inherit them |
+| Home | `CURSOR_CONFIG_DIR` on the config volume | `CODEX_HOME` on the session's config volume (`<config>/codex`): the rollout survives between turns and across Take over, and the host's own Codex configuration is never read |
+| Guard | permissions file, then the policy on every call | **two layers, failing closed** (below) |
+| Usage | the model only | each turn's tokens from `turn.completed`, counted so that the screen's sum is Codex's own total (below); `total_cost_usd: null`; the rate windows from the rollout after each finished turn |
+| Take over | `agent --resume <chat>` | the running turn ends, `codex resume --no-daemon --include-non-interactive -m <m> -c approval_policy="on-request" -c sandbox_mode=<the role's> <thread>` in the web terminal, messages refused until Give back |
+| Give back | the next turn resumes the chat | the next turn resumes the thread the human left |
+
+**Guard.** 1. Codex's own sandbox, chosen by the role (`codex/interactive.ts`, `sandboxOf`): `read-only` for a reviewer, a reader, the lead and an author whose session plan waits for its Go; `workspace-write` for an author at work, with `sandbox_workspace_write.network_access=true` because the container's egress (B5.4d) is the network's guard and the tests reach the session's services through it. Approvals are `never`. No program ever gets `danger-full-access`, a `--dangerously-*` flag, `--full-auto`, `--approve-for-me` or `--ephemeral` (a test checks every role and both programs). 2. Every item Codex reports is evaluated once per turn by the unchanged policy (each turn is a new process, whose items are numbered from `item_0` again, so what the guard has seen and the call ids of the thread are the turn's own): a `command_execution` as `Bash` (the command read inside its `bash -lc '...'` wrapper), each file of a `file_change` as `Edit`, `Write` or `Delete`, an `mcp_tool_call` as `mcp__<server>__<tool>`, a `web_search` as `WebSearch`. Only an allow lets the turn go on; a deny or an ask kills the program in the container, says so in the thread (`cleared.permission_answered`, then `policy_stop`) and waits for the next message. A command is seen when it starts, but a file change only once it is made: for edits this layer reports after the fact, and the sandbox is what refuses. Codex names the changed files, not their text, so the requests carry none: a change of `package.json` is one the policy cannot read, so it asks (`scripts.change`) and the turn ends, and so does a lock file (`install.package`); the policy has no rule for `Delete`, so every file Codex deletes ends the turn too. Both fail closed, at the cost of a turn. The policy now locks `.codex/` in the checkout as it locks `.cursor/` (a project's own Codex configuration could otherwise be changed by a session).
+
+**Usage.** Codex counts the cached input inside `input_tokens` and the reasoning inside `output_tokens` (a rollout's `total_tokens` is `input_tokens + output_tokens`). The Consumption screen adds input, output, cache read and cache write, so a turn's usage says `inputTokens = input_tokens - cached_input_tokens - cache_write_input_tokens`, `cachedInputTokens`, `cacheWriteInputTokens` and `outputTokens` as given: their sum is Codex's total. The session's state adds its turns, since Codex reports each turn alone (proof 8: the second turn's input is the whole thread again).
+
+**Quota.** The recorded `exec --json` stream has no rate limits. After each finished turn the launcher runs a fixed program in the container (`RATE_LIMITS`) that prints the last `token_count` line of that thread's rollout, at most 64 KiB, and nothing else; the adapter keeps only `rate_limits` from it and says `cleared.rate_limit` for the week (10080 minutes) and the five hours (300 minutes), `used_percent` already a percent, once per change. A window of another length is not guessed. A failed read says nothing.
+
+**Failures** are fixed sentences by exit code and a stderr pattern (`codex_login`, `codex_not_installed`, `codex_exit`, `codex_launch`), and `codex_error` for `turn.failed` or `error`. Codex's own words are never journaled.
+
+**The week.** The seven-day window that stops new lanes (B3.11: the plan runner's week stop and the scheduler's `weekShare`) is Claude Code's subscription. Both now skip a `cleared.rate_limit` journaled on a session whose harness is another (a Codex session's window is its own and shows on its own card); a row of a session the ledger does not know still counts, as before.
+
+**Reachability.** Registered as `codex`; the terminal route picks the adapter by the session's harness. As for Cursor, the flow and the lead start every session as `claude-code` (`HARNESS` in `flow/engine.ts` and `lead/engine.ts`), so no ticket can name `codex` yet.
+
+**Image.** The session image does not contain Codex (`npm i -g @openai/codex@<pinned>` is the documented install; adding it to the image is the owner's trial, with the pinned version). A turn in an image without it ends with `codex_not_installed`. `CodexRuntime.image` names an image that has it.
+
+**Probe.** `node scripts/doctor.ts codex` runs `codex --version` and `codex login status` only, never `login`, never a turn. It was not run on this server, which holds the owner's live Codex login; its tests use stand-in programs.
+
+### Proven with fakes (`test/session/codex/`)
+
+- The mapper (`map.test.ts`) on the recorded lines (thread, turn, message, usage) and on lines written from the documentation (commands, file changes, web search, failure, labelled in `fixtures.ts`): the usage arithmetic against a rollout's real total, the session's sum of turns, the command unwrapped, one request per changed file, rate limits from a rollout-shaped line, no cost.
+- The adapter on a fake launcher (`adapter.test.ts`): the prompt on stdin only, the thread kept and resumed, the sandbox for each role and no bypass flag, the reviewer's file change and writing command stop its turn, a denied read and an ask stop the turn and leave nothing in the inbox, allowed calls pass and are checked once, the quota read after a finished turn only, failures by code without the program's words, interrupt, stop, handover rejected, Take over (the author's and the reviewer's sandbox), Give back, a turn that will not end refusing the hand over, a malformed thread id not kept.
+- The launcher programs (`launcher.test.ts`) run by `/bin/sh` with a stand-in `codex` on a PATH of linked tools only (this machine's own Codex can never be found): the key in the environment only, the other key unset, the words of each program, exit 127 and 3, the rollout's last `token_count` line and nothing else, `docker exec` on the labelled container.
+- The probe with stand-in programs (`probe.test.ts`).
+
+### Needs a real Codex trial by the owner
+
+1. Record one real `exec --json` turn with a command, a file change and a refused write, and replace the unrecorded lines of `fixtures.ts`; check the `command` shape (string or list, the `bash -lc` wrapper) and whether `file_change` ever comes as `item.started`.
+2. Whether `codex exec` honours `CODEX_API_KEY` from the environment with a fresh `CODEX_HOME`, and whether the interactive `codex resume` does too (if it does not, Take over shows Codex's own sign-in screen: a login stored on the volume would then be a decision for the owner).
+3. Whether Codex's Linux sandbox starts inside the session container (no capability, `no-new-privileges`): v1 saw it fail on a socket mount on the host. If it cannot, every command fails, which is safe but useless; running with the container as the only sandbox is the owner's decision, never a default.
+4. Whether `exec resume` reads the prompt from `-` as `exec` does, and whether `-c sandbox_mode` takes effect on a resumed thread.
+5. The interactive program's trust prompt for the checkout (the adapter does not pre-trust it, so a project's `.codex/config.toml` is not loaded), and that `--no-daemon` leaves nothing running after Give back.
+6. Whether `exec --json` ever carries `rate_limits` itself, and that the rollout path (`sessions/*/*/*/rollout-*-<thread>.jsonl`) holds for the pinned version.
+7. That ending the turn's process (`END_TURN`: TERM to the program and its children, then KILL) stops the native binary under the npm wrapper.
+8. The egress hosts (`CODEX_HOSTS` in `codex.ts`: `api.openai.com`, `chatgpt.com`, `auth.openai.com`, from the documentation) and Codex in a session image at a pinned version.
+9. The briefing: the generated context file is `CLAUDE.md`; Codex reads `AGENTS.md`. Writing it under that name too is a later lane.
+10. The decision gate above: run the app server's approval test on the pinned version; if it passes, the adapter can move to the app server and an ask can wait in the inbox.
 
 ## v1 adapter contract
 

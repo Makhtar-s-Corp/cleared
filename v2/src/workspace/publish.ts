@@ -18,7 +18,10 @@
 //   4. reuse the open pull request of the branch, or open one with gh:
 //      not a draft (merge-pr.sh refuses a draft), its body the session's
 //      report as lib/pr-body.mjs cleans it, left out when the guard refuses
-//      it, then the commits.
+//      it, then the commits; the proof receipt first (P210, flow/receipt.ts),
+//      in the project's language ([owner] language at the base), guarded on
+//      its own and left out when the guard refuses it. A reused pull
+//      request gets the new receipt in place of the old one.
 import { execFile, spawn } from 'node:child_process';
 import { copyFileSync, lstatSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -26,6 +29,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { CheckoutError, checkBranchName, git, gitPath } from './checkout.ts';
+import { renderReceipt, withReceipt, type ReceiptData } from '../flow/receipt.ts';
 
 const run = promisify(execFile);
 
@@ -57,6 +61,7 @@ export type PublishInput = {
   readonly repo: string;                  // owner/name on the forge, for gh
   readonly ticket: string;
   readonly report?: string;               // the session's report for the body
+  readonly receipt?: ReceiptData;         // the proof receipt's facts, first in the body
   readonly gitEnv?: NodeJS.ProcessEnv;    // forgeEnv of lib/forge.mjs; read from it when absent
   readonly ghEnv?: NodeJS.ProcessEnv;     // forgeGhEnv of lib/forge.mjs; read from it when absent
 };
@@ -81,12 +86,12 @@ async function command(file: string, args: readonly string[], options: { cwd: st
   }
 }
 
-function guardSetting(conf: string, key: string): string | undefined {
-  let inGuard = false;
+function confSetting(conf: string, section: string, key: string): string | undefined {
+  let inSection = false;
   for (const raw of conf.split('\n')) {
     const line = raw.trim();
-    if (line.startsWith('[')) inGuard = line === '[guard]';
-    else if (inGuard && !line.startsWith('#') && line.includes('=') && line.slice(0, line.indexOf('=')).trim() === key)
+    if (line.startsWith('[')) inSection = line === `[${section}]`;
+    else if (inSection && !line.startsWith('#') && line.includes('=') && line.slice(0, line.indexOf('=')).trim() === key)
       return line.slice(line.indexOf('=') + 1).trim();
   }
   return undefined;
@@ -103,7 +108,7 @@ export async function runGuard(project: string, ref: string, files: readonly str
     try { conf = await git(project, ['show', `${ref}:.cleared/agents.conf`]); }
     catch { throw new PublishRefused('guard', `the project commits no .cleared/agents.conf at ${ref}: nothing leaves without the guard's lists`); }
     for (const [key, list] of [['terms', 'private-terms.json'], ['allowed', 'codex-guard-allow.json']] as const) {
-      const value = guardSetting(conf, key);
+      const value = confSetting(conf, 'guard', key);
       if (!value) throw new PublishRefused('guard', `the project names no list for [guard] ${key} at ${ref}: write the file path or none`);
       let text = DISABLED;
       if (value.toLowerCase() !== 'none') {
@@ -158,6 +163,21 @@ try {
       catch { reject(new PublishError('forge: the answer is not JSON')); }
     });
   });
+}
+
+// The receipt in the project's language, or empty when the guard refuses
+// it: it is made of structured fields only, so a refusal is a bug, and the
+// pull request still opens without it.
+async function receiptFor(input: PublishInput, base: string, file: string): Promise<string> {
+  if (!input.receipt) return '';
+  let conf = '';
+  try { conf = await git(input.project, ['show', `${base}:.cleared/agents.conf`]); } catch { /* runGuard said so already */ }
+  const language = confSetting(conf, 'owner', 'language')?.toLowerCase().startsWith('fr') ? 'fr' : 'en';
+  const receipt = renderReceipt(input.receipt, language);
+  writeFileSync(file, receipt);
+  if ((await runGuard(input.project, base, [file])) === undefined) return receipt;
+  console.error(`cleared-v2: the proof receipt of ${input.ticket} was left out: the guard refuses it`);
+  return '';
 }
 
 // The report as lib/pr-body.mjs cleans it: no path of this machine, no
@@ -247,15 +267,29 @@ async function guardPushOpen(input: PublishInput, at: { base: string; ref: strin
   const gh = (args: readonly string[]) => command('gh', args, { cwd: input.project, env: ghEnv });
   const open = JSON.parse(await gh(['pr', 'list', '--repo', input.repo, '--head', input.branch, '--state', 'open', '--json', 'number,url'])) as { number?: unknown; url?: unknown }[];
   const existing = open[0];
-  if (existing && typeof existing.number === 'number' && typeof existing.url === 'string')
+  const receipt = await receiptFor(input, base, join(work, 'receipt.md'));
+  if (existing && typeof existing.number === 'number' && typeof existing.url === 'string') {
+    if (receipt) {
+      // The branch is pushed: a receipt that cannot be put in place is said, and the pull request stays as it is.
+      try {
+        const seen = JSON.parse(await gh(['pr', 'view', String(existing.number), '--repo', input.repo, '--json', 'body'])) as { body?: unknown };
+        const edited = join(work, 'edited.md');
+        writeFileSync(edited, withReceipt(typeof seen.body === 'string' ? seen.body : '', receipt));
+        await gh(['pr', 'edit', String(existing.number), '--repo', input.repo, '--body-file', edited]);
+      } catch (error) {
+        console.error(`cleared-v2: the proof receipt of pull request ${existing.number} was not updated (${error instanceof Error ? error.name : typeof error})`);
+      }
+    }
     return { url: existing.url, number: existing.number, head, created: false };
+  }
 
   const subjects = (await git(input.project, ['log', '--reverse', '--format=%s', range])).split('\n').filter(Boolean);
   const bare = `Opened by Cleared for ${input.ticket} (branch \`${input.branch}\`).\n\nCommits:\n${subjects.map((s) => `- ${s}`).join('\n')}\n`;
   const report = await cleanReport(input.report ?? '', join(work, 'report.md'), input.project);
   const body = join(work, 'body.md');
-  writeFileSync(body, report ? `${report}\n\n---\n\n${bare}` : bare);
-  if (report && (await runGuard(input.project, base, [body])) !== undefined) writeFileSync(body, bare);
+  const first = (text: string) => (receipt ? withReceipt(text, receipt) : text);
+  writeFileSync(body, first(report ? `${report}\n\n---\n\n${bare}` : bare));
+  if (report && (await runGuard(input.project, base, [body])) !== undefined) writeFileSync(body, first(bare));
 
   const url = (await gh(['pr', 'create', '--repo', input.repo, '--base', input.base, '--head', input.branch, '--title', subjects[0] ?? input.branch, '--body-file', body])).trim();
   const number = Number(/\/pull\/(\d+)$/.exec(url)?.[1]);

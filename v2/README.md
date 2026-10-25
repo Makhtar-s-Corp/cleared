@@ -1,6 +1,6 @@
 # Cleared v2 service
 
-The core of Cleared v2, rewritten as a Node service in TypeScript. This folder holds only the skeleton: a health endpoint, its tests and its checks. The v1 code at the root of the repository is unchanged and keeps working on its own.
+The core of Cleared v2, rewritten as a Node service in TypeScript. This folder holds the service (`src/`), the web app (`app/`), the session images (`images/`), the scripts (`scripts/`) and their tests. The v1 code at the root of the repository is unchanged and keeps working on its own.
 
 ## Why a separate folder
 
@@ -8,7 +8,9 @@ The core of Cleared v2, rewritten as a Node service in TypeScript. This folder h
 
 ## Requirements
 
-Node.js 24 or later. Node runs the `.ts` files directly through its type stripping: there is no build step and no emitted JavaScript. Only syntax Node can erase is allowed (no `enum`, no `namespace`, no constructor parameter properties); `tsc` enforces it with `erasableSyntaxOnly`. Relative imports name the `.ts` file.
+Node.js 24 or later. Node runs the service's and the app server's `.ts` files directly through its type stripping: no build step and no emitted JavaScript for them. Only syntax Node can erase is allowed (no `enum`, no `namespace`, no constructor parameter properties); `tsc` enforces it with `erasableSyntaxOnly`. Relative imports name the `.ts` file.
+
+The one exception is the app's front end (`app/web/`, React): Vite builds it into `app/dist/`, which the app serves (the owner's decision of 2026-10-22, in the [decisions log](../docs/v2/decisions-log.md)). `npm run app` and `npm test` build it first. The app reads the build's file names once, at its first page: restart it after a new `npm run build`.
 
 ## Commands
 
@@ -16,12 +18,14 @@ Run from `v2/`:
 
 | Command | What it does |
 | --- | --- |
-| `npm ci` | Installs the pinned dev dependencies (TypeScript and Node types only; the service has no runtime dependency). |
+| `npm ci` | Installs the pinned dev dependencies. The service and the app's server have no runtime dependency: every package is either a type, a test or build tool, or code that Vite bundles into the page. `.npmrc` runs no install script (CopilotKit pulls in `@scarf/scarf`, whose install script reports installs), and `package.json` turns Scarf off too (`scarfSettings`). |
+| `npm run build` | Builds the front end with Vite (`app/web/vite.config.ts`) into `app/dist/`. |
 | `npm start` | Starts the service (`node src/main.ts`). |
 | `npm run app` | Starts the app (`node app/main.ts`), see [The app](#the-app). |
 | `npm run user -- add <name>` | Adds a person who signs in to the app (the `cleared-v2 user add <name>` command). |
-| `npm test` | Runs the unit tests with `node --test`: `test/` and `app/test/`. |
-| `npx tsc --noEmit` | Type checks `src/`, `test/` and `scripts/`. `npm run typecheck` also checks `app/` with `tsc --noEmit -p app`, which `npm test` runs too. |
+| `npm test` | Builds the front end, runs the unit tests with `node --test` (`test/` and `app/test/`), then the components' tests with Vitest (`app/web/test/`, rendered to HTML under Node). |
+| `npx tsc --noEmit` | Type checks `src/`, `test/` and `scripts/`. `npm run typecheck` also checks the app's server with `tsc --noEmit -p app` and the front end with `tsc --noEmit -p app/web`; `npm test` runs both through `app/test/static.test.ts`. |
+| `node src/cli/ledger-mcp.ts` | Serves the ledger's session history to an agent as a read-only MCP server on stdio, see [The ledger's MCP server](#the-ledgers-mcp-server). Not through `npm run`, whose banner would reach the protocol's stdout. |
 | `npm run guard` | Runs the repository's private terms and secrets guard (`lib/guard/codex-guard.mjs`) on every v2 file and the v2 workflow. `-- --base origin/v2` also checks the lines changed since that ref, in the guard's `--strict` diff mode. |
 
 ## Settings
@@ -30,12 +34,34 @@ Run from `v2/`:
 | --- | --- | --- |
 | `CLEARED_V2_HOST` | `127.0.0.1` | This machine only. |
 | `CLEARED_V2_PORT` | `8791` | Refused: 80 and 443 (the machine's public proxy, see [Decisions](../docs/concepts.md#decisions)), 8787 and 8788 (the v1 dashboard and app), 8790. A port already in use stops the service with a message. |
+| `CLEARED_V2_EDITOR_SSH_HOST` | none | For Open in an editor: the host your VS Code or Cursor reaches this server by over SSH, as your ssh config names it, with an optional `user@` (letters, digits, dots, dashes, underscores; anything else stops the service at start). Unset, the links open the session's checkout on the machine the browser is on (`vscode://file/<path>`); set, they are the remote ones (`vscode://vscode-remote/ssh-remote+<host>/<path>`). The service runs no editor. |
+| `CLEARED_NOTIFY_LINK_BASE` | none | The app's address as people open it (an `http` or `https` origin, no credentials). The proof receipt at the top of each pull request Cleared opens links its captures there (`/api/service/tickets/<id>/proof/<service>/before.png`, `after.png`, `flow.webm`), so only a person signed in to the app opens them. Unset, the receipt says the captures are kept by Cleared. The captures are taken by Playwright when the author of a ticket is done: `playwright-core` from `CLEARED_V2_PLAYWRIGHT` when it names an installed one, else v2's own, and Chromium from `CLEARED_V2_CHROME` or Playwright's; without either, the receipt says no browser was there. |
 
 `GET /health` (and `HEAD`) answers `200` with `{"status":"ok"}`. Any other path is `404`; another method on `/health` is `405`; a request target the URL parser refuses (such as `//[`) is `400`.
 
+## The flow
+
+The service runs tickets once it knows its project (`src/flow/config.ts`, `src/workspace/config.ts`). Without `CLEARED_V2_WORKSPACE` or `CLEARED_V2_PROJECT` it still answers `/health`, and the ticket routes answer `503` "the flow is not configured". A setting that is named but wrong stops the service at start.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `CLEARED_V2_PROJECT` | none | The project of a one-service workspace, the `project` value of its rows. It needs the four below. |
+| `CLEARED_V2_PROJECT_DIR` | none | The service's checkout on this server, an absolute path. |
+| `CLEARED_V2_REPO` | none | The GitHub repository, `owner/name`. |
+| `CLEARED_V2_REPO_URL` | none | What a session's checkout clones. |
+| `CLEARED_V2_BASE` | `main` | The base branch. |
+| `CLEARED_V2_WORKSPACE` | none | A workspace of several services: one file in the format of `agents.conf`, an absolute path ([`examples/workspace.conf`](../examples/workspace.conf)). With `CLEARED_V2_PROJECT` set too, the two must name the same id. |
+| `CLEARED_V2_STATE_DIR` | `$XDG_STATE_HOME/cleared-v2`, else `~/.local/state/cleared-v2` | The flow's own state. |
+| `CLEARED_V2_WORKDIRS` | `<state>/work` | The sessions' checkouts, an absolute path. |
+| `CLEARED_V2_AUTHOR_MODEL` | `claude-opus-5-5` | A Quick ticket's author is `claude-haiku-5-5`, unless the reviewer is Haiku or a service of the ticket is `sensitivity = full` (see [The fast lane](#the-fast-lane)). |
+| `CLEARED_V2_REVIEWER_MODEL` | `claude-sonnet-5-5` | Set it to another model than the author's: the service does not check it here. |
+| `CLEARED_V2_REVIEW_ROUNDS` | `3` | A review that still asks for changes after this many rounds sends the ticket back to Todo with its last report. |
+| `CLEARED_V2_IDLE_MINUTES` | `15` | A session idle this long is stopped. |
+| `CLEARED_V2_QUESTION_TIMEOUT_MINUTES` | `30` | How long a team's question waits for the owner. Then the lead has 10 minutes to decide, then the session's declared answer applies or the ticket is parked. |
+
 ## The app
 
-`v2/app` is the web app: the sign-in page, the shell (project, Tower, Inbox with its count, Sessions, Tickets, the signed-in person, the clock, the theme button) and the screens. It holds no key and signs nothing. Every request a signed-in person makes to `/api/service/*` goes to the service on loopback as `/api/*`, with the person's id and the app's proof, and with nothing of the browser's cookie or anti-forgery token. Design: [`app/DESIGN.md`](../app/DESIGN.md), with the Geist fonts served by the app itself.
+`v2/app` is the web app: the sign-in page, the shell (project, Tower, Inbox with its count, Sessions, Tickets, Plans, the notifications button, the clock, the theme button, the signed-in person) and the screens. It holds no key and signs nothing. Every request a signed-in person makes to `/api/service/*` goes to the service on loopback as `/api/*`, with the person's id and the app's proof, and with nothing of the browser's cookie or anti-forgery token. Design: [`app/DESIGN.md`](../app/DESIGN.md), with the Geist fonts served by the app itself.
 
 To try it on sample data, without the service:
 
@@ -52,7 +78,7 @@ Then open `http://127.0.0.1:8792/` and sign in. Check that the port is free firs
 | `CLEARED_V2_APP_PORT` | `8792` | The service's reserved ports are refused, and so is the service's own port. |
 | `CLEARED_V2_APP_SOURCE` | `service` | `fixtures` answers the service's read routes from sample data played by the fake adapter, and creates tickets in memory. The header then says "Sample data, not the service". |
 | `CLEARED_V2_PORT` | `8791` | Where the app finds the service, on `127.0.0.1`. |
-| `CLEARED_V2_APP_LANGUAGE` | `en` | `en` or `fr`. |
+| `CLEARED_V2_APP_LANGUAGE` | `fr` | `fr` or `en`. |
 | `CLEARED_V2_APP_PROJECT` | the last part of `CLEARED_REPO` | The project name in the header. |
 | `CLEARED_V2_APP_ORIGIN` | none | The address the browser uses when a proxy on this machine serves the app, such as `https://<machine>.<tailnet>.ts.net:8443`. Writes must come from it. |
 
@@ -68,15 +94,128 @@ Sign-in and writes:
 - A request for another host name gets `421`.
 - The pages load nothing inline and nothing from another site.
 
-Each screen is `app/public/screens/<screen>.ts`, with its words in `app/messages/<screen>.en.json` and `.fr.json`. The browser gets the TypeScript with its types stripped. The session and inbox screens are stubs that lanes 9 and 10 fill.
+### The front end
+
+The pages are React (strict TypeScript) under `app/web/`, built by Vite into `app/dist/`:
+
+- **Each screen** is `app/web/screens/<screen>/`: `model.ts`, its rules as pure functions (the tests run them under Node), `<Screen>.tsx`, the component, and its sheet. Its words are in `app/messages/<screen>.en.json` and `.fr.json`, bundled into the page; the language is `CLEARED_V2_APP_LANGUAGE`, and a key missing from French falls back to English.
+- **The shell** (`app/web/shell/`) draws the header and the sign-in page. The server writes each page's HTML: its language, its title, the screen and what the header shows first on `<body>`, and the bundle's files from `dist/.vite/manifest.json`. The sign-in form posts to `/login` as before; a refusal comes back with the server's sentence on `<body data-error>`.
+- **The components** are shadcn/ui's (`app/web/components/ui/`, Radix plus Tailwind), copied in and restyled to the kit. The theme is shadcn/ui's CSS variables with the kit's colours (`app/web/styles/app.css`), light and dark, chosen with the button (`data-theme`, never the system's setting). Tailwind is loaded without its preflight, so the kit's sheets keep the look. The icons are Phosphor's (`@phosphor-icons/react`), regular weight; the bell is bold while this device is told.
+- **CopilotKit** holds the session's and the lead's threads, open source and local only: the headless React entries of `@copilotkit/react-core`, with no runtime, no Copilot Cloud, no public API key and no license key. Each thread is an AG-UI agent (`app/web/copilot/agent.ts`) that reads the app's own stream and publishes the thread as AG-UI state and message snapshots; the screens draw what CopilotKit holds, and the person's answers go through the app's routes as before. CopilotKit's inspector is replaced by an empty module at build time, and `app/web/test/copilot.test.tsx` checks that CopilotKit sends no request of its own. The page's Content-Security-Policy (`default-src 'self'`) would refuse one anyway.
+
+The lead screen (`/lead` and `/plans/<id>`, the Plans tab) reads the draft that the tower's New goal and Ask the lead send as `?draft=` (and `?goal=1`), then drops it from the address.
+
+### Notifications
+
+The bell in the header turns this browser's notifications on or off, and says how many devices are told. A signed-in person does it with the same checks as any write (the session, the anti-forgery token, the app's origin); there is no passkey in v2. The app only keeps the subscriptions: the service's dispatcher sends the notifications.
+
+- **Where they are kept.** In the service's private notification directory, the one v1 used: `[notify] secrets_dir`, by default `~/.config/cleared/notify` of the account the app and the service run under. The app creates it with mode 0700 and the Web Push key pair in it (`vapid.json`, 0600) the first time a signed-in page asks for the status (every page does, to draw the bell), and refuses it, without repairing it, when it is looser, a link, owned by another account, or inside the project or this checkout. The browsers are in `subscriptions.json`: at most ten, the oldest pushed out, each named by its user and platform only (`alex · iPhone`).
+- **What a browser may give.** An `https` address of a known push service (Google, Mozilla, Apple, Microsoft), without a port, and its two keys. `CLEARED_NOTIFY_PUSH_HOSTS` (comma separated) adds hosts, for a self-hosted push service or a test.
+- **The settings.** `[notify] adapters` must include `webpush` (the default), and the service needs an address to sign with: `[notify] vapid_subject` (a `mailto:` address or an `https` address), or else `CLEARED_NOTIFY_LINK_BASE` when it is `https`. They are read from the project's `agents.conf` (`CLEARED_CONF`, else `<CLEARED_REPO>/.cleared/agents.conf`) and the app's environment, once, at the first use: restart the app after changing them.
+- **The https address.** Web Push needs a secure origin. `http://127.0.0.1:8792` is one for a browser on this machine. Any other device needs the app's `https` address, served by a proxy on this machine: set it as `CLEARED_V2_APP_ORIGIN` for the app and as `CLEARED_NOTIFY_LINK_BASE` for the service, so a notification opens the app there. On plain `http` from another address, the menu says notifications need the https address.
+- **iPhone and iPad.** Web notifications exist only for the app added to the Home Screen (Share, then Add to Home Screen); the menu says so in Safari. The app serves `manifest.webmanifest`, its icons and the service worker `sw.js` without a session, so it can be installed. The worker shows what is pushed, opens only addresses of the app, and caches nothing.
+- **Routes.** `GET /api/notifications` answers `{ available, reason, publicKey, devices }`, with `reason` one of `off` (no Web Push), `insecure`, `no_subject`, `config` (a setting cannot be read) and `store` (the directory is refused). `POST /api/notifications/subscribe` takes `{ subscription }` as the browser gives it, and `POST /api/notifications/unsubscribe` takes `{ endpoint }`.
+
+### On a phone
+
+The inbox works on a 375-pixel screen (P217, `app/web/screens/inbox/inbox.css`): a session plan's Go and Change, and a release's Approve, Send back and Close, stay above the shell's bar of screens, each reached without scrolling. Under 480 pixels the release's Approve has a row of its own. `app/test/inbox/mobile-browser.test.ts` taps them in Chromium at 375 by 667, in French and in English; the captures are in [`docs/v2/mobile-ui/`](../docs/v2/mobile-ui/). Approve starts the 60-second grace, as on a computer; the merge after it is the lock's.
+
+## The ledger's MCP server
+
+An agent searches the sessions' history through it (issue 292): the sessions, their events, the review verdicts, the questions and the permission answers that `ledger.db` keeps. To install it, give the agent this line: `claude mcp add cleared-ledger -e CLEARED_STATE_DIR=<folder of ledger.db> -- node <cleared checkout>/v2/src/cli/ledger-mcp.ts`.
+
+- **Tools.** `search_sessions` (text, ticket, project, role, status, dates), `search_events` (text, ticket, project, session, event type or custom name such as `cleared.review_verdict`, dates) and `get_session_timeline` (one session's events in order). Dates are ISO days (`2026-10-20`, the whole day) or moments; both ends are included. Newest first; the timeline in its order.
+- **Pages.** 20 items by default, 100 at most (more is cut to 100). Each answer gives `next`: the cursor of the next page for a search, the `after_seq` of the next page for the timeline, `null` on the last page. A search reads at most 2000 rows per call; at that limit it answers `partial: true` with what it found so far, perhaps nothing, and a `next` that goes on after the last row read. A cursor holds the stored time and rowid of a row, never an id. A term that is the words of a marker (`[removed: GitHub token]`) finds the text that was cleaned.
+- **Read only.** The file is opened with SQLite's read-only flag and `PRAGMA query_only`, never through `openStore`: no folder made, no table created, no migration, no copy. A stopped service's ledger in a folder that cannot be written to (no `-wal`, no `-shm`) is read `immutable`; one with a `-wal` never is. A ledger that does not exist is not created; the server stops with code 66 and says where it looked (64 when it cannot tell where the ledger is, as the service does). The tools are marked `readOnlyHint`.
+- **Secrets.** Every string of an answer goes through the events' cleaner (`session/clean.ts`: the guard's patterns, the values of the environment variables whose names say secret, the service's folders), then the GitHub, Slack, Linear, AWS, Google, Stripe and npm token forms, JSON web tokens, bearer tokens, and the value of any `NAME=value` whose name says key, token, secret or password. Then it is cut, so a secret is never shown in part: at 1000 characters in a search's answer, at 4096 (a command output's limit) in a timeline. A session's preview key is never given. A search reads the whole cleaned text, not the part an answer shows: a term shaped like a secret is refused, and a piece of a secret finds nothing, so a search cannot tell whether a secret is in the ledger. The server cleans with its own environment: a secret the service knew but the server's environment does not hold is removed only if one of the patterns finds it.
+- **Words.** The tools' descriptions and errors are in `src/mcp/messages/ledger.en.json` and `.fr.json`, in the app's language (`CLEARED_V2_APP_LANGUAGE`, `fr` by default). A session's duration is said as the app says it (`app/web/lib/time.ts`: "1 h 30", "1h 30m").
+- **Protocol.** MCP over stdio, one JSON-RPC 2.0 message per line, written in `src/mcp/server.ts` without the SDK (the service has no runtime dependency). stdout carries only the protocol; anything else goes to stderr. No port is opened.
+
+## The lanes' MCP server
+
+A local Claude Code asks the service, before it edits, which lanes run, which tickets are open and which files a lane holds (P216, `src/mcp/lanes.ts` and `src/mcp/http.ts`). To install it, give the agent this line, run in its checkout of the project: `claude mcp add --transport http cleared-lanes http://127.0.0.1:8791/mcp --header "Authorization: Bearer $(cat <folder of ledger.db>/v2-mcp-token)"`.
+
+- **Tools.** `list_lanes`: each ticket out of Todo and not Done, its status, whether its flow runs now, each service's branch and pull request, since when, and its sessions with their phase. `list_tickets`: the open tickets, the most recently changed first, 100 at most, with their labels; Done only when `status` asks for it; never a description. `locked_files`: the files a lane holds, relative to the repository's root, with the ticket, the session, why (`edited`, `planned`) and since when; `path` checks one file, or a folder for the files under it, and `locked` says whether any is held.
+- **What "held" means.** Cleared takes no lock: a file is held once a lane's session edits it or names it in its session plan, until the lane's ticket is Done or back in Todo. The pull request waiting for approval still holds its files. A ticket put back and started again holds only what its new flow touched.
+- **Read only.** The tools read the engine and the ledger the service already has open, and write nothing (marked `readOnlyHint`). Every string goes through the ledger server's cleaner.
+- **The token.** `v2-mcp-token`, beside `ledger.db`, made at the service's first start like the app's proof, before a project is set up too: 64 hex characters, mode 600, this account's. It is not the app's proof and opens `POST /mcp` only. To change it, delete the file, restart the service and run the install line again; `claude mcp add` keeps the header in Claude Code's own settings.
+- **The network.** The route answers this machine and the tailnet (100.64.0.0/10, `fd7a:115c:a1e0::/48`), whatever `CLEARED_V2_HOST` is: anyone else is `403`, a session's container on a Docker bridge included, and so is a request that carries an `Origin` (a web page) or a `Host` other than `127.0.0.1`, `localhost`, `[::1]` or the tailnet address it came in on (a name made to point at this machine). These are checked before the token is read. No port is opened for it: it is a route of the service. From another machine of the tailnet, use the service's tailnet address in the line, with `CLEARED_V2_HOST` set to it.
+- **Protocol.** MCP's Streamable HTTP, each answer one JSON body (no event stream, no session): `GET` and `DELETE` are `405`, a notification is `202`, an unknown `MCP-Protocol-Version` is `400`, a body other than JSON is `415`, over 64 KB `413`, a missing or wrong token `401`. The words are `src/mcp/messages/lanes.en.json` and `.fr.json`, in the app's language (`CLEARED_V2_APP_LANGUAGE`, `fr` by default); durations as the app says them.
+
+## A ticket from a chat
+
+A slash command `@cleared <task>` posted to `POST /hooks/chat` creates a ticket in the service's project (P212, `src/flow/chat.ts`). It is tested with a fake chat client only (`test/flow/chat-client.ts`); no chat account is set up.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `CLEARED_V2_CHAT_SECRET_FILE` | none | A file holding the chat's signing secret (16 characters or more). Unset, the route answers `404`. A file that cannot be read, a bad user list or a bad origin is said once (at start when the flow is configured, else at the first command) and leaves the route off. |
+| `CLEARED_V2_CHAT_USERS` | none | `<chat user id>=<user id>,...`: who may launch, as which user of the service. Anyone else is told the account is not linked. |
+| `CLEARED_V2_CHAT_REPLY_ORIGINS` | `https://hooks.slack.com` | The origins a command's `response_url` may have. Another one is refused with `400` before any ticket. |
+
+- **The signature.** Slack's v0: `x-slack-signature` is `v0=` and the hex HMAC-SHA256 of `v0:<timestamp>:<body>`, `x-slack-request-timestamp` the timestamp in seconds. A missing or wrong signature, or a timestamp more than five minutes off, is `401`; the same signature twice is `409`. The body is form-encoded (`text`, `user_id`, `response_url`), 64 KB at most (`413`).
+- **The answers.** At once: the ticket's id, its title and the Tower's address. Then, posted to `response_url`: the author session's address when it starts, and the pull request's when the release waits for approval, each once, a restart included. The addresses are the app's (`CLEARED_V2_APP_ORIGIN`, else `http://127.0.0.1:8792`); the words are in `src/flow/messages/chat.en.json` and `.fr.json`, in the app's language.
+- **The limits.** The ticket is a batch of one: it starts within the Consumption screen's lanes and the week stop, and the answer says when it waits. The service listens on this machine only: how a chat platform reaches it is the owner's setup.
+
+## The harness pick
+
+`POST /api/tickets` with `harnesses`, 2 to 4 names, runs a variant of the ticket on each (P213, `src/flow/harness-pick.ts`). Once all have ended, the flow keeps by itself the variant that committed a change and whose own run of the declared test command passed, with the fewest tokens, else the shortest agent time; the others stop and their containers go. None green: the owner chooses in the inbox. The wins per ticket type are on the Consumption screen. Tested with fake adapters only.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `CLEARED_V2_PICK_HARNESSES` | `claude-code` | The harnesses a pick may run, each at most once: `claude-code`, `codex` (on `gpt-6-luna` unless `codex=<model>`), `cursor=<model>` (Cursor has no default model). Leave it unset until the owner's real trials of Codex and Cursor (`docs/adapters.md`). A wrong value stops the service at start. |
+
+- **The limits.** The Consumption screen's lanes, as for variants, and the week stop (`CLEARED_V2_WEEK_STOP_PERCENT`, 85 by default), read per harness: a harness at the stop starts no variant.
+
+## The proof receipt
+
+Every pull request Cleared opens starts with a receipt (P210, `src/flow/receipt.ts`, its words in `src/flow/messages/receipt.en.json` and `.fr.json`, in the project's language):
+
+- **Captures.** `before.png` of what the base runs (the origin of the service's `health_url`), `after.png` of the ticket's trial environment, and `flow.webm`, about 20 seconds of the after page scrolled down and back up (`src/flow/proof-capture.ts`). Each page reaches its own address only. Linked through the app when `CLEARED_NOTIFY_LINK_BASE` is set (see [Settings](#settings)), else "kept by Cleared". A capture that was not taken says why: no browser, no `health_url`, no trial environment, or a failure. A ticket of variants takes none.
+- **Tests.** Each review round's run of the declared `[session] test_command`: passed, failed, not run, or run in a pipe or a list, so its exit status is not known.
+- **Cost.** Tokens and time, as [the ticket's cost](#the-cost-of-a-ticket) counts them. Dollars only when every session reported a figure.
+
+The receipt is built from structured fields only: no command output, no error text, no path of this machine.
+
+## The cost of a ticket
+
+`GET /api/tickets/:id/cost` (P211, `src/consumption/ticket-cost.ts`) reads the ledger and nothing else. The session screen's ticket card of a Done ticket shows it, and the proof receipt says the same figures.
+
+- **Tokens.** The four counts of each finished turn of every session of the ticket: authors, reviewers, variants, handovers.
+- **Time.** The agents' own time, each turn from its start to its end, and the ticket's time, from its first stored event to its last. Both are said as the app says a duration ("1 h 30", "1h 30m").
+- **Dollars.** Only the API-equivalent figure the harness reports (Claude Code's `total_cost_usd`), never an estimate and never euros. Codex and Cursor report none, so a ticket with one of their sessions has no dollar figure.
+- **Not counted.** The lead's turns: they serve several tickets at once, and the ledger gives no share of them to one.
+
+## Ticket templates
+
+The Tower's bar has a Template chip with four ready-made tickets: Bug, Review, CI and Question (P214, `src/tickets/templates.ts`, `app/web/screens/tower/templates.ts`). A template fills an empty or untouched description with its sections and keeps any words already written. Its ticket carries the label `type:<id>` (`type:bug`, `type:review`, `type:ci`, `type:question`); `POST /api/tickets` refuses an unknown one or two of them. The harness pick counts its wins per type from that label. The words are in `app/messages/tower.en.json` and `.fr.json`.
+
+## Code questions and their links
+
+A question to the code, from the Tower's bar or a session's Plan tab, starts a reader on the base branch; its answer is on `/ask/<id>` (`POST /api/asks`, `GET /api/asks/:id`). The reader cites code as `service/path:line` or `service/path:from-to`. The service checks each citation against the commit the reader's folder was exported at, from git's objects, and builds the link itself (P215, `src/reader/citations.ts`): `https://github.com/<repo>/blob/<commit>/<path>#L<from>-L<to>`. An address the reader writes is never taken. A citation that commit does not hold gets no link and is listed under the answer with its reason (`no_file`, `no_line`, `no_repository`, `unchecked`), so an invented one shows. GitHub only; at most 40 citations an answer.
+
+## After a release: the production page
+
+Cleared never deploys. With `[release] production_url` set in a service's `.cleared/agents.conf` ([configuration](../docs/configuration.md#release)), once a release the human approved has landed and its watch ended healthy, the service opens that page in Chromium, takes one screenshot and attaches it to the Done ticket's card, with a comment on the ticket (P218, `src/flow/production.ts`). The page is only read: GET and HEAD of its own origin, nothing else. Without a health check nothing says the deploy is done, so the page is not opened and the card says why. `GET /api/tickets/:id/production` gives each service's last check; the screenshot is the proof route's `production.png`.
+
+## The fast lane
+
+A ticket with the `Quick` label gets `claude-haiku-5-5` as its author, with the exceptions in [The flow](#the-flow) (B2.2, `src/flow/fast-lane.ts`). With the service's `[fast_lane]` on, after each author session, and again at the head it publishes, v1's written rules judge the real diff against the base, with the `[fast_lane]` settings of the base branch's `agents.conf`. A broken rule sends the ticket back to the full circuit for good, with a comment that names the rule. With the fast lane off, the card says "Full circuit for this version" and the ticket takes the full circuit. The release card's "Lane" fact says which lane the ticket is on, and the approval is asked while the checks run; the merge waits for them. What v1 does and what v2 leaves out: [docs/fast-lane.md](../docs/fast-lane.md#in-cleared-v2).
+
+## The prompt cache
+
+A Claude Code session's system prompt keeps only what does not change between sessions; the working directory, auto-memory and the git status go to the first message (P219, `images/session/runner/main.ts`: `excludeDynamicSections`, `snapshot`). The lead's briefing goes from what changes least to what changes most. `node scripts/prompt-cache.ts` (`scripts/prompt-cache.ts`) measures it on a reference fake run with a model of the cache: 20.5 % of the estimated input tokens served before, 36.1 % after, 4.0 % both ways with `--no-system-entry`. No real run has measured it yet: [docs/adapters.md](../docs/adapters.md#the-system-prompt-and-the-prompt-cache-2026-10-25-issue-335-not-verified-by-a-run) lists the checks.
+
+## Skills
+
+A session reads the project's skills: the base branch's `.claude/skills` is mounted read only in the session's Claude configuration folder, and the runner gives Claude Code `settingSources: ['user']`, which reads that folder and not the checkout's own `.claude/` (B5.5b, `images/session/runner/main.ts`). The `claude-code` section of the doctor checks it against a real Claude Code; it has not run yet ([docs/adapters.md](../docs/adapters.md#the-user-setting-source-alone-2026-10-25-b55b-not-verified-by-a-run)).
 
 ## The guard
 
-The guard checks every v2 file except the app's web fonts (`app/public/fonts/*.woff2`), which are binary; it says how many it left out, and any other binary file is refused. The guard reads its private-term fingerprint lists from a project's committed `.cleared/agents.conf` (`[guard] salt`, `terms`, `allowed`), as v1 does. This repository commits no such list, so by default, and in CI, `npm run guard` checks secrets, private keys, IBANs, credentials in URLs, email addresses and phone numbers, and no private terms; it says so when it runs. This is a known gap: closing it in CI needs a fingerprint list the guard can read there, either a committed guard configuration with its lists or lists provided to the workflow. To check private terms too, point it at a project whose committed configuration names its lists: `CLEARED_REPO=<project checkout> [ORCH_GUARD_REF=<ref>] npm run guard`.
+The guard checks every v2 file except the app's web fonts (`app/public/fonts/*.woff2`) and its three icons (`app/public/icons/icon-192.png`, `icon-512.png` and `apple-touch-icon.png`, by exact name), which are binary; it says how many it left out, and any other binary file is refused. The guard reads its private-term fingerprint lists from a project's committed `.cleared/agents.conf` (`[guard] salt`, `terms`, `allowed`), as v1 does. This repository commits no such list, so by default, and in CI, `npm run guard` checks secrets, private keys, IBANs, credentials in URLs, email addresses and phone numbers, and no private terms; it says so when it runs. This is a known gap: closing it in CI needs a fingerprint list the guard can read there, either a committed guard configuration with its lists or lists provided to the workflow. To check private terms too, point it at a project whose committed configuration names its lists: `CLEARED_REPO=<project checkout> [ORCH_GUARD_REF=<ref>] npm run guard`. The lines changed since `--base` leave out `package-lock.json`, which npm writes: the strict mode reads a dependency named `js-tokens` with a version range as an assigned secret. The tree check still reads the whole lock file. `app/dist/` is not checked: it is built, and git ignores it.
 
 ## CI
 
-`.github/workflows/v2.yml` runs on pull requests to `v2`: `npm ci`, `npm test`, `npx tsc --noEmit`, then the guard with `--base` set to the pull request's base branch.
+`.github/workflows/v2.yml` runs on pull requests to `v2`: `npm ci`, `npm run typecheck` (the service, the app's server and the front end), `npm run build` (Vite), `npm test`, then the guard with `--base` set to the pull request's base branch. The job sets every opt-out of the front end's packages: `SCARF_ANALYTICS=false`, `DO_NOT_TRACK=1` and `COPILOTKIT_TELEMETRY_DISABLED=true`.
 
 ## Docker
 

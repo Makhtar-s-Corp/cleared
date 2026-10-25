@@ -1,10 +1,15 @@
 // The policy that answers a harness's permission requests, per role
-// (docs/v2/milestone-1-plan.md, section 5). Order: deny, then the compound
-// command check, then allow (learned answers included), then ask. The deny
-// rules read the raw text, every part of it, so that a compound command that
-// names the base branch, a production host or a secret is denied, not asked.
-// The allow rules read the one simple command a strict shell-word parser
-// finds, word for word, never a prefix of the raw text.
+// (docs/v2/milestone-1-plan.md, section 5). Order: deny, then the lead's
+// rows for the lead (docs/v2/milestone-2-plan.md, section 3.3), then the
+// compound command check, then allow (learned answers included), then ask.
+// The deny rules read the raw text, every part of it, so that a compound
+// command that names the base branch, a production host or a secret is
+// denied, not asked. The allow rules read each simple command a strict
+// shell-word parser finds, word for word, never a prefix of the raw text: a
+// list of simple commands each allowed on its own is allowed as a whole
+// (milestone 2, decision 10). A reader's verdicts (decision 28) are the
+// reviewer's with the lead's cap on a Read, with no learned answer, and
+// what would ask is refused: nobody answers a reader's requests.
 import { posix } from 'node:path';
 import type { Role } from './contract.ts';
 
@@ -24,6 +29,18 @@ export type Policy = {
   readonly forbiddenHosts: readonly string[]; // production and anything the project names
   readonly ticketFiles: readonly string[];    // what the ticket branch changed so far, relative to the workdir
   readonly learned: readonly { readonly tool: string; readonly pattern: string }[]; // "always in this project" answers
+  // An author whose session plan waits for its Go (milestone 2, decision 22):
+  // it reads and runs the checks, and writes nothing but its HANDOVER.md.
+  readonly planning?: boolean;
+  // The daily skill ticket's one file under .claude/ (milestone 2 decision
+  // 27, O12): its path relative to the workdir, set by the flow only for a
+  // ticket the knowledge module made. An edit of exactly that file is
+  // allowed; nothing else under .claude/ is.
+  readonly skillFile?: string;
+  // The reviewer's one command that runs code (issue #268): the service's
+  // declared test command, its words. A reviewer runs it and its reads,
+  // nothing else that runs or writes; none declared, it runs no code.
+  readonly testCommand?: readonly string[];
 };
 
 export type ToolRequest = {
@@ -56,6 +73,64 @@ export const DEFAULT_SAFE_COMMANDS: readonly string[] = [
   'pwd',
 ];
 
+// The reviewer's own reads, on top of the safe commands (owner decision of
+// 2026-10-22 22:03): what a review runs to find the ticket's change and read
+// it. The reviewer's only, so that neither the author nor the reader, whose
+// policy is built from DEFAULT_SAFE_COMMANDS, gains them.
+export const REVIEWER_READS: readonly string[] = [
+  'git show', 'git show *',
+  'git merge-base *',
+  'git rev-parse *',
+  'rg *',
+  'wc', 'wc *',
+];
+
+// The safe commands a reviewer keeps (issue #268): milestone 1's reads.
+// The test runners of DEFAULT_SAFE_COMMANDS, git add, commit and checkout,
+// and the project's own safe commands are not a reviewer's.
+export const REVIEWER_SAFE_READS: readonly string[] = [
+  'git status', 'git status *',
+  'git diff', 'git diff *',
+  'git log', 'git log *',
+  'git branch', 'git branch --show-current',
+  'ls', 'ls *',
+  'cat *', 'head *', 'tail *', 'grep *', 'find *',
+  'pwd',
+];
+
+// What a reviewer never runs (issue #268), wherever it stands in a command:
+// a program that writes files, and git's commands that change the checkout,
+// its refs or a remote. A program that runs code (RUNNERS) is refused unless
+// it is the declared test command, word for word.
+const WRITERS = new Set(['rm', 'mv', 'cp', 'touch', 'mkdir', 'rmdir', 'ln', 'chmod', 'chown', 'tee', 'dd', 'truncate', 'install', 'patch', 'rsync', 'unzip', 'tar']);
+const GIT_WRITES = new Set(['add', 'commit', 'push', 'checkout', 'switch', 'reset', 'restore', 'rm', 'mv', 'stash', 'merge', 'rebase', 'cherry-pick', 'revert', 'apply', 'am', 'clean', 'tag', 'pull', 'fetch', 'worktree', 'update-index', 'update-ref', 'gc', 'init', 'clone', 'config', 'notes', 'submodule']);
+const RUNNERS = new Set(['npm', 'npx', 'pnpm', 'yarn', 'bun', 'deno', 'node', 'tsx', 'ts-node', 'vitest', 'jest', 'mocha', 'tsc', 'make', 'python', 'python3', 'pytest', 'cargo', 'go', 'perl', 'ruby', 'sh', 'bash', 'zsh', 'dash']);
+
+const unquoted = (word: string) => word.replace(/^(['"])(.*)\1$/s, '$2');
+
+// The declared test command, word for word: no variable before it, no option added.
+function isTestCommand(words: readonly string[], policy: Policy): boolean {
+  const declared = policy.testCommand;
+  return declared !== undefined && declared.length > 0 && words.length === declared.length && words.every((word, i) => unquoted(word) === declared[i]);
+}
+
+// The reviewer's refusal of a loose command, or undefined.
+function reviewerWrite(words: readonly string[], policy: Policy): string | undefined {
+  if (isTestCommand(words, policy)) return undefined;
+  const programs = commandWords(words);
+  const writer = programs.find((program) => WRITERS.has(program));
+  if (writer) return `${writer} writes files`;
+  if (programs.some((program) => program === 'sed' || program === 'perl') && words.some((word) => /^-[A-Za-z]*i/.test(word) || word.startsWith('--in-place')))
+    return 'an in-place edit writes files';
+  const git = gitCommand(words)?.rest ?? [];
+  if (git[0] !== undefined && GIT_WRITES.has(git[0])) return `git ${git[0]} changes the checkout or its refs`;
+  if (git[0] === 'branch' && git.slice(1).some((word) => !['--show-current', '--list', '-l', '-a', '--all', '-r', '--remotes', '-v', '-vv', '--verbose', '--contains', '--merged', '--no-merged'].includes(word) && word.startsWith('-')))
+    return 'git branch with that option changes the refs';
+  const runner = programs.find((program) => RUNNERS.has(program));
+  if (runner) return `${runner} runs code`;
+  return undefined;
+}
+
 const READ_TOOLS = new Set(['Read', 'Glob', 'Grep']);
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 
@@ -69,20 +144,27 @@ const ask = (rule: string, reason: string): Verdict => ({ decision: 'ask', rule,
 // else: a list, a pipe, a redirection, a substitution, an expansion, a
 // newline, an unclosed quote, or nothing at all. Quotes and backslashes are
 // understood; every other special character is refused, so that what runs is
-// exactly the words returned.
-export function parseCommand(text: string): readonly string[] | undefined {
+// exactly the words returned. `globs` (the proofs' driver only,
+// scripts/proof-inbox.ts) also reads an unquoted *, ? or [ in a word with no
+// slash that does not start with a dot: it names files of the current folder
+// only, never `..` nor another folder; the policy never passes it.
+export type ParseOptions = { readonly globs?: boolean };
+export function parseCommand(text: string, options: ParseOptions = {}): readonly string[] | undefined {
   const words: string[] = [];
   let word = '';
   let started = false;
   let bare = '';                                  // the unquoted characters of the word, for brace expansion
+  let globbed = false;                            // an unquoted *, ? or [ in the word (options.globs)
   let i = 0;
   const end = () => {
     if (started) {
       if (/\{[^}]*(?:,|\.\.)[^}]*\}/.test(bare)) return false;
+      if (globbed && (word.includes('/') || word.startsWith('.'))) return false;
       words.push(word);
     }
     word = '';
     bare = '';
+    globbed = false;
     started = false;
     return true;
   };
@@ -123,6 +205,12 @@ export function parseCommand(text: string): readonly string[] | undefined {
       word += next;
       started = true;
       i += 2;
+    } else if (options.globs && '*?['.includes(c)) {
+      word += c;
+      bare += c;
+      globbed = true;
+      started = true;
+      i++;
     } else if (';&|<>()`$\n\r*?['.includes(c)) {
       return undefined;
     } else if ((c === '#' || c === '~') && !started) {
@@ -147,6 +235,112 @@ function looseCommands(text: string): string[][] {
     .split(/\$\(|[;&|\n\r()`<>{}]/)
     .map((part) => part.trim().split(/\s+/).filter(Boolean))
     .filter((words) => words.length > 0);
+}
+
+// One simple command of a list: its words, the operator that joins it to
+// the one before, and what its redirections do.
+export type SimpleCommand = {
+  readonly words: readonly string[];
+  readonly after: ';' | '&&' | '||' | '|' | null;
+  readonly writes: readonly string[];         // the files its > and >> write, whatever the stream
+  readonly redirected: boolean;               // any redirection, a duplication such as 2>&1 included
+};
+
+// A list of simple commands joined by &&, ||, ; or |, each read by
+// parseCommand, with its output redirections taken out: `>`, `>>`, `N>`,
+// `&>` with one word as the target, and the duplications `N>&M`. Anything
+// else is undefined: a lone & (background), |&, >|, an empty command, an
+// input redirection or a here-document (parseCommand refuses <), and
+// whatever parseCommand refuses in a part or a target. Quotes and
+// backslashes are skipped whole, so a separator inside them is a character.
+export function parseList(text: string, options: ParseOptions = {}): readonly SimpleCommand[] | undefined {
+  const list: SimpleCommand[] = [];
+  let part = '';
+  let writes: string[] = [];
+  let redirected = false;
+  let after: SimpleCommand['after'] = null;
+  let i = 0;
+  // The quoted or escaped run that starts at i, copied whole; false when it does not close.
+  const quoted = (): string | false => {
+    const c = text[i] as string;
+    if (c === '\\') return i + 1 < text.length ? text.slice(i, i + 2) : false;
+    if (c === "'") {
+      const close = text.indexOf("'", i + 1);
+      return close < 0 ? false : text.slice(i, close + 1);
+    }
+    let j = i + 1;
+    while (j < text.length && text[j] !== '"') j += text[j] === '\\' ? 2 : 1;
+    return j < text.length ? text.slice(i, j + 1) : false;
+  };
+  const end = (next: SimpleCommand['after']): boolean => {
+    const words = parseCommand(part, options);
+    if (!words) return false;
+    list.push({ words, after, writes, redirected });
+    part = '';
+    writes = [];
+    redirected = false;
+    after = next;
+    return true;
+  };
+  // A redirection at i, after its `>`, `>>` or `&>`: a duplication, or a target word.
+  const redirect = (): boolean => {
+    redirected = true;
+    if (text[i] === '|') return false;
+    if (text[i] === '&') {
+      const digits = /^[0-9]+/.exec(text.slice(i + 1))?.[0];
+      if (!digits) return false;
+      i += 1 + digits.length;
+      return i >= text.length || ' \t;&|'.includes(text[i] as string);
+    }
+    while (text[i] === ' ' || text[i] === '\t') i++;
+    let raw = '';
+    while (i < text.length && !' \t;&|<>()\n\r'.includes(text[i] as string)) {
+      const run = '\\\'"'.includes(text[i] as string) ? quoted() : (text[i] as string);
+      if (run === false) return false;
+      raw += run;
+      i += run.length;
+    }
+    const target = parseCommand(raw);
+    if (target?.length !== 1 || target[0] === '') return false;
+    writes.push(target[0] as string);
+    return true;
+  };
+  while (i < text.length) {
+    const c = text[i] as string;
+    const next = text[i + 1];
+    if (c === '\\' || c === "'" || c === '"') {
+      const run = quoted();
+      if (run === false) return undefined;
+      part += run;
+      i += run.length;
+    } else if (c === ';') {
+      if (!end(';')) return undefined;
+      i++;
+    } else if (c === '&' && next === '&') {
+      if (!end('&&')) return undefined;
+      i += 2;
+    } else if (c === '|' && next === '|') {
+      if (!end('||')) return undefined;
+      i += 2;
+    } else if (c === '|') {
+      if (next === '&' || !end('|')) return undefined;
+      i++;
+    } else if (c === '&' && next === '>') {
+      i += next === '>' && text[i + 2] === '>' ? 3 : 2;
+      if (!redirect()) return undefined;
+    } else if (c === '&') {
+      return undefined;
+    } else if (c === '>') {
+      // A file descriptor is digits standing alone just before the >.
+      part = part.replace(/(^|[ \t])[0-9]+$/, '$1');
+      i += next === '>' ? 2 : 1;
+      if (!redirect()) return undefined;
+    } else {
+      part += c;
+      i++;
+    }
+  }
+  return end(null) ? list : undefined;
 }
 
 const basename = (word: string) => word.slice(word.lastIndexOf('/') + 1);
@@ -389,11 +583,31 @@ function denied(request: ToolRequest, policy: Policy): Verdict | undefined {
     if (commandWords(words).includes('printenv') || printsEnvironment(words))
       return deny('secret.read', 'the environment of a session holds its login and is never printed');
   }
-  if (policy.role === 'reviewer') {
-    if (EDIT_TOOLS.has(request.tool)) return deny('reviewer.edit', 'a reviewer reads and runs the checks; it does not edit');
+  if (policy.role === 'reviewer' || policy.role === 'reader') {
+    const rule = `${policy.role}.edit`;
+    if (EDIT_TOOLS.has(request.tool)) return deny(rule, `a ${policy.role} reads and runs the checks; it does not edit`);
     for (const words of commands) {
       const sub = gitCommand(words)?.rest[0];
-      if (sub === 'commit' || sub === 'push') return deny('reviewer.edit', `a reviewer does not run git ${sub}`);
+      if (sub === 'commit' || sub === 'push') return deny(rule, `a ${policy.role} does not run git ${sub}`);
+    }
+  }
+  if (policy.role === 'reviewer') {
+    // Read word for word when the parser can, so that `npm test 2>&1` is the
+    // test command; else loosely, where a runner or a writer is refused.
+    const exact = command === undefined ? undefined : parseList(command)?.map((part) => part.words);
+    for (const words of exact ?? commands) {
+      const why = reviewerWrite(words, policy);
+      if (why === undefined) continue;
+      const declared = policy.testCommand?.join(' ');
+      return deny(why.endsWith('runs code') ? 'reviewer.run' : 'reviewer.edit', `${why}: a reviewer reads the code and runs ${declared ? `the service's declared test command, \`${declared}\`, exactly as declared` : 'no command that runs code, since the service declares no test command'}, and nothing else`);
+    }
+  }
+  if (policy.role === 'author' && policy.planning === true) {
+    const why = 'until its session plan has its Go, the session reads and runs the checks, and changes nothing but HANDOVER.md';
+    if (EDIT_TOOLS.has(request.tool) && !isHandover(request, policy)) return deny('plan.before_go', why);
+    for (const words of commands) {
+      const sub = gitCommand(words)?.rest[0];
+      if (sub === 'commit' || sub === 'push' || sub === 'add' || sub === 'checkout' || commandWords(words).includes('rm')) return deny('plan.before_go', why);
     }
   }
   return undefined;
@@ -435,12 +649,21 @@ function packageChange(request: ToolRequest, path: string, context: PolicyContex
   return 'none';
 }
 
+// An edit of HANDOVER.md at the root of the workdir.
+function isHandover(request: ToolRequest, policy: Policy): boolean {
+  const path = request.input.file_path ?? request.input.notebook_path;
+  return typeof path === 'string' && inside(policy.workdir, path) && relative(policy.workdir, path) === 'HANDOVER.md';
+}
+
 function allowedEdit(request: ToolRequest, policy: Policy, context: PolicyContext): Verdict | undefined {
   const path = request.input.file_path ?? request.input.notebook_path;
   if (typeof path !== 'string' || !inside(policy.workdir, path)) return undefined;
   const parts = relative(policy.workdir, path).split('/');
-  // Generated (CLAUDE.md), locked (.claude/) or run by git on the host (.git/).
-  if (parts.includes('.claude') || parts.includes('.git') || parts.at(-1) === 'CLAUDE.md') return undefined;
+  if (policy.skillFile !== undefined && request.tool !== 'NotebookEdit' && parts.join('/') === policy.skillFile) return allow('edit.skill');
+  // Generated (CLAUDE.md), locked (.claude/, .cursor/, where the Cursor
+  // harness's permissions are written, and .codex/, a project's own Codex
+  // configuration) or run by git on the host (.git/).
+  if (parts.includes('.claude') || parts.includes('.cursor') || parts.includes('.codex') || parts.includes('.git') || parts.at(-1) === 'CLAUDE.md') return undefined;
   const name = parts.at(-1);
   if (name === 'package-lock.json' || name === 'npm-shrinkwrap.json') return ask('install.package', 'an edit of the lock file changes the installed packages');
   if (name === 'package.json') {
@@ -459,45 +682,199 @@ function allowedRead(request: ToolRequest, policy: Policy): Verdict | undefined 
   return paths.every((path) => typeof path === 'string' && inside(policy.workdir, path)) ? allow('read.workdir') : undefined;
 }
 
+// The options a read may take, by program (review round 1 of pull request
+// 240): an allowlist, never a list of the dangerous ones. `flags` are the
+// short options without a value, `values` those with one (the rest of the
+// group, or the next word); `long` names each long option whole, with
+// whether it takes a value. GNU programs and git's parse-options take any
+// unambiguous prefix of a long option (`wc --files0=` is `--files0-from=`),
+// so a long option matches only by its whole name: an abbreviation asks.
+// `--` ends the options. `digits`: the old count form, `head -20`.
+type OptionSpec = {
+  readonly flags: string;
+  readonly values: string;
+  readonly long: Readonly<Record<string, 'flag' | 'value' | 'optional'>>;
+  readonly digits?: boolean;
+};
+
+const longs = (kind: 'flag' | 'value' | 'optional', names: string) => Object.fromEntries(names.split(' ').map((name) => [`--${name}`, kind]));
+
+const READ_OPTIONS: Readonly<Record<string, OptionSpec>> = {
+  cat: { flags: 'AbeEnstTuv', values: '', long: longs('flag', 'show-all number-nonblank show-ends number squeeze-blank show-tabs show-nonprinting') },
+  head: { flags: 'qvz', values: 'cn', digits: true, long: { ...longs('flag', 'quiet silent verbose zero-terminated'), ...longs('value', 'bytes lines') } },
+  // No -f or -F: a tail that follows never ends.
+  tail: { flags: 'qvz', values: 'cn', digits: true, long: { ...longs('flag', 'quiet silent verbose zero-terminated'), ...longs('value', 'bytes lines') } },
+  ls: {
+    flags: 'aAbBcCdfFgGhHiklLmnNopqQrRsStuUvxXZ1', values: 'ITw',
+    long: {
+      ...longs('flag', 'all almost-all author escape ignore-backups directory file-type full-time group-directories-first no-group human-readable si dereference-command-line dereference-command-line-symlink-to-dir inode kibibytes dereference numeric-uid-gid literal hide-control-chars show-control-chars quote-name reverse recursive size context zero'),
+      ...longs('value', 'block-size format hide indicator-style ignore quoting-style sort time time-style tabsize width'),
+      ...longs('optional', 'color classify hyperlink'),
+    },
+  },
+  // No --files0-from: it reads the names of the files to count from a file.
+  wc: { flags: 'cmlLw', values: '', long: { ...longs('flag', 'bytes chars lines max-line-length words'), ...longs('value', 'total') } },
+  // No -f, --file or --exclude-from: they read a file.
+  grep: {
+    flags: 'abcEFGhHiIlLnoPqrRsTUvVwxyzZ', values: 'ABCDdem', digits: true,
+    long: {
+      ...longs('flag', 'extended-regexp fixed-strings basic-regexp perl-regexp ignore-case no-ignore-case word-regexp line-regexp null-data no-messages invert-match count files-with-matches files-without-match only-matching quiet silent byte-offset line-number no-line-number line-buffered with-filename no-filename initial-tab null text recursive dereference-recursive'),
+      ...longs('value', 'max-count label after-context before-context context binary-files devices directories include exclude exclude-dir regexp'),
+      ...longs('optional', 'color colour'),
+    },
+  },
+  // No --pre or --pre-glob (a program run on every file), --hostname-bin (a
+  // program), -z or --search-zip (decompression programs), -f, --file or
+  // --ignore-file (a file read). ripgrep takes no abbreviation of a long
+  // option; the whole-name match holds whatever its version does.
+  rg: {
+    flags: 'acFHiIlLnNopqsSuUvwx0bPV', values: 'ABCeEgjmMrtT',
+    long: {
+      ...longs('flag', 'files type-list count count-matches files-with-matches files-without-match fixed-strings hidden no-hidden ignore-case smart-case case-sensitive line-number no-line-number no-heading heading no-ignore no-ignore-vcs no-ignore-parent no-ignore-dot no-ignore-global no-ignore-exclude no-ignore-files word-regexp line-regexp invert-match only-matching json vimgrep stats multiline multiline-dotall pcre2 no-pcre2 null null-data trim quiet text binary no-binary follow no-follow unrestricted column no-column no-filename with-filename passthru one-file-system no-messages crlf no-config byte-offset max-columns-preview no-require-git glob-case-insensitive line-buffered block-buffered no-unicode'),
+      ...longs('value', 'after-context before-context context context-separator glob iglob max-count max-columns max-depth max-filesize type type-not regexp replace color colors sort sortr encoding threads engine path-separator'),
+    },
+  },
+  // git's own parse-options takes abbreviations too.
+  'git merge-base': { flags: 'a', values: '', long: longs('flag', 'all octopus independent is-ancestor fork-point') },
+  'git rev-parse': {
+    flags: 'q', values: '',
+    long: {
+      ...longs('flag', 'verify quiet show-toplevel show-prefix show-cdup git-dir absolute-git-dir git-common-dir is-inside-work-tree is-inside-git-dir is-bare-repository symbolic symbolic-full-name revs-only no-revs flags no-flags all'),
+      ...longs('optional', 'abbrev-ref short branches tags remotes'),
+    },
+  },
+};
+
+// The operands of a command under its spec, and the options that named a
+// value; undefined when a word is an option the spec does not have.
+function readOptions(args: readonly string[], spec: OptionSpec): { operands: string[]; named: string[] } | undefined {
+  const operands: string[] = [];
+  const named: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const word = args[i] as string;
+    if (word === '--') {
+      operands.push(...args.slice(i + 1));
+      break;
+    }
+    if (!word.startsWith('-') || word === '-') {
+      operands.push(word);
+    } else if (word.startsWith('--')) {
+      const [name = '', value] = word.split(/=(.*)/s);
+      const kind = spec.long[name];
+      if (kind === undefined || (kind === 'flag' && value !== undefined)) return undefined;
+      if (kind === 'value' && value === undefined && ++i >= args.length) return undefined;
+      named.push(name);
+    } else if (!(spec.digits === true && /^-[0-9]+$/.test(word))) {
+      for (let at = 1; at < word.length; at++) {
+        const letter = word[at] as string;
+        if (spec.flags.includes(letter)) continue;
+        if (!spec.values.includes(letter)) return undefined;
+        named.push(`-${letter}`);
+        if (at === word.length - 1 && ++i >= args.length) return undefined;
+        break;
+      }
+    }
+  }
+  return { operands, named };
+}
+
+// find's start points, then its expression, word by word: the tests and the
+// actions that only print. Not -exec, -execdir, -ok, -okdir, -delete,
+// -fprint*, -fls (they run or write), nor -files0-from (start points read
+// from a file). find takes no abbreviation of a primary.
+const FIND_ALONE = new Set(['-print', '-print0', '-ls', '-prune', '-quit', '-empty', '-true', '-false', '-readable', '-writable', '-executable', '-nouser', '-nogroup', '-depth', '-mount', '-xdev', '-noleaf', '-follow', '-daystart', '-ignore_readdir_race', '-noignore_readdir_race', '-not', '-and', '-a', '-or', '-o', '(', ')', '!', ',']);
+const FIND_VALUE = new Set(['-name', '-iname', '-path', '-ipath', '-wholename', '-iwholename', '-regex', '-iregex', '-lname', '-ilname', '-type', '-xtype', '-size', '-mtime', '-mmin', '-atime', '-amin', '-ctime', '-cmin', '-perm', '-user', '-group', '-uid', '-gid', '-links', '-inum', '-maxdepth', '-mindepth', '-regextype', '-printf', '-used', '-fstype']);
+const FIND_PATH = new Set(['-newer', '-anewer', '-cnewer', '-samefile']);
+
+function findUnsafe(args: readonly string[], policy: Policy): boolean {
+  let i = 0;
+  while (args[i] === '-H' || args[i] === '-L' || args[i] === '-P') i++;
+  for (; i < args.length && !(args[i] as string).startsWith('-') && !['(', ')', '!', ','].includes(args[i] as string); i++)
+    if (!inside(policy.workdir, args[i] as string)) return true;
+  for (; i < args.length; i++) {
+    const word = args[i] as string;
+    if (FIND_ALONE.has(word)) continue;
+    if (!FIND_VALUE.has(word) && !FIND_PATH.has(word)) return true;
+    const value = args[++i];
+    if (value === undefined || (FIND_PATH.has(word) && !inside(policy.workdir, value))) return true;
+  }
+  return false;
+}
+
+// Long options of git log, show and diff that write a file, read one or run
+// a program: refused with every prefix of their name too, although those
+// commands refuse an abbreviation (git 2.47, checked by the lane).
+const GIT_UNSAFE_LONG = ['--output', '--output-indicator-new', '--no-index', '--ext-diff', '--orderfile'];
+
 // Words of a safe command that would make it write, run or reach outside.
 function unsafeWords(words: readonly string[], policy: Policy): boolean {
-  const [program] = words;
+  const [program = ''] = words;
   const args = words.slice(1);
   if (program === 'git') {
     const git = gitCommand(words);
     if (!git || git.risky) return true;
     const [sub = '', ...rest] = git.rest;
+    const spec = READ_OPTIONS[`git ${sub}`];
+    if (spec) {
+      const read = readOptions(rest, spec);
+      return !read || read.operands.some((path) => !inside(policy.workdir, path));
+    }
     const { options, operands } = gitArguments(sub, rest);
     // A file read through git: a path outside the workdir (git diff reads
     // two paths without --no-index when one is outside), a message file.
     if (operands.some((path) => !inside(policy.workdir, path))) return true;
     if (sub === 'commit' && options.some((word) => /^--(?:file|template|reuse-message|reedit-message)(?:=|$)/.test(word) || /^-[A-Za-z]*[FtCc]/.test(word))) return true;
-    return options.some((word) =>
-      word === '--no-index' || word.startsWith('--output') || word === '-o' || ((word.startsWith('--format') || word.startsWith('--pretty')) && /%\(|%x/.test(word)));
+    return options.some((word) => {
+      const name = word.split('=')[0] as string;
+      return (name.length > 2 && GIT_UNSAFE_LONG.some((unsafe) => unsafe.startsWith(name))) || name.startsWith('--output') || word === '-o' || word.startsWith('-O') ||
+        ((word.startsWith('--format') || word.startsWith('--pretty')) && /%\(|%x/.test(word));
+    });
   }
-  if (program === 'find') {
-    const firstExpression = args.findIndex((word) => word.startsWith('-') || word === '(' || word === '!');
-    const starts = firstExpression < 0 ? args : args.slice(0, firstExpression);
-    if (starts.some((path) => !inside(policy.workdir, path))) return true;
-    return args.some((word) => ['-delete', '-exec', '-execdir', '-ok', '-okdir', '-fls'].includes(word) || word.startsWith('-fprint'));
-  }
-  if (program === 'grep') {
-    if (args.some((word) => word === '-f' || word.startsWith('--file') || /^-[A-Za-z]*f/.test(word))) return true;
-    const operands = args.filter((word) => !word.startsWith('-'));
-    const named = args.some((word) => word === '-e' || word.startsWith('--regexp'));
-    return (named ? operands : operands.slice(1)).some((path) => !inside(policy.workdir, path));
-  }
-  if (program === 'cat' || program === 'head' || program === 'tail' || program === 'ls')
-    return args.filter((word) => !word.startsWith('-')).some((path) => !inside(policy.workdir, path));
-  return false;
+  if (program === 'find') return findUnsafe(args, policy);
+  const spec = READ_OPTIONS[program];
+  if (!spec) return false;
+  const read = readOptions(args, spec);
+  if (!read) return true;
+  // grep and rg: the first operand is the pattern, unless -e or --regexp
+  // named one, or rg --files looks for none.
+  const searches = program === 'grep' || program === 'rg';
+  const patternNamed = read.named.some((option) => option === '-e' || option === '--regexp' || option === '--files');
+  const paths = searches && !patternNamed ? read.operands.slice(1) : read.operands;
+  return paths.some((path) => !inside(policy.workdir, path));
+}
+
+const folded = (words: readonly string[]) => (words[0] === 'git' ? ['git', ...(gitCommand(words)?.rest ?? [])] : words);
+
+// A command one of the patterns matches, with none of its unsafe words.
+function matches(words: readonly string[], patterns: readonly string[], policy: Policy): boolean {
+  const command = folded(words);
+  return patterns.some((pattern) => globWords(splitPattern(pattern), command)) && !unsafeWords(words, policy);
 }
 
 function safeCommand(words: readonly string[], policy: Policy): boolean {
-  const folded = words[0] === 'git' ? ['git', ...(gitCommand(words)?.rest ?? [])] : words;
-  if (folded[0] === 'npm' && folded[1] === 'run' && folded[2] !== undefined && policy.scripts.includes(folded[2]) && (folded.length === 3 || folded[3] === '--'))
-    return true;
-  if (!policy.safeCommands.some((pattern) => globWords(splitPattern(pattern), folded))) return false;
-  return !unsafeWords(words, policy);
+  const [program, run, script, rest] = folded(words);
+  if (program === 'npm' && run === 'run' && script !== undefined && policy.scripts.includes(script) && (rest === undefined || rest === '--')) return true;
+  return matches(words, policy.safeCommands, policy);
+}
+
+// An author deletes a file its ticket changed without asking (milestone 2,
+// decision 11): plain `rm`, with `-f` at most, every operand inside the
+// workdir and in ticketFiles, which the service fills from the edits the
+// ticket's sessions made. A recursive or any other option, an operand the
+// ticket did not change, or another role falls to the asks below.
+function ticketDeletion(words: readonly string[], policy: Policy): boolean {
+  if (policy.role !== 'author' || words[0] !== 'rm') return false;
+  const operands: string[] = [];
+  let options = true;
+  for (const word of words.slice(1)) {
+    if (options && word === '--') { options = false; continue; }
+    if (options && word.startsWith('-')) {
+      if (word === '-f' || word === '--force') continue;
+      return false;
+    }
+    operands.push(word);
+  }
+  return operands.length > 0 && operands.every((path) => inside(policy.workdir, path) && policy.ticketFiles.includes(relative(policy.workdir, path)));
 }
 
 function learned(request: ToolRequest, words: readonly string[] | undefined, policy: Policy): boolean {
@@ -543,16 +920,154 @@ function asked(request: ToolRequest, words: readonly string[] | undefined, polic
   return ask('default', 'no rule allows this request');
 }
 
+// ---------------------------------------------------------------- compound
+
+const GENERIC = 'default';
+
+// One part of a list: its command, then each file it writes, which must be
+// one an Edit may write without asking. A deny of either wins; else the
+// first ask, with its own rule when it has one.
+function part(request: ToolRequest, command: SimpleCommand, policy: Policy, context: PolicyContext): Verdict {
+  const verdict = simple(request, command.words, policy);
+  let asked: Verdict | undefined =
+    verdict.decision !== 'ask' ? undefined : verdict.rule === GENERIC ? ask('shell.compound', `${command.words.join(' ')} is not a command the policy allows on its own`) : verdict;
+  for (const target of command.writes) {
+    const edit = evaluate({ tool: 'Write', input: { file_path: target } }, policy, context);
+    if (edit.decision === 'allow' && edit.rule === 'edit.workdir') continue;
+    if (edit.decision === 'deny') return edit;
+    asked ??= edit.decision === 'ask' && edit.rule !== GENERIC
+      ? ask(edit.rule, `the redirection to ${target}: ${edit.reason}`)
+      : ask('shell.compound', `the redirection writes ${target}, which an edit could not write without asking`);
+  }
+  return asked ?? allow('shell.compound_safe');
+}
+
+// A list of simple commands, split part by part (owner decision of
+// 2026-10-22 22:03): allowed when every part is; denied when any part is,
+// wherever it stands, so that an "Allow once" given to an earlier part never
+// runs a later one the policy denies; else it asks for the parts that ask
+// and names them, and only them, with the rule of the first.
+function compound(request: ToolRequest, command: string, policy: Policy, context: PolicyContext): Verdict {
+  const list = parseList(command);
+  if (!list) return ask('shell.compound', 'shell syntax the policy does not read word for word');
+  const asks: { readonly words: readonly string[]; readonly verdict: Extract<Verdict, { decision: 'ask' }> }[] = [];
+  for (const command of list) {
+    const verdict = part(request, command, policy, context);
+    if (verdict.decision === 'deny') return verdict;
+    if (verdict.decision === 'ask') asks.push({ words: command.words, verdict });
+  }
+  const [first] = asks;
+  if (!first) return allow('shell.compound_safe');
+  if (asks.length === 1) return first.verdict;
+  const reasons = asks.map(({ words, verdict }) => (verdict.reason.startsWith(words.join(' ')) ? verdict.reason : `${words.join(' ')}: ${verdict.reason}`));
+  return ask(first.verdict.rule, `${asks.length} parts of this command ask, the others are allowed: ${reasons.join('; ')}`);
+}
+
+// ---------------------------------------------------------------- lead
+
+// The longest Read, and the longest head, the lead may ask for: one answer
+// stays far below the distance between the handover point and the
+// threshold (milestone 2 plan, section 4.1).
+export const LEAD_READ_LINES = 400;
+
+const LEAD_GIT_READS = ['git log *', 'git show *', 'git diff *', 'git status', 'git branch --show-current'].map(splitPattern);
+const LEAD_DELEGATES = new Set(['WebFetch', 'WebSearch', 'Agent', 'Task']);
+
+// `head -n N` or `head -nN` with N from 1 to LEAD_READ_LINES, and the files
+// it reads; undefined for any other head.
+function capped(words: readonly string[]): readonly string[] | undefined {
+  if (words[0] !== 'head') return undefined;
+  const option = words[1] === '-n' ? words[2] : words[1]?.startsWith('-n') ? words[1].slice(2) : undefined;
+  if (option === undefined || !/^[1-9][0-9]*$/.test(option) || Number(option) > LEAD_READ_LINES) return undefined;
+  return words.slice(words[1] === '-n' ? 3 : 2);
+}
+
+// The lead's shell reads: a git read alone or piped into head, ls, grep or
+// find piped into head, or head itself reading one file, all under the
+// workdir and under milestone 1's conditions on their words. A head takes
+// its one count and nothing else: a second count, a byte count or several
+// files would lift the cap.
+function leadRead(command: string, policy: Policy): boolean {
+  const list = parseList(command);
+  if (!list || list.length > 2 || list.some((part) => part.redirected)) return false;
+  const [first, pipe] = list as [SimpleCommand, SimpleCommand | undefined];
+  if (pipe && (pipe.after !== '|' || capped(pipe.words)?.length !== 0)) return false;
+  const words = first.words;
+  if (words[0] === 'git') {
+    const git = gitCommand(words);
+    return !!git && !git.risky && LEAD_GIT_READS.some((pattern) => globWords(pattern, ['git', ...git.rest])) && !unsafeWords(words, policy);
+  }
+  if (words[0] === 'head') {
+    const files = capped(words);
+    return files?.length === 1 && !(files[0] as string).startsWith('-') && !unsafeWords(words, policy);
+  }
+  return pipe !== undefined && (words[0] === 'ls' || words[0] === 'grep' || words[0] === 'find') && !unsafeWords(words, policy);
+}
+
+// Section 3.3 of the milestone 2 plan, for the lead only: what is not
+// decided here goes on to the role-free rows.
+function leadRows(request: ToolRequest, policy: Policy): Verdict | undefined {
+  const { tool, input } = request;
+  if (tool.startsWith('mcp__cleared__')) return allow('lead.tools');
+  if (tool === 'Read') {
+    const limit = input.limit;
+    if (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > LEAD_READ_LINES)
+      return deny('lead.read_cap', `read with a limit of at most ${LEAD_READ_LINES} lines (the limit parameter), and an offset for the next part`);
+    return allowedRead(request, policy);
+  }
+  if (tool === 'Glob' || tool === 'Grep') return allowedRead(request, policy);
+  if (EDIT_TOOLS.has(tool)) return deny('lead.edit', 'the lead edits nothing: a change is a ticket of a plan');
+  if (tool === 'Bash') {
+    const command = typeof input.command === 'string' ? input.command : '';
+    if (leadRead(command, policy)) return allow('lead.git_read');
+    for (const words of looseCommands(command)) {
+      const sub = gitCommand(words)?.rest[0];
+      if (sub === 'commit' || sub === 'push' || sub === 'checkout' || sub === 'add') return deny('lead.edit', `the lead does not run git ${sub}: a change is a ticket of a plan`);
+    }
+    return deny('lead.command', `the lead runs nothing: it reads with git log, show, diff and status, and with ls, grep and find piped into head -n ${LEAD_READ_LINES} at most`);
+  }
+  if (LEAD_DELEGATES.has(tool)) return deny('lead.command', 'the lead reaches no network and starts no agent: it gives the work to a ticket');
+  return undefined;
+}
+
 // ---------------------------------------------------------------- evaluate
 
+// The longest Read a reader may ask for, as the lead's: an answer about the
+// code reads it in parts.
+export const READER_READ_LINES = LEAD_READ_LINES;
+
+// A reader (decision 28): its own rows, then the rows every role has, with
+// no learned answer; an ask becomes a refusal that keeps its reason.
+function readerVerdict(request: ToolRequest, policy: Policy, context: PolicyContext): Verdict {
+  const refused = denied(request, policy);
+  if (refused) return refused;
+  if (request.tool === 'AskUserQuestion') return deny('reader.question', 'nobody answers a reader\'s questions: answer from what the code shows, and say what it does not');
+  const limit = request.input.limit;
+  if (request.tool === 'Read' && (typeof limit !== 'number' || !Number.isInteger(limit) || limit < 1 || limit > READER_READ_LINES))
+    return deny('reader.read_cap', `read with a limit of at most ${READER_READ_LINES} lines (the limit parameter), and an offset for the next part`);
+  const verdict = rules(request, { ...policy, learned: [] }, context);
+  return verdict.decision === 'ask' ? deny('reader.ask', `a reader reads only and waits for nobody: ${verdict.reason}`) : verdict;
+}
+
 export function evaluate(request: ToolRequest, policy: Policy, context: PolicyContext = {}): Verdict {
+  if (policy.role === 'reader') return readerVerdict(request, policy, context);
+  return rules(request, policy, context);
+}
+
+function rules(request: ToolRequest, policy: Policy, context: PolicyContext): Verdict {
   const refused = denied(request, policy);
   if (refused) return refused;
 
+  if (policy.role === 'lead') {
+    const lead = leadRows(request, policy);
+    if (lead) return lead;
+  }
+
   let words: readonly string[] | undefined;
   if (request.tool === 'Bash') {
-    words = typeof request.input.command === 'string' ? parseCommand(request.input.command) : undefined;
-    if (!words) return ask('shell.compound', 'more than one simple command, or shell syntax the policy does not read word for word');
+    const command = typeof request.input.command === 'string' ? request.input.command : undefined;
+    words = command === undefined ? undefined : parseCommand(command);
+    if (!words) return command === undefined ? ask('shell.compound', 'a command the policy cannot read') : compound(request, command, policy, context);
   }
 
   if (READ_TOOLS.has(request.tool)) {
@@ -563,8 +1078,23 @@ export function evaluate(request: ToolRequest, policy: Policy, context: PolicyCo
     const edit = allowedEdit(request, policy, context);
     if (edit) return edit;
   }
-  if (words && safeCommand(words, policy)) return allow('run.safe');
-  if (learned(request, words, policy)) return allow('learned');
+  if (words) return simple(request, words, policy);
+  if (learned(request, undefined, policy)) return allow('learned');
 
+  return asked(request, undefined, policy);
+}
+
+// The verdict of one simple command, after the deny rules.
+function simple(request: ToolRequest, words: readonly string[], policy: Policy): Verdict {
+  if (policy.role === 'reviewer') {
+    if (isTestCommand(words, policy)) return allow('reviewer.tests');
+    if (matches(words, REVIEWER_SAFE_READS, policy)) return allow('run.safe');
+    if (matches(words, REVIEWER_READS, policy)) return allow('reviewer.read');
+    if (learned(request, words, policy)) return allow('learned');
+    return asked(request, words, policy);
+  }
+  if (safeCommand(words, policy)) return allow('run.safe');
+  if (learned(request, words, policy)) return allow('learned');
+  if (ticketDeletion(words, policy)) return allow('delete.ticket');
   return asked(request, words, policy);
 }

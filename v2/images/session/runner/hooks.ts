@@ -11,9 +11,12 @@
 //      private terms included (src/workspace/publish.ts); this is the early
 //      check, inside the container, where only this file is copied.
 //   3. HANDOVER.md at the end: a turn that ends without it is sent back
-//      once with the five headings lib/memory expects.
-// Lane 4's runner (main.ts) spreads `hooks` into the `hooks` option of
-// query() without editing this file.
+//      once with the five headings lib/memory expects. Only an author is
+//      asked: a reviewer cannot write the file and a lead hands over
+//      through its host tool (issue 139), so hooksFor() leaves the Stop
+//      hook out for both.
+// The runner (main.ts) spreads hooksFor(<the session's role>) into the
+// `hooks` option of query().
 //
 // The image copies this file alone (images/session/Dockerfile), so it
 // imports Node built-ins only. The types mirror the shapes of
@@ -219,4 +222,13 @@ export function createHooks(run: Run = runCommand): Hooks {
   };
 }
 
+// The hooks of an author.
 export const hooks: Hooks = createHooks();
+
+// The hooks of a role: the Stop hook is an author's only.
+export function hooksFor(role: string, run?: Run): Hooks {
+  const all = run === undefined ? hooks : createHooks(run);
+  if (role !== 'lead' && role !== 'reviewer') return all;
+  const { Stop: _stop, ...rest } = all;
+  return rest;
+}

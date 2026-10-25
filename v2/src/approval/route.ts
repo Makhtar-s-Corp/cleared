@@ -2,10 +2,22 @@
 // only from a request that shows the app's proof (src/modules/users.ts), and
 // signs only for the owner: a session, which has neither the proof nor the key,
 // can at most send a request that is refused before anything is signed.
+//
+// A ticket of a workspace of several services is approved as a train
+// (docs/v2/milestone-2-plan.md, decision 21, lane 16): a card blocked by the
+// compatibility check answers 409 with the proposal; otherwise every
+// service's record must still hold the head the card showed, and the grace
+// is held by TrainApprovals (approval/service.ts).
+//
+// A service whose sensitivity is human:<user> is approved by that user only
+// (decision 24, lane 18): anybody else answers 403 naming who, before
+// anything is held; the train checks it for its services, the approver
+// gate for a one-service workspace.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, type ApproveBody } from '../api/types.ts';
 import type { Route, RouteContext } from '../modules/registry.ts';
 import { ApprovalError, type ApprovalCode } from './errors.ts';
+import { TrainBlocked, environmentApprovers, type ApproverGate, type TrainApprovals } from './service.ts';
 import { isGraceWriter, type GraceApprovalWriter } from './writer.ts';
 import type { Version } from './record.ts';
 
@@ -59,11 +71,15 @@ function authorise(context: RouteContext): { writer: GraceApprovalWriter; user: 
 }
 
 function refuse(response: ServerResponse, error: unknown): void {
+  if (error instanceof TrainBlocked) return send(response, 409, { error: error.message, proposal: error.proposal });
   if (error instanceof ApprovalError) return send(response, STATUS[error.code], { error: error.message });
   throw error;
 }
 
-const approve: Route = {
+// The train approvals of the workspace, when it has several services.
+export type TrainGate = () => TrainApprovals | undefined;
+
+const approve = (trains: TrainGate, approvers: ApproverGate): Route => ({
   method: 'POST',
   path: '/api/tickets/:id/approve',
   async handle(context) {
@@ -81,29 +97,40 @@ const approve: Route = {
     }
     const shown = heads(body?.heads);
     if (!body || typeof body.requestedAt !== 'string' || !shown) return send(response, 400, { error: 'requestedAt and one to eight heads (a pull request and its 40 hex head) are required' });
+    const ticket = params.id as string;
+    const train = trains();
     try {
-      const { dueAt } = await auth.writer.begin({ ticket: params.id as string, by: auth.user, requestedAt: body.requestedAt, heads: shown });
+      const request = { ticket, by: auth.user, requestedAt: body.requestedAt, heads: shown };
+      const waiting = train?.waiting(ticket);
+      if (!waiting) await approvers({ ticket, by: auth.user, users: context.registry.users });
+      const { dueAt } = train && waiting ? await train.begin(request) : await auth.writer.begin(request);
       send(response, 202, { accepted: true, by: auth.user, dueAt });
     } catch (error) {
       refuse(response, error);
     }
   },
-};
+});
 
-const undo: Route = {
+const undo = (trains: TrainGate): Route => ({
   method: 'POST',
   path: '/api/tickets/:id/approve/undo',
   async handle(context) {
     const auth = authorise(context);
     if (!auth) return;
+    const ticket = context.params.id as string;
+    const train = trains();
     try {
-      const { undone } = await auth.writer.undo(context.params.id as string, auth.user);
+      const { undone } = train?.waiting(ticket) ? await train.undo(ticket, auth.user) : await auth.writer.undo(ticket, auth.user);
       if (undone) send(context.response, 200, { undone: true });
       else send(context.response, 409, { error: 'nothing is held for this ticket: it was written already, or never started' });
     } catch (error) {
       refuse(context.response, error);
     }
   },
-};
+});
 
-export const approvalRoutes: readonly Route[] = [approve, undo];
+export function createApprovalRoutes(trains: TrainGate, approvers: ApproverGate = environmentApprovers()): readonly Route[] {
+  return [approve(trains, approvers), undo(trains)];
+}
+
+export const approvalRoutes: readonly Route[] = createApprovalRoutes(() => undefined);

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { AUTHOR_ID, ANSWER_TEXT, QUESTION_TEXT, REQUEST_ID, USER, detailOf, sessionFixture } from '../../fixtures/session.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
-import { applyAll, applyEvent, emptyModel, EVENT_NAMES, parseCriteria, resultSummary, stepsOf, timeline, type Row } from '../../public/screens/session.ts';
+import { applyAll, applyEvent, emptyModel, EVENT_NAMES, parseCriteria, resultSummary, stepsOf, timeline, type Row } from '../../web/screens/session/model.ts';
 import { EVENT_TYPES, type AgUiEvent } from '../../../src/session/events.ts';
 import { createMapper, toolRequest } from '../../../src/session/adapters/claude-code/map.ts';
 import { createCleaner } from '../../../src/session/clean.ts';
@@ -26,8 +26,10 @@ function fixtureModel() {
 test('the fixture session adds up to the rows of the capture, with their counts', () => {
   const { model } = fixtureModel();
   const rows = timeline(model);
-  assert.deepEqual(rows.map((row) => row.kind), ['read', 'tool', 'tool', 'message', 'message', 'tool', 'tool']);
-  const [read, editA, run, question, answer, editB, install] = rows as [Row, Row, Row, Row, Row, Row, Row];
+  // The session plan (lane 20's fixture): proposed, then its Go, before the first edit.
+  assert.deepEqual(rows.map((row) => row.kind), ['read', 'plan', 'plan', 'tool', 'tool', 'message', 'message', 'tool', 'tool']);
+  const [read, proposed, given, editA, run, question, answer, editB, install] = rows as [Row, Row, Row, Row, Row, Row, Row, Row, Row];
+  assert.deepEqual([proposed.kind === 'plan' && [proposed.confidence, proposed.go], given.kind === 'plan' && given.go?.by], [['high', null], USER]);
   assert.deepEqual([read.kind === 'read' && read.paths, time(read.at)], [['src/screens/Upcoming.jsx', 'test/upcoming.test.mjs', 'test/screens.test.mjs'], '09:23']);
   assert.deepEqual([editA.kind === 'tool' && editA.input, time(editA.at)], [{ kind: 'edit', path: 'src/engine/upcoming.mjs', added: 24, removed: 6 }, '09:25']);
   assert.deepEqual(run.kind === 'tool' && [run.input, resultSummary(run.output)], [{ kind: 'execute', command: 'npm run test:upcoming', description: 'Run the upcoming tests' }, { tone: 'ok', key: 'passed', n: 18 }]);
@@ -48,8 +50,10 @@ test('the state is the last snapshot with the deltas applied', () => {
   assert.equal(model.state?.phase, 'waiting_human');
   assert.deepEqual(model.state?.files.map((f) => [f.path, f.added, f.removed]), [['src/engine/upcoming.mjs', 24, 6], ['src/screens/Upcoming.jsx', 41, 12], ['test/upcoming.test.mjs', 38, 0]]);
   assert.deepEqual(model.state?.checks, [{ name: 'Targeted tests', state: 'passed' }, { name: 'Full suite', state: 'pending' }]);
-  assert.deepEqual(model.state?.steps.map((s) => [s.name, s.finishedAt === null]), [['workspace', false], ['author', true], ['waiting_human', true]]);
-  assert.deepEqual(detailOf(fixture, AUTHOR_ID)?.state, model.state, 'the service answers the same state');
+  assert.deepEqual(model.state?.steps.map((s) => [s.name, s.finishedAt === null]), [['workspace', false], ['author', false], ['plan_gate', false], ['author', true], ['waiting_human', true]]);
+  const { plan, ...served } = detailOf(fixture, AUTHOR_ID)?.state ?? {};
+  assert.deepEqual(served, model.state, 'the service answers the same state');
+  assert.deepEqual(plan, model.plan, 'with the session plan');
 });
 
 test('a delta covers add, replace and remove at a path, and ignores a path that is not there', () => {
@@ -139,6 +143,21 @@ test('an interrupt, an error and a verdict are rows; reasoning and unknown event
     { type: 'CUSTOM', name: 'cleared.handover_captured', value: { path: 'HANDOVER.md' } },
   ]);
   assert.deepEqual(timeline(model).map((row) => row.kind), ['interrupted', 'error', 'verdict']);
+});
+
+test('a message of the review channel is a row with its side, its round and its limit; an answer says how long the request waited', () => {
+  const model = emptyModel();
+  const at = (minute: number) => new Date(2026, 9, 21, 9, minute).toISOString();
+  applyAll(model, [
+    { seq: 1, at: at(0), sessionId: 's2', ticket: 'LOCAL-161', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.review_channel', value: { round: 1, limit: 3, from: 'reviewer', text: 'Defects: a.ts:3' } } },
+    { seq: 2, at: at(72), sessionId: 's2', ticket: 'LOCAL-161', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.review_channel', value: { round: 1, limit: 3, from: 'author', text: 'Fixed.' } } },
+    { seq: 3, at: at(80), sessionId: 's2', ticket: 'LOCAL-161', project: 'guestbook', event: { type: 'CUSTOM', name: 'cleared.review_channel', value: { round: 2, limit: 3, from: 'author', text: 'Again.' } } },
+  ]);
+  assert.deepEqual(timeline(model), [
+    { kind: 'channel', at: at(0), from: 'reviewer', round: 1, limit: 3, text: 'Defects: a.ts:3', seq: 1 },
+    { kind: 'channel', at: at(72), from: 'author', round: 1, limit: 3, text: 'Fixed.', afterMs: 72 * 60_000, seq: 2 },
+    { kind: 'channel', at: at(80), from: 'author', round: 2, limit: 3, text: 'Again.', seq: 3 },
+  ], 'an answer whose request this session did not log has no wait; each row keeps its first event (issue #272)');
 });
 
 test('a command result reads as the capture shows it, and never as markup', () => {

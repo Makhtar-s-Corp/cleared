@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, utimesSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { signedIn, startApp } from './support.ts';
@@ -15,9 +16,9 @@ function walk(dir: string): string[] {
   });
 }
 
-test('no gradient in any stylesheet, and no theme imposed by the system', () => {
-  const sheets = walk(join(app, 'public')).filter((path) => path.endsWith('.css'));
-  assert.ok(sheets.length > 0);
+test('no gradient in any stylesheet, and no theme imposed by the system: the sources and the built sheets', () => {
+  const sheets = [...walk(join(app, 'web')), ...walk(join(app, 'dist', 'assets'))].filter((path) => path.endsWith('.css'));
+  assert.ok(sheets.filter((path) => path.includes('/dist/')).length >= 4, 'the shell\'s sheet and the screens\' (npm run build)');
   for (const sheet of sheets) {
     const text = readFileSync(sheet, 'utf8');
     assert.doesNotMatch(text, /gradient/i, relative(app, sheet));
@@ -26,7 +27,8 @@ test('no gradient in any stylesheet, and no theme imposed by the system', () => 
 });
 
 test('no em dash in the app\'s files', () => {
-  for (const path of walk(app).filter((p) => !p.endsWith('.woff2'))) assert.ok(!readFileSync(path, 'utf8').includes(String.fromCharCode(0x2014)), relative(app, path));
+  // The app's own files; dist/ is Vite's build, with third-party code.
+  for (const path of walk(app).filter((p) => !p.endsWith('.woff2') && !p.endsWith('.png') && !p.startsWith(join(app, 'dist')))) assert.ok(!readFileSync(path, 'utf8').includes(String.fromCharCode(0x2014)), relative(app, path));
 });
 
 test('the pages load nothing inline and nothing from another site', async () => {
@@ -34,7 +36,8 @@ test('the pages load nothing inline and nothing from another site', async () => 
   try {
     const login = await fetch(`${running.base}/login`);
     assert.equal(login.status, 200);
-    assert.equal(login.headers.get('content-security-policy'), "default-src 'self'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'");
+    // The page's own style nonce is the one addition (lane 32, style-nonce.test.ts).
+    assert.match(login.headers.get('content-security-policy') ?? '', /^default-src 'self'; style-src 'self' 'nonce-[A-Za-z0-9+/=]+'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'$/);
     assert.equal(login.headers.get('x-content-type-options'), 'nosniff');
     assert.equal(login.headers.get('referrer-policy'), 'same-origin');
     const html = await login.text();
@@ -52,28 +55,80 @@ test('the pages load nothing inline and nothing from another site', async () => 
   }
 });
 
-test('a TypeScript file of the page is served as JavaScript, types stripped; a path out of public/ is not served', async () => {
+test('the bundle is served as JavaScript, its hashed files kept a year; nothing outside dist/ is served', async () => {
   const running = await startApp();
   try {
-    const screen = await fetch(`${running.base}/screens/tower.ts`);
-    assert.equal(screen.status, 200);
-    assert.equal(screen.headers.get('content-type'), 'text/javascript; charset=utf-8');
-    const code = await screen.text();
-    assert.doesNotMatch(code, /^\s*import type /m);
-    assert.doesNotMatch(code, /^export type /m);
-    assert.match(code, /export function renderTower\(/);
+    const login = await (await fetch(`${running.base}/login`)).text();
+    const entry = /<script type="module" src="(\/assets\/main-[A-Za-z0-9_-]+\.js)">/.exec(login)?.[1];
+    assert.ok(entry, 'the page names the entry Vite built');
+    const code = await fetch(`${running.base}${entry}`);
+    assert.equal(code.status, 200);
+    assert.equal(code.headers.get('content-type'), 'text/javascript; charset=utf-8');
+    assert.equal(code.headers.get('cache-control'), 'public, max-age=31536000, immutable');
+    const theme = await fetch(`${running.base}/theme.js`);
+    assert.equal(theme.status, 200);
+    assert.equal(theme.headers.get('cache-control'), 'no-cache');
+    assert.match(await theme.text(), /cleared-v2-theme/);
     const font = await fetch(`${running.base}/fonts/Geist-Variable.woff2`);
     assert.equal(font.status, 200);
     assert.equal(font.headers.get('content-type'), 'font/woff2');
-    for (const path of ['/../package.json', '/%2e%2e/package.json', '/screens/../../main.ts', '/.hidden', '/index.html.bak'])
+    for (const path of ['/../package.json', '/%2e%2e/package.json', '/screens/../../main.ts', '/.hidden', '/index.html.bak', '/.vite/manifest.json', '/screens/tower.ts', '/app.ts', '/assets/../../main.ts'])
       assert.equal((await fetch(`${running.base}${path}`)).status, 404, path);
   } finally {
     await running.close();
   }
 });
 
-test('the app\'s TypeScript type checks, browser code included (tsc -p app)', () => {
+test('a server started before the build says so, on every page', async () => {
+  const running = await startApp({ extra: { distDir: join(v2, 'no-such-build') } });
+  try {
+    const page = await fetch(`${running.base}/login`);
+    assert.equal(page.status, 503);
+    assert.match(await page.text(), /npm run build/);
+  } finally {
+    await running.close();
+  }
+});
+
+// Issue 185, item 2: npm run build under a running app empties dist/
+// (emptyOutDir), so a page that kept naming the old hashed files drew
+// nothing until a restart. The manifest is read again once it changed.
+test('a rebuild under a running server: the next page names the new build\'s files, and a build being written says so', async () => {
+  const dist = mkdtempSync(join(tmpdir(), 'cleared-v2-dist-'));
+  const manifest = join(dist, '.vite', 'manifest.json');
+  const build = (hash: string, at: number) => {
+    mkdirSync(join(dist, '.vite'), { recursive: true });
+    writeFileSync(manifest, JSON.stringify({ 'main.tsx': { file: `assets/main-${hash}.js`, css: [`assets/main-${hash}.css`], isEntry: true, src: 'main.tsx' } }));
+    // The modification time set, so the test does not hang on the clock's resolution.
+    utimesSync(manifest, at, at);
+  };
+  build('first', 1_700_000_000);
+  const running = await startApp({ extra: { distDir: dist } });
+  try {
+    const first = await (await fetch(`${running.base}/login`)).text();
+    assert.match(first, /src="\/assets\/main-first\.js"/);
+    assert.match(first, /href="\/assets\/main-first\.css"/);
+    // vite build: the folder emptied, then the new files and their manifest.
+    rmSync(join(dist, '.vite'), { recursive: true });
+    const during = await fetch(`${running.base}/login`);
+    assert.equal(during.status, 503, 'between the two builds, the page says the build is missing');
+    assert.match(await during.text(), /npm run build/);
+    build('second', 1_700_000_060);
+    const second = await (await fetch(`${running.base}/login`)).text();
+    assert.match(second, /src="\/assets\/main-second\.js"/);
+    assert.doesNotMatch(second, /main-first/, 'no link to a file the rebuild removed');
+    const again = await (await fetch(`${running.base}/login`)).text();
+    assert.match(again, /main-second\.js/, 'an unchanged manifest keeps the bundle read');
+  } finally {
+    await running.close();
+    rmSync(dist, { recursive: true, force: true });
+  }
+});
+
+test('the app\'s TypeScript type checks: the server (tsc -p app) and the front end (tsc -p app/web)', () => {
   const tsc = join(v2, 'node_modules', 'typescript', 'bin', 'tsc');
-  const result = spawnSync(process.execPath, [tsc, '--noEmit', '-p', join(app, 'tsconfig.json')], { encoding: 'utf8', cwd: v2 });
-  assert.equal(result.status, 0, result.stdout + result.stderr);
+  for (const config of [join(app, 'tsconfig.json'), join(app, 'web', 'tsconfig.json')]) {
+    const result = spawnSync(process.execPath, [tsc, '--noEmit', '-p', config], { encoding: 'utf8', cwd: v2 });
+    assert.equal(result.status, 0, result.stdout + result.stderr);
+  }
 });

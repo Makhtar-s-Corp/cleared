@@ -1,0 +1,25 @@
+{
+  // The front end's type check (tsc --noEmit -p app/web): React with strict
+  // TypeScript, for the browser. Vite bundles it; nothing is emitted here.
+  // The models in plain .ts stay erasable, since node --test runs them.
+  "compilerOptions": {
+    "target": "es2024",
+    "lib": ["es2024", "dom", "dom.iterable"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "types": ["node", "vite/client"],
+    "strict": true,
+    "noEmit": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    "paths": { "@/*": ["./*"] }
+  },
+  "include": ["."]
+}

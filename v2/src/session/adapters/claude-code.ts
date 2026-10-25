@@ -11,10 +11,20 @@
 //   - a permission request is evaluated by the policy: an allow
 //     or a deny is answered at once, an ask waits for answer() from the inbox;
 //     a question (AskUserQuestion) always waits;
+//   - a host tool call (milestone 2, the lead's tools) runs the handler of
+//     the tool of that name in StartInput.tools, and only of those: the
+//     answer goes back to the runner, and cleared.host_call records the
+//     outcome. A refusal (HostToolRefused) is said to the model; any other
+//     error stays on the host, and the model reads a generic line;
 //   - interrupt() cancels what waits and asks the runner to interrupt the turn;
 //   - stop() asks the runner to stop, then removes the containers and the
 //     networks; the config volume stays, so resume() can start a new
-//     container on the same Claude Code session.
+//     container on the same Claude Code session;
+//   - interactive() (Take over, owner request of 2026-10-22 17:26) asks the
+//     runner to release its harness, waits until it says so, and gives
+//     Claude Code resumed on the same session for the human's terminal in
+//     the container (claude-code/interactive.ts); resume() then has the
+//     runner reload the session from its transcript, in the same container.
 // The login never appears on a docker command line: the runner reads it from
 // the read-only mount, inside the container.
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
@@ -28,9 +38,11 @@ import { Docker, type Limits } from '../../container/docker.ts';
 import type { ServiceSpec } from '../../container/services.ts';
 import { WORKDIR_MOUNT, sessionNames, startSession, stopSession } from '../../container/session-runtime.ts';
 import type { Cleaner } from '../clean.ts';
-import { NotImplemented, type Answer, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
+import { HostToolRefused, type Answer, type InteractiveResume, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
+import { handoverOf } from '../handover.ts';
 import type { AgUiEvent, EventLog, SessionEvent } from '../events.ts';
 import { evaluate, type Policy, type PolicyContext } from '../policy.ts';
+import { INTERACTIVE_NAME, interactiveCommand } from './claude-code/interactive.ts';
 import { createMapper, toolRequest, type Mapper } from './claude-code/map.ts';
 
 export const RUNNER_COMMAND: readonly string[] = ['node', '/opt/cleared/runner/main.ts'];
@@ -48,6 +60,7 @@ export type ClaudeCodeRuntime = {
   readonly limits?: Limits;
   readonly maxBudgetUsd?: number;                 // per session, passed to the SDK
   readonly stopTimeoutMs?: number;                // how long stop() waits for the runner to exit
+  readonly releaseTimeoutMs?: number;             // how long interactive() waits for the runner to release its harness
 };
 
 // The default runtime: the service's state folder (CLEARED_V2_STATE_DIR, or
@@ -89,6 +102,10 @@ type Session = {
   exitSeen: boolean;                              // the runner printed its exit line
   exited: Promise<void>;
   handle: SessionHandle | undefined;
+  // The runner's harness and a human: 'sent' once release is written (resume()
+  // then reloads, even if the runner parks late), 'done' once it said released.
+  release: 'none' | 'sent' | 'done';
+  onReleased: Set<() => void>;
 };
 
 // Reads a file of the ticket checkout by the path the harness names it
@@ -171,6 +188,14 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
       emit(session, session.mapper.answered(line.requestId, { decision: { kind: 'reject_once', message: verdict.message }, by: 'policy', rule: verdict.rule }));
       return;
     }
+    if (line.type === 'host_call') {
+      void hostCall(session, line);
+      return;
+    }
+    if (line.type === 'released') {
+      for (const wake of [...session.onReleased]) wake();
+      return;
+    }
     if (line.type === 'question') {
       session.pending.set(line.requestId, { kind: 'question' });
       emit(session, session.mapper.question(line));
@@ -182,12 +207,38 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
     emit(session, session.mapper.line(line));
   }
 
+  // A host tool call: the handler's answer, as text, back to the runner
+  // that asked, unless it is gone by then.
+  async function hostCall(session: Session, line: Extract<RunnerOutput, { type: 'host_call' }>): Promise<void> {
+    const child = session.child;
+    const tool = session.input.tools?.find((candidate) => candidate.name === line.name);
+    let outcome: 'ok' | 'refused' | 'failed' = 'ok';
+    let text: string;
+    if (!tool) {
+      outcome = 'failed';
+      text = `No host tool is named ${line.name}.`;
+    } else {
+      try {
+        const answer = await tool.handle(line.input, { sessionId: session.id, turn: session.mapper.turn() ?? '' });
+        text = typeof answer === 'string' ? answer : JSON.stringify(answer) ?? '';
+      } catch (error) {
+        outcome = error instanceof HostToolRefused ? 'refused' : 'failed';
+        text = error instanceof HostToolRefused ? error.message : 'The host could not run this tool.';
+      }
+    }
+    if (session.closed || session.child !== child) return;
+    write(session, { type: 'host_result', callId: line.callId, ok: outcome === 'ok', text });
+    const toolCallId = line.toolUseId || line.callId;
+    emit(session, [{ type: 'CUSTOM', name: 'cleared.host_call', value: outcome === 'ok' ? { toolCallId, name: line.name, input: line.input, outcome } : { toolCallId, name: line.name, input: line.input, outcome, message: text } }]);
+  }
+
   // Starts the session container with the runner attached and sends `start`.
   async function launch(session: Session, resume: boolean): Promise<void> {
     const { id, input } = session;
     await startSession(docker, {
       session: id, workdir: input.workdir, tokenFile: runtime.loginFile, allowDir: join(runtime.stateDir, 'egress', id),
       allowHosts: input.policy.allowedHosts, hostAddresses: runtime.hostAddresses, services: input.services ?? runtime.services ?? [],
+      ...(input.siblings === undefined ? {} : { siblings: input.siblings }), ...(input.skills === undefined ? {} : { skills: input.skills }),
       user: runtime.user, command: RUNNER_COMMAND, interactive: true,
       ...(runtime.image === undefined ? {} : { image: runtime.image }),
       ...(runtime.limits === undefined ? {} : { limits: runtime.limits }),
@@ -196,6 +247,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
     session.child = child;
     session.closed = false;
     session.exitSeen = false;
+    session.release = 'none';
     session.exited = new Promise<void>((done) => {
       child.on('close', (code: number | null) => {
         if (session.child === child) {
@@ -212,7 +264,8 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
     child.stderr.resume();                          // the runner's and the CLI's diagnostics are not events
     createInterface({ input: child.stdout, crlfDelay: Infinity }).on('line', (text) => onLine(session, text));
     write(session, {
-      type: 'start', sessionId: id, model: input.model, resume,
+      type: 'start', sessionId: id, model: input.model, resume, role: input.role,
+      ...(input.tools?.length ? { tools: input.tools.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })) } : {}),
       ...(runtime.maxBudgetUsd === undefined ? {} : { maxBudgetUsd: runtime.maxBudgetUsd }),
     });
     emit(session, session.mapper.start(input.model));
@@ -289,8 +342,9 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
           close(session);
         }
       },
-      async handover() {
-        throw new NotImplemented('handing a session over to another harness comes in milestone 3');
+      async handover(to) {
+        open();
+        return handoverOf(log, session.id, 'claude-code', to);
       },
     };
     return value;
@@ -303,7 +357,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
       const id = newId();
       const session: Session = {
         id, input, cleaner: options.cleaner(), mapper: createMapper({ sessionId: id }), wake: new Set(), pending: new Map(),
-        child: undefined, closed: true, exitSeen: false, exited: Promise.resolve(), handle: undefined,
+        child: undefined, closed: true, exitSeen: false, exited: Promise.resolve(), handle: undefined, release: 'none', onReleased: new Set(),
       };
       sessions.set(id, session);
       await launch(session, false);
@@ -315,10 +369,45 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
     async resume(id) {
       const session = sessions.get(id);
       if (!session) throw new Error(`unknown session ${id}`);
-      if (!session.closed && session.handle) return session.handle;
+      if (!session.closed && session.handle) {
+        // Given back after a human ran the harness: the runner reads the
+        // session again from its transcript, before any turn it is sent.
+        if (session.release !== 'none') {
+          session.release = 'none';
+          write(session, { type: 'reload' });
+        }
+        return session.handle;
+      }
       await launch(session, true);
       session.handle = handle(session);
       return session.handle;
+    },
+    async interactive(id): Promise<InteractiveResume> {
+      const session = sessions.get(id);
+      if (!session || session.closed || !session.child) return { supported: false, reason: `There is no running session ${id} here to resume in a terminal.` };
+      if (session.release !== 'done') {
+        const child = session.child;
+        const released = await new Promise<boolean>((resolve) => {
+          const done = (value: boolean) => { session.onReleased.delete(wake); clearTimeout(timer); resolve(value); };
+          const wake = () => done(true);
+          const timer = setTimeout(() => done(false), runtime.releaseTimeoutMs ?? 15_000);
+          timer.unref();
+          session.onReleased.add(wake);
+          if (session.release === 'none') {
+            session.release = 'sent';
+            write(session, { type: 'release' });
+          }
+        });
+        // Given back meanwhile: the runner reloads, and no harness starts beside it.
+        if (session.release === 'none' || session.child !== child) {
+          return { supported: false, reason: 'The session was given back while its harness was being handed over: take it over again to resume it here.' };
+        }
+        if (!released) {
+          return { supported: false, reason: 'The session\'s runner did not hand its harness over in time: rebuild the session image if it predates this version, or open the Shell instead.' };
+        }
+        session.release = 'done';
+      }
+      return { supported: true, name: INTERACTIVE_NAME, command: interactiveCommand(id, session.input.model) };
     },
   };
 }

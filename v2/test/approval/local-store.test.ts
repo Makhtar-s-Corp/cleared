@@ -12,7 +12,7 @@ import { applyTables } from '../../src/store/db.ts';
 import { OWNER, lockBox, scratch } from './harness.ts';
 
 const service = { kind: 'agents' as const, id: 'cleared-v2' };
-const oracle = new URL('./oracle.mjs', import.meta.url).pathname;
+const oracle = new URL('./oracle.ts', import.meta.url).pathname;
 
 function open(options: { signed?: boolean } = {}) {
   const box = lockBox();
@@ -79,6 +79,36 @@ test('a human write is signed, and v1 verifies it as the human; an altered row i
   assert.deepEqual((await store.history('LOCAL-1')).map((h) => h.by.kind), ['human', 'other']);
   db.prepare("UPDATE tracker_tickets SET title = 'Changed' WHERE id = 1").run();
   assert.equal(v1('history', 'LOCAL-1')[0].by.kind, 'other', 'the creation binds the ticket\'s content');
+});
+
+test('histories reads several tickets\' history in one query, verified as history verifies it; an unknown id is left out', async () => {
+  const { store, db, box } = open();
+  await store.create({ title: 'By the owner', project: 'guestbook' }, { kind: 'human', id: 'user-uuid-1' });
+  await store.create({ title: 'By the service', project: 'guestbook' }, service);
+  await store.move('LOCAL-1', 'In Progress', { kind: 'human', id: 'user-uuid-1' });
+  await store.move('LOCAL-2', 'In Progress', service);
+  db.prepare("UPDATE tracker_history SET status = 'Done' WHERE ticket = 1 AND status = 'In Progress'").run();
+  // A reader opened on the same file counts what it asks of tracker_history.
+  let queries = 0;
+  const prepare = db.prepare.bind(db);
+  db.prepare = ((sql: string) => {
+    const statement = prepare(sql);
+    if (!/tracker_history/.test(sql)) return statement;
+    for (const name of ['all', 'get', 'iterate'] as const) {
+      const real = (statement[name] as (...args: unknown[]) => unknown).bind(statement);
+      (statement as unknown as Record<string, unknown>)[name] = (...args: unknown[]) => { queries++; return real(...args); };
+    }
+    return statement;
+  }) as typeof db.prepare;
+  const reader = new LocalTicketStore(db, { stateDir: box.state, ownerId: OWNER, publicKey: box.keys.publicKey });
+  const read = await reader.histories(['LOCAL-2', 'LOCAL-1', 'LOCAL-9', 'nonsense']);
+  db.prepare = prepare;
+  assert.equal(queries, 1, 'one query for every ticket');
+  assert.deepEqual([...read.keys()].sort(), ['LOCAL-1', 'LOCAL-2']);
+  assert.deepEqual(read.get('LOCAL-1'), await store.history('LOCAL-1'));
+  assert.deepEqual(read.get('LOCAL-1')?.map((h) => h.by.kind), ['human', 'other'], 'a signed row is the human\'s, an altered one is not');
+  assert.deepEqual(read.get('LOCAL-2'), await store.history('LOCAL-2'));
+  assert.equal((await store.histories([])).size, 0);
 });
 
 test('only the owner\'s writes are signed as the owner: another user\'s ticket, move and comment never count as his', async () => {

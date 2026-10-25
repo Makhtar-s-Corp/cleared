@@ -1,0 +1,13 @@
+{
+  "chat_created": "Ticket {ticket} created: {title}.",
+  "chat_created_link": "Ticket {ticket} created: {title}. It is on the Tower: {link}",
+  "chat_waits_lanes": "It waits for a free lane ({running} in use, {lanes} allowed).",
+  "chat_waits_seven_day": "It waits: the seven-day window is at {percent} % (the stop is at {stop} %).",
+  "chat_waits_five_hour": "It waits: the five-hour window is at {percent} % (the stop is at {stop} %).",
+  "chat_started": "{ticket} has started.",
+  "chat_started_link": "{ticket} has started: {link}",
+  "chat_pr": "Pull request #{pr} of {ticket}: {url}. It waits for an approval in the Inbox.",
+  "chat_help": "Write the task after the command, for example: @cleared show the newest entry first.",
+  "chat_unknown_user": "This chat account is not linked to a Cleared user: ask the owner to add it to CLEARED_V2_CHAT_USERS.",
+  "chat_too_long": "The task is at most {max} characters."
+}

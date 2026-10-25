@@ -15,9 +15,12 @@ const main = new URL('../src/main.ts', import.meta.url).pathname;
 // directory of its own, never the machine's.
 const state = mkdtempSync(join(tmpdir(), 'cleared-v2-main-'));
 after(() => rmSync(state, { recursive: true, force: true }));
+// The service builds its flow and its lead at start: a workspace the shell
+// names would start real sessions, so these runs name none; nor would they
+// read a real quota (issue #270): no login is named and no reading runs.
 function isolated(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
-  const out: NodeJS.ProcessEnv = { ...env, CLEARED_STATE_DIR: state };
-  delete out.ORCH_LEDGER;
+  const out: NodeJS.ProcessEnv = { ...env, CLEARED_STATE_DIR: state, CLEARED_V2_LEAD_ENABLED: 'off', CLEARED_V2_QUOTA_MINUTES: '0' };
+  for (const key of ['ORCH_LEDGER', 'CLEARED_V2_PROJECT', 'CLEARED_V2_WORKSPACE', 'CLEARED_V2_STATE_DIR', 'CLEARED_V2_ADAPTER', 'CLEARED_CLAUDE_CREDENTIALS']) delete out[key];
   return out;
 }
 
@@ -103,9 +106,11 @@ test('the service opens the ledger of its state directory and creates its tables
   }
 });
 
-test('a ledger the service cannot place stops it before it listens', () => {
+test('a ledger the service cannot place stops it before it listens, before any module starts (issue #349)', () => {
   // No state directory, no project: the ledger has no place. Port 1 cannot
   // be bound by this account, so a regression could never start listening.
+  // The modules start once the service listens: the flow module's start
+  // never runs without a ledger (its ledgerFolder counts on it).
   const env: NodeJS.ProcessEnv = { PATH: process.env.PATH, HOME: state, XDG_CONFIG_HOME: join(state, 'no-config'), CLEARED_V2_PORT: '1' };
   const run = spawnSync(process.execPath, [main], { env, encoding: 'utf8', timeout: 10_000 });
   assert.equal(run.status, 64);
@@ -152,4 +157,42 @@ test('a second signal during shutdown changes nothing: one clean exit (review ro
   const [code] = await once(child, 'exit');
   assert.equal(code, 0);
   assert.equal(stderr, '');
+});
+
+test('the restart recovery runs once the service listens, before any request: a ticket the last process left In Progress is back in Todo (ops, 2026-10-23)', async () => {
+  const own = mkdtempSync(join(tmpdir(), 'cleared-v2-main-recover-'));
+  try {
+    const env: NodeJS.ProcessEnv = {
+      ...isolated(process.env), CLEARED_STATE_DIR: own, CLEARED_V2_STATE_DIR: own, CLEARED_V2_PROJECT: 'guestbook', CLEARED_V2_PROJECT_DIR: join(own, 'checkout'),
+      CLEARED_V2_REPO_URL: 'https://example.invalid/guestbook.git', CLEARED_V2_REPO: 'example-org/guestbook', CLEARED_V2_LEAD_ENABLED: 'off',
+    };
+    delete env.CLEARED_V2_HOST;
+    delete env.CLEARED_V2_WORKSPACE;
+    // A first start creates the tables; the ticket is then written as a process that stopped mid-work leaves it.
+    const first = spawn(process.execPath, [main], { env: { ...env, CLEARED_V2_PORT: String(await freePort()) } });
+    await once(first.stdout, 'data');
+    first.kill('SIGTERM');
+    await once(first, 'exit');
+    const path = join(own, 'ledger.db');
+    const write = new DatabaseSync(path);
+    const at = new Date().toISOString();
+    write.prepare("INSERT INTO tracker_tickets (title, body, labels, project, status, created_at, updated_at) VALUES ('Left running', '', '[]', 'guestbook', 'In Progress', ?, ?)").run(at, at);
+    write.close();
+    const second = spawn(process.execPath, [main], { env: { ...env, CLEARED_V2_PORT: String(await freePort()) } });
+    try {
+      await once(second.stdout, 'data');
+      const status = (): string => {
+        const db = new DatabaseSync(path, { readOnly: true });
+        try { return String((db.prepare("SELECT status FROM tracker_tickets WHERE title = 'Left running'").get() as { status: string }).status); } finally { db.close(); }
+      };
+      const end = Date.now() + 10_000;
+      while (status() !== 'Todo' && Date.now() < end) await new Promise((resolve) => setTimeout(resolve, 100));
+      assert.equal(status(), 'Todo', 'no request was made: the recovery ran at start');
+    } finally {
+      second.kill('SIGTERM');
+      await once(second, 'exit');
+    }
+  } finally {
+    rmSync(own, { recursive: true, force: true });
+  }
 });
