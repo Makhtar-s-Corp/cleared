@@ -210,10 +210,14 @@ export type CustomValue = {
   };
   // The captures of the proof receipt (flow/proof-capture.ts): the files'
   // names in the ticket's proof folder, and what was not taken, by its code.
+  // `need` (P226, flow/capture-need.ts): whether the change needed them and
+  // why, with the screens it touches; absent before the rule, or when the
+  // flow has no reader of the diff.
   'cleared.proof_captured': {
     readonly service: string;
     readonly before?: string; readonly after?: string; readonly video?: string; readonly videoMs?: number;
     readonly missing: readonly { readonly part: 'before' | 'after' | 'video'; readonly reason: 'no_browser' | 'no_before' | 'no_after' | 'failed' }[];
+    readonly need?: { readonly take: boolean; readonly reason: 'screens' | 'no_screen' | 'forced_on' | 'forced_off' | 'unread'; readonly screens: readonly string[] };
   };
   // The production page's check (api/types.ts ProductionCheck): the address
   // without its query, the capture's name in the ticket's proof folder or why

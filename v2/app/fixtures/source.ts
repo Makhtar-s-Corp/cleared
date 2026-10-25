@@ -27,9 +27,10 @@
 // that holds the ticket's sessions; with `resolved`, the landed ticket
 // LOCAL-149 has its author's and its reviewer's sessions (fixtures/cost.ts),
 // and its production page's check (P218), read by the service's own reader.
+// The choice of the receipt's captures (P226) is kept by ticket, Auto until posted.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { KEEPALIVE_MS } from '../../src/api/events.ts';
-import { changeFrame, leadFrame, sseFrame, type Ask, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
+import { changeFrame, leadFrame, sseFrame, type Ask, type CaptureChoice, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
 import { ticketCost } from '../../src/consumption/ticket-cost.ts';
 import { productionChecksOf } from '../../src/flow/production.ts';
 import { BatchError, BatchRunner } from '../../src/flow/batch.ts';
@@ -95,6 +96,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   const project = fixture.sessions[0]?.project ?? 'guestbook';
   const created = new MemoryTicketStore({ now: () => now().toISOString() });
   const takenOver = new Map<string, TakenOver>();
+  const captureChoices = new Map<string, CaptureChoice>();         // the receipt's captures forced from a ticket (P226)
   // LOCAL-152's reviewer resumes on its own story (envelopeReviewer, below).
   const human = fixtureHuman({ resumed: (id) => (id === envelopeReviewer?.id ? ENVELOPE_RESUMED : undefined) });
   const decided: (ContractItem | KnowledgeItem)[] = [contractItem(now()), knowledgeItem(now())];
@@ -358,6 +360,19 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
       if (method === 'GET' && sub === 'proof' && parts.length === 5 && parts[4] === 'production.png' && productionChecksOf(ledgerOf(decodeURIComponent(id ?? '')), decodeURIComponent(id ?? ''), [decodeURIComponent(parts[3] ?? '')]).some((c) => c.file)) {
         response.writeHead(200, { 'content-type': 'image/png', 'content-length': String(PIXEL.length), 'cache-control': 'no-store' });
         return void response.end(PIXEL);
+      }
+      // The human's choice of the receipt's captures (P226): Auto until one is posted.
+      if (sub === 'captures' && parts.length === 3) {
+        const ticket = decodeURIComponent(id ?? '');
+        if (!(await all()).some((t) => t.id === ticket)) return sendJson(response, 404, { error: 'no such ticket' });
+        if (method === 'GET') return sendJson(response, 200, captureChoices.get(ticket) ?? { choice: 'auto', by: null, at: null });
+        if (method === 'POST') {
+          const choice = ((await readJson(request)) as { choice?: unknown }).choice;
+          if (choice !== 'auto' && choice !== 'on' && choice !== 'off') return sendJson(response, 400, { error: 'choice is auto, on, off' });
+          const chosen: CaptureChoice = { choice, by: user, at: now().toISOString() };
+          captureChoices.set(ticket, chosen);
+          return sendJson(response, 200, chosen);
+        }
       }
       if (method === 'GET' && parts.length === 2) {
         const ticket = (await all()).find((t) => t.id === id);

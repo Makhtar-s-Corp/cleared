@@ -386,6 +386,16 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       return { files, contract: { path, diff, blob, snapshot: copy } };
     },
 
+    // The paths the author's branch commits against the service's base, for
+    // the capture rule (P226, flow/capture-need.ts): fetched as a step's
+    // branch is, into a ref of its own; a folder service's in its folder.
+    async changedPaths({ ticket, service, workdir }) {
+      const { dir, range } = await fetchBranch(ticket, service, workdir, `refs/cleared/proof/${service.name}/${ticketBranch(ticket)}`);
+      const files = (await git(dir, [...DIFF_ARGS, '--name-only', range, '--'])).split('\n').filter(Boolean);
+      const folder = service.kind === 'folder' && service.path ? `${service.path.replace(/\/+$/, '')}/` : '';
+      return folder ? files.filter((path) => path.startsWith(folder)) : files;
+    },
+
     // What a service's ticket branch changes, for the reviewer of a ticket
     // of several services (owner decision of 2026-10-22 20:33): read out of
     // <workdirs>/<ticket>/<service> as a step's branch is, committed changes

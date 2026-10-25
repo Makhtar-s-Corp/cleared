@@ -98,7 +98,7 @@
 // back to the full circuit for good: its card says why, the lead is told,
 // and its later authors run on the full model, never a resumed Haiku.
 import { posix } from 'node:path';
-import { VARIANT_DIFF_MAX, VARIANTS_MAX, VARIANTS_MIN, type CiRepair, type InboxItem, type PermissionItem, type ProductionCheck, type QuestionItem, type QuestionTimeout, type FastLane, type ReleaseItem, type SessionDetail, type SessionPlan, type SessionSummary, type TakenOver, type TicketStep, type TicketVariant } from '../api/types.ts';
+import { VARIANT_DIFF_MAX, VARIANTS_MAX, VARIANTS_MIN, type CiRepair, type InboxItem, type PermissionItem, type CaptureChoice, type ProductionCheck, type QuestionItem, type QuestionTimeout, type FastLane, type ReleaseItem, type SessionDetail, type SessionPlan, type SessionSummary, type TakenOver, type TicketStep, type TicketVariant } from '../api/types.ts';
 import { isSessionId } from '../container/docker.ts';
 import type { SiblingSpec } from '../container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
@@ -137,6 +137,8 @@ import { GIVEN_BACK, GIVEN_BACK_REVIEW, TAKEN_OVER } from './takeover.ts';
 import { NO_ANSWER, answerMessage, channelOf, channelPrompt, lastSaid, verdictsOf, type ChannelMessage } from './channel.ts';
 import { testComment, testLine, testRunOf } from './review-tests.ts';
 import type { ProductionCapture, ProofCapture } from './proof-capture.ts';
+import { CaptureChoiceStore } from './capture-choice.ts';
+import { captureNeed, type CaptureChoiceName, type CaptureNeed } from './capture-need.ts';
 import { PRODUCTION_FILE, PROOF_FILES } from './proof-capture.ts';
 import { productionChecksOf, productionComment } from './production.ts';
 import type { ReceiptCapture, ReceiptData, ReceiptTest } from './receipt.ts';
@@ -182,6 +184,11 @@ export type FlowEffects = {
   // author's session still runs. Never throws in the real one; a throw here
   // is journaled as failed. Absent: no capture is taken.
   captureProof?(input: { readonly ticket: TicketId; readonly session: SessionId; readonly service: ServiceConfig; readonly dir: string }): Promise<ProofCapture>;
+  // The paths the author's branch commits against the service's base, read
+  // as a step's branch is (stepChanges), a folder service's in its folder
+  // only: what the capture rule reads (P226, flow/capture-need.ts) before a
+  // browser starts. Absent: every author's work is captured, as before the rule.
+  changedPaths?(input: { readonly ticket: TicketId; readonly service: ServiceConfig; readonly workdir: string }): Promise<readonly string[]>;
   // The production page at `url`, the service's [release] production_url,
   // captured in `dir` once a release the human approved is deployed (by the
   // human or their CI) and its watch ended healthy (P218,
@@ -418,6 +425,7 @@ export class FlowEngine {
   #replaying = new Set<TicketId>();                                 // tickets whose resume is under way
   #tips = new Map<SessionId, string>();                             // the last commit journaled as an author's checkpoint
   #fastLanes: FastLaneStore;                                        // the Quick tickets the rules kept fast or sent back (B2.2)
+  #captureChoices: CaptureChoiceStore;                              // the human's choice of the receipt's captures, by ticket (P226)
 
   constructor(deps: FlowDeps) {
     this.registry = deps.registry;
@@ -437,6 +445,7 @@ export class FlowEngine {
     this.#variants = new VariantStore(deps.store.db, this.#now);
     this.#replays = new ReplayStore(deps.store.db, this.#now);
     this.#fastLanes = new FastLaneStore(deps.store.db);
+    this.#captureChoices = new CaptureChoiceStore(deps.store.db);
     this.#runner = new TrainRunner({
       db: deps.store.db, trains: this.#trains, tickets: this.registry.ticketStore, project: this.config.project, retryMs: this.config.mergeRetryMs,
       lock: (name) => this.#lockOf(this.#service(name)), now: this.#now, clean: this.#clean, emit: (event) => this.#emit(event),
@@ -2816,10 +2825,18 @@ export class FlowEngine {
   // The captures of `service`, taken while the author's session and its
   // trial environment still run, journaled on the session. A capture that
   // throws, or still runs at the cap, loses the captures, never the ticket.
+  // First the rule (P226): a change no person sees, or the human's Off on
+  // the ticket, takes none, and no browser starts; the journal says why.
   async #captureProof(live: Live, service: ServiceConfig): Promise<void> {
     const capture = this.#effects.captureProof;
     if (!capture) return;
     const { ticket: id, project } = live.input;
+    const need = await this.#captureNeed(live, service);
+    const reason = need ? { need } : {};
+    if (need && !need.take) {
+      this.#journal({ id: live.id, ticket: id, project }, { type: 'CUSTOM', name: 'cleared.proof_captured', value: { service: service.name, missing: [], ...reason } });
+      return;
+    }
     const failed: ProofCapture = { missing: (['before', 'after', 'video'] as const).map((part) => ({ part, reason: 'failed' as const })) };
     let timer: ReturnType<typeof setTimeout> | undefined;
     let got: ProofCapture;
@@ -2832,7 +2849,34 @@ export class FlowEngine {
     } finally {
       clearTimeout(timer);
     }
-    this.#journal({ id: live.id, ticket: id, project }, { type: 'CUSTOM', name: 'cleared.proof_captured', value: { service: service.name, ...got } });
+    this.#journal({ id: live.id, ticket: id, project }, { type: 'CUSTOM', name: 'cleared.proof_captured', value: { service: service.name, ...got, ...reason } });
+  }
+
+  // Whether the author's change needs captures: the paths its branch
+  // commits, and the human's choice on the ticket. Undefined without a
+  // reader of the diff; a read that fails is said by its code only.
+  async #captureNeed(live: Live, service: ServiceConfig): Promise<CaptureNeed | undefined> {
+    const read = this.#effects.changedPaths;
+    if (!read) return undefined;
+    const { ticket, workdir } = live.input;
+    const choice = this.#captureChoices.get(ticket).choice;
+    let paths: readonly string[] | undefined;
+    try { paths = await read({ ticket, service, workdir }); } catch { paths = undefined; }
+    return captureNeed(paths, choice);
+  }
+
+  // The human's choice of the receipt's captures on a ticket (GET and POST
+  // /api/tickets/:id/captures): undefined for a ticket the store does not
+  // know. It counts from the next author that ends its work.
+  async captureChoice(ticket: TicketId): Promise<CaptureChoice | undefined> {
+    if (!(await this.registry.ticketStore.get(ticket))) return undefined;
+    return this.#captureChoices.get(ticket);
+  }
+
+  async chooseCaptures(ticket: TicketId, choice: CaptureChoiceName, by: UserId): Promise<CaptureChoice> {
+    const known = await this.registry.ticketStore.get(ticket);
+    if (!known) throw new FlowError('not_found', `unknown ticket ${ticket}`);
+    return this.#captureChoices.set(ticket, known.project ?? this.config.project, choice, by, this.#at());
   }
 
   #proofDir(ticket: TicketId, service: string): string {

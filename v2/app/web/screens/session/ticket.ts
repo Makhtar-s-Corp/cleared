@@ -8,9 +8,10 @@
 // Take over. The right column says what the ticket's sessions changed,
 // checked and spent, and the Editor holds the ticket's diff, which the
 // author made and the reviewer reads. Pure, so the tests run it under Node.
-import type { ProductionCheck, SessionPlan, SessionSummary, TicketCost } from '../../../../src/api/types.ts';
+import type { CaptureChoice, ProductionCheck, SessionPlan, SessionSummary, TicketCost } from '../../../../src/api/types.ts';
 import type { ChangedFile, TimedEdit } from '../../components/editor/model.ts';
 import type { Translate } from '../../lib/i18n.ts';
+import type { ScreenContext } from '../../lib/screen.ts';
 import { lasted, quantity } from '../../lib/time.ts';
 import { ENDED, clock, family, latestOf, stepsOf, type Row, type SessionThread, type StepTotal } from './model.ts';
 
@@ -176,4 +177,17 @@ export function ticketCostFacts(cost: TicketCost | null | undefined, language: '
   if (cost.costUsd === null) return facts;
   const usd = new Intl.NumberFormat(language, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: cost.costUsd < 1 ? 4 : 2 }).format(cost.costUsd);
   return [...facts, t('ticket_cost_usd', { usd })];
+}
+
+// The human's choice of the proof receipt's captures on the ticket (P226,
+// issue #368): Auto, the service's rule decides from the change; On and
+// Off win over it. Posted to the service, which keeps it on the ticket.
+export const CAPTURE_CHOICES = ['auto', 'on', 'off'] as const satisfies readonly CaptureChoice['choice'][];
+// The service's answer when it is a choice, else null: a source that does not know the route draws no switch.
+export function captureChoiceOf(answer: unknown): CaptureChoice | null {
+  const choice = (answer as { choice?: unknown } | null)?.choice;
+  return typeof answer === 'object' && answer !== null && (CAPTURE_CHOICES as readonly unknown[]).includes(choice) ? answer as CaptureChoice : null;
+}
+export function chooseCaptures(api: ScreenContext['api'], ticket: string, choice: CaptureChoice['choice']): Promise<CaptureChoice> {
+  return api<CaptureChoice>(`/tickets/${encodeURIComponent(ticket)}/captures`, { method: 'POST', body: { choice } });
 }
