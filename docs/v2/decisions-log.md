@@ -5141,7 +5141,7 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Tests first.** The tests were committed alone in `00db860`. There, `test/flow/chat.test.ts` and `test/flow/chat-catalog.test.ts` do not load (`src/flow/chat.ts` does not exist), and `test/flow/modules.test.ts` fails on the same import (past it, it asks for `POST /hooks/chat` among the flow module's routes, the chat's tables, and 37 routes instead of 36). The fake chat client (`test/flow/chat-client.ts`) signs with `node:crypto` on its own, so the service's signature is checked against an independent one. Nothing else of the earlier tests changed.
 
-**Checks.** `npm run typecheck` passes. `npm test` (the build, `node --test` and Vitest): 1910 Node tests, 1864 pass, 46 skipped because `CLEARED_V2_PLAYWRIGHT` is not set, 0 fail; 295 Vitest tests pass. No browser test was run: nothing of the app changed. `npm run guard -- --base origin/v2`: nothing refused.
+**Checks.** `npm run typecheck` passes. `npm test` (the build, `node --test` and Vitest): 1910 Node tests, 1864 pass, 46 skipped because `CLEARED_V2_PLAYWRIGHT` is not set, 0 fail; 295 Vitest tests pass. No browser test was run: nothing of the app changed. After merging `origin/v2` at `2d3ff4e` (pull request 339, P211; the matrix keeps its P211 line and this lane's P212, every id once): `npm run typecheck` passes, `npm test` runs 1923 Node tests, 1875 pass, 48 skipped, 0 fail, and 301 Vitest tests pass. `npm run guard -- --base origin/v2`: nothing refused.
 
 **Resources.** No Docker object, no chat, Cursor or Codex account, no network beyond `npm ci` of the lock file, no tunnel, no secret: the tests' signing values are fake, the service and the fake client listen on port 0 on loopback.
 
