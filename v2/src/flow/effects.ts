@@ -1,7 +1,7 @@
 // The flow's effects for real: what leaves the process. Each one is a
 // thin call to the workspace modules of lane 5 or to the lock's own client;
 // the flow's tests replace all of them (FlowEffects in engine.ts).
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,9 +14,9 @@ import { judgeDiff } from './fast-lane.ts';
 import { captureHandover } from '../workspace/handover.ts';
 import { ensureProjectPage, readProjectPage, updateProjectPage } from '../workspace/project-page.ts';
 import { forgeEnvironments, publish } from '../workspace/publish.ts';
+import { forgeFor, forgeKindOf } from '../forge/index.ts';
 import type { ServiceConfig } from '../workspace/config.ts';
 import type { Ticket } from '../tickets/contract.ts';
-import { failedChecks, jobOf, logTail } from './ci-repair.ts';
 import { closePullRequest } from './pr-close.ts';
 import { captureProduction, captureProof, playwrightBrowser, proofTargets, type ProofTarget } from './proof-capture.ts';
 import { parseConf, projectSettings, workspaceOf, type FlowConfig } from './config.ts';
@@ -25,14 +25,9 @@ import type { FlowEffects } from './engine.ts';
 // The repository's root, which holds release-request.ts, the lock's client.
 const CLEARED = fileURLToPath(new URL('../../../', import.meta.url));
 
-// What the release card says of a pull request's checks, from the buckets of
-// `gh pr checks --json bucket`: one failed or cancelled check fails them,
-// one still running (or none reported yet) keeps them pending.
-export function checksOf(checks: readonly { readonly bucket: string }[]): 'pending' | 'passed' | 'failed' {
-  if (checks.some((c) => c.bucket === 'fail' || c.bucket === 'cancel')) return 'failed';
-  if (checks.length === 0 || checks.some((c) => c.bucket === 'pending')) return 'pending';
-  return 'passed';
-}
+// What the release card says of a pull request's checks on GitHub, now the
+// GitHub adapter's (src/forge/github.ts).
+export { checksOf } from '../forge/github.ts';
 
 export type EffectsOptions = {
   readonly env?: NodeJS.ProcessEnv;
@@ -57,6 +52,9 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     ? { dir: service.dir, url: service.url, base: service.base, repo: service.repo }
     : { dir: config.projectDir, url: config.repoUrl, base: config.base, repo: config.repo };
   const forge = (service?: ServiceConfig) => forgeEnvironments(of(service).dir, env);
+  // The service's forge (`forge` in the workspace file, GitHub by default),
+  // in its checkout, with the forge's environment.
+  const forgeOf = async (service?: ServiceConfig) => forgeFor(forgeKindOf(service), { dir: of(service).dir, env: (await forge(service)).gh });
   const refresh = async (service?: ServiceConfig) => {
     const { dir, url, base } = of(service);
     const checkout = await projectCheckout({ url, dir, base, env: (await forge(service)).git });
@@ -283,6 +281,7 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       return publish({
         project: dir, workdir: input.workdir, base, branch: input.branch, repo, ticket: input.ticket,
         report: input.report, gitEnv: environments.git, ghEnv: environments.gh,
+        forge: forgeFor(forgeKindOf(input.service), { dir, env: environments.gh }),
         ...(input.receipt ? { receipt: input.receipt } : {}),
       });
     },
@@ -300,42 +299,22 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       return captureProduction({ browser: await playwrightBrowser(env), url, dir });
     },
 
-    // gh exits 8 while a check is pending, and prints the list all the same.
     async prChecks(pr, service) {
-      const { gh } = await forge(service);
-      const { dir, repo } = of(service);
-      const stdout = await new Promise<string>((resolve, reject) => {
-        execFile('gh', ['pr', 'checks', String(pr), '--repo', repo, '--json', 'bucket'], { cwd: dir, env: gh, timeout: 15_000, encoding: 'utf8' },
-          (error, out) => (error && (error as { code?: unknown }).code !== 8 ? reject(error) : resolve(out)));
-      });
-      return checksOf(JSON.parse(stdout) as { bucket: string }[]);
+      return (await forgeOf(service)).checks(of(service).repo, pr);
     },
 
     // The head and the failed checks of a pull request (issue #273), each
-    // GitHub Actions job's failed steps' log cut to its end; a log that
-    // cannot be read is left out, the check's name stays.
+    // failed check's log cut to its end when the forge gives one.
     async ciFailures({ pr, service }) {
-      const { gh } = await forge(service);
-      const { dir, repo } = of(service);
-      const read = (args: readonly string[]) => new Promise<string>((resolve, reject) => {
-        execFile('gh', [...args, '--repo', repo], { cwd: dir, env: gh, timeout: 30_000, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }, (error, out) => (error ? reject(error) : resolve(out)));
-      });
-      const failures = failedChecks(JSON.parse(await read(['pr', 'view', String(pr), '--json', 'headRefOid,statusCheckRollup'])));
-      const checks = [];
-      for (const check of failures.checks.slice(0, 5)) {
-        const job = jobOf(check.url);
-        const log = job ? await read(['run', 'view', '--job', job, '--log-failed']).then((out) => logTail(out), () => null) : null;
-        checks.push({ ...check, log });
-      }
-      return { head: failures.head, checks: [...checks, ...failures.checks.slice(5)] };
+      return (await forgeOf(service)).failedChecks(of(service).repo, pr);
     },
 
     // A Close closes the ticket's pull request (issue #249, P114), through
-    // gh on the host as the repair reads one; never --delete-branch.
+    // the service's forge on the host as the repair reads one; never its branch.
     async closePullRequest({ pr, branches, reason, service }) {
       const { gh } = await forge(service);
       const { dir, repo, base } = of(service);
-      return closePullRequest({ pr, repo, dir, base, branches, reason, env: gh });
+      return closePullRequest({ pr, repo, dir, base, branches, reason, env: gh, forge: forgeFor(forgeKindOf(service), { dir, env: gh }) });
     },
 
     // What the published head changes against the base, read in the
