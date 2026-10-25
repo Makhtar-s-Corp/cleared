@@ -28,22 +28,22 @@ test('the screen draws the map as one named image, with its links in words and i
   assert.equal(markup.match(/<g class="map-box" data-box="database"/g)?.length, 1);
   assert.match(markup, /<path class="map-edge" data-edge="call"/);
   assert.match(markup, /<path class="map-edge" data-edge="database"/);
-  const text = visibleText(markup);
+  const text = visibleText(markup).join('\n');
   assert.match(text, /guestbook calls filter-api: POST \/check/);
   assert.match(text, /declared and found in the code/);
   assert.match(text, /guestbook uses PostgreSQL of guestbook: entries/);
   assert.match(text, /src\/filter\.ts:38/);
   for (const word of ['Call', 'Event', 'Database']) assert.match(text, new RegExp(word));
-  assert.match(text, /Built 3 min ago from the base branches/);
+  assert.match(text, /Built 3\smin ago from the base branches/);
 });
 
 test('each service is a button; the one picked is pressed and its impact is shown', () => {
   const none = render(en);
   assert.equal(none.match(/<button[^>]*data-service="[a-z-]+"[^>]*aria-pressed="false"/g)?.length, 2);
-  assert.match(visibleText(none), /Pick a service to see what a change of it reaches\./);
+  assert.match(visibleText(none).join('\n'), /Pick a service to see what a change of it reaches\./);
   const picked = render(en, 'filter-api');
   assert.match(picked, /<button[^>]*data-service="filter-api"[^>]*aria-pressed="true"/);
-  const text = visibleText(picked);
+  const text = visibleText(picked).join('\n');
   assert.match(text, /If filter-api changes/);
   assert.match(text, /guestbook calls it: POST \/check/);
   assert.match(text, /guestbook must change in the same ticket/);
@@ -51,7 +51,7 @@ test('each service is a button; the one picked is pressed and its impact is show
 });
 
 test('in French, every word from the catalog', () => {
-  const text = visibleText(render(fr, 'filter-api'));
+  const text = visibleText(render(fr, 'filter-api')).join('\n');
   assert.match(text, /Carte des services/);
   assert.match(text, /guestbook appelle filter-api\s:\sPOST \/check/);
   assert.match(text, /Si filter-api change/);

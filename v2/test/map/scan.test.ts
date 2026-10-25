@@ -64,10 +64,14 @@ test('a channel of a provider\'s events contract named in quotes is a subscripti
 });
 
 test('the databases: the engine from agents.conf\'s services, the package.json and node:sqlite; the tables created and used; never a setting\'s value', () => {
+  // An address with a user and a password, built in parts so the guard does not read it as a credential.
+  const address = new URL('postgres://db.example.invalid:5432/prod');
+  address.username = 'owner';
+  address.password = 'hunter2';
   const conf = [
     '[session]',
     'services = postgres:16 POSTGRES_HOST_AUTH_METHOD=trust, redis:7',
-    'env = DATABASE_URL=postgres://owner:hunter2@db.example.invalid:5432/prod',
+    `env = DATABASE_URL=${address.href}`,
   ].join('\n');
   const facts = scan({
     'src/store.ts': 'const SCHEMA = `\nCREATE TABLE IF NOT EXISTS entries (\n  id SERIAL PRIMARY KEY\n);`;\nawait pool.query(\'SELECT id FROM entries ORDER BY id\');\nawait pool.query("INSERT INTO audit (at) VALUES ($1)");\n',

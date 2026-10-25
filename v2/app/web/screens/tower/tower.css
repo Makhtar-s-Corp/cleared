@@ -50,6 +50,7 @@
 .workspace-line .svc-name { font-weight: var(--weight-strong); }
 .workspace-line .svc-state { color: var(--text-muted); }
 .workspace-line .svc[data-state="rolled_back"] .svc-train { color: var(--danger-text); }
+.services-open { display: inline-block; margin-top: var(--space-2); font-size: var(--text-sm); }
 
 /* rows: a kind, a title and one line, the meta at the end, its columns shared by every row of the list (a
    subgrid), its text on the headings' edge and its hover a little beyond it; J and K walk them */

@@ -73,6 +73,7 @@
   "landed_title": "Livré aujourd'hui",
   "landed_empty": "Rien de livré aujourd'hui pour l'instant.",
   "services_title": "Services",
+  "services_map_open": "Carte des services",
   "service_live_one": "{n} session en cours",
   "service_live_other": "{n} sessions en cours",
   "service_landing": "atterrit {ticket}",

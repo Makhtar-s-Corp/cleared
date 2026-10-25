@@ -46,7 +46,9 @@ test('the drawing puts each caller left of what it calls, the databases under th
   assert.deepEqual(['back-office', 'web', 'catalogue'].map((id) => box(id)?.column), [0, 1, 2]);
   assert.equal(box('royalties')?.column, 0, 'nobody calls it');
   assert.ok((box('catalogue:postgres')?.y ?? 0) > Math.max(...drawing.boxes.filter((b) => b.kind === 'service').map((b) => b.y)));
-  assert.equal(box('catalogue:postgres')?.x, box('catalogue')?.x);
+  const db = box('catalogue:postgres')!;
+  const owner = box('catalogue')!;
+  assert.equal(db.x + db.w / 2, owner.x + owner.w / 2, 'centred under its owner');
   assert.deepEqual(drawing.edges.map((e) => `${e.kind} ${e.from}>${e.to}`), wide.links.map((l) => `${l.kind} ${l.from}>${l.to}`));
   for (const edge of drawing.edges) assert.match(edge.path, /^M[\d.]+ [\d.]+ C/);
   assert.ok(drawing.width > 0 && drawing.height > 0);
@@ -62,7 +64,7 @@ test('the links in words: who calls whom and what, who listens, who uses which d
     'royalties uses PostgreSQL of catalogue: isrc',
   ]);
   assert.deepEqual(linkRows(wide, en).map((row) => row.state), [
-    "declared and found in the code', 'declared, not found in the code', 'found in the code', 'found in the code', 'found in the code",
+    'declared and found in the code', 'declared, not found in the code', 'found in the code', 'found in the code', 'found in the code',
   ]);
   assert.deepEqual(linkRows(wide, fr).map((row) => flat(row.text)), [
     'web appelle catalogue : POST /isrc',
@@ -110,8 +112,8 @@ test('the map\'s age through the shell\'s durations, and each service\'s problem
   assert.equal(flat(builtLine(wide, now, fr)), 'Construite il y a 12 min à partir des branches de base');
   assert.equal(flat(builtLine({ ...wide, builtAt: null }, now, en)), 'Not built yet');
   assert.deepEqual(problemLines(wide.services.find((s) => s.name === 'back-office')!, en), ['Too large: read in part']);
-  assert.deepEqual(problemLines({ ...wide.services[0]!, problems: ['not_fetched', 'fetch_failed', 'contract_unreadable'], dropped: 3 }, fr), [
-    "Pas encore récupéré', 'Récupération impossible : la carte montre la dernière base lue', 'Son contrat est illisible', 'Noms écartés : 3",
+  assert.deepEqual(problemLines({ ...wide.services[0]!, problems: ['not_fetched', 'fetch_failed', 'contract_unreadable'], dropped: 3 }, fr).map(flat), [
+    'Pas encore récupéré', 'Récupération impossible : la carte montre la dernière base lue', 'Son contrat est illisible', 'Noms écartés : 3',
   ]);
 });
 
@@ -127,6 +129,6 @@ test('the reads go to the service-map route; a 503 says the map is not available
   await readMap(api);
   await refreshMap(api);
   assert.deepEqual(calls, [{ path: '/service-map' }, { path: '/service-map/refresh', method: 'POST' }]);
-  assert.equal(mapFailure(new ApiError(503, 'down')), 'services_down');
-  assert.equal(mapFailure(new Error('x')), 'services_read_failed');
+  assert.equal(mapFailure(new ApiError(503, 'down')), 'map_down');
+  assert.equal(mapFailure(new Error('x')), 'map_read_failed');
 });

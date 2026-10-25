@@ -12,7 +12,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
 import { fixtureSource } from '../../fixtures/source.ts';
-import { FIXTURE_NOW } from '../../fixtures/tower.ts';
+import { FIXTURE_NOW, towerSource } from '../../fixtures/tower.ts';
 import { PASSWORD, startApp } from '../support.ts';
 
 const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
@@ -21,15 +21,18 @@ const SHOTS = process.env.CLEARED_V2_SHOTS;
 declare const document: any;
 
 async function withBrowser(options: { language: 'en' | 'fr'; width?: number; theme?: 'light' | 'dark' }, run: (page: any, base: string) => Promise<void>): Promise<void> {
-  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }), extra: { language: options.language } });
+  // The tower's source draws the workspace of two services, whose line has the map's link; the rest is the fixtures'.
+  const app = await startApp({ source: towerSource(() => FIXTURE_NOW, await fixtureSource({ now: () => FIXTURE_NOW })), extra: { language: options.language } });
   const require = createRequire(join(PLAYWRIGHT as string, 'package.json'));
   const { chromium } = require('playwright-core') as { chromium: { launch(options: Record<string, unknown>): Promise<any> } };
   const browser = await chromium.launch({ headless: true, ...(process.env.CLEARED_V2_CHROME ? { executablePath: process.env.CLEARED_V2_CHROME } : {}) });
   try {
     await app.directory.add('owner', PASSWORD);
     const context = await browser.newContext({
-      viewport: { width: options.width ?? 1440, height: 900 }, locale: options.language === 'fr' ? 'fr-FR' : 'en-US', timezoneId: 'Europe/Paris', colorScheme: options.theme ?? 'light',
+      viewport: { width: options.width ?? 1440, height: 900 }, locale: options.language === 'fr' ? 'fr-FR' : 'en-US', timezoneId: 'Europe/Paris',
     });
+    // The app's theme is the person's choice, kept by the page, not the system's (as the accessibility pass sets it).
+    await context.addInitScript(`try { localStorage.setItem('cleared-v2-theme', '${options.theme ?? 'light'}'); } catch {}`);
     const page = await context.newPage();
     await page.clock.install({ time: FIXTURE_NOW });
     const errors: string[] = [];
@@ -107,9 +110,9 @@ test('in French, dark, every word is French', { skip }, async () => {
   });
 });
 
-for (const width of [1280, 768, 390]) {
-  test(`at ${width} px the page does not scroll sideways, and the list of links is there`, { skip }, async () => {
-    await withBrowser({ language: 'en', width }, async (page, base) => {
+for (const [width, theme] of [[1280, 'light'], [768, 'light'], [390, 'light'], [1280, 'dark'], [768, 'dark'], [390, 'dark']] as const) {
+  test(`at ${width} px, ${theme}, the page does not scroll sideways, and the list of links is there`, { skip }, async () => {
+    await withBrowser({ language: 'en', width, theme }, async (page, base) => {
       await page.goto(`${base}/services`);
       await page.locator('.services-grid').waitFor();
       assert.ok(await noOverflow(page), `no horizontal scroll at ${width} px`);
@@ -118,7 +121,7 @@ for (const width of [1280, 768, 390]) {
         const height = await page.locator('[data-service="guestbook"]').evaluate((el: any) => el.getBoundingClientRect().height);
         assert.ok(height >= 44, `a service button is ${height}px high`);
       }
-      await shot(page, `services-en-${width}-light`);
+      await shot(page, `services-en-${width}-${theme}`);
     });
   });
 }

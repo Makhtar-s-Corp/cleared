@@ -323,9 +323,13 @@ export function TowerBody({ model, t, language = 'en', leadDraft = '', onLeadDra
           {model.needs.length === 0 ? null : <a className="more" href="/inbox">{t('open_inbox')}</a>}
         </div>
         {model.services.length === 0 ? null : (
-          <ul className="workspace-line" aria-label={t('services_title')}>
-            {model.services.map((row) => <li key={row.name} className="svc" data-service={row.name} data-state={serviceTone(row)}><span className="svc-name">{row.name}</span> <ServiceState row={row} t={t} /></li>)}
-          </ul>
+          <>
+            <ul className="workspace-line" aria-label={t('services_title')}>
+              {model.services.map((row) => <li key={row.name} className="svc" data-service={row.name} data-state={serviceTone(row)}><span className="svc-name">{row.name}</span> <ServiceState row={row} t={t} /></li>)}
+            </ul>
+            {/* The service map (milestone 4, M6): what links these services, reached from here, the palette and G M. */}
+            <a className="more services-open" id="services-open" href="/services">{t('services_map_open')}</a>
+          </>
         )}
         {/* Nothing waiting: the heading above says so; no empty list under it. */}
         {model.needs.length === 0 ? null : (

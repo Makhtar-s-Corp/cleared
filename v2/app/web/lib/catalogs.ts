@@ -10,6 +10,8 @@ import inboxEn from '../../messages/inbox.en.json';
 import inboxFr from '../../messages/inbox.fr.json';
 import leadEn from '../../messages/lead.en.json';
 import leadFr from '../../messages/lead.fr.json';
+import servicesEn from '../../messages/services.en.json';
+import servicesFr from '../../messages/services.fr.json';
 import sessionEn from '../../messages/session.en.json';
 import sessionFr from '../../messages/session.fr.json';
 import shellEn from '../../messages/shell.en.json';
@@ -19,7 +21,7 @@ import towerFr from '../../messages/tower.fr.json';
 import type { Catalog } from './i18n.ts';
 
 export type Language = 'en' | 'fr';
-export type CatalogScreen = 'shell' | 'tower' | 'session' | 'inbox' | 'lead' | 'ask' | 'consumption';
+export type CatalogScreen = 'shell' | 'tower' | 'session' | 'inbox' | 'lead' | 'ask' | 'consumption' | 'services';
 
 const FILES: Readonly<Record<CatalogScreen, Readonly<Record<Language, Catalog>>>> = {
   shell: { en: shellEn, fr: shellFr },
@@ -29,6 +31,7 @@ const FILES: Readonly<Record<CatalogScreen, Readonly<Record<Language, Catalog>>>
   lead: { en: leadEn, fr: leadFr },
   ask: { en: askEn, fr: askFr },
   consumption: { en: consumptionEn, fr: consumptionFr },
+  services: { en: servicesEn, fr: servicesFr },
 };
 
 // Each made once per language: a switch to a screen makes its translator
