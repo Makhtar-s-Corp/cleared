@@ -64,6 +64,13 @@ export interface Tracker {
 // the token or what the request carried.
 export class TrackerError extends Error {
   override name = 'TrackerError';
+  // The tracker's HTTP status when it answered with a refusal; none when it did not answer.
+  readonly status: number | undefined;
+
+  constructor(message: string, status?: number) {
+    super(message);
+    this.status = status;
+  }
 }
 
 // A tracker's answer within this time, or the pass on that tracker ends.

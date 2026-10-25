@@ -78,8 +78,8 @@ test('in French: the section\'s words follow CLEARED_V2_APP_LANGUAGE', async () 
   const { env } = setup('fr');
   const run = await doctor(env);
   assert.equal(run.code, 0, run.out + run.err);
-  assert.match(run.out, /^== mirror : le miroir GitHub \(jalon 4\)/m);
-  assert.match(run.out, /^PASS org\/guestbook : GitHub répond/m);
+  assert.match(run.out, /^== mirror\s: le miroir GitHub \(jalon 4\)/m);
+  assert.match(run.out, /^PASS org\/guestbook\s: GitHub répond/m);
 });
 
 test('each failing path exits 1 and prints the token nowhere', async () => {

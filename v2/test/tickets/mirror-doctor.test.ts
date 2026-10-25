@@ -97,7 +97,7 @@ test('all well: the token file read, the repository reached with its rights, eve
   assert.deepEqual(levels(checks), ['pass', 'pass', 'pass', 'pass'], JSON.stringify(checks));
   assert.match(checks[0]?.text ?? '', /CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE names can be read and is not empty \(its content is not shown\)/);
   assert.match(checks[1]?.text ?? '', /^org\/guestbook: GitHub answers, its issues are on, and the token's account can label and close them/);
-  assert.match(checks[2]?.text ?? '', /^org\/guestbook: every status label exists: status:Todo, status:In Progress, status:In Review, status:Needs Approval, status:Ready to Ship, status:Done/);
+  assert.match(checks[2]?.text ?? '', /^org\/guestbook: every status label a person picks on GitHub's page exists: status:In Progress, status:In Review, status:Needs Approval, status:Ready to Ship\.$/);
   assert.match(checks[3]?.text ?? '', /^org\/guestbook: the mirror's last full pass was 3 min ago/);
   noToken(checks);
   assert.deepEqual(fake.requests.map((r) => `${r.method} ${r.path.split('?')[0]}`), ['GET /repos/org/guestbook', 'GET /repos/org/guestbook/labels'], 'read only, nothing written');
@@ -112,7 +112,7 @@ test('in French, by default', async () => {
   assert.match(checks[0]?.text ?? '', /peut être lu et n'est pas vide/);
   assert.match(checks[1]?.text ?? '', /^org\/guestbook : GitHub répond/);
   assert.match(checks[2]?.text ?? '', /^org\/guestbook : il manque les étiquettes de statut status:In Progress, status:In Review/);
-  assert.match(checks[3]?.text ?? '', /il y a 3 min/);
+  assert.match(checks[3]?.text ?? '', /^org\/guestbook : dernier passage complet du miroir : il y a 3 min\.$/);
 });
 
 test('the token file missing, or empty: one failure, no request, never the token', async () => {
@@ -207,6 +207,13 @@ test('issues turned off, or an account that can only read them: each fails', asy
   assert.match(silent[1]?.text ?? '', /GitHub does not say what the token's account may do here/);
 });
 
+test('Todo and Done need no label: an open issue with none is in Todo, and Done is the issue closed', async () => {
+  const { env } = setup();
+  fake.repoMeta(REPO).labels = STATUS_LABELS.filter((label) => label !== 'status:Todo' && label !== 'status:Done');
+  const checks = plain(await run(env));
+  assert.equal(checks[2]?.level, 'pass', JSON.stringify(checks));
+});
+
 test('missing status labels are named and fail; labels are read on every page; the states the settings name are the ones looked for', async () => {
   const { env } = setup();
   fake.repoMeta(REPO).labels = [...Array.from({ length: 140 }, (_, i) => `area:${i}`), 'status:Todo', 'status:Done', 'Status:In Review', 'status:In Progress '];
@@ -235,7 +242,7 @@ test('the last pass: none yet is a notice; older than the heartbeat\'s tracker l
   passes(stale.ledger, { [`github:${REPO}`]: ago(125) });
   const late = plain(await run(stale.env));
   assert.equal(late[3]?.level, 'fail');
-  assert.match(late[3]?.text ?? '', /the mirror's last full pass was 2h ago, more than 10 min ago: is the service running\?/);
+  assert.match(late[3]?.text ?? '', /the mirror's last full pass was 2h ago, past the limit of 10 min \(CLEARED_V2_HEARTBEAT_TRACKER_MINUTES\): is the service running\?/);
 
   const tolerant = setup({ CLEARED_V2_HEARTBEAT_TRACKER_MINUTES: '180' });
   passes(tolerant.ledger, { [`github:${REPO}`]: ago(125) });

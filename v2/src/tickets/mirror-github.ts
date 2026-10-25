@@ -7,7 +7,8 @@
 // bot or an app is an agent, anyone else a person. A change of the title is
 // its `renamed` event; GitHub's events say nothing of a change of the
 // description, so no one is named for it (P237). Comments are read for the
-// whole repository, by their own time.
+// whole repository, by their own time. The doctor (tickets/mirror-doctor.ts)
+// reads the repository and its labels, and writes nothing.
 import { DEFAULT_STATES, type TicketStates } from './contract.ts';
 import { TrackerError, trackerFetch, type Tracker, type TrackerChange, type TrackerComment, type TrackerEdit, type TrackerIssue } from './mirror-tracker.ts';
 
@@ -63,7 +64,7 @@ export class GitHubTracker implements Tracker {
     });
     if (!response.ok) {
       await response.body?.cancel();
-      throw new TrackerError(`GitHub answered ${response.status} to ${method} ${path.split('?')[0]}`);
+      throw new TrackerError(`GitHub answered ${response.status} to ${method} ${path.split('?')[0]}`, response.status);
     }
     return (await response.json()) as T;
   }
@@ -162,6 +163,18 @@ export class GitHubTracker implements Tracker {
       out.push(this.#issueOf(issue, this.#changes(issue, events, me), this.#edits(events, me)));
     }
     return out;
+  }
+
+  // Whether the repository's issues are on, and what the token's account may
+  // do there, when GitHub says it.
+  async repository(): Promise<{ readonly issues: boolean; readonly permissions: Readonly<Record<string, boolean>> | undefined }> {
+    const repo = await this.#request<{ has_issues?: boolean; permissions?: Record<string, boolean> }>('GET', `/repos/${this.#repo}`);
+    return { issues: repo.has_issues !== false, permissions: repo.permissions };
+  }
+
+  // The names of the repository's labels, every page.
+  async labels(): Promise<string[]> {
+    return (await this.#pages<{ name: string }>(`/repos/${this.#repo}/labels`)).map((label) => label.name);
   }
 
   async create(input: { readonly title: string; readonly body: string; readonly labels: readonly string[]; readonly status: string }): Promise<TrackerIssue> {
