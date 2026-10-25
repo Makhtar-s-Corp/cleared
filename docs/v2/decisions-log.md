@@ -6405,6 +6405,8 @@ The choice is one condition in `#goOut` (`src/tickets/mirror.ts`).
 
 **Decision.** By the owner, 2026-10-25 16:30, relayed by the lead: the CI guard scans only the lines a change adds. A removed line, and an unchanged context line (the text git repeats after a hunk header's second `@@` included), are not read. The added lines are still read with every pattern.
 
+**Decision, the quota.** By the owner, 2026-10-25 16:34, relayed by the lead: for this project, no new lane starts past 90 % of the week's quota (it was 85 %). The other limits stay: 3 lanes at most, and each lane's stops at 5 % of the quota and 3 hours. This lane changes no code or default for it: the 85 % of B3.11 and of `CLEARED_V2_WEEK_STOP_PERCENT`'s default stays v2's own, and the project's 90 % is the value its runs set.
+
 **The need.** Deleting v1's tests and modules removed their fixtures: invented addresses, phone numbers, keys and tokens. The diff pass of `npm run guard -- --base origin/v2` read a deleted file's lines with every pattern, and git's `-U0` hunk headers quote the nearest unchanged line above a change, so it refused 26 lines this lane does not add, though each is already in `origin/v2`. v2's own `secret_shape` check already counts added lines only (see its entry above).
 
 **What changes.** `v2/scripts/guard.ts` keeps, from the `-U0` diff it hands the guard, the lines that start with `+` only: the added lines, and each file's `+++` line, so a code file keeps its own patterns (the snapshot's) and a deleted file (`+++ /dev/null`) adds nothing. It keeps `rename to` and `copy to` too, the new name of a file git moves without changing it. Hunk headers, removed lines, `---` lines and the other git headers are dropped. The pass is named `the lines added since <ref>`. `lib/guard/codex-guard.ts` is unchanged, and so is the tree pass, which reads every v2 file whole.
@@ -6417,4 +6419,4 @@ The choice is one condition in `#goOut` (`src/tickets/mirror.ts`).
 **Checks.** The five guard tests pass. `npm run guard -- --base origin/v2`: the tree pass and the pass on the added lines refuse nothing. The suites' counts are in the pull request.
 
 - Pull request: 388, against `v2`.
-- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-cleanup`; the decision: the owner, 2026-10-25 16:30.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-cleanup`; the decisions: the owner, 2026-10-25 16:30 (the guard) and 16:34 (the quota).
