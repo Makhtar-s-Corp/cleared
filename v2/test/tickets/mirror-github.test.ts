@@ -176,3 +176,70 @@ test('an answer GitHub refuses is a TrackerError that names the request, never t
   const missing = new GitHubTracker({ api, token: TOKEN, repo: 'org/missing' });
   await assert.rejects(missing.create({ title: 'x', body: '', labels: [], status: 'Todo' }), (error: unknown) => error instanceof TrackerError && /404/.test(error.message));
 });
+
+// ---- a delegation (C3, P243) ----------------------------------------------
+
+const delegationOf = async (since: string, number: number) => (await tracker.changed(since)).find((i) => i.id === String(number))?.delegation;
+
+test('a delegation: the cleared label on an open issue, whatever its case, read with who put it on and when; gone with the label or once closed', async () => {
+  clock.tick(60);
+  const since = clock.iso;
+  const issue = fake.open(REPO, JANE, { title: 'Hand it over', labels: ['bug'] });
+  assert.equal(await delegationOf(since, issue.number), null, 'no label, no delegation');
+  clock.tick();
+  const at = clock.iso;
+  fake.label(REPO, issue.number, JANE, 'Cleared');
+  assert.deepEqual(await delegationOf(since, issue.number), { how: 'label', actor: 'person', who: 'jane', at });
+  const read = (await tracker.changed(since)).find((i) => i.id === String(issue.number));
+  assert.deepEqual(read?.labels, ['bug', 'Cleared'], 'the label stays a label of the ticket');
+  assert.equal(read?.status, 'Todo');
+  clock.tick();
+  fake.unlabel(REPO, issue.number, JANE, 'Cleared');
+  assert.equal(await delegationOf(since, issue.number), null);
+  clock.tick();
+  fake.label(REPO, issue.number, ACTIONS, 'cleared');
+  assert.deepEqual(await delegationOf(since, issue.number), { how: 'label', actor: 'agent', who: 'github-actions[bot]', at: clock.iso }, 'a bot\'s label is an agent\'s');
+  clock.tick();
+  fake.close_(REPO, issue.number, JANE);
+  assert.equal(await delegationOf(since, issue.number), null, 'a closed issue is not handed over');
+});
+
+test('a delegation: the issue assigned to the mirror\'s own account; assigned to anyone else, it is not one', async () => {
+  clock.tick(60);
+  const since = clock.iso;
+  const issue = fake.open(REPO, JANE, { title: 'Assigned' });
+  clock.tick();
+  fake.assign(REPO, issue.number, JANE, JANE);
+  assert.equal(await delegationOf(since, issue.number), null);
+  clock.tick();
+  const at = clock.iso;
+  fake.assign(REPO, issue.number, JANE, MIRROR);
+  assert.deepEqual(await delegationOf(since, issue.number), { how: 'assignee', actor: 'person', who: 'jane', at });
+  clock.tick();
+  fake.label(REPO, issue.number, JANE, 'cleared');
+  assert.deepEqual(await delegationOf(since, issue.number), { how: 'label', actor: 'person', who: 'jane', at: clock.iso }, 'the latest of the two');
+  clock.tick();
+  fake.unlabel(REPO, issue.number, JANE, 'cleared');
+  fake.unassign(REPO, issue.number, JANE, MIRROR);
+  assert.equal(await delegationOf(since, issue.number), null);
+});
+
+test('an issue opened with the label and no event for it is handed over by its author, at its creation', async () => {
+  clock.tick(60);
+  const since = clock.iso;
+  const issue = fake.open(REPO, JANE, { title: 'Born delegated', labels: ['cleared'] });
+  assert.deepEqual(await delegationOf(since, issue.number), { how: 'label', actor: 'person', who: 'jane', at: issue.created_at });
+});
+
+test('another delegation label is read in its place', async () => {
+  clock.tick(60);
+  const since = clock.iso;
+  const issue = fake.open(REPO, JANE, { title: 'Another label' });
+  clock.tick();
+  fake.label(REPO, issue.number, JANE, 'cleared');
+  clock.tick();
+  fake.label(REPO, issue.number, JANE, 'agent');
+  const other = new GitHubTracker({ api, token: TOKEN, repo: REPO, delegationLabel: 'Agent' });
+  const read = (await other.changed(since)).find((i) => i.id === String(issue.number));
+  assert.deepEqual(read?.delegation, { how: 'label', actor: 'person', who: 'jane', at: clock.iso });
+});
