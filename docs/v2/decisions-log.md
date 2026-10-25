@@ -7020,3 +7020,81 @@ Tests first (`65ed443d`): a render case per value, a guess case, and a repositor
 
 - Pull request: 418, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-connect`.
+
+## 2026-10-25: GitLab, the second forge: the adapter over its REST API, the lock's merge for a GitLab service, the forge step's choice and a doctor section (the author's choices, lane `v2-j5-gitlab`, M10, P254, issue #423)
+
+**The need.** Issue #423, section 11 of [milestone-5-plan.md](milestone-5-plan.md) (matrix M10, decision 10). Section 6 made the forge a contract with GitHub as its first adapter. This lane adds GitLab:
+- the adapter, over GitLab's REST API, a token from a file, the address configurable for a self-managed GitLab;
+- the lock's merge for a GitLab service, with the checks the GitHub path makes;
+- the assistant's forge step offering GitLab;
+- a doctor section `gitlab`, run only when named.
+
+French and English, accessible, against a fake GitLab only. As earlier lanes noted, the brief's section 6 (`PROMPT.md`) and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of section 3.1 of the milestone 5 plan.
+
+**The branch.** The brief asked for `v2/j5-gitlab`. Git refuses that name while a local branch `v2` exists, so the lane runs on `v2-j5-gitlab`, as the other milestone 5 lanes did.
+
+**Decision.**
+1. **One client, in `lib/gitlab.ts`.** The v2 adapter and the v1 lock both use it. It sits in the root `lib/` because the lock's tests copy `lib/` into their sandbox, and the root type check leaves `v2/` out; v2 already imports from `lib/`.
+   - The token goes in the `PRIVATE-TOKEN` header only: never in an address, an error or a log. Errors carry GitLab's status and at most 200 characters of its `message`.
+   - Every request is sent with `redirect: 'error'`, so the header never follows an answer to another host.
+   - The address is https on any host, or http on loopback only (the tests). A trailing slash is dropped and a path kept, for a GitLab served under one. A user, a query or a fragment is refused. gitlab.com by default.
+   - The token's file must be absolute, a plain file of this account, mode 600, one word. A link is refused (`O_NOFOLLOW`).
+   - A project path is `group/name` or `group/subgroup/name`, checked before any call and sent as one encoded segment.
+2. **The adapter** (`v2/src/forge/gitlab.ts`), `forge = gitlab` in the workspace file:
+   - It reads `CLEARED_V2_GITLAB_URL` and `CLEARED_V2_GITLAB_TOKEN_FILE`. The settings write both under `[env]`, not `[env_files]`, so the token stays in its file and no variable holds it.
+   - **The listing** is the token's own projects (`membership=true`), never every public project of gitlab.com. It goes page by page, at most 1000, sorted by path. A project with no branch yet is left out. An internal project counts as private.
+   - **The numbers.** A pull request of the contract is a merge request's `iid`. A merge request is opened with `remove_source_branch: false`.
+   - **The checks** are the commit statuses of the merge request's head (GitLab's jobs and external statuses alike), summed up as GitHub's: one failed or cancelled fails them; one running, or none, keeps them pending. A failure GitLab allows (`allow_failure`) does not fail them. A manual job not run counts as skipped.
+   - **The repair's logs.** The failed statuses' job logs are read by id (`/jobs/:id/trace`), for the first five. The last 256 KB is kept, then `logTail` cuts it. An external status has no job, so no log, and its name stays.
+   - **The close** posts the comment as a note, then closes. The branch is kept.
+   - **No repository given.** The head is read on the project that the checkout's `origin` names on this GitLab. Another host is refused.
+3. **The contract's cases, one fixture change.** In `contract-cases.ts`, the five pull requests of the checks case now each have a head of their own. Checks belong to a commit: the fake GitLab keeps statuses by commit, as GitLab does, and refuses two pull requests on one head with different checks. The fake forge and the GitHub adapter pass unchanged.
+4. **The lock.** A service whose `agents.conf` says `[forge] adapter = gitlab`, with `gitlab_url`, `gitlab_project` and `gitlab_token_file`, is put live by `merge-pr.ts` through GitLab. The choice comes from the lock's own settings, never from the broker's client.
+   - The settings are checked before anything is read, and refused (exit 6) with the key named: an address in clear, a token file that is not absolute, inside the checkout or readable by others, no project, or a GitHub App key beside `adapter = gitlab`. `lib/forge.ts` accepts `adapter = gitlab` (no GitHub App, git's ambient credential) and refuses the App's keys with it.
+   - **The checks.** The merge request and its head's statuses are read in gh's words (`OPEN`, `isDraft`, `SUCCESS`, `PENDING`, `NEUTRAL` for an allowed failure). The checks that follow are the GitHub path's, unchanged and in the same order:
+     - open and not a draft, to the base;
+     - nothing running, nothing failed, one at least that passed;
+     - the branch holds the base, and its head is the one GitLab names;
+     - reviewed at this version;
+     - the agreement.
+   - **The host** is free when no pipeline of the project runs or waits, and the base's last commit is ten minutes old with no container settling, as for GitHub.
+   - **The merge** is `PUT …/merge` with `sha`, the commit that was checked (GitLab refuses it if the branch moved), and `should_remove_source_branch: false`.
+   - **GitLab silent** (no answer, or a 5xx) is "not now" (exit 3, or 5 from the queue), as GitHub down is. Its 4xx is "could not be read" (exit 1).
+   - **gh is never called.** Other merge requests shown on the ticket are asked of GitLab through a reader `shownLeft` now takes. `lib/release.ts start` reads the merged merge request from GitLab (its merge commit and when) before the watch starts.
+5. **The forge step.**
+   - **The screen.** It offers GitHub and GitLab as two radio buttons of one labelled group. GitHub comes first, and stays chosen until a GitLab token is saved alone.
+   - **The GitLab fields.** The address, gitlab.com by default. The api scope and the Developer role (Maintainer to merge into a protected branch), with what each is for. A link to the page that makes the token on that GitLab, its name and scope filled in.
+   - **The check goes through the contract:** the adapter's listing. Then the token's own page (`/personal_access_tokens/self`) must hold the scope `api`. An older GitLab without that page is checked by the listing alone.
+   - **Refusals:** `address`, `refused` (401), `forbidden` (403), `scope`, `empty`, `unreachable`, and `environment` when the environment names the token file.
+   - **What is written.** The token goes to `<state>/forge-gitlab.token` (mode 600). The settings name it with the address. Both are set in the process at once, with no restart.
+6. **GitHub's check stays its direct read.** The plan says the step goes through the contract for both forges; for GitHub, it does not. The GitHub adapter is `gh`, and the step's direct read of one page (`GET /user/repos`) is what tells 401 from 403 and needs no `gh` before the forge is connected. The step's and the assistant's existing tests stay as they were. Moving it would change GitHub's behaviour for no gain the plan names, which section 6 asked not to do.
+7. **The doctor section `gitlab`** is run only when named (`node scripts/doctor.ts gitlab`, `cleared doctor gitlab`), as `mirror`, and is read only. It says, in order:
+   - the address;
+   - the token's file, looked at as the adapter reads it and never printed;
+   - the account GitLab accepts, with 401, 403 and no answer in 15 s said apart;
+   - the api scope, a notice when GitLab cannot say;
+   - each GitLab service's project, with the role the token holds there (Developer at least, the role named in GitLab's words in both languages).
+
+   Not set up, it is one notice.
+
+**Questions for the owner** (defaults applied):
+1. The listing leaves out a project with no commit yet (applied), since there is no branch to work on. Or list it, and let the workspace step refuse it.
+2. A manual job not run counts as skipped (applied), so a manual deploy job does not hold the merge. Or wait for it, which holds every merge of a project with such a job until someone runs it.
+
+**Open.**
+- **#424.** The assistant's later steps on GitLab: the workspace step lists and clones through GitHub, the ready section checks GitHub's token, and `headOnForge` reads GitHub. Those files are other lanes'.
+- **#425.** git's credential for a GitLab service's fetches and pushes, the sibling of #421.
+- **#426.** Three project shapes are not taken yet:
+  - a nested group in the workspace file, whose `repository` is `owner/name`;
+  - a fast-forward merge method, which gives the watch no merge commit;
+  - merged results pipelines, whose statuses are not on the head.
+
+**Not done here.**
+- **No real GitLab.** The plan's section 11.5 makes GitLab for real the owner's trial (question 6). Every call here goes to a fake GitLab on loopback (`test/forge/fakes/gitlab.ts`, `node:http` only, so the root lock tests use it too). The lock's tests merge for real on the sandbox's git remote, so the watch starts on a real merge commit.
+- **Out of scope.** GitLab issues as a mirror. Forges other than GitHub and GitLab.
+
+**Tests first.** `ef0dcb64` committed the tests alone. On it:
+- the adapter's file, the contract's GitLab cases, the step's, the doctor's and the screen's could not load what they test;
+- the workspace file still refused `forge = gitlab`;
+- `lib/forge.ts` still refused `adapter = gitlab`;
+- the lock's six GitLab cases failed, `merge-pr.ts` asking `gh`.
