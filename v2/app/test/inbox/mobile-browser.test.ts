@@ -6,7 +6,8 @@
 //     Close, and the lead plan's Approve are reached by a finger without
 //     scrolling: the point at a button's centre is the button, not the
 //     shell's bottom bar laid over it;
-//   - the release's Approve keeps its words on one line, its commit under them;
+//   - Go is wider than Change; the release's Approve keeps its words on one
+//     line, its commit under them;
 //   - a tap on Go sends the Go, a tap on Approve starts the grace with Undo
 //     in reach;
 //   - scrolled to its end, the detail's last line stays above its buttons.
@@ -43,8 +44,9 @@ const WORDS: Record<Language, { readonly kinds: readonly string[]; readonly go: 
 type Item = { id: string; kind: string; state: string; sessionId?: string; ticket?: string };
 
 async function onPhone(language: Language, run: (page: any, base: string, items: Item[], source: InboxSource) => Promise<void>): Promise<void> {
-  // The grace is held for good: what this file checks is the tap and the countdown, not the write after it.
-  const source = inboxSource(inboxFixture(FIXTURE_NOW, { sessionPlan: 'medium' }), { now: () => FIXTURE_NOW, later: () => undefined });
+  // The source keeps the real clock, as the page's countdown does, and holds the grace for good:
+  // what this file checks is the tap and the countdown, not the write after it.
+  const source = inboxSource(inboxFixture(FIXTURE_NOW, { sessionPlan: 'medium' }), { later: () => undefined });
   const app = await startApp({ source, extra: { language } });
   const require = createRequire(join(PLAYWRIGHT as string, 'package.json'));
   const { chromium } = require('playwright-core') as { chromium: { launch(options: Record<string, unknown>): Promise<any> } };
@@ -124,6 +126,9 @@ for (const language of LANGUAGES) {
       assert.ok(await fitsWidth(page), 'no sideways scroll');
       assert.equal(await page.evaluate(() => window.scrollY), 0);
       for (const act of ['plan_change', 'plan_go']) await assertReachable(page, `#detail [data-act="${act}"]`, 'unscrolled');
+      // Go is the gesture the card waits for: the wider of the two, as Approve is beside Send back.
+      const width = (act: string) => page.locator(`#detail [data-act="${act}"]`).evaluate((button: any) => button.getBoundingClientRect().width);
+      assert.ok(await width('plan_go') > await width('plan_change'), 'Go is wider than Change');
       await page.locator('#detail [data-act="plan_go"]').tap();
       await page.locator('#detail .d-done').waitFor();
       assert.match((await page.locator('#detail .d-done').innerText()).trim(), words.go);

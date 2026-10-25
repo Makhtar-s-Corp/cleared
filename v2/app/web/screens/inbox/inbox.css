@@ -279,7 +279,8 @@ a.btn, a.btn:hover { text-decoration: none; }
   /* the detail is the page: edge to edge, its buttons at the bottom of the screen */
   .inbox[data-open="true"] { padding: 0; }
   .detail { border-radius: 0; box-shadow: none; }
-  .d-actions { border-radius: 0; padding-bottom: calc(14px + env(safe-area-inset-bottom)); box-shadow: 0 -1px 0 var(--hairline); }
+  /* above the shell's bar of screens, fixed at the foot of a phone, which pays the safe area (P217) */
+  .d-actions { bottom: calc(var(--bottom-bar) + env(safe-area-inset-bottom)); border-radius: 0; }
   .d-link { display: inline-flex; align-items: center; min-height: 44px; margin-block: -14px; }
   .d-buttons .btn[data-act="allow_once"] { flex-basis: 100%; order: -1; }
   .deny-reason { flex-basis: 100%; }
@@ -292,9 +293,9 @@ a.btn, a.btn:hover { text-decoration: none; }
   .d-actions { padding: 12px 16px 14px; }
   .d-buttons { width: 100%; margin-left: 0; }
   .d-buttons .btn { flex: 1 1 0; min-width: 0; padding: 4px 10px; }
-  .btn[data-act="approve"], .btn[data-act="approve_plan"] { min-width: 0; flex-grow: 1.6; }
+  .btn[data-act="approve"], .btn[data-act="approve_plan"], .btn[data-act="plan_go"] { min-width: 0; flex-grow: 1.6; }
   .d-body .plan-facts { display: flex; flex-direction: column; gap: 4px; padding: 12px 0 0; }
-  .switch button { min-height: 38px; }
+  .switch button { min-height: 44px; }
   .facts { grid-template-columns: 112px minmax(0, 1fr); }
   .shots { gap: 10px; }
   .shots.frame-phone { gap: 12px; }
@@ -305,7 +306,14 @@ a.btn, a.btn:hover { text-decoration: none; }
   .flag-chip { min-width: 0; }
 }
 /* a phone: the answers one per row, the first in ink; the field at the phone's field size */
-@media (max-width: 479px) { .d-answers .d-buttons .btn { flex: 1 1 100%; } }
+@media (max-width: 479px) {
+  .d-answers .d-buttons .btn { flex: 1 1 100%; }
+  /* Approve the release on a row of its own, its words on one line; Send back and Close share the next */
+  .d-buttons .btn[data-act="approve"] { flex-basis: 100%; order: -1; }
+  /* the kind on one line; the ticket and the link go under it when they no longer fit beside it */
+  .d-eyebrow { flex-wrap: wrap; row-gap: 0; }
+  .d-kind { white-space: nowrap; }
+}
 @media (max-width: 767px) {
   .d-answers .deny-reason { flex-basis: 100%; }
   .d-answers .deny-reason input { font-size: var(--text-input); }
