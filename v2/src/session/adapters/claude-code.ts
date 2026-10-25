@@ -235,6 +235,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
   // Starts the session container with the runner attached and sends `start`.
   async function launch(session: Session, resume: boolean): Promise<void> {
     const { id, input } = session;
+    const { service } = input;
     await startSession(docker, {
       session: id, workdir: input.workdir, tokenFile: runtime.loginFile, allowDir: join(runtime.stateDir, 'egress', id),
       allowHosts: input.policy.allowedHosts, hostAddresses: runtime.hostAddresses, services: input.services ?? runtime.services ?? [],
@@ -242,6 +243,10 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
       user: runtime.user, command: RUNNER_COMMAND, interactive: true,
       ...(runtime.image === undefined ? {} : { image: runtime.image }),
       ...(runtime.limits === undefined ? {} : { limits: runtime.limits }),
+      // The service's prepared image (C15), when the runtime names none; a wait for its build is said on the ticket.
+      ...(service === undefined || runtime.image !== undefined ? {} : {
+        prepared: { service, stateDir: runtime.stateDir, onWait: () => emit(session, [{ type: 'CUSTOM', name: 'cleared.prepared_image', value: { service, state: 'waiting' } }]) },
+      }),
     });
     const child = await docker.attach(id, sessionNames(id).container);
     session.child = child;

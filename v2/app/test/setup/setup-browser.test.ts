@@ -152,10 +152,12 @@ async function run(language: 'en' | 'fr'): Promise<void> {
 
     for (const id of ['workspace', 'environment', 'secrets', 'checks', 'first-ticket']) {
       await page.waitForURL(`${app.base}/setup/${id}`);
-      // The workspace and checks steps are filled (lanes v2-j5-connect and v2-j5-doctor, each with its own tests); the others are stubs.
-      const marker = id === 'workspace' ? '[data-workspace-step] [name="repository"]' : id === 'checks' ? '[data-check="docker"]' : `[data-step-stub="${id}"]`;
+      // The workspace, environment and checks steps are filled (lanes v2-j5-connect, v2-j5-images and v2-j5-doctor, each with its own tests); the others are stubs.
+      const marker = id === 'workspace' ? '[data-workspace-step] [name="repository"]' : id === 'checks' ? '[data-check="docker"]'
+        : id === 'environment' ? '[data-environment-none]' : `[data-step-stub="${id}"]`;
       await page.locator(marker).first().waitFor();
-      if (id === 'environment') await checked(page, 'a stub');
+      if (id === 'environment') await checked(page, 'the environment with no workspace');
+      if (id === 'secrets') await checked(page, 'a stub');
       await page.click('[data-act="setup_skip"]');
     }
     await page.locator('[data-setup-finished]').waitFor();

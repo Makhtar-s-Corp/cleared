@@ -17,6 +17,8 @@ import { createClaudeCodeAdapter } from '../../src/session/adapters/claude-code.
 import { createCleaner } from '../../src/session/clean.ts';
 import type { StartInput } from '../../src/session/contract.ts';
 import { DEFAULT_SAFE_COMMANDS } from '../../src/session/policy.ts';
+import { PreparedImages } from '../../src/container/prepared.ts';
+import { LOCK as PREPARED_LOCK, fetched as preparedFetched, land as preparedLand, project as preparedProject } from './prepared-fixture.ts';
 
 const SESSION = '0b7f3c1e-5d0a-4a6e-9f3b-1c2d3e4f5a6b';
 
@@ -661,4 +663,65 @@ test('the Claude Code adapter mounts a reader\'s workdir read only, from its mar
     prompt: 'x', services: [], siblings: [],
   });
   assert.ok(hasPair(byName(fake.containers, sessionNames(SESSION).container).args, '--mount', `type=bind,source=${workdir},target=${WORKDIR_MOUNT},readonly`));
+});
+
+// Prepared images (docs/v2/milestone-5-plan.md, section 10, matrix C15): a
+// session of a service with a prepared image starts on it, built ahead; a
+// stale one is waited for, and the ticket is told; with none, or an image
+// the runtime names, the session runs as before.
+test('a prepared service\'s session starts on its ready image, and nothing is built at its start', async () => {
+  const fake = new FakeDocker();
+  const { source } = preparedProject();
+  const stateDir = scratch();
+  const record = await new PreparedImages({ docker: new Docker(fake.runner), stateDir }).ensure(source);
+  const before = fake.calls.length;
+  const started = await startSession(new Docker(fake.runner), runtimeSpec({ prepared: { service: 'api', stateDir } }));
+  assert.ok(byName(fake.containers, sessionNames(SESSION).container).args?.includes(record.tag ?? '?'));
+  assert.ok(!fake.calls.slice(before).some((call) => call.args[0] === 'build'), 'no build at the start');
+  assert.deepEqual(started.image, { image: record.tag, kind: 'prepared', waitedMs: started.image.waitedMs });
+});
+
+test('with no prepared image the session runs Cleared\'s image as before, and an image the runtime names wins over a prepared one', async () => {
+  const fake = new FakeDocker();
+  const stateDir = scratch();
+  const plain = await startSession(new Docker(fake.runner), runtimeSpec({ prepared: { service: 'api', stateDir } }));
+  assert.ok(byName(fake.containers, sessionNames(SESSION).container).args?.includes(SESSION_IMAGE));
+  assert.deepEqual(plain.image, { image: SESSION_IMAGE, kind: 'default', reason: 'not_prepared', waitedMs: 0 });
+
+  const { source } = preparedProject();
+  const other = new FakeDocker();
+  await new PreparedImages({ docker: new Docker(other.runner), stateDir }).ensure(source);
+  const named = await startSession(new Docker(other.runner), runtimeSpec({ image: 'cleared-v2-codex:1', prepared: { service: 'api', stateDir } }));
+  assert.ok(byName(other.containers, sessionNames(SESSION).container).args?.includes('cleared-v2-codex:1'));
+  assert.equal(named.image.kind, 'given');
+});
+
+test('the Claude Code adapter tells the ticket it waits for its service\'s image, then starts on the new one', async () => {
+  const { bare, source } = preparedProject();
+  const dir = scratch();
+  const stateDir = join(dir, 'state');
+  const fake = new FakeDocker();
+  const first = await new PreparedImages({ docker: new Docker(fake.runner), stateDir }).ensure(source);
+  preparedLand(bare, { 'package-lock.json': PREPARED_LOCK('8.13.2') });
+  preparedFetched(source);
+  const runner = () => {
+    const process = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), pid: 1, exitCode: null, kill: () => true });
+    return process as unknown as ChildProcessWithoutNullStreams;
+  };
+  const events: { event: { type: string; name?: string; value?: unknown } }[] = [];
+  const adapter = createClaudeCodeAdapter({
+    log: { append: (row: never) => { events.push(row); return events.length; }, after: () => [] } as never, cleaner: () => createCleaner({}),
+    docker: new Docker(fake.runner, runner), newId: () => SESSION,
+    runtime: { stateDir, loginFile: join(dir, 'claude.token'), hostAddresses: [], user: '1000:1000', stopTimeoutMs: 10 },
+  });
+  await adapter.start({
+    project: 'demo', ticket: 'LOCAL-2', role: 'author', harness: 'claude-code', model: 'claude-haiku-5-5', workdir: join(dir, 'work'),
+    briefing: { projectPage: '', decisions: [], glossary: [], lessons: [], lastHandover: null },
+    policy: { role: 'author', base: 'main', workdir: '/workspace', scripts: [], credentialFile: '/run/cleared/claude.token', safeCommands: DEFAULT_SAFE_COMMANDS, allowedHosts: [], forbiddenHosts: [], ticketFiles: [], learned: [] },
+    prompt: 'x', service: 'api', services: [], siblings: [],
+  });
+  const waited = events.filter((row) => row.event.type === 'CUSTOM' && row.event.name === 'cleared.prepared_image');
+  assert.deepEqual(waited.map((row) => row.event.value), [{ service: 'api', state: 'waiting' }]);
+  const image = (byName(fake.containers, sessionNames(SESSION).container).args ?? []).find((arg) => arg.startsWith('cleared-v2-prep-api:'));
+  assert.ok(image && image !== first.tag, 'the new image, built while the ticket waited');
 });
