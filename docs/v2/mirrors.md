@@ -83,4 +83,5 @@ The tables are in the service's ledger: `mirror_trackers` (each tracker's first 
 - Linear has run against a fake only. A real trial needs a Linear account and a key, and that trial is the owner's to run. Until it has run, three things are unknown: how Linear shows an OAuth application acting as itself (`actor=app`) in an issue's history; whether a comment of an integration carries its `botActor`; and whether the history's `toTitle` and `updatedDescription` are filled as its schema says. A change no one is named for reads as an agent's.
 - The real GitHub run was a one-off script; there is no `doctor` section for the mirrors yet.
 - The app shows no comment yet: a comment that came from a tracker is read by the lead (its last five) and by v1's tools.
+- The lead's tool names every comment that no person signed `cleared`. A comment from a tracker therefore reaches the lead as `cleared: jane, on GitHub: ...`. On a public repository, anyone can write that text, and it reaches the lead under Cleared's name.
 - Known limit: if the service stops between the tracker's creation of an issue, or of a comment, and the mirror's record of it, the next pass creates it again.
