@@ -17,9 +17,13 @@
 // engine and the store this module receives. The idle watchdog (issue #290,
 // session/watchdog.ts) starts with the engine, on its own timer. The
 // captures of a pull request's proof receipt (P210) are flow/proof-routes.ts's.
+// A ticket launched from a chat (P212), POST /hooks/chat with chat_seen,
+// chat_launches and chat_replies, is flow/chat.ts's: a batch of one on the
+// batches' runner, whose replies follow the flow's events.
 import { LeverStore } from '../consumption/levers.ts';
 import { Docker } from '../container/docker.ts';
 import { BATCH_TABLES, BatchRunner, batchRoutes } from '../flow/batch.ts';
+import { CHAT_TABLES, ChatConfigError, ChatLauncher, chatRoutes, loadChatConfig, type ChatConfig } from '../flow/chat.ts';
 import { editorRoutes } from '../flow/editor.ts';
 import { filesRoutes } from '../flow/files.ts';
 import { planGateRoutes } from '../flow/plan-gate.ts';
@@ -56,6 +60,31 @@ function batchesOf(registry: Registry): BatchRunner | undefined {
   batches.startTimer();
   return batches;
 }
+let chat: ChatLauncher | undefined;
+let chatConfig: ChatConfig | undefined | null = null;
+// The chat's settings, read once; a bad setting is said and leaves the route off.
+function chatConfigOf(): ChatConfig | undefined {
+  if (chatConfig !== null) return chatConfig;
+  try {
+    chatConfig = loadChatConfig(process.env);
+  } catch (error) {
+    if (!(error instanceof ChatConfigError)) throw error;
+    console.error(`cleared-v2: ${error.message}`);
+    chatConfig = undefined;
+  }
+  return chatConfig;
+}
+// The chat's launcher, on the batches' runner and the engine's users.
+function chatOf(registry: Registry): ChatLauncher | undefined {
+  if (chat || !store) return chat;
+  const config = chatConfigOf();
+  const runner = config ? batchesOf(registry) : undefined;
+  const engine = runtime.engine(registry);
+  if (!config || !runner || !engine) return undefined;
+  chat = new ChatLauncher({ db: store.db, runner, flow: engine, users: engine.registry.users, config });
+  chat.listen();
+  return chat;
+}
 function humanOf(registry: Registry): HumanSide | undefined {
   if (human || !store) return human;
   const engine = runtime.engine(registry);
@@ -66,7 +95,7 @@ function humanOf(registry: Registry): HumanSide | undefined {
 }
 
 const flow: Module = {
-  tables: [TRAIN_TABLE, STEPS_TABLE, VARIANTS_TABLE, REPLAYS_TABLE, ...BATCH_TABLES],
+  tables: [TRAIN_TABLE, STEPS_TABLE, VARIANTS_TABLE, REPLAYS_TABLE, ...BATCH_TABLES, ...CHAT_TABLES],
   routes: [
     ...runtime.routes((path) => path.startsWith('/api/tickets')),
     ...planGateRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
@@ -79,6 +108,7 @@ const flow: Module = {
     ...proofRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
     ...replayRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
     ...batchRoutes({ runner: batchesOf, proof: () => runtime.proof() }),
+    ...chatRoutes({ config: chatConfigOf, launcher: chatOf }),
   ],
   provide: (deps) => {
     store = deps.store;
@@ -88,11 +118,13 @@ const flow: Module = {
   // recovery stops what the last process left, puts its tickets back, and
   // releases the stopped sessions' containers and networks. The watchdog
   // starts with it, once a minute, and so does the batches' runner, whose
-  // queue a restart finishes.
+  // queue a restart finishes, and the chat's replies, which a restart
+  // still sends.
   start: (registry) => {
     const engine = runtime.engine(registry);
     if (!engine || !store) return;
     batchesOf(registry);
+    chatOf(registry);
     if (watchdog) return;
     const docker = new Docker();
     watchdog = new IdleWatchdog({
@@ -102,14 +134,17 @@ const flow: Module = {
     });
     watchdog.startTimer();
   },
-  // Ends the watchdog's and the batches' timers and awaits the passes they run, so that the store
-  // does not close under them; a second start builds new ones.
+  // Ends the watchdog's and the batches' timers and awaits the passes they run, and the chat's
+  // replies, so that the store does not close under them; a second start builds new ones.
   stop: async () => {
     const ending = watchdog;
     const runner = batches;
+    const replies = chat;
     watchdog = undefined;
     batches = undefined;
+    chat = undefined;
     await ending?.close();
+    await replies?.close();
     await runner?.close();
   },
 };

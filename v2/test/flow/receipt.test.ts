@@ -51,8 +51,8 @@ test('the receipt in French: the same facts in the project\'s language, numbers 
   assert.ok(body.includes('[avant]('), body);
   assert.ok(body.includes('[après]('), body);
   assert.ok(body.includes('[vidéo du parcours (20 s)]('), body);
-  assert.match(body, /Tour 1 : `npm test` a échoué/);
-  assert.match(body, /Tour 2 : `npm test` a réussi/);
+  assert.match(body, /Tour 1\u00a0: `npm test` a échoué/);
+  assert.match(body, /Tour 2\u00a0: `npm test` a réussi/);
   assert.match(body, /1 234 567 jetons|1 234 567 jetons/);
   assert.match(body, /0,40 \$US/);
   assert.match(body, /42 min de la première session à cette pull request/);
@@ -90,7 +90,7 @@ test('a capture not taken says why, by its code; with no link address the files 
 test('no declared test command, or one declared and never run: said, not left blank', () => {
   assert.match(renderReceipt({ ...full, tests: [], testsDeclared: false }, 'en'), /Tests: the service declares no test command/);
   assert.match(renderReceipt({ ...full, tests: [{ round: 1, command: 'npm test', outcome: 'not_run' }] }, 'en'), /Round 1: `npm test` was not run/);
-  assert.match(renderReceipt({ ...full, tests: [{ round: 1, command: 'npm test', outcome: 'unclear' }] }, 'fr'), /Tour 1 : `npm test` a tourné dans un tube ou une liste/);
+  assert.match(renderReceipt({ ...full, tests: [{ round: 1, command: 'npm test', outcome: 'unclear' }] }, 'fr'), /Tour 1\u00a0: `npm test` a tourné dans un tube ou une liste/);
 });
 
 test('the block holds only what its fields say: a command with a backtick cannot break out, a link base with a path or credentials is not used', () => {
@@ -116,4 +116,12 @@ test('the receipt\'s catalogs: French has every English key, and no French sente
   const fr = read('fr');
   assert.deepEqual(Object.keys(fr).sort(), Object.keys(en).sort());
   for (const key of Object.keys(en)) assert.notEqual(fr[key], en[key], key);
+});
+
+test('the receipt\'s French keeps French typography: no plain space before ? ! ; : » or after «', () => {
+  const fr = JSON.parse(readFileSync(`${RECEIPT_MESSAGES_DIR}receipt.fr.json`, 'utf8')) as Record<string, string>;
+  for (const [key, value] of Object.entries(fr)) {
+    assert.doesNotMatch(value, / [?!;:%»]/, key);
+    assert.doesNotMatch(value, /« /, key);
+  }
 });

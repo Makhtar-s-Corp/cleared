@@ -73,7 +73,7 @@ test('the receipt is in the project\'s language: [owner] language at the base', 
   await publish({ ...input, report: '## Done\nTrié.\n', receipt });
   const body = gh.calls().find((c) => c.args[1] === 'create')?.body ?? '';
   assert.match(body, /^### Reçu de preuve$/m);
-  assert.match(body, /Tour 1 : `npm test` a réussi/);
+  assert.match(body, /Tour 1\u00a0: `npm test` a réussi/);
 });
 
 test('a report the guard refuses is left out, the receipt stays', async () => {
