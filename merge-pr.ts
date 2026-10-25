@@ -137,9 +137,9 @@ await main(() => {
     }
     // A watched release must finish before another merge can make the cause of
     // a health failure ambiguous. The queue is retried by the normal wake.
-    const active = node('lib/release.mjs', ['active']).status;
+    const active = node('lib/release.ts', ['active']).status;
     if (active !== 0) { if (active === 3) later('the previous release is still being monitored'); die('release watch state could not be read'); }
-    if (node('lib/release.mjs', ['check']).status !== 0) no('[release] settings are invalid; fix them before shipping');
+    if (node('lib/release.ts', ['check']).status !== 0) no('[release] settings are invalid; fix them before shipping');
 
     const down = githubDown();
     if (down.code === 0 && down.out) later(`GitHub is down (${down.out})`);
@@ -174,7 +174,7 @@ await main(() => {
     if (git(['merge-base', '--is-ancestor', base, head]).status !== 0) {
       const lag = join(work.path, 'lag.json');
       writeFileSync(lag, `${names(`${head}...${base}`)}\n`);
-      if (node('lib/merge.mjs', ['lag', lag]).status !== 0) no(`its branch lacks code that is on ${target}: the lane brings ${target} in first`);
+      if (node('lib/merge.ts', ['lag', lag]).status !== 0) no(`its branch lacks code that is on ${target}: the lane brings ${target} in first`);
     }
 
     // 3. Reviewed, for this ticket, with the verdict asked for, at this version.
@@ -184,13 +184,13 @@ await main(() => {
       let commit = '';
       try { commit = (readFileSync(report, 'utf8').split('\n').find((line) => line.startsWith('commit: ')) ?? '').slice('commit: '.length); } catch { commit = ''; }
       if (!commit) continue;
-      if (node('lib/merge.mjs', ['verdict', report], { stderr: 'ignore' }).status !== 0) continue;
+      if (node('lib/merge.ts', ['verdict', report], { stderr: 'ignore' }).status !== 0) continue;
       if (onlyBaseMerges(commit, head)) { reviewed = commit; break; }
     }
     if (!reviewed) no(`this version (${head.slice(0, 8)}) has no review for ${ticket} that concludes « ${confGet('merge', 'verdict')} »: have it reviewed`);
 
     // 4. The agreement of the user.
-    const needs = node('lib/merge.mjs', ['needs', filesJson], { stdout: 'pipe' }).stdout.replace(/\n+$/, '');
+    const needs = node('lib/merge.ts', ['needs', filesJson], { stdout: 'pipe' }).stdout.replace(/\n+$/, '');
     const go = confGet('tracker', 'go_state');
     const validate = confGet('tracker', 'validate_state');
     const askedPath = join(state, 'validations', `${ticket}.json`);
@@ -249,7 +249,7 @@ await main(() => {
             const idsFile = join(work.path, 'agent-ids.txt');
             writeFileSync(idsFile, idsOf([join(state, 'tracker-comments.jsonl')]));
             const opened = String(jqOr(pull.createdAt, ''));
-            const line = node('lib/merge.mjs', ['line', commentsFile, idsFile, ticket, opened, ...(needs === 'guarded' ? [pr] : [])]);
+            const line = node('lib/merge.ts', ['line', commentsFile, idsFile, ticket, opened, ...(needs === 'guarded' ? [pr] : [])]);
             if (line.status === 0) agreed = 'line';
           }
           break;
@@ -274,9 +274,9 @@ await main(() => {
     if (merged.status !== 0) die(`GitHub did not merge #${pr}`);
     ledgerEvent({ kind: 'merged_by_script', ticket, value: Number(pr), detail: `#${pr} at ${head.slice(0, 8)}, reviewed at ${reviewed.slice(0, 8)}, ${needs}, agreement: ${agreed || 'none needed'}, full lane` });
     // Its time from Todo to Done, in working time, the human's wait and the
-    // machine's (lib/fast-lane.mjs measure): never a reason not to go on.
-    if (node('lib/fast-lane.mjs', ['measure', ticket, pr, 'full'], { stdout: 'ignore', stderr: 'ignore' }).status !== 0) say(`${name}: the time of ${ticket} could not be measured`);
-    const watched = node('lib/release.mjs', ['start', ticket, pr, 'full'], { stderr: 'pipe' });
+    // machine's (lib/fast-lane.ts measure): never a reason not to go on.
+    if (node('lib/fast-lane.ts', ['measure', ticket, pr, 'full'], { stdout: 'ignore', stderr: 'ignore' }).status !== 0) say(`${name}: the time of ${ticket} could not be measured`);
+    const watched = node('lib/release.ts', ['start', ticket, pr, 'full'], { stderr: 'pipe' });
     if (watched.status !== 0) {
       const reason = watched.stderr.replace(/\n+$/, '').split('\n').at(-1) ?? '';
       ledgerEvent({ kind: 'release_watch_failed', ticket, value: Number(pr), detail: `the merge succeeded but its release watch could not start: ${reason}` });
@@ -286,7 +286,7 @@ await main(() => {
         mkdirSync(join(state, 'tracker-outbox'), { recursive: true });
         copyFileSync(failed, join(state, 'tracker-outbox', `${ticket}--release-watch-${pr}.md`));
       }
-      say(`${name}: #${pr} merged, but release monitoring failed: ${reason}. Retry with node ${ORCH_HOME}/lib/release.mjs start ${ticket} ${pr}`);
+      say(`${name}: #${pr} merged, but release monitoring failed: ${reason}. Retry with node ${ORCH_HOME}/lib/release.ts start ${ticket} ${pr}`);
     }
     process.stdout.write(`merged: #${pr} (${ticket}) at ${head.slice(0, 8)}\n`);
 

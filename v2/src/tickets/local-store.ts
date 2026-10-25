@@ -1,6 +1,6 @@
 // The ticket store on the local tracker's tables in ledger.db (plan, decision
 // 11): tracker_tickets, tracker_history, tracker_comments, as
-// lib/tracker/adapters/local.mjs creates and reads them, so tracker.ts,
+// lib/tracker/adapters/local.ts creates and reads them, so tracker.ts,
 // ask-validation.ts and merge-pr.ts see what the service writes and the
 // service sees what they write.
 //
@@ -25,7 +25,7 @@ import {
   type Actor, type Author, type Comment, type NewTicket, type StatusChange, type Ticket, type TicketId, type TicketService, type TicketStates, type TicketStore,
 } from './contract.ts';
 
-// One statement each, as lib/tracker/adapters/local.mjs SCHEMA writes them
+// One statement each, as lib/tracker/adapters/local.ts SCHEMA writes them
 // (a test keeps them identical).
 export const TICKET_TABLES: string[] = [
   `CREATE TABLE IF NOT EXISTS tracker_tickets (

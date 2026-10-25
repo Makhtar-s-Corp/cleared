@@ -26,7 +26,7 @@ import type { ServiceConfig, WorkspaceConfig } from '../workspace/config.ts';
 import { loadFlowConfig } from '../flow/config.ts';
 
 // The tables the approval writer and the review recorder use besides the
-// tickets': the ledger's runs and events, as lib/ledger.mjs creates them.
+// tickets': the ledger's runs and events, as lib/ledger.ts creates them.
 export const APPROVAL_TABLES: string[] = [...RUNS_TABLES];
 export { TICKET_TABLES };
 

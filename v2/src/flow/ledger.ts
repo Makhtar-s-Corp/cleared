@@ -1,7 +1,7 @@
 // What became of a release once the human approved it, read from what the
 // lock and the release watch write in ledger.db (docs/v2/milestone-2-plan.md,
 // decision 12): merge-pr.ts's `merged_by_script` row in v1's `events` table,
-// then lib/release.mjs's `releases` row, whose status is the watch's own
+// then lib/release.ts's `releases` row, whose status is the watch's own
 // verdict, with the times and the words of its `events` rows. The flow only
 // reads these tables; v1 creates them, and a ledger where they do not exist
 // yet reads as "nothing happened".

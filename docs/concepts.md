@@ -19,7 +19,7 @@ Paths under `[merge] tooling_paths` may merge without a ticket approval once rev
 The SQLite database lives under `~/.local/state/cleared/<project>/ledger.db` by default. `runs` records the selected and actual model, provider, role, worktree, times, outcome, token counts, estimated cost, pull request, and human decision data. `events` records routing changes, wakes, limits, reviews, refusals, merge events, and failures. Scripts write the ledger; agents do not. For example:
 
 ```sh
-CLEARED_REPO=/path/to/project node lib/ledger.mjs sql 'select model, count(*), sum(cost_eur) from runs group by model'
+CLEARED_REPO=/path/to/project node lib/ledger.ts sql 'select model, count(*), sum(cost_eur) from runs group by model'
 ```
 
 Agents can search the v2 sessions and their events through a read-only MCP server that removes secrets from every answer; give an agent this line to install it: `claude mcp add cleared-ledger -e CLEARED_STATE_DIR=<folder of ledger.db> -- node <cleared checkout>/v2/src/cli/ledger-mcp.ts` ([details](../v2/README.md#the-ledgers-mcp-server)).
@@ -43,7 +43,7 @@ CLI-reported cost is used when available. Otherwise `[prices]` and `[currency]` 
 - `spawn-lane.sh dev EX-12` opens a team and starts its session.
 - `review-pr.sh 41 EX-12` opens a separate read-only review.
 - `ask-validation.sh EX-12 request.md --pr 41` shows the user the commit to approve.
-- `release-request.mjs request_release EX-12 41 < announcement.md` asks the local broker to verify and ship.
+- `release-request.ts request_release EX-12 41 < announcement.md` asks the local broker to verify and ship.
 - `dashboard.sh` rewrites the static dashboard page.
 
 For command flags and settings, use [Configuration](configuration.md), [Adapters](adapters.md), and [Security](security.md).

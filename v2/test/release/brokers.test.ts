@@ -2,8 +2,8 @@
 // (docs/v2/milestone-2-plan.md, decision 21, lane 16): each started with
 // ORCH_LEDGER naming the service's ledger and its own state folder, over its
 // own temporary repository, both pull requests numbered 7. The real v1
-// scripts (serve/release-broker.mjs, ask-validation.ts, merge-pr.ts,
-// tracker.ts, lib/release.mjs) run unchanged; gh and docker are fakes, so
+// scripts (serve/release-broker.ts, ask-validation.ts, merge-pr.ts,
+// tracker.ts, lib/release.ts) run unchanged; gh and docker are fakes, so
 // nothing reaches GitHub or Docker. The train's own pieces drive them: the
 // per-service locks of approval/service.ts and the train's approval.
 import test from 'node:test';
@@ -27,7 +27,7 @@ import { CLEARED_HOME, OWNER, lockBox, lockConf } from '../approval/harness.ts';
 import { FakeTimers, PROOF } from '../approval/support.ts';
 
 async function startBroker(env: NodeJS.ProcessEnv, socket: string): Promise<ChildProcess> {
-  const child = spawn(process.execPath, ['--no-warnings', join(CLEARED_HOME, 'serve/release-broker.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['--no-warnings', join(CLEARED_HOME, 'serve/release-broker.ts')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
   child.stderr?.on('data', (chunk) => { stderr += chunk; });
   for (let i = 0; i < 100 && !existsSync(socket); i++) {
@@ -173,14 +173,14 @@ test('two brokers on one shared ledger: each finds the ticket and its own review
     const none = await filterLock.rollback({ ticket: ticket.id });
     console.log(`[filter-api request_rollback, no release row] ${JSON.stringify(none)}`);
     assert.doesNotMatch(none.message, /Only the configured human account|not an authorized/, 'the broker accepts the service account as its human account');
-    assert.match(none.message, /No Cleared release recorded for LOCAL-1/, 'it reached lib/release.mjs rollback');
+    assert.match(none.message, /No Cleared release recorded for LOCAL-1/, 'it reached lib/release.ts rollback');
 
     // The fake gh merges nothing on the forge, so no watch started. The
     // merges are made on each repository's base as the forge would, and the
-    // rows lib/release.mjs writes for them are written: the filter API's,
+    // rows lib/release.ts writes for them are written: the filter API's,
     // then the guestbook's, which its own watch reverted. On the shared
     // ledger the ticket's newest row is the guestbook's; the filter API's
-    // broker reverts the filter API's own merge (lib/release.mjs ownRelease).
+    // broker reverts the filter API's own merge (lib/release.ts ownRelease).
     const mergeOnBase = (box: typeof provider): string => {
       box.git(box.repo, 'checkout', '-q', 'main');
       box.git(box.repo, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #7', 'cleared/LOCAL-1');

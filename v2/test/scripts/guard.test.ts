@@ -25,7 +25,7 @@ function repo(t: test.TestContext): { readonly root: string; readonly commit: (f
   const git = (...args: string[]) => execFileSync('git', ['-C', root, '-c', 'core.hooksPath=/dev/null', '-c', 'user.name=test', '-c', 'user.email=test@example.invalid', '-c', 'commit.gpgSign=false', ...args], { stdio: 'pipe' });
   git('init', '-q', '-b', 'main');
   mkdirSync(join(root, 'lib', 'guard'), { recursive: true });
-  for (const name of ['codex-guard.mjs', 'private-terms.mjs']) copyFileSync(join(repository, 'lib', 'guard', name), join(root, 'lib', 'guard', name));
+  for (const name of ['codex-guard.ts', 'private-terms.ts']) copyFileSync(join(repository, 'lib', 'guard', name), join(root, 'lib', 'guard', name));
   const commit = (files: Record<string, string>, message: string) => {
     for (const [path, text] of Object.entries(files)) {
       mkdirSync(join(root, path, '..'), { recursive: true });

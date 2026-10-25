@@ -1,5 +1,5 @@
-// The service's client of the release broker (serve/release-broker.mjs), over
-// its Unix socket, with the same checks release-request.mjs makes before it
+// The service's client of the release broker (serve/release-broker.ts), over
+// its Unix socket, with the same checks release-request.ts makes before it
 // connects. The broker takes the caller's uid from the kernel, never from the
 // request: the service's own uid is accepted because the example project sets
 // [security] allow_shared_uid = true (plan, decision 7), and no session
@@ -19,7 +19,7 @@ export type BrokerAnswer = {
   readonly output: string;
   readonly reason: string;
   readonly problem?: string | null;
-  // The broker's own code (serve/release-broker.mjs): 0 done, 5 not now, 1
+  // The broker's own code (serve/release-broker.ts): 0 done, 5 not now, 1
   // with `definitive` a refusal for good, 69 anything else.
   readonly code?: number;
   readonly definitive?: boolean;
@@ -83,12 +83,12 @@ export class SocketReleaseBroker implements ReleaseBroker {
   // when every check holds. Minutes, not seconds. `fromQueue`: merge-pr.ts
   // answers "not now" without writing v1's merge-queue file (the broker
   // honours it from the service's uid only), as ORCH_FROM_QUEUE does for
-  // release-request.mjs.
+  // release-request.ts.
   requestRelease(request: ReleaseBrokerRequest & { readonly fromQueue?: boolean }): Promise<BrokerAnswer> {
     return this.#send({ operation: 'request_release', ticket: request.ticket, pr: request.pr, announcement: request.announcement, ...(request.fromQueue ? { from_queue: true } : {}) }, 15 * 60_000);
   }
 
-  // `request_rollback`: the broker runs lib/release.mjs rollback under its
+  // `request_rollback`: the broker runs lib/release.ts rollback under its
   // merge.lock, for the configured human account only.
   requestRollback(ticket: string): Promise<BrokerAnswer> {
     return this.#send({ operation: 'request_rollback', ticket }, 15 * 60_000);
@@ -106,7 +106,7 @@ export class SocketReleaseBroker implements ReleaseBroker {
   }
 }
 
-// Where the broker listens, as release-request.mjs finds it.
+// Where the broker listens, as release-request.ts finds it.
 export function brokerSocketPath(options: { readonly env: NodeJS.ProcessEnv; readonly confSocket?: string | undefined; readonly stateDir: string }): string {
   return options.env.CLEARED_RELEASE_SOCKET || options.confSocket || join(options.stateDir, 'release.sock');
 }

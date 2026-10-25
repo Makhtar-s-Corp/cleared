@@ -92,7 +92,7 @@ await main(() => {
   if (!installCheck({ appPort, confPort, origin, link: process.env.CLEARED_NOTIFY_LINK_BASE || '', bind, units, legacyLink: process.env.ORCH_NOTIFY_LINK_BASE || '' })) {
     die('a port check failed (above): nothing was written, no unit was touched');
   }
-  // Behind tailscale serve (an https public_origin) the app listens on [app] bind, this machine only by default (app/main.mjs).
+  // Behind tailscale serve (an https public_origin) the app listens on [app] bind, this machine only by default (app/main.ts).
   const appAddress = isHttps(origin) ? (confSoft('app', 'bind') || '127.0.0.1') : bind;
   const goWrite = (path: string) => chmodSync(path, statSync(path).mode & ~0o022);
   mkdirSync(dirname(named), { recursive: true });

@@ -3,7 +3,7 @@
 // linear | github | local), as tracker.sh and lib/tracker/adapters/dispatch.sh
 // were (docs/v2/milestone-4-plan.md, step b): Linear through
 // lib/tracker/adapters/linear.ts, GitHub and the local store through
-// lib/tracker/cli.mjs. A comment of the GitHub and local trackers is posted
+// lib/tracker/cli.ts. A comment of the GitHub and local trackers is posted
 // here, under the hourly limit, with the agents' first line.
 //
 //   tracker.ts <command> [<argument>...]
@@ -62,7 +62,7 @@ await main(() => {
         const from = args[3] || process.env.ORCH_SIGNED || 'script';
         const file = join(formatted.path, 'comment.md');
         writeFileSync(file, `${userMessage('agent_comment', { from, owner: ownerName(), body: readFileSync(input, 'utf8').replace(/\n+$/, '') })}\n`);
-        const posted = spawnSync(process.execPath, ['--no-warnings', join(ORCH_HOME, 'lib', 'tracker', 'cli.mjs'), 'comment-json', args[1]!, file], { env: process.env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
+        const posted = spawnSync(process.execPath, ['--no-warnings', join(ORCH_HOME, 'lib', 'tracker', 'cli.ts'), 'comment-json', args[1]!, file], { env: process.env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
         if (posted.status !== 0) return posted.status ?? 1;
         const answer = JSON.parse(posted.stdout) as { id?: unknown; url?: unknown };
         appendFileSync(join(state, 'tracker-comments.jsonl'), `${JSON.stringify({ id: String(answer.id ?? 'null'), ticket: args[1], from, at: nowUtc() })}\n`);
@@ -77,6 +77,6 @@ await main(() => {
     }
   }
   if (adapter === 'linear') return handOver(join(ORCH_HOME, 'lib', 'tracker', 'adapters', 'linear.ts'), args);
-  if (adapter === 'github' || adapter === 'local') return handOver(process.execPath, ['--no-warnings', join(ORCH_HOME, 'lib', 'tracker', 'cli.mjs'), ...args]);
+  if (adapter === 'github' || adapter === 'local') return handOver(process.execPath, ['--no-warnings', join(ORCH_HOME, 'lib', 'tracker', 'cli.ts'), ...args]);
   die(`unknown [tracker] adapter: ${adapter}`);
 });

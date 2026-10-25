@@ -4,7 +4,7 @@
 //   node src/cli/notify.ts send        (the dispatcher) reads its messages on stdin, prints what each adapter did
 //
 // The dispatcher (src/notify/dispatcher.ts) runs in the service and never
-// imports lib/notify: lib/conf.mjs copies every CLEARED_* variable to ORCH_*
+// imports lib/notify: lib/conf.ts copies every CLEARED_* variable to ORCH_*
 // when it is imported. Here that copy is harmless, and the process ends.
 //
 // The settings are the app's (app/src/notifications.ts): [notify] in the
@@ -52,8 +52,8 @@ async function load(env: NodeJS.ProcessEnv): Promise<{ contract: Contract; setti
   if (file) {
     try { sections = parseSections(readFileSync(file, 'utf8')); } catch { /* no settings file: the defaults */ }
   }
-  const contract = await import(`${LIB}contract.mjs`) as Contract;
-  const { notifyStore } = await import(`${LIB}store.mjs`) as { notifyStore(dir: string, options: { project?: string }): unknown };
+  const contract = await import(`${LIB}contract.ts`) as Contract;
+  const { notifyStore } = await import(`${LIB}store.ts`) as { notifyStore(dir: string, options: { project?: string }): unknown };
   const settings = contract.notifySettings({ sections }, env);
   const project = env.CLEARED_REPO || env.ORCH_REPO;
   // Never created here: the app makes the directory and the keys when a person turns notifications on.

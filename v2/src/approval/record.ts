@@ -1,7 +1,7 @@
 // What ask-validation.ts keeps of a request for agreement
 // (<state>/validations/<ticket>.json): the time of the request and the head
 // of each pull request shown. The human's approval is to these versions and
-// to nothing else (lib/validation-record.mjs reads the same file).
+// to nothing else (lib/validation-record.ts reads the same file).
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,7 +14,7 @@ const HEAD = /^[0-9a-f]{40}$/;
 
 export const byPr = (a: Version, b: Version) => a.pr - b.pr;
 
-// As lib/validation-record.mjs approvalOf: nothing is returned for a file
+// As lib/validation-record.ts approvalOf: nothing is returned for a file
 // that is not exactly what ask-validation.ts writes.
 export function readApprovalRecord(stateDir: string, ticket: string): ApprovalRecord | undefined {
   if (!TICKET.test(ticket)) return undefined;
@@ -39,7 +39,7 @@ export function sameVersions(a: readonly Version[] | undefined, b: readonly Vers
   return Array.isArray(a) && Array.isArray(b) && a.length === b.length && a.every((x, i) => x.pr === b[i]?.pr && x.head === b[i]?.head);
 }
 
-// The approval context local.mjs binds a human's move to: the ticket, the
+// The approval context local.ts binds a human's move to: the ticket, the
 // time of the request and the shown versions, in pull request order.
 export function approvalContext(ticket: string, at: string, versions: readonly Version[]): string {
   const shown = versions.map(({ pr, head }) => ({ pr, head })).sort(byPr);

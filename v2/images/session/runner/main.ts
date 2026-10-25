@@ -75,7 +75,7 @@ export const SLOW_MEASURE_MS = 200;
 export const MEASURE_TIMEOUT_MS = 5_000;
 // The commit identity of every session: a name and no address. Git 2.39
 // (the image's) accepts an empty address from these variables, and the
-// guard has nothing to refuse in it (lib/guard/codex-guard.mjs, "email
+// guard has nothing to refuse in it (lib/guard/codex-guard.ts, "email
 // address"); without them a commit fails, since HOME has no git config.
 export const GIT_IDENTITY = { GIT_AUTHOR_NAME: 'Cleared', GIT_AUTHOR_EMAIL: '', GIT_COMMITTER_NAME: 'Cleared', GIT_COMMITTER_EMAIL: '' } as const;
 // What the model reads after its login was renewed: the turn that failed is
@@ -499,7 +499,7 @@ export async function run(deps: RunnerDeps): Promise<number> {
       ...(resume ? { resume: start.sessionId } : { sessionId: start.sessionId }),
       settingSources: ['user'],
       // No co-author trailer on commits: its address would make the guard
-      // refuse the publish (lib/guard/codex-guard.mjs, "email address").
+      // refuse the publish (lib/guard/codex-guard.ts, "email address").
       settings: { attribution: { commit: '', pr: '' } },
       permissionMode: 'default',
       canUseTool,

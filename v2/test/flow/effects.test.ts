@@ -52,7 +52,7 @@ test('settings refuses a project without a verdict phrase, and a base with no pa
 test('requestRelease runs the lock\'s client with request_release, the ticket, the pull request and --ask, the announcement on stdin', async () => {
   const root = tempDir('flow-lock');
   const out = join(root, 'out.json');
-  const stub = join(root, 'release-request.mjs');
+  const stub = join(root, 'release-request.ts');
   writeFileSync(stub, `import { writeFileSync } from 'node:fs';
 let input = ''; for await (const c of process.stdin) input += c;
 writeFileSync(${JSON.stringify(out)}, JSON.stringify({ args: process.argv.slice(2), input, repo: process.env.CLEARED_REPO }));`);
@@ -63,7 +63,7 @@ writeFileSync(${JSON.stringify(out)}, JSON.stringify({ args: process.argv.slice(
 
 test('requestRelease answers the request time the lock recorded, which the approval is bound to', async () => {
   const root = tempDir('flow-lock');
-  const stub = join(root, 'release-request.mjs');
+  const stub = join(root, 'release-request.ts');
   // As ask-validation.ts: the record, with its nanosecond time, in the state folder.
   writeFileSync(stub, `import { mkdirSync, writeFileSync } from 'node:fs';
 for await (const c of process.stdin) void c;
@@ -75,7 +75,7 @@ writeFileSync(process.env.CLEARED_STATE_DIR + '/validations/LOCAL-1.json', JSON.
 
 test('requestRelease rejects with the lock\'s message when the client fails', async () => {
   const root = tempDir('flow-lock');
-  const stub = join(root, 'release-request.mjs');
+  const stub = join(root, 'release-request.ts');
   writeFileSync(stub, "process.stderr.write('release broker is not running'); process.exit(69);");
   const { flow } = await effects(undefined, { releaseRequest: stub });
   await assert.rejects(flow.requestRelease({ ticket: 'LOCAL-1', pr: 7, announcement: 'x' }), /exit 69.*release broker is not running/);
@@ -83,7 +83,7 @@ test('requestRelease rejects with the lock\'s message when the client fails', as
 
 test('requestRelease gives up when the client does not answer', async () => {
   const root = tempDir('flow-lock');
-  const stub = join(root, 'release-request.mjs');
+  const stub = join(root, 'release-request.ts');
   writeFileSync(stub, 'setTimeout(() => {}, 60000);');
   const { flow } = await effects(undefined, { releaseRequest: stub, requestTimeoutMs: 200 });
   await assert.rejects(flow.requestRelease({ ticket: 'LOCAL-1', pr: 7, announcement: 'x' }), /did not answer the release request within 0 seconds/);
@@ -104,11 +104,11 @@ test('the checks of a pull request, as the release card says them, from the buck
   assert.equal(checksOf([{ bucket: 'cancel' }]), 'failed');
 });
 
-// A stand-in for release-request.mjs that records what it was given and exits with `code`.
+// A stand-in for release-request.ts that records what it was given and exits with `code`.
 function lockStub(code: number, stderr = '', wait = false) {
   const root = tempDir('flow-merge');
   const out = join(root, 'out.json');
-  const stub = join(root, 'release-request.mjs');
+  const stub = join(root, 'release-request.ts');
   writeFileSync(stub, `import { writeFileSync } from 'node:fs';
 let input = ''; for await (const c of process.stdin) input += c;
 writeFileSync(${JSON.stringify(out)}, JSON.stringify({ args: process.argv.slice(2), input, repo: process.env.CLEARED_REPO, queue: process.env.ORCH_FROM_QUEUE }));

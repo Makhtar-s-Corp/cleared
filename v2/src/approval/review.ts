@@ -1,15 +1,15 @@
 // The review record merge-pr.ts reads (lane 8; the contract is registry.ts
 // ReviewRecorder). A review is a `runs` row with role review, source
 // dispatcher, outcome done, its pull request and ticket, and a report file
-// <state>/reports/<run id>.md in the format lib/reviews.mjs readReport
+// <state>/reports/<run id>.md in the format lib/reviews.ts readReport
 // parses: a front matter with the reviewed commit, then the report, whose
-// first « Verdict : » line is what lib/merge.mjs verdictIs reads.
+// first « Verdict : » line is what lib/merge.ts verdictIs reads.
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ReviewRecord, ReviewRecorder } from '../modules/registry.ts';
 
-// One statement each, as lib/ledger.mjs SCHEMA writes them (a test keeps them identical).
+// One statement each, as lib/ledger.ts SCHEMA writes them (a test keeps them identical).
 export const RUNS_TABLES: string[] = [
   `CREATE TABLE IF NOT EXISTS runs (
   run_id TEXT PRIMARY KEY,

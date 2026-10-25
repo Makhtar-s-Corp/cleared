@@ -16,8 +16,8 @@
 import { spawn } from 'node:child_process';
 import type { MemoryContext } from '../workspace/briefing.ts';
 
-const MEMORY_MODULE = new URL('../../../lib/memory/contract.mjs', import.meta.url).href;
-const CONF_MODULE = new URL('../../../lib/conf.mjs', import.meta.url).href;
+const MEMORY_MODULE = new URL('../../../lib/memory/contract.ts', import.meta.url).href;
+const CONF_MODULE = new URL('../../../lib/conf.ts', import.meta.url).href;
 
 const WRITE_PROGRAM = `
 const chunks = [];

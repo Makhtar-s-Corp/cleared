@@ -2,7 +2,7 @@
 // the human's (docs/v2/milestone-1-plan.md, decision 6). The service process
 // holds it alone: a file it owns, mode 0600, outside the project, which no
 // session container mounts. The signature is the one lib/tracker/adapters/
-// local.mjs verifies, so merge-pr.ts and tracker.ts read it unchanged.
+// local.ts verifies, so merge-pr.ts and tracker.ts read it unchanged.
 import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 
@@ -10,14 +10,14 @@ export class SigningKeyError extends Error {
   override name = 'SigningKeyError';
 }
 
-// What local.mjs signs for a status change: the ticket number (not LOCAL-n),
+// What local.ts signs for a status change: the ticket number (not LOCAL-n),
 // the status, the time exactly as stored, the actor, the approval context and
 // the content hash. Any other order or form verifies as someone else.
 export function approvalPayload(ticket: number, status: string, at: string, actor: string, approvalContext: string | null, contentHash: string | null): string {
   return JSON.stringify([ticket, status, at, actor, approvalContext, contentHash]);
 }
 
-// What local.mjs signs for a comment.
+// What local.ts signs for a comment.
 export function commentPayload(ticket: number, body: string, images: string, at: string, actor: string): string {
   return JSON.stringify(['comment', ticket, body, images, at, actor]);
 }
@@ -42,7 +42,7 @@ export class ApprovalSigner {
     this.publicKey = b64(createPublicKey(key).export({ type: 'spki', format: 'pem' }) as string);
   }
 
-  // Reads the key the way local.mjs reads its own: a regular file owned by
+  // Reads the key the way local.ts reads its own: a regular file owned by
   // this account that nobody else can read. A link is not followed.
   static load(path: string): ApprovalSigner {
     let fd: number;

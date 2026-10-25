@@ -38,7 +38,7 @@ test('nothing outside v2/ and examples/, its tests included, writes a bash scrip
   assert.deepEqual(found, []);
 });
 
-test('the core outside v2/ starts no shell on the host and writes no shell script', { todo: 'step d of docs/v2/milestone-4-plan.md' }, () => {
+test('the core outside v2/ starts no shell on the host and writes no shell script', () => {
   const rules: ReadonlyArray<readonly [string, RegExp]> = [
     ['a shell as the program of a call', new RegExp(String.raw`\(\s*${SHELL_PROGRAM}\s*,`)],
     ['a command run through a shell', /\bshell:\s*(?:true|['"`])/],
@@ -56,7 +56,7 @@ test('the core outside v2/ starts no shell on the host and writes no shell scrip
   assert.deepEqual(found, []);
 });
 
-test('no JavaScript is kept outside examples/ but what a browser loads by its address', { todo: 'step d of docs/v2/milestone-4-plan.md' }, () => {
+test('no JavaScript is kept outside examples/ but what a browser loads by its address', () => {
   assert.deepEqual(tracked.filter((file) => /\.(m?js|cjs|jsx)$/.test(file)), [
     // v1's page scripts, loaded as they are, with no build step.
     'app/public/actions.js',

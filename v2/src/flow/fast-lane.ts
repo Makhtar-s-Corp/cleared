@@ -2,7 +2,7 @@
 // decision 15; docs/fast-lane.md). A ticket with the Quick label opens on it
 // (its author is Haiku, engine.ts #authorModel); then v1's written rules,
 // never a model, judge what merging the ticket's branch would land on the
-// base: lib/fast-lane.mjs decideLane, run as it is, in a child process, on
+// base: lib/fast-lane.ts decideLane, run as it is, in a child process, on
 // the service's own checkout and with the [fast_lane] settings of the
 // service's base branch, never the branch's. The engine asks after each
 // author session and again at the head it publishes.
@@ -116,9 +116,9 @@ export function fallbackComment(reasons: readonly FastReason[]): string {
     + 'The next author sessions of this ticket run on the full author model, and it never comes back to the fast lane. The review and your approval are unchanged.';
 }
 
-// ---- lib/fast-lane.mjs, in a child process --------------------------------
+// ---- lib/fast-lane.ts, in a child process --------------------------------
 
-const FAST_LANE_MODULE = new URL('../../../lib/fast-lane.mjs', import.meta.url).href;
+const FAST_LANE_MODULE = new URL('../../../lib/fast-lane.ts', import.meta.url).href;
 
 // decideLane with a record that opened fast, so only the settings and the
 // diff decide; readDiff is its own (git merge-tree into a scratch object

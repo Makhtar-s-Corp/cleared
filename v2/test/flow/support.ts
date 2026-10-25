@@ -157,7 +157,7 @@ export async function setup(options: SetupOptions = {}) {
   return { deps, store, clock, tickets, users, recorder, approvals, calls, startedSessions, inbox, registry, engine, ticket, flowEvents };
 }
 
-// lib/release.mjs's table of the releases it watches, as it creates it (a
+// lib/release.ts's table of the releases it watches, as it creates it (a
 // test of landing.test.ts keeps the two texts the same).
 export const RELEASES_TABLE = `CREATE TABLE IF NOT EXISTS releases (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ticket TEXT NOT NULL, pr INTEGER NOT NULL,
@@ -167,13 +167,13 @@ export const RELEASES_TABLE = `CREATE TABLE IF NOT EXISTS releases (
   watch_pid INTEGER
 )`;
 
-// A release as lib/release.mjs keeps it: one row per merge, its status the watch's verdict.
+// A release as lib/release.ts keeps it: one row per merge, its status the watch's verdict.
 export function releaseRow(store: Store, row: { ticket: string; pr: number; status: string; mergedAt: string; lastHealth?: string; endedAt?: string }): void {
   store.db.prepare('INSERT INTO releases (ticket, pr, merge_sha, title, merged_at, status, last_health, ended_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
     .run(row.ticket, row.pr, `${row.ticket}-${row.pr}-${row.mergedAt}`, 'Newest entry first', row.mergedAt, row.status, row.lastHealth ?? null, row.endedAt ?? null);
 }
 
-// A row of the v1 ledger's events table, as merge-pr.ts and lib/release.mjs write it.
+// A row of the v1 ledger's events table, as merge-pr.ts and lib/release.ts write it.
 export function ledgerRow(store: Store, row: { kind: string; ticket: string; pr: number; at: string; detail?: string }): void {
   store.db.prepare('INSERT INTO events (at, kind, ticket, detail, value, source) VALUES (?, ?, ?, ?, ?, ?)')
     .run(row.at, row.kind, row.ticket, row.detail ?? '', row.pr, 'dispatcher');

@@ -263,9 +263,9 @@ test('a new engine follows a landing the last one started: the retries go on, th
   assert.equal(steps(t).filter((s) => s === '+watch').length, 1);
 });
 
-test('the releases table of the tests is lib/release.mjs\'s, word for word', () => {
-  const v1 = readFileSync(new URL('../../../lib/release.mjs', import.meta.url), 'utf8');
-  assert.ok(v1.includes(RELEASES_TABLE), 'support.ts RELEASES_TABLE must be copied from lib/release.mjs');
+test('the releases table of the tests is lib/release.ts\'s, word for word', () => {
+  const v1 = readFileSync(new URL('../../../lib/release.ts', import.meta.url), 'utf8');
+  assert.ok(v1.includes(RELEASES_TABLE), 'support.ts RELEASES_TABLE must be copied from lib/release.ts');
 });
 
 // The ticket store refuses the next move to `status` once, as a tracker that errors once would.

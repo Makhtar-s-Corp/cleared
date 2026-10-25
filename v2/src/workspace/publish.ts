@@ -10,14 +10,14 @@
 //   1. refuse the base branch, a git folder that points elsewhere, a branch
 //      with no commit of its own, and a branch whose history carries
 //      HANDOVER.md or CLAUDE.md;
-//   2. run lib/guard/codex-guard.mjs (--strict) on the commit messages and
+//   2. run lib/guard/codex-guard.ts (--strict) on the commit messages and
 //      on the lines each commit adds, with the private-term lists the
 //      project commits at the base ([guard] terms and allowed); nothing
 //      leaves when it refuses or when the project names no list;
 //   3. push the branch to the branch of the same name, never forced;
 //   4. reuse the open pull request of the branch, or open one with gh:
 //      not a draft (merge-pr.ts refuses a draft), its body the session's
-//      report as lib/pr-body.mjs cleans it, left out when the guard refuses
+//      report as lib/pr-body.ts cleans it, left out when the guard refuses
 //      it, then the commits; the proof receipt first (P210, flow/receipt.ts),
 //      in the project's language ([owner] language at the base), guarded on
 //      its own and left out when the guard refuses it. A reused pull
@@ -62,8 +62,8 @@ export type PublishInput = {
   readonly ticket: string;
   readonly report?: string;               // the session's report for the body
   readonly receipt?: ReceiptData;         // the proof receipt's facts, first in the body
-  readonly gitEnv?: NodeJS.ProcessEnv;    // forgeEnv of lib/forge.mjs; read from it when absent
-  readonly ghEnv?: NodeJS.ProcessEnv;     // forgeGhEnv of lib/forge.mjs; read from it when absent
+  readonly gitEnv?: NodeJS.ProcessEnv;    // forgeEnv of lib/forge.ts; read from it when absent
+  readonly ghEnv?: NodeJS.ProcessEnv;     // forgeGhEnv of lib/forge.ts; read from it when absent
 };
 
 export type Published = {
@@ -103,7 +103,7 @@ function confSetting(conf: string, section: string, key: string): string | undef
 export async function runGuard(project: string, ref: string, files: readonly string[]): Promise<string | undefined> {
   const tool = mkdtempSync(join(tmpdir(), 'cleared-v2-publish-guard-'));
   try {
-    for (const name of ['codex-guard.mjs', 'private-terms.mjs']) copyFileSync(join(CLEARED, 'lib', 'guard', name), join(tool, name));
+    for (const name of ['codex-guard.ts', 'private-terms.ts']) copyFileSync(join(CLEARED, 'lib', 'guard', name), join(tool, name));
     let conf: string;
     try { conf = await git(project, ['show', `${ref}:.cleared/agents.conf`]); }
     catch { throw new PublishRefused('guard', `the project commits no .cleared/agents.conf at ${ref}: nothing leaves without the guard's lists`); }
@@ -119,7 +119,7 @@ export async function runGuard(project: string, ref: string, files: readonly str
     }
     const env = { ...process.env, CLEARED_REPO: project, ORCH_REPO: project, ORCH_GUARD_REF: ref };
     try {
-      await run(process.execPath, [join(tool, 'codex-guard.mjs'), '--strict', ...files], { env, encoding: 'utf8' });
+      await run(process.execPath, [join(tool, 'codex-guard.ts'), '--strict', ...files], { env, encoding: 'utf8' });
       return undefined;
     } catch (error) {
       return String((error as { stderr?: unknown }).stderr ?? '').trim() || 'the guard stopped without saying why';
@@ -136,15 +136,15 @@ export function addedLines(diff: string): string {
   return diff.split('\n').filter((line) => !line.startsWith('-')).map((line) => line.replace(/^(@@ [^@]* @@).*/, '$1')).join('\n');
 }
 
-// The forge's environments, from lib/forge.mjs in a child process (it
+// The forge's environments, from lib/forge.ts in a child process (it
 // reads the project's settings at import): the one git pushes with, which
 // carries the credential helper and never the token, and the one gh runs
 // with, which carries the token. With no app configured, both are the
 // ambient environment.
 export function forgeEnvironments(project: string, env: NodeJS.ProcessEnv = process.env): Promise<{ git: NodeJS.ProcessEnv; gh: NodeJS.ProcessEnv }> {
   const program = `
-const { loadConf } = await import(${JSON.stringify(new URL('lib/conf.mjs', CLEARED_URL).href)});
-const { forgeEnv, forgeGhEnv } = await import(${JSON.stringify(new URL('lib/forge.mjs', CLEARED_URL).href)});
+const { loadConf } = await import(${JSON.stringify(new URL('lib/conf.ts', CLEARED_URL).href)});
+const { forgeEnv, forgeGhEnv } = await import(${JSON.stringify(new URL('lib/forge.ts', CLEARED_URL).href)});
 try {
   const conf = loadConf();
   process.stdout.write(JSON.stringify({ git: forgeEnv(conf), gh: forgeGhEnv(conf) }));
@@ -180,12 +180,12 @@ async function receiptFor(input: PublishInput, base: string, file: string): Prom
   return '';
 }
 
-// The report as lib/pr-body.mjs cleans it: no path of this machine, no
+// The report as lib/pr-body.ts cleans it: no path of this machine, no
 // token-shaped word, cut to its limits. Empty when there is none.
 async function cleanReport(report: string, file: string, project: string): Promise<string> {
   if (!report.trim()) return '';
   writeFileSync(file, report, { mode: 0o600 });
-  return (await command(process.execPath, ['--no-warnings', join(CLEARED, 'lib', 'pr-body.mjs'), file], { cwd: project, env: { ...process.env, CLEARED_REPO: project } })).trim();
+  return (await command(process.execPath, ['--no-warnings', join(CLEARED, 'lib', 'pr-body.ts'), file], { cwd: project, env: { ...process.env, CLEARED_REPO: project } })).trim();
 }
 
 export async function publish(input: PublishInput): Promise<Published> {

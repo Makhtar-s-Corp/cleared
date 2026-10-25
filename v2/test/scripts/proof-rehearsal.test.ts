@@ -110,8 +110,8 @@ test('the sendmail stand-in appends each message to the mail file after a dated 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('the lock stand-in reads the requests of release-request.mjs and of the approval\'s broker client', () => {
-  // release-request.mjs request_release T PR --ask (the flow's requestRelease).
+test('the lock stand-in reads the requests of release-request.ts and of the approval\'s broker client', () => {
+  // release-request.ts request_release T PR --ask (the flow's requestRelease).
   assert.deepEqual(brokerRequest(JSON.stringify({ operation: 'request_release', ticket: 'LOCAL-1', pr: 101, approval_request: 'Release?', announcement: '', approval_prs: [101], captures: [] })), { op: 'ask', ticket: 'LOCAL-1', pr: 101, prs: [101] });
   // Without --ask (the flow's mergeRelease, ORCH_FROM_QUEUE) and the approval writer's own call.
   assert.deepEqual(brokerRequest(JSON.stringify({ operation: 'request_release', ticket: 'LOCAL-1', pr: 101, announcement: 'What changes', from_queue: true })), { op: 'merge', ticket: 'LOCAL-1', pr: 101 });

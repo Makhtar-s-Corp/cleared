@@ -2,7 +2,7 @@
 // ledger.db: each occurrence that may notify, until it is sent, folded into
 // another one of its group, or dropped (gone, turned off, too old, nobody
 // to tell). The notify module owns this one table; v1's notify_queue and
-// notify_state are lib/notify.mjs's and are left alone.
+// notify_state are lib/notify.ts's and are left alone.
 //
 // One row is not an occurrence: the cursor, keyed 'cursor', holds the last
 // event_id of v1's events table already read. Its absence is the first run.

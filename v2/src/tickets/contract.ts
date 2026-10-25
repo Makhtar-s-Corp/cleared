@@ -1,7 +1,7 @@
 // The ticket store contract the flow codes against, with an in-memory
 // implementation for tests and fixtures. Lane 8 implements it on the local
 // tracker's tables in ledger.db (tracker_tickets, tracker_history,
-// tracker_comments, lib/tracker/adapters/local.mjs), so ids, states and
+// tracker_comments, lib/tracker/adapters/local.ts), so ids, states and
 // actor kinds are the local tracker's.
 import type { UserId } from '../session/contract.ts';
 

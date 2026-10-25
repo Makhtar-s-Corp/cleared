@@ -22,7 +22,7 @@ import { captureProduction, captureProof, playwrightBrowser, proofTargets, type 
 import { parseConf, projectSettings, workspaceOf, type FlowConfig } from './config.ts';
 import type { FlowEffects } from './engine.ts';
 
-// The repository's root, which holds release-request.mjs, the lock's client.
+// The repository's root, which holds release-request.ts, the lock's client.
 const CLEARED = fileURLToPath(new URL('../../../', import.meta.url));
 
 // What the release card says of a pull request's checks, from the buckets of
@@ -36,7 +36,7 @@ export function checksOf(checks: readonly { readonly bucket: string }[]): 'pendi
 
 export type EffectsOptions = {
   readonly env?: NodeJS.ProcessEnv;
-  readonly releaseRequest?: string;       // the lock's client; release-request.mjs of the repository by default
+  readonly releaseRequest?: string;       // the lock's client; release-request.ts of the repository by default
   readonly requestTimeoutMs?: number;
   readonly mergeTimeoutMs?: number;
   // The page of a session's trial environment, through the service's
@@ -147,7 +147,7 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
   // and the end of what it said on stderr.
   const lock = (args: readonly string[], input: string, limit: number, extra: NodeJS.ProcessEnv) =>
     new Promise<{ code: number | null; stderr: string; timedOut: boolean }>((resolve, reject) => {
-      const script = options.releaseRequest ?? join(CLEARED, 'release-request.mjs');
+      const script = options.releaseRequest ?? join(CLEARED, 'release-request.ts');
       const child = spawn(process.execPath, ['--no-warnings', script, ...args], {
         env: { ...env, CLEARED_REPO: config.projectDir, ...extra }, stdio: ['pipe', 'ignore', 'pipe'],
       });
@@ -419,7 +419,7 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       return { files, diff };
     },
 
-    // `release-request.mjs request_release <ticket> <pr> --ask`, the
+    // `release-request.ts request_release <ticket> <pr> --ask`, the
     // announcement on its stdin: the lock asks the human, at these heads.
     // Then the request time the lock recorded for these versions
     // (<state>/validations/<ticket>.json, which ask-validation.ts writes).
@@ -432,10 +432,10 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       return record && record.versions.some((v) => v.pr === input.pr) ? { requestedAt: record.at } : {};
     },
 
-    // `release-request.mjs request_release <ticket> <pr>`, without --ask:
+    // `release-request.ts request_release <ticket> <pr>`, without --ask:
     // the broker runs merge-pr.ts, which merges once every check holds. The
-    // client's exit says what happened (release-request.mjs and
-    // serve/release-broker.mjs): 0 merged; 5 not now (merge-pr.ts's 3 or 5,
+    // client's exit says what happened (release-request.ts and
+    // serve/release-broker.ts): 0 merged; 5 not now (merge-pr.ts's 3 or 5,
     // or the broker busy with another release); 1 refused for good
     // (merge-pr.ts's 6); anything else, the broker could not be asked.
     // ORCH_FROM_QUEUE makes merge-pr.ts answer "not now" without writing

@@ -31,12 +31,13 @@ function removed(): string[] {
 
 // Still tracked, with why (each one is a step of the plan, or a question).
 const STILL: ReadonlyMap<string, string> = new Map([
-  // Question 1 of the plan, default (a): the passkey files stay with the v1 app (B5.9d).
-  ['app/lib/webauthn.mjs', 'passkeys'],
-  ['app/lib/grant-socket.mjs', 'passkeys'],
+  // Question 1 of the plan, default (a): the passkey files stay with the v1 app (B5.9d), the modules in TypeScript
+  // under the same names (step d).
+  ['app/lib/webauthn.ts', 'passkeys'],
+  ['app/lib/grant-socket.ts', 'passkeys'],
   ['app/public/register.html', 'passkeys'],
   ['app/public/register.js', 'passkeys'],
-  ['test/app-authenticator.mjs', 'passkeys'],
+  ['test/app-authenticator.ts', 'passkeys'],
 ]);
 
 const under = (path: string) => (file: string) => (path.endsWith('/') ? file.startsWith(path) : file === path);
@@ -46,7 +47,7 @@ test('the page names the removals this test reads', () => {
   for (const path of ['adapters/', 'flow-lanes.sh', 'merge-pr.sh', 'lib/common.sh', 'app/lib/webauthn.mjs', 'lib/tracker/adapters/linear.sh', 'prompts/events/', 'serve/serve-dashboard.mjs']) {
     assert.ok(paths.includes(path), path);
   }
-  assert.ok(!paths.includes('app/lib/actions.mjs'), 'an adapt directory row removes only the children it names');
+  assert.ok(!paths.includes('app/lib/actions.ts'), 'an adapt directory row removes only the children it names');
 });
 
 test('nothing keep-and-drop.md removes in milestone 4 is tracked, but what the plan keeps for now', () => {

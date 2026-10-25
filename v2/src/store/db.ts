@@ -1,5 +1,5 @@
 // The service's store: the v1 ledger file (ledger.db), opened with
-// node:sqlite as lib/ledger.mjs opens it, so that the tracker tables and the
+// node:sqlite as lib/ledger.ts opens it, so that the tracker tables and the
 // runs merge-pr.ts reads stay in the same file (docs/v2/milestone-1-plan.md,
 // decision 11). This file owns three tables: session_events, sessions and
 // policy_rules. Every other table belongs to the module that declares it.
@@ -47,7 +47,7 @@ export class MigrationError extends StoreError {
   override name = 'MigrationError';
 }
 
-// The project whose ledger this is, named as v1 names it (lib/conf.mjs
+// The project whose ledger this is, named as v1 names it (lib/conf.ts
 // projectDir): CLEARED_REPO, ORCH_REPO, or the first line of
 // <config>/cleared/project. v1's last resort, asking git for the checkout
 // that holds Cleared, is not followed: the v2 service runs no git to find
@@ -64,7 +64,7 @@ function projectName(env: NodeJS.ProcessEnv): string | undefined {
   }
 }
 
-// Where ledger.db is, as lib/ledger.mjs ledgerPath and lib/conf.mjs stateDir
+// Where ledger.db is, as lib/ledger.ts ledgerPath and lib/conf.ts stateDir
 // find it: ORCH_LEDGER, then CLEARED_STATE_DIR or ORCH_STATE_DIR, then
 // <XDG_STATE_HOME or ~/.local/state>/cleared/<project name>.
 export function ledgerPath(env: NodeJS.ProcessEnv = process.env): string {
@@ -148,7 +148,7 @@ function session(row: Row): SessionRecord {
   };
 }
 
-// Opened as lib/ledger.mjs openLedger opens it for writing: the directory
+// Opened as lib/ledger.ts openLedger opens it for writing: the directory
 // made, a 5 second busy timeout, the WAL journal, which v1 already sets on
 // the same file, so merge-pr.ts and the tracker read it as before.
 function openDatabase(path: string): DatabaseSync {

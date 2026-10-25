@@ -84,7 +84,7 @@ export function openQueuedMerges(state: string): void {
       code = 69;
       why = `queued announcement cannot be read: ${said}`;
     } else {
-      const run = spawnSync(join(ORCH_HOME, 'release-request.mjs'), ['request_release', ticket, pr], { env, encoding: 'utf8', input: said ? readFileSync(said) : '', stdio: ['pipe', 'ignore', 'pipe'] });
+      const run = spawnSync(join(ORCH_HOME, 'release-request.ts'), ['request_release', ticket, pr], { env, encoding: 'utf8', input: said ? readFileSync(said) : '', stdio: ['pipe', 'ignore', 'pipe'] });
       code = run.status ?? 1;
       why = (run.stderr ?? '').replace(/\n+$/, '');
     }

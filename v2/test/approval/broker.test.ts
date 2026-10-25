@@ -19,7 +19,7 @@ import { LocalTicketStore, TICKET_TABLES } from '../../src/tickets/local-store.t
 import { DatabaseSync } from 'node:sqlite';
 
 async function startBroker(box: ReturnType<typeof lockBox>): Promise<ChildProcess> {
-  const child = spawn(process.execPath, ['--no-warnings', join(CLEARED_HOME, 'serve/release-broker.mjs')], { env: box.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['--no-warnings', join(CLEARED_HOME, 'serve/release-broker.ts')], { env: box.env, stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
   child.stderr?.on('data', (chunk) => { stderr += chunk; });
   const socket = box.socket as string;

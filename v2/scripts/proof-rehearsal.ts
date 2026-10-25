@@ -235,7 +235,7 @@ function withForge<T>(file: string, change: (forge: Forge) => { forge: Forge; ou
 
 export type BrokerRequest = { readonly op: 'ask' | 'merge' | 'rollback' | 'status' | 'invalid'; readonly ticket: string; readonly pr: number | null; readonly prs?: readonly number[] };
 
-// What release-request.mjs and approval/broker.ts send on the socket.
+// What release-request.ts and approval/broker.ts send on the socket.
 export function brokerRequest(raw: string): BrokerRequest {
   let value: Record<string, unknown>;
   try { value = JSON.parse(raw) as Record<string, unknown>; } catch { return { op: 'invalid', ticket: '', pr: null }; }
@@ -264,7 +264,7 @@ export function writeValidation(state: string, request: { readonly ticket: strin
   renameSync(`${file}.part`, file);
 }
 
-// v1's releases table (lib/release.mjs), which the flow's ledger reader reads.
+// v1's releases table (lib/release.ts), which the flow's ledger reader reads.
 const RELEASES = `CREATE TABLE IF NOT EXISTS releases (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ticket TEXT NOT NULL, pr INTEGER NOT NULL,
   merge_sha TEXT NOT NULL UNIQUE, title TEXT NOT NULL, merged_at TEXT NOT NULL,
@@ -287,10 +287,10 @@ type BrokerOptions = {
   readonly base?: string;                                   // the branch it merges into and reverts on (main when absent)
 };
 
-// Answers on the socket as serve/release-broker.mjs does ({ ok, code,
+// Answers on the socket as serve/release-broker.ts does ({ ok, code,
 // output }). A merge is done once per pull request; asked again, it says
 // merged. A failing watch probes twice, then rolls the merge back, as
-// lib/release.mjs's watch does with auto_rollback; a request_rollback
+// lib/release.ts's watch does with auto_rollback; a request_rollback
 // reverts the ticket's newest merge of this repository.
 export function startBroker(options: BrokerOptions): Promise<net.Server> {
   const merged = new Map<number, { ticket: string; sha: string }>();

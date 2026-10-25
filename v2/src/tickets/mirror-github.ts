@@ -1,7 +1,7 @@
 // The mirror's GitHub Issues tracker (P230): the issues of one repository,
 // through GitHub's REST API. A state is one `status:<state>` label on an
 // open issue, as v1's GitHub adapter wrote it (lib/tracker/adapters/
-// github.mjs); an open issue with none is in Todo, one with two reads as no
+// github.ts); an open issue with none is in Todo, one with two reads as no
 // state; Done is the issue closed as completed. Who made each change is
 // read from the issue's events: the token's own account is the mirror's, a
 // bot or an app is an agent, anyone else a person.

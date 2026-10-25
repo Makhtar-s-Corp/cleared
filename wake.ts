@@ -4,14 +4,14 @@
 //   1. Tries again what only waited: the comments the hourly limit held back,
 //      the go-lives that waited for the host, the tickets a go-live could not
 //      close.
-//   2. Follows the release watch (lib/release.mjs reconcile) and notes an
+//   2. Follows the release watch (lib/release.ts reconcile) and notes an
 //      outage of GitHub, with its start and its end, in the ledger.
 //   3. Reads what moved in the tracker and on GitHub since the last wake
-//      (lib/wake.mjs) and keeps it in its state, where the snapshot reads
+//      (lib/wake.ts) and keeps it in its state, where the snapshot reads
 //      each pull request's size and checks.
-//   4. Writes the snapshot (lib/board-collector.mjs) and the heartbeat's wake
-//      end (lib/heartbeat.mjs), then dispatches the notifications
-//      (lib/notify.mjs).
+//   4. Writes the snapshot (lib/board-collector.ts) and the heartbeat's wake
+//      end (lib/heartbeat.ts), then dispatches the notifications
+//      (lib/notify.ts).
 //
 //   wake.ts
 //
@@ -32,7 +32,7 @@ const node = (file: string, args: readonly string[], options: { readonly stdout?
 // The wake's own work; the snapshot, the heartbeat and the notifications
 // follow it whatever its end.
 function wake(state: string, wakeDir: string): number {
-  node('lib/release.mjs', ['reconcile'], { stdout: 'ignore', stderr: 'ignore' });
+  node('lib/release.ts', ['reconcile'], { stdout: 'ignore', stderr: 'ignore' });
   // What the hourly limit held back leaves now, grouped, if the user may be written.
   flushOutbox(state);
   // The go-lives that only waited for the host.
@@ -64,7 +64,7 @@ function wake(state: string, wakeDir: string): number {
     // The tracker is asked for what was touched since the last wake, with
     // some overlap; what was already seen is told apart by its identifier. A
     // state file that cannot be read is no state: this wake starts over as a
-    // first one (lib/wake.mjs does the same with it).
+    // first one (lib/wake.ts does the same with it).
     const last = readJson<{ at?: unknown }>(statePath)?.at;
     const lastAt = typeof last === 'string' ? Date.parse(last) : Number.NaN;
     let since: string;
@@ -88,7 +88,7 @@ function wake(state: string, wakeDir: string): number {
     writeFileSync(join(work.path, 'agent-ids.txt'), idsOf([join(state, 'tracker-comments.jsonl'), join(state, 'tracker-issues.jsonl')]));
     writeFileSync(join(work.path, 'none.json'), '[]\n');
     const none = join(work.path, 'none.json');
-    const moved = node('lib/wake.mjs', [statePath, join(work.path, 'tracker.json'), join(work.path, 'pulls.json'), join(work.path, 'agent-ids.txt'), readAt, none,
+    const moved = node('lib/wake.ts', [statePath, join(work.path, 'tracker.json'), join(work.path, 'pulls.json'), join(work.path, 'agent-ids.txt'), readAt, none,
       confSoft('lead', 'wake_on'), out ? 'down' : '', none, confSoft('tracker', 'go_state'), none], { stdout: 'pipe' });
     if (moved.status !== 0) throw new ScriptExit(moved.status);
     writeWhole(statePath, `${JSON.stringify((JSON.parse(moved.stdout) as { next?: unknown }).next ?? null, null, 2)}\n`);
@@ -118,16 +118,16 @@ await main(() => {
       if (!(error instanceof ScriptExit)) process.stderr.write(`wake.ts: ${error instanceof Error ? error.message : String(error)}\n`);
       result = error instanceof ScriptExit ? error.code : 1;
     }
-    if (result === 0 && node('lib/board-collector.mjs', [], { stdout: 'ignore' }).status !== 0) result = 1;
-    node('lib/heartbeat.mjs', ['wake-end', String(result)], { stdout: 'ignore' });
+    if (result === 0 && node('lib/board-collector.ts', [], { stdout: 'ignore' }).status !== 0) result = 1;
+    node('lib/heartbeat.ts', ['wake-end', String(result)], { stdout: 'ignore' });
     // What waits for the human, and what went wrong, told on his phone
-    // (lib/notify.mjs, [notify]): last, once the snapshot and the health are
+    // (lib/notify.ts, [notify]): last, once the snapshot and the health are
     // written. It never fails the wake, and never holds the wake's lock for
     // long: it gives up its own sends after CLEARED_NOTIFY_DEADLINE_SECONDS
     // (30 by default, 50 at most) and is stopped here after 60 seconds
     // whatever happens. The wake's lock is not handed to it: a sendmail child
     // that outlives the kill must not hold the lock.
-    spawnSync('timeout', ['-k', '5', '60', process.execPath, '--no-warnings', join(ORCH_HOME, 'lib', 'notify.mjs'), 'dispatch'], { env: process.env, stdio: ['ignore', 'ignore', 'inherit'] });
+    spawnSync('timeout', ['-k', '5', '60', process.execPath, '--no-warnings', join(ORCH_HOME, 'lib', 'notify.ts'), 'dispatch'], { env: process.env, stdio: ['ignore', 'ignore', 'inherit'] });
     return result;
   } finally {
     lock.release();

@@ -10,7 +10,7 @@
 // instruction in it opens nothing.
 //
 // Also the effects behind it: the lead's workdir, a fresh clone of the base
-// at each generation, and lib/memory in a child process (lib/conf.mjs copies
+// at each generation, and lib/memory in a child process (lib/conf.ts copies
 // every CLEARED_* variable into ORCH_* when it is imported). The lead's
 // memory is the workspace's level; after it come the first line of each
 // other service's page, read in that service's level (decision 25, lane 19).
@@ -116,7 +116,7 @@ export function renderLeadBriefing(input: LeadBriefingInput): string {
 
 // ---- lib/memory, in a child process -----------------------------------------
 
-const MEMORY_MODULE = new URL('../../../lib/memory/contract.mjs', import.meta.url).href;
+const MEMORY_MODULE = new URL('../../../lib/memory/contract.ts', import.meta.url).href;
 
 // One request on stdin, one JSON answer on stdout. `briefing` is the lead
 // role's selection within its budget; `search` the entries that match;

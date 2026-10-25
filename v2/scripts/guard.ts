@@ -1,4 +1,4 @@
-// Runs the repository's guard (lib/guard/codex-guard.mjs, the private terms
+// Runs the repository's guard (lib/guard/codex-guard.ts, the private terms
 // and secrets check that v1 applies before sending anything out) on every
 // v2 file and the v2 workflow, as a tree (names and contents), and, with
 // --base <ref>, on the lines changed since that ref, as a lane's diff is
@@ -58,7 +58,7 @@ const entry = (file: string): Stats | undefined => {
   catch { return undefined; }
 };
 // The app's web fonts and its three icons are binary, and the guard's tree
-// mode reads text only (lib/guard/codex-guard.mjs expects a snapshot pruned
+// mode reads text only (lib/guard/codex-guard.ts expects a snapshot pruned
 // of non-text files). Only these are left out, by exact place and name; any
 // other binary under v2/ is still refused.
 const FONT = /^v2\/app\/public\/fonts\/[A-Za-z0-9-]+\.woff2$/;
@@ -79,7 +79,7 @@ try {
   // The guard's code, with its lists beside it, as guard_text lays it out.
   const tool = join(work, 'guard');
   mkdirSync(tool);
-  for (const name of ['codex-guard.mjs', 'private-terms.mjs']) copyFileSync(join(root, 'lib', 'guard', name), join(tool, name));
+  for (const name of ['codex-guard.ts', 'private-terms.ts']) copyFileSync(join(root, 'lib', 'guard', name), join(tool, name));
 
   const env: NodeJS.ProcessEnv = { ...process.env };
   const project = process.env.CLEARED_REPO;
@@ -123,7 +123,7 @@ try {
   }
   const guard = (what: string, guardArgs: string[]): boolean => {
     try {
-      execFileSync(process.execPath, [join(tool, 'codex-guard.mjs'), ...guardArgs], { env, stdio: ['ignore', 'inherit', 'pipe'], encoding: 'utf8' });
+      execFileSync(process.execPath, [join(tool, 'codex-guard.ts'), ...guardArgs], { env, stdio: ['ignore', 'inherit', 'pipe'], encoding: 'utf8' });
       console.log(`guard: ${what}: nothing refused`);
       return true;
     } catch (error) {

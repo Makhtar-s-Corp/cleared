@@ -8,10 +8,10 @@ import { closeSync, constants, cpSync, existsSync, mkdirSync, mkdtempSync, openS
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { defaultValue, requiredValue } from './conf.mjs';
-import { forgeEnv, forgeGhEnv, ForgeError } from './forge.mjs';
-import { message } from './i18n.mjs';
-import { addEvent, openLedger } from './ledger.mjs';
+import { defaultValue, requiredValue } from './conf.ts';
+import { forgeEnv, forgeGhEnv, ForgeError } from './forge.ts';
+import { message } from './i18n.ts';
+import { addEvent, openLedger } from './ledger.ts';
 
 export const ORCH_HOME: string = join(dirname(fileURLToPath(import.meta.url)), '..');
 
@@ -116,9 +116,9 @@ function forgeSetup(): void {
   try {
     next = forgeEnv();
   } catch (error) {
-    // lib/forge.mjs could not even say what to do: git gets a helper and an
+    // lib/forge.ts could not even say what to do: git gets a helper and an
     // SSH command that only refuse, with the reason; gh stops the same way.
-    const reason = `forge credential: [forge] could not be applied, lib/forge.mjs failed (${(error instanceof Error ? error.message : String(error)).split('\n')[0]!.replace(/[^\w ._:/()[\]=,+-]/g, '').slice(0, 200)}); forge calls stop, the ambient credential is not used`;
+    const reason = `forge credential: [forge] could not be applied, lib/forge.ts failed (${(error instanceof Error ? error.message : String(error)).split('\n')[0]!.replace(/[^\w ._:/()[\]=,+-]/g, '').slice(0, 200)}); forge calls stop, the ambient credential is not used`;
     next = { ...process.env };
     let count = Number(next.GIT_CONFIG_COUNT) || 0;
     for (const [key, value] of [['credential.https://github.com.helper', ''], ['credential.https://github.com.helper', `!f() { echo "cleared ${reason}" >&2; echo quit=1; }; f`],
@@ -221,7 +221,7 @@ export type Run = { readonly status: number; readonly stdout: string; readonly s
 
 const done = (run: SpawnSyncReturns<string>): Run => ({ status: run.status ?? 1, stdout: run.stdout ?? '', stderr: run.stderr ?? '' });
 
-// gh in the project's checkout with the forge credential (lib/forge.mjs
+// gh in the project's checkout with the forge credential (lib/forge.ts
 // forgeGhEnv): the app's token when one is configured, the ambient one
 // otherwise. A configured app that gives no token stops the call with the
 // reason; the ambient credential is never used instead.
@@ -244,14 +244,14 @@ export function ghShown(args: readonly string[]): Run {
   return run;
 }
 
-// git on the project's checkout, with the forge's settings (lib/forge.mjs
+// git on the project's checkout, with the forge's settings (lib/forge.ts
 // forgeEnv, set by projectEnv) as every git of the bash scripts had them.
 export function git(args: readonly string[], options: { readonly cwd?: string; readonly input?: string } = {}): Run {
   const { repo } = projectEnv();
   return done(spawnSync('git', ['-C', options.cwd ?? repo, ...args /* git-env: the service account on its own checkout, as the bash scripts ran it, with the forge's settings */], { env: process.env, encoding: 'utf8', input: options.input ?? '', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }));
 }
 
-// A Node command of the tool (lib/release.mjs, lib/merge.mjs…), run as the
+// A Node command of the tool (lib/release.ts, lib/merge.ts…), run as the
 // bash scripts ran it, with the project's environment; its error output goes
 // where the caller's goes unless `quiet`.
 export function tool(file: string, args: readonly string[], options: { readonly input?: string; readonly env?: NodeJS.ProcessEnv; readonly quiet?: boolean } = {}): Run {
@@ -303,7 +303,7 @@ export function githubDown(): { readonly code: 0 | 2; readonly out: string } {
 
 // ---- Locks ------------------------------------------------------------------
 
-// flock(1) on a descriptor of this process, as lib/notify/store.mjs takes its
+// flock(1) on a descriptor of this process, as lib/notify/store.ts takes its
 // lock: the lock belongs to the open file, and stays held until `release`.
 // The same locks as the bash scripts' `exec 9> file; flock`, so the two keep
 // each other out. Null when it could not be had in time (or at once, with
@@ -416,21 +416,28 @@ export function guardText(file: string): boolean {
     // the files: the tests of a change to the guard itself.
     const toolRef = process.env.ORCH_GUARD_TOOL_REF !== undefined ? process.env.ORCH_GUARD_TOOL_REF : (confSoft('update', 'base') || 'origin/main');
     const top = spawnSync('git', ['-C', ORCH_HOME, 'rev-parse', '--show-toplevel' /* git-env: the tool's own checkout, as lib/common.sh read it */], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
+    // Its two files as the branch has them: TypeScript since milestone 4, JavaScript on a branch from before it.
+    const carried = (names: readonly string[]) => spawnSync('git', ['-C', ORCH_HOME, 'cat-file', '-e', `${toolRef}:lib/guard/${names[0]}` /* git-env: the tool's own checkout, as lib/common.sh read it */], { stdio: 'ignore' }).status === 0;
+    let names: readonly string[] = ['codex-guard.ts', 'private-terms.ts'];
     let fromRef = false;
-    if (toolRef && top.status === 0 && top.stdout.trim() === realpathSync(ORCH_HOME)
-      && spawnSync('git', ['-C', ORCH_HOME, 'cat-file', '-e', `${toolRef}:lib/guard/codex-guard.mjs` /* git-env: the tool's own checkout, as lib/common.sh read it */], { stdio: 'ignore' }).status === 0) {
-      for (const name of ['codex-guard.mjs', 'private-terms.mjs']) {
-        const shown = spawnSync('git', ['-C', ORCH_HOME, 'show', `${toolRef}:lib/guard/${name}` /* git-env: the tool's own checkout, as lib/common.sh read it */], { stdio: ['ignore', 'pipe', 'ignore'] });
-        if (shown.status === 0) writeFileSync(join(dir.path, name), shown.stdout);
+    if (toolRef && top.status === 0 && top.stdout.trim() === realpathSync(ORCH_HOME)) {
+      if (!carried(names) && carried(['codex-guard.mjs', 'private-terms.mjs'])) names = ['codex-guard.mjs', 'private-terms.mjs'];
+      if (carried(names)) {
+        for (const name of names) {
+          const shown = spawnSync('git', ['-C', ORCH_HOME, 'show', `${toolRef}:lib/guard/${name}` /* git-env: the tool's own checkout, as lib/common.sh read it */], { stdio: ['ignore', 'pipe', 'ignore'] });
+          if (shown.status === 0) writeFileSync(join(dir.path, name), shown.stdout);
+        }
+        fromRef = true;
       }
-      fromRef = true;
     }
     if (!fromRef) {
       if (toolRef) say(`${scriptName()}: the guard runs from the files of this checkout (${ORCH_HOME} does not follow ${toolRef}, or that branch does not carry lib/guard/)`);
-      for (const name of ['codex-guard.mjs', 'private-terms.mjs']) { try { cpSync(join(ORCH_HOME, 'lib', 'guard', name), join(dir.path, name)); } catch { /* said below */ } }
+      for (const name of names) { try { cpSync(join(ORCH_HOME, 'lib', 'guard', name), join(dir.path, name)); } catch { /* said below */ } }
     }
+    // The copy is an ES module wherever it lies.
+    writeFileSync(join(dir.path, 'package.json'), '{ "type": "module" }\n');
     const present = (name: string) => { try { return statSync(join(dir.path, name)).size > 0; } catch { return false; } };
-    if (!present('codex-guard.mjs') || !present('private-terms.mjs')) {
+    if (!present(names[0]!) || !present(names[1]!)) {
       say(`${scriptName()}: not sent, the guard of the tool (lib/guard/) could not be read`);
       return false;
     }
@@ -489,7 +496,7 @@ export function guardText(file: string): boolean {
         || !guardList(dir.path, ref, settings, 'allowed', 'codex-guard-allow.json', 'of allowed values')) return false;
     }
     // (Its own report goes to the error output, as the bash scripts sent it.)
-    const checked = spawnSync(process.execPath, [join(dir.path, 'codex-guard.mjs'), '--strict', file], { env: { ...process.env, ORCH_GUARD_REF: ref }, stdio: ['ignore', 2, 2] });
+    const checked = spawnSync(process.execPath, [join(dir.path, names[0]!), '--strict', file], { env: { ...process.env, ORCH_GUARD_REF: ref }, stdio: ['ignore', 2, 2] });
     if (checked.status !== 0) {
       say(`${scriptName()}: not sent, the guard refuses this text`);
       return false;

@@ -21,7 +21,7 @@
 import { spawnSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, readlinkSync, realpathSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { runAsCommand } from './conf.mjs';
+import { runAsCommand } from './conf.ts';
 
 // Where the kernel's tables are read, and the programs that list the sockets
 // and tell what tailscale serve publishes. Given by the caller, never read
