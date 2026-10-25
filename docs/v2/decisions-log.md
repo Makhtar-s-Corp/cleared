@@ -6167,6 +6167,14 @@ P224's axe test reads the phone's screens at 390 in both languages and themes, t
 - The budget runs alone at 17.3, 20.6 and 18.6 ms, with no request per switch.
 - `npm run guard -- --base origin/v2`: nothing refused.
 
+**The merge of 379** (lane `j3-flaky-ci`, P228, at `origin/v2` `199d059`). The log keeps 379's entry before this lane's three. The matrix keeps the ids in order, P226, P227, P228. 379 changes `lib/cache.ts`, `Session.tsx` and their tests, none of this lane's lines. After the merge:
+- `npm run typecheck` passes.
+- `npm test` runs 2176 Node tests: 2080 pass, 96 skipped, 0 fail. 349 Vitest tests pass.
+- With the CI's Chromium, 79 of 80 pass. The one failure is `app/test/session/production-browser.test.ts` under the parallel run, the load flake lane `j3-tab-perf` logged; alone it passes, 3 of 3, twice.
+- The budget runs alone at 21.2, 19.1 and 17.2 ms, with no request per switch.
+- The 40 captures were taken again: 39 are identical to the byte, and the 40th (`sessions-768-dark`) is drawn the same. So the committed set stands.
+- `npm run guard -- --base origin/v2`: nothing refused.
+
 **The merge.** The owner's "puis merger" asks for the merge into `v2`. This lane does not write to `v2` (the brief's rule); the pull request is left ready for the orchestrator, who merges.
 
 - Pull request: 377, against `v2`.
