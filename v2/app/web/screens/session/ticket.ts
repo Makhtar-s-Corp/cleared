@@ -8,9 +8,10 @@
 // Take over. The right column says what the ticket's sessions changed,
 // checked and spent, and the Editor holds the ticket's diff, which the
 // author made and the reviewer reads. Pure, so the tests run it under Node.
-import type { SessionPlan, SessionSummary } from '../../../../src/api/types.ts';
+import type { SessionPlan, SessionSummary, TicketCost } from '../../../../src/api/types.ts';
 import type { ChangedFile, TimedEdit } from '../../components/editor/model.ts';
 import type { Translate } from '../../lib/i18n.ts';
+import { lasted, quantity } from '../../lib/time.ts';
 import { ENDED, clock, family, latestOf, stepsOf, type Row, type SessionThread, type StepTotal } from './model.ts';
 
 export type ThreadRole = 'author' | 'reviewer';
@@ -143,4 +144,17 @@ export function editsOf(parts: readonly TicketPart[]): TimedEdit[] {
     }
   }
   return out.sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
+}
+
+// What a resolved ticket's sessions used (P211, the service's
+// consumption/ticket-cost.ts), as facts the card keeps whole: its tokens,
+// the agents' time over the ticket's, and the dollars only when every
+// session reported them; none before the cost is read or when no turn
+// finished. Never euros.
+export function ticketCostFacts(cost: TicketCost | null | undefined, language: 'en' | 'fr', t: Translate): string[] {
+  if (!cost || cost.tokens === null) return [];
+  const facts = [t('ticket_cost_use', { count: quantity(cost.tokens, t) }), t('ticket_cost_time', { work: lasted(cost.workMs, t), elapsed: lasted(cost.elapsedMs, t) })];
+  if (cost.costUsd === null) return facts;
+  const usd = new Intl.NumberFormat(language, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: cost.costUsd < 1 ? 4 : 2 }).format(cost.costUsd);
+  return [...facts, t('ticket_cost_usd', { usd })];
 }
