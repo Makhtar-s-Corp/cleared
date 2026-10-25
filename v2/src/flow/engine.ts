@@ -2705,9 +2705,12 @@ export class FlowEngine {
     const settings = kept?.settings ?? (await this.#settings(ticket));
     const prepared = await this.#prepare(ticket, 'author');
     // A Codex author has no host tools: it is started again on Codex, with none (B6.3).
+    // Another harness than Claude Code keeps the last author's model: Codex's
+    // after a handover, the one CLEARED_V2_PICK_HARNESSES named after a pick (issue #329).
     const harness = authorRow ? this.#harnessOf(authorRow.id) : HARNESS;
     const tools = this.config.authorTools === true && harness === HARNESS;
-    const live = await this.#launch(adapter, ticket, 'author', harness === HARNESS ? this.#authorModel(ticket) : CODEX_MODEL, prepared.workdir, prepared.briefing, settings,
+    const model = harness === HARNESS ? this.#authorModel(ticket) : (authorRow ? this.#store.sessions.get(authorRow.id)?.model : undefined) ?? CODEX_MODEL;
+    const live = await this.#launch(adapter, ticket, 'author', model, prepared.workdir, prepared.briefing, settings,
       `${authorPrompt(ticket, { plan: false, report: tools })}\n\n${message}`, tools ? 'report' : undefined, undefined, harness);
     this.#step({ id: live.id, ticket: id, project: live.input.project }, 'STEP_STARTED', 'author', began);
     if (journal && !journaled) this.#journal({ id: live.id, ticket: id, project: live.input.project }, journal);

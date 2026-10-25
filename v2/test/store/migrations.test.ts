@@ -17,6 +17,7 @@ import tickets, { recordWorkspaceOf } from '../../src/modules/tickets.ts';
 import users from '../../src/modules/users.ts';
 import { StoreError, applyTables, openStore } from '../../src/store/db.ts';
 import { MIGRATIONS, MigrationError, migrate, type Migration } from '../../src/store/migrations.ts';
+import { harnessWins } from '../../src/flow/harness-pick.ts';
 
 const FIXTURE = readFileSync(new URL('./fixtures/ledger-m2.sql', import.meta.url), 'utf8');
 const ALL_TABLES = [sessions, users, tickets, flow, approval, inbox, lead, notify].flatMap((module) => module.tables);
@@ -200,6 +201,28 @@ test('a fresh ledger: the migrations wait for their tables, run after applyTable
     store.close();
   }
   assert.deepEqual(backups(dir), []);
+}));
+
+// The variants table as P75 (pull request 305) created it, before migration 3.
+const P75_VARIANTS = `CREATE TABLE IF NOT EXISTS ticket_variants (
+  id TEXT PRIMARY KEY, ticket TEXT NOT NULL, project TEXT NOT NULL, round INTEGER NOT NULL, position INTEGER NOT NULL,
+  state TEXT NOT NULL, session TEXT, workdir TEXT, files TEXT NOT NULL, added INTEGER NOT NULL, removed INTEGER NOT NULL,
+  diff TEXT NOT NULL, cut INTEGER NOT NULL, cost REAL, minutes REAL, note TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE (ticket, round, position)
+)`;
+
+test('migration 3: a variant written before the harness pick reads as a plain Claude Code variant, and counts no win', withDir((dir) => {
+  const path = fixtureLedger(dir);
+  readFile(path, (db) => {
+    db.exec(P75_VARIANTS);
+    db.prepare("INSERT INTO ticket_variants (id, ticket, project, round, position, state, session, workdir, files, added, removed, diff, cut, cost, minutes, note, created_at, updated_at) VALUES ('LOCAL-9:r1:v1', 'LOCAL-9', 'guestbook', 1, 1, 'chosen', 'sess-9', '/work/LOCAL-9.variant-1-1', '[\"src/a.ts\"]', 1, 0, '+a', 0, 0.2, 3, NULL, '2026-10-24T10:00:00.000Z', '2026-10-24T10:05:00.000Z')").run();
+  });
+  start(path);
+  readFile(path, (db) => {
+    assert.deepEqual({ ...db.prepare('SELECT harness, pick, kind, tests, tokens, work_ms, won, state, files FROM ticket_variants').get() as object },
+      { harness: 'claude-code', pick: 0, kind: 'other', tests: null, tokens: null, work_ms: null, won: 0, state: 'chosen', files: '["src/a.ts"]' });
+    assert.deepEqual(harnessWins(db, 'guestbook'), []);
+  });
 }));
 
 test('a ledger migrated by a newer Cleared is refused, not used', withDir((dir) => {

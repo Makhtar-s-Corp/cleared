@@ -23,7 +23,7 @@ import type { Harness } from '../../src/session/contract.ts';
 import { toolArgs, toolResult } from '../../src/session/events.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
 import { FakeDocker } from '../container/fake-docker.ts';
-import { CONFIG, fakeEffects, scriptedAdapter, setup, started, text, until, type Setup } from './support.ts';
+import { CONFIG, REPORT_FIX, fakeEffects, reviewerScript, scriptedAdapter, setup, started, text, until, type Setup, type Scripts } from './support.ts';
 
 // ---------------------------------------------------------------- the rules
 
@@ -110,8 +110,8 @@ function pickEffects(prepared: Prepared[], published: string[], testCommand: rea
 }
 
 // A scripted adapter under another harness's name: its own authors' scripts, the same list of started sessions.
-function otherHarness(t: Setup, harness: Harness, authors: FakeStep[][]): void {
-  const adapter = scriptedAdapter(t.store, { authors }, t.startedSessions);
+function otherHarness(t: Setup, harness: Harness, authors: FakeStep[][], more: Partial<Scripts> = {}): void {
+  const adapter = scriptedAdapter(t.store, { authors, ...more }, t.startedSessions);
   (t.registry.sessionAdapters as Record<string, unknown>)[harness] = { ...adapter, harness };
 }
 
@@ -197,6 +197,18 @@ test('Cursor\'s variant kept: a cheaper one whose tests failed loses, the time d
   assert.deepEqual(handled.outcome && { chosen: handled.outcome.chosen, measure: handled.outcome.measure }, { chosen: 2, measure: 'time' });
   await until(() => t.startedSessions.some((s) => s.input.role === 'reviewer'), 'the reviewer');
   assert.equal(t.startedSessions.find((s) => s.input.role === 'reviewer')?.input.harness, 'claude-code');
+  await t.engine.settled();
+  await t.engine.close();
+});
+
+test('Cursor\'s variant kept, then sent back by the review and not resumable: its next author is Cursor again, on the model the owner named', async () => {
+  const t = await setup({ config: ENABLED, scripts: { authors: [variant('a1', false, 2_000)], reviewers: [reviewerScript(REPORT_FIX)] }, effects: pickEffects([], []) });
+  otherHarness(t, 'cursor', [variant('a2', true, null), variant('a3', true, null)], { reopen: 'throw' });
+  const ticket = await bug(t);
+  await t.engine.start(ticket.id, 'u1', undefined, ['claude-code', 'cursor']);
+  await until(() => t.startedSessions.filter((s) => s.input.role === 'author').length === 3, 'a new author after the review', 5000);
+  const next = t.startedSessions.filter((s) => s.input.role === 'author').at(-1);
+  assert.deepEqual([next?.input.harness, next?.input.model], ['cursor', 'sonnet-4.5']);
   await t.engine.settled();
   await t.engine.close();
 });
