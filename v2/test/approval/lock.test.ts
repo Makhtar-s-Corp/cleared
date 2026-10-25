@@ -1,5 +1,5 @@
 // The proof of the lane: the lock runs unchanged on what the service writes.
-// merge-pr.sh, ask-validation.sh and tracker.sh are the real v1 scripts; gh
+// merge-pr.ts, ask-validation.ts and tracker.ts are the real v1 scripts; gh
 // and docker are fakes, so nothing is merged and nothing reaches GitHub.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -23,9 +23,9 @@ async function world() {
   const recorder = new LedgerReviewRecorder(s.db, { stateDir: box.state, verdict: 'no blocking issues' });
   const review = (verdict: 'pass' | 'changes_requested' = 'pass', round = 1) =>
     recorder.record({ ticket: 'LOCAL-1', pr: 7, session: 'sess-1', model: 'claude-sonnet-5-5', round, verdict, report: 'Read the diff and ran the tests.', at: new Date().toISOString(), commit: box.head() } as never);
-  // What the lead does through the broker: ask for the approval (v1 ask-validation.sh), for the head now.
-  const ask = () => box.run('ask-validation.sh', ['LOCAL-1', '-', '--pr', '7'], {}, '**What changes.** The newest entry comes first. Do you put it live?');
-  const dry = (extra: string[] = []) => box.run('merge-pr.sh', ['7', 'LOCAL-1', '-', '--dry-run', ...extra], {}, ANNOUNCEMENT);
+  // What the lead does through the broker: ask for the approval (v1 ask-validation.ts), for the head now.
+  const ask = () => box.run('ask-validation.ts', ['LOCAL-1', '-', '--pr', '7'], {}, '**What changes.** The newest entry comes first. Do you put it live?');
+  const dry = (extra: string[] = []) => box.run('merge-pr.ts', ['7', 'LOCAL-1', '-', '--dry-run', ...extra], {}, ANNOUNCEMENT);
   const approveWithTheShownHeads = async () => {
     const record = JSON.parse((await import('node:fs')).readFileSync(join(box.state, 'validations', 'LOCAL-1.json'), 'utf8')) as { at: string; pulls: { pr: number; head: string }[] };
     await s.writer.begin({ ticket: 'LOCAL-1', by: 'u-owner', requestedAt: record.at, heads: record.pulls.map(({ pr, head: h }) => ({ pr, head: h })) });
@@ -34,7 +34,7 @@ async function world() {
   return { ...s, review, ask, dry, approveWithTheShownHeads };
 }
 
-test('merge-pr.sh --dry-run reaches "would merge" after the review record and the app\'s approval, and not before', async () => {
+test('merge-pr.ts --dry-run reaches "would merge" after the review record and the app\'s approval, and not before', async () => {
   const w = await world();
   const { box } = w;
   const before = w.dry();
@@ -98,7 +98,7 @@ test('a new commit on the branch is refused: first for want of a review, then, r
   assert.match(unshown.stderr, /is not the version he was shown/, 'check 4: his agreement is to the version he saw');
   // A dry run changes nothing; the real run puts the card back where the request waits for him.
   assert.equal(box.tracker('state', 'LOCAL-1').stdout.trim(), 'Ready to Ship');
-  const real = box.run('merge-pr.sh', ['7', 'LOCAL-1', '-'], {}, ANNOUNCEMENT);
+  const real = box.run('merge-pr.ts', ['7', 'LOCAL-1', '-'], {}, ANNOUNCEMENT);
   assert.equal(real.status, 6);
   assert.match(real.stderr, /is back in « Needs Approval »/);
   assert.equal(box.tracker('state', 'LOCAL-1').stdout.trim(), 'Needs Approval');

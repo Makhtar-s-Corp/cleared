@@ -1,5 +1,5 @@
 // The capture of HANDOVER.md at the end of a session (milestone 1 plan,
-// lane 5): lib/memory's captureHandover, as lib/memory/cli.mjs runs it for
+// lane 5): lib/memory's captureHandover, as lib/memory/cli.ts runs it for
 // v1. It stores a file with the five headings as a handover entry of the
 // ticket, then removes it from the checkout; it records a missing, linked or
 // malformed file as handover_missing, so the next briefing says so, and

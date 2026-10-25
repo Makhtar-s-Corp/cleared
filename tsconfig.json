@@ -1,0 +1,31 @@
+{
+  // Type checking only: Node runs the .ts files itself (type stripping), so
+  // nothing is emitted and only syntax Node can erase is allowed. The same
+  // rules as v2/tsconfig.json. TypeScript and the Node types come from v2/'s
+  // dependencies: run `npm ci` in v2/ first, then `v2/node_modules/.bin/tsc -p .`.
+  "compilerOptions": {
+    "target": "es2024",
+    "lib": ["es2024"],
+    "module": "nodenext",
+    "moduleResolution": "nodenext",
+    "types": ["node"],
+    "typeRoots": ["./v2/node_modules/@types"],
+    // app/'s screenshots import playwright-core, a devDependency of app/: its types are v2's copy.
+    "paths": { "playwright-core": ["./v2/node_modules/playwright-core/index.d.ts"] },
+    "strict": true,
+    "noEmit": true,
+    "allowJs": true,
+    "checkJs": false,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "noUncheckedIndexedAccess": true,
+    "noImplicitOverride": true,
+    "noFallthroughCasesInSwitch": true,
+    "forceConsistentCasingInFileNames": true,
+    // Library declarations are not ours to check: Playwright's name the DOM, which a Node project does not load.
+    "skipLibCheck": true
+  },
+  "include": ["*.ts", "lib/**/*.ts", "serve/**/*.ts", "app/**/*.ts", "test/**/*.ts"],
+  "exclude": ["v2", "examples", "node_modules", "app/node_modules"]
+}

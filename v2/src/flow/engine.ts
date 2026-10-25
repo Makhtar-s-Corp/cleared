@@ -686,7 +686,7 @@ export class FlowEngine {
   // ---- the landing ---------------------------------------------------------
 
   // The releases to follow: the last release item of each ticket in the go
-  // state, and of each ticket the lock already put in Done (merge-pr.sh does
+  // state, and of each ticket the lock already put in Done (merge-pr.ts does
   // at the merge, before the watch has said anything) if it was approved
   // within the horizon. Read from the tables at every tick, so that a new
   // engine goes on where the last one stopped; the `watch` step on the
@@ -779,7 +779,7 @@ export class FlowEngine {
       // A read that fails is retried like a move; a ticket that is gone has nothing to move.
       const status = (await tickets.get(c.ticket))?.status;
       if (landing.state === 'landed') {
-        // merge-pr.sh moves the card to Done when every shown pull request is merged; the flow does when it did not.
+        // merge-pr.ts moves the card to Done when every shown pull request is merged; the flow does when it did not.
         if (status === tickets.states.go) await tickets.move(c.ticket, tickets.states.done, SERVICE);
       } else if (landing.state === 'rolled_back') {
         if (status === tickets.states.go || status === tickets.states.done) await tickets.move(c.ticket, tickets.states.todo, SERVICE);

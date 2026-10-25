@@ -1,5 +1,5 @@
 // The v2 service's heartbeat (docs/v2/milestone-4-plan.md, section 7), kept
-// from v1 (B2.1, lib/heartbeat.mjs). The service beats on its own timer:
+// from v1 (B2.1, lib/heartbeat.ts). The service beats on its own timer:
 // each beat writes its time, finds the problems, records each continuous
 // problem once (v2_heartbeat_incidents, and a heartbeat_problem row of the
 // ledger's events), then calls the monitor's success address with no

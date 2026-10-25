@@ -1,5 +1,5 @@
 // The fast lane kept from v1 (matrix B2.2, the first plan of milestone 2,
-// decision 15): a Quick ticket is judged by v1's rules (lib/fast-lane.mjs)
+// decision 15): a Quick ticket is judged by v1's rules (lib/fast-lane.ts)
 // on its real diff, after each author session and again at the head it
 // publishes. A rule it breaks sends it back to the full circuit for good:
 // the card says why, the lead is told, and every later author session runs
@@ -102,7 +102,7 @@ test('the approval is asked while the checks run: the owner\'s Go is taken then,
   const { t, ticket } = await quick({
     effects: {
       async prChecks() { return checks; },
-      // As merge-pr.sh: a pull request whose checks still run is kept in the queue.
+      // As merge-pr.ts: a pull request whose checks still run is kept in the queue.
       async mergeRelease() { const outcome = checks === 'passed' ? 'merged' : 'queued'; merges.push(outcome); return { outcome, message: outcome === 'queued' ? 'a check still runs' : '' }; },
     },
   });

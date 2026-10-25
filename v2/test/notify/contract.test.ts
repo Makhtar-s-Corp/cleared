@@ -1,7 +1,7 @@
-// What milestone 2 adds to lib/notify/contract.mjs and to the catalogs of
+// What milestone 2 adds to lib/notify/contract.ts and to the catalogs of
 // lib/i18n: the kinds permission and plan, their order of urgency, the
 // lead's question, and two health codes. v1's own behaviour is the test of
-// test/notify.test.mjs, which stays as it is.
+// test/notify.test.ts, which stays as it is.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -16,7 +16,7 @@ type Contract = {
   notifySettings(conf: unknown, env: NodeJS.ProcessEnv): { events: string[] };
 };
 
-const contract = await import(new URL('../../../lib/notify/contract.mjs', import.meta.url).href) as Contract;
+const contract = await import(new URL('../../../lib/notify/contract.ts', import.meta.url).href) as Contract;
 const catalog = (language: string) => JSON.parse(readFileSync(new URL(`../../../lib/i18n/${language}.json`, import.meta.url), 'utf8')) as Record<string, string>;
 
 test('permission and plan are kinds, ordered by urgency after rollback, health, approval', () => {

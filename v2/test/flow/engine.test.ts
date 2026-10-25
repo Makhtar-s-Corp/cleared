@@ -390,7 +390,7 @@ test('the release item carries the request time the lock recorded, else the time
   assert.equal(item?.requestedAt, '2026-10-21T10:00:05.000Z');
   assert.equal(slow.recorder.records[0]?.at, '2026-10-21T10:00:00.000Z', 'the review is stamped when it passed');
 
-  // A lock that moves the card itself, as ask-validation.sh does: no second move.
+  // A lock that moves the card itself, as ask-validation.ts does: no second move.
   let own: Setup | undefined;
   own = await setup({ scripts: { author: quickAuthor }, effects: { async requestRelease({ ticket }) { own!.clock.now += 7000; await own!.tickets.move(ticket, 'Needs Approval', { kind: 'agents', id: 'lock' }); own!.clock.now += 3000; return {}; } } });
   await own.engine.start(own.ticket.id, 'u1');
@@ -399,7 +399,7 @@ test('the release item carries the request time the lock recorded, else the time
   assert.equal(lockMoves.length, 1, 'the flow does not move a card the lock moved');
   assert.equal(own.inbox.list().find((i): i is ReleaseItem => i.kind === 'release')?.requestedAt, '2026-10-21T10:00:07.000Z');
 
-  // The real lock (ask-validation.sh) records its own time, in nanoseconds, a
+  // The real lock (ask-validation.ts) records its own time, in nanoseconds, a
   // little after its move: the approval route compares with that record, so
   // the item carries it.
   let real: Setup | undefined;

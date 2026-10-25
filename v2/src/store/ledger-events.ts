@@ -1,4 +1,4 @@
-// A row of the ledger's `events` table, which v1 creates (lib/ledger.mjs)
+// A row of the ledger's `events` table, which v1 creates (lib/ledger.ts)
 // and the reports and the proofs read: what the service did on its own
 // (issue #290: a question timed out, an idle session stopped). A row that
 // cannot be written (no table yet, the ledger locked) is said by its kind

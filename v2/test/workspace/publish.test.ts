@@ -61,7 +61,7 @@ test('a clean branch is pushed from the host and its pull request opened through
   assert.equal(flag('--base'), 'main');
   assert.equal(flag('--head'), BRANCH);
   assert.equal(flag('--title'), 'Show the newest entry first');
-  assert.ok(!create.args.includes('--draft'), 'not a draft: merge-pr.sh refuses a draft');
+  assert.ok(!create.args.includes('--draft'), 'not a draft: merge-pr.ts refuses a draft');
   assert.ok(create.body?.includes('The list is sorted'), 'the report is in the body');
   assert.ok(!create.body?.includes('/home/someone'), 'no path of this machine in the body');
   assert.ok(create.body?.includes('- Show the newest entry first'), 'the commits are listed');
@@ -149,7 +149,7 @@ test('an open pull request for the branch is reused after the push', async () =>
 test('a report the guard flags is left out of the body, the pull request still opens', async () => {
   const { workdir, input, gh } = await setup();
   commit(workdir, { 'src/app.ts': 'export const order = "newest";\n' }, 'Newest first');
-  // lib/pr-body.mjs keeps an address, the guard refuses it.
+  // lib/pr-body.ts keeps an address, the guard refuses it.
   const address = ['someone', 'gmail.com'].join('@');
   await publish({ ...input, report: `## Done\nAsked ${address} for the copy.\n` });
   const body = gh.calls()[1]?.body ?? '';
@@ -186,7 +186,7 @@ test('a checkout whose git folder points elsewhere is refused', async () => {
   assert.deepEqual(gh.calls(), []);
 });
 
-test('without environments given, publish takes them from lib/forge.mjs: the ambient one when no app is configured', async () => {
+test('without environments given, publish takes them from lib/forge.ts: the ambient one when no app is configured', async () => {
   const { workdir, input, gh, remoteHead } = await setup();
   const head = commit(workdir, { 'src/app.ts': 'export const order = "newest";\n' }, 'Newest first');
   // Nothing of a v1 shell may point the child at a real configuration or ledger.

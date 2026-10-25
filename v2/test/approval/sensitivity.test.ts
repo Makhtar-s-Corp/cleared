@@ -3,7 +3,7 @@
 // approval answers 403 naming the user, before anything is held; that
 // user's approval is held, then signed for that user, and the service's
 // lock, which trusts that user ([tracker] owner_id of its agents.conf),
-// reads it as agreed: v1's tracker.sh is the oracle. A ticket whose
+// reads it as agreed: v1's tracker.ts is the oracle. A ticket whose
 // services name two different approvers cannot be approved in one gesture.
 // A one-service workspace's lock is the one the service's environment
 // names, so its owner_id must be that user, or the approval is refused as
@@ -82,7 +82,7 @@ async function train(sensitivity: { guestbook: ServiceSensitivity; filter: Servi
   const locks = serviceLocks(s.db, workspace, { env: s.box.env, environment, now: s.now });
   const approvals = new TrainApprovals({ db: s.db, workspace, locks, environment, env: s.box.env, timers: s.timers, now: s.now });
   // v1's oracle, with the lock's settings given: did the trusted human move this ticket to go, bound to this state folder's record?
-  const moved = (state: string, conf: string) => s.box.run('tracker.sh', ['moved-by-owner', ticket.id, 'Ready to Ship'],
+  const moved = (state: string, conf: string) => s.box.run('tracker.ts', ['moved-by-owner', ticket.id, 'Ready to Ship'],
     { ORCH_STATE_DIR: state, CLEARED_STATE_DIR: state, ORCH_LEDGER: join(s.box.state, 'ledger.db'), ORCH_CONF: conf, CLEARED_CONF: conf }).status;
   const app: App = { registry: { ...defaultRegistry(), users: s.users, ticketStore: s.store, approvalWriter: s.writer }, tables: [], routes: createApprovalRoutes(() => approvals) };
   const shown = { requestedAt: filterAt, heads: [{ pr: 7, head: head('a') }, { pr: 7, head: head('b') }] };
@@ -176,7 +176,7 @@ async function single(sensitivity: ServiceSensitivity, lockOwner: string) {
     registry: { ...defaultRegistry(), users: s.users, ticketStore: s.store, approvalWriter: s.writer }, tables: [],
     routes: createApprovalRoutes(() => undefined, approverGate(() => ({ workspace, ownerId: lockOwner }))),
   };
-  const moved = (conf: string) => s.box.run('tracker.sh', ['moved-by-owner', ticket.id, 'Ready to Ship'], { ORCH_LEDGER: join(s.box.state, 'ledger.db'), ORCH_CONF: conf, CLEARED_CONF: conf }).status;
+  const moved = (conf: string) => s.box.run('tracker.ts', ['moved-by-owner', ticket.id, 'Ready to Ship'], { ORCH_LEDGER: join(s.box.state, 'ledger.db'), ORCH_CONF: conf, CLEARED_CONF: conf }).status;
   return { s, ticket, app, moved, body: { requestedAt: shown.requestedAt, heads: shown.heads } };
 }
 

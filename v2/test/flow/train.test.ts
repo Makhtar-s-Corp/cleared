@@ -34,7 +34,7 @@ const HEAD: Record<string, string> = { guestbook: 'a'.repeat(40), 'filter-api': 
 type Call = { readonly service: string; readonly what: string; readonly at: number; readonly detail?: unknown };
 
 // A lock per service that records its calls, with the clock of the test.
-// A merge writes merge-pr.sh's row and closes the ticket as merge-pr.sh does
+// A merge writes merge-pr.ts's row and closes the ticket as merge-pr.ts does
 // once every pull request its own record shows is merged: that service's one.
 function locks(t: () => Setup, calls: Call[], options: { outcomes?: Record<string, MergeOutcome['outcome'][]>; drift?: string; rollback?: { ok: boolean; message: string } } = {}) {
   const made = new Map<string, ServiceLock>();

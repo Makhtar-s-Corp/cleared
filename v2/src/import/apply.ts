@@ -174,8 +174,8 @@ async function approvalSkip(approval: V1Approval, options: ImportOptions): Promi
   return committed === approval.content ? undefined : 'changed';
 }
 
-const MEMORY_MODULE = new URL('../../../lib/memory/contract.mjs', import.meta.url).href;
-const CONF_MODULE = new URL('../../../lib/conf.mjs', import.meta.url).href;
+const MEMORY_MODULE = new URL('../../../lib/memory/contract.ts', import.meta.url).href;
+const CONF_MODULE = new URL('../../../lib/conf.ts', import.meta.url).href;
 
 // The child's program: lib/memory indexes the checkout, then approves each
 // entry still a proposal whose indexed text is v1's, committed, as the owner
