@@ -56,7 +56,8 @@ let human: HumanSide | undefined;
 let watchdog: IdleWatchdog | undefined;
 let batches: BatchRunner | undefined;
 // The batches' runner, on the engine and the store; the week stop is the plans' (CLEARED_V2_WEEK_STOP_PERCENT).
-function batchesOf(registry: Registry): BatchRunner | undefined {
+// The run module's tickets are batches of one on it too (modules/run.ts), so it is exported: one runner per process.
+export function batchesOf(registry: Registry): BatchRunner | undefined {
   if (batches || !store) return batches;
   const engine = runtime.engine(registry);
   if (!engine) return undefined;

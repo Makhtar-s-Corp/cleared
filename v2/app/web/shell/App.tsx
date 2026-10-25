@@ -1,8 +1,9 @@
 // The shell in the browser: who is signed in, the sidebar (the screens, the
 // inbox count, the lead's dot, the live sessions, the theme, notifications,
 // signing out), the screen's bar, the command palette, the keyboard and its
-// sheet (lane 35, docs/v2/ui-overhaul-plan.md, 2.2 and U8), and the screen
-// of the address, with its catalog over the shell's.
+// sheet (lane 35, docs/v2/ui-overhaul-plan.md, 2.2 and U8), the API access
+// panel (shell/Access.tsx, C18), and the screen of the address, with its
+// catalog over the shell's.
 //
 // One document for the whole app (docs/v2/ui-overhaul-plan.md, section
 // 2.1, lane 34): the router (lib/router.tsx) names the screen from the
@@ -42,6 +43,7 @@ import {
   OPEN_FROM, RAIL_FROM, type SessionRow, type Theme,
 } from './model.ts';
 import { GESTURES, paletteItems, type PaletteItem } from './palette.ts';
+import { AccessPanel } from './Access.tsx';
 import { ShortcutSheet, pressTab, useShortcuts, walkRows } from './Shortcuts.tsx';
 import { weeklyQuota, type WeeklyQuota } from './quota.ts';
 import { Sidebar } from './Sidebar.tsx';
@@ -212,7 +214,7 @@ function shownGesture(selector: string): HTMLElement | null {
   return null;
 }
 
-type Overlay = 'palette' | 'sheet' | null;
+type Overlay = 'palette' | 'sheet' | 'access' | null;
 
 // The palette is a chunk of its own (cmdk and what it brings), loaded once
 // the first screen has drawn, so the first draw does not wait for it.
@@ -406,6 +408,11 @@ function Shell({ shared }: { readonly shared: Shared }) {
   // The sidebar draws again only when what it shows changes (Sidebar is memo).
   const groups = useMemo(() => sessionGroups(rows), [rows]);
   const onSignOut = useCallback(() => void signOut(), [signOut]);
+  // The menu that opens the API access panel closes first: the focus goes back to the person's button.
+  const openAccess = useCallback(() => {
+    back.current = document.getElementById('person');
+    setOverlay('access');
+  }, []);
   const onPick = useCallback((href: string) => { fromSidebar.current = href !== location.pathname; }, []);
 
   const lastRow = useRef<HTMLElement | null>(null);
@@ -440,7 +447,7 @@ function Shell({ shared }: { readonly shared: Shared }) {
         <a className="skip" href="#screen">{t('skip_to_content')}</a>
         <Sidebar t={t} mode={mode} screen={place.screen} session={place.session} project={start.project} userName={start.userName} source={start.source} me={me}
           waiting={waiting} lead={leadDot(lead)} groups={groups} quota={quota} zone={zone} theme={theme} onTheme={flipTheme} language={language} onLanguage={pickLanguage}
-          onSearch={openPalette} onToggle={toggleSidebar} onSignOut={onSignOut} onPick={onPick} />
+          onSearch={openPalette} onToggle={toggleSidebar} onSignOut={onSignOut} onAccess={openAccess} onPick={onPick} />
         <div className="main">
           {/* The bar names the screen: the page's banner, so nothing on it lies outside a landmark. */}
           <header className="top-bar" id="top-bar">
@@ -459,6 +466,7 @@ function Shell({ shared }: { readonly shared: Shared }) {
       </div>
       {overlay === 'palette' ? <Suspense fallback={null}><Palette t={towerT} items={items} dark={theme === 'dark'} onRun={runItem} onClose={() => setOverlay(null)} /></Suspense> : null}
       {overlay === 'sheet' ? <ShortcutSheet t={t} screen={place.screen} mac={mac} onClose={() => setOverlay(null)} /> : null}
+      {overlay === 'access' && raw ? <AccessPanel t={t} api={raw} onClose={() => setOverlay(null)} /> : null}
     </>
   );
 }
