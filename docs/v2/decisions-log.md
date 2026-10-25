@@ -5344,6 +5344,8 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Resources.** No Docker object, no account, no real deploy, no tunnel, no secret. The tests listen on port 0 on loopback; the real Chromium opens only those fake pages.
 
+**The merge of 344** (P216, at `origin/v2` `c1940c2`). The log keeps 345's entry, then 344's, then this one and the P216 follow-ups after it. The matrix merged by itself and keeps every id once. The flow module's assembled routes count both lanes' new routes, 40 (`test/flow/modules.test.ts`); the API's list stays 66, since 344's MCP route is not one of the app's. After the merge: `npm run typecheck` passes; `npm test` runs 2039 Node tests, 1971 pass, 68 skipped (the browser tests), 0 fail, and 321 Vitest tests pass; `test/ci-triggers.test.mjs` passes 4 of 4; `npm run guard -- --base origin/v2`: nothing refused. CI's browser list run here whole with `CLEARED_V2_PLAYWRIGHT`: 53 of 54 pass. The one that fails is `app/test/foundation/budget-browser.test.ts` ("twenty switches", the median p95 at 119.1 and 129.9 ms, over its 100 ms), which 344's entry already saw fail once in CI. It is the load of 19 files at once on this server: run alone three times it passes at 29.9 to 33.6 ms, and the list without this lane's two browser files fails it too (133.0 and 139.3 ms). This lane changes no code that test loads.
+
 - Pull request: 346, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-post-deploy`.
 
