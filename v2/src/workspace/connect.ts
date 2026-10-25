@@ -25,7 +25,7 @@ import { writeSettings } from '../setup/settings.ts';
 import { CheckoutError, git, projectCheckout } from './checkout.ts';
 import { parseConf, parseWorkspace, WorkspaceError } from './config.ts';
 import { contractOf, folderServices, proposeLinks, serviceNames, wantedFiles, type Tree } from './guess.ts';
-import type { ConnectedService, ProposedService, WorkspaceProposal, WorkspaceWritten } from './types.ts';
+import type { ConnectedService, ContractLine, ProposedService, WorkspaceProposal, WorkspaceWritten } from './types.ts';
 
 export const WORKSPACE_FILE = 'workspace.conf';
 // The most repositories one connect clones.
@@ -189,6 +189,50 @@ function writeWhole(path: string, text: string): void {
   }
 }
 
+// A service as the file says it: the lines of one [service <name>] section.
+export type ServiceLines = {
+  readonly name: string;
+  readonly kind: 'repository' | 'folder';
+  readonly repo: string;
+  readonly url: string;
+  readonly base: string;
+  readonly path: string | null;
+  readonly dir: string;
+  readonly consumes: readonly string[];
+  readonly contract: ContractLine | null;                    // written only when ticked
+  readonly hand: Readonly<Record<string, string>>;          // the keys a person wrote by hand, kept
+};
+
+// A line break or a NUL inside a value would end its line and start another
+// (a section included), so every value is checked on its own, never the
+// lines once joined.
+const BREAK = /[\r\n\0]/;
+
+export function renderWorkspace(input: { readonly id: string; readonly name: string; readonly services: readonly ServiceLines[] }): string {
+  const value = (text: string): string => {
+    if (BREAK.test(text)) throw new ConnectError('invalid');
+    return text;
+  };
+  const lines: string[] = [
+    '# The workspace, written by the setup assistant from what was ticked. A',
+    '# person may add keys by hand (health_url, run, sensitivity, broker_*): a',
+    '# later connect keeps them for a service of the same name.',
+    '',
+    '[workspace]',
+    `id = ${value(input.id)}`,
+    `name = ${value(input.name)}`,
+  ];
+  for (const service of input.services) {
+    lines.push('', `[service ${value(service.name)}]`, `kind = ${service.kind}`, `repository = ${value(service.repo)}`, `url = ${value(service.url)}`, `base = ${value(service.base)}`);
+    if (service.path !== null) lines.push(`path = ${value(service.path)}`);
+    lines.push(`dir = ${value(service.dir)}`);
+    if (service.consumes.length > 0) lines.push(`consumes = ${service.consumes.map(value).join(', ')}`);
+    if (service.contract) lines.push(`contract = ${service.contract.format}:${value(service.contract.path)}`);
+    for (const [key, kept] of Object.entries(service.hand)) lines.push(`${value(key)} = ${value(kept)}`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
 export type Ticks = { readonly services: unknown; readonly links: unknown; readonly contracts: unknown };
 
 // Makes the proposal again from the clones, keeps what is ticked, reads the
@@ -219,27 +263,19 @@ export async function confirm(input: {
   try { before = parseConf(readFileSync(file, 'utf8')); } catch { /* no earlier file */ }
   const id = input.env.CLEARED_V2_PROJECT || before.workspace?.id || (kept[0] as Planned).name;
   const dirOf = (service: Planned) => (service.kind === 'repository' ? service.clone : join(input.stateDir, 'services', service.name, 'checkout'));
-  const lines: string[] = [
-    '# The workspace, written by the setup assistant from what was ticked. A',
-    '# person may add keys by hand (health_url, run, sensitivity, broker_*): a',
-    '# later connect keeps them for a service of the same name.',
-    '',
-    '[workspace]',
-    `id = ${id}`,
-    `name = ${before.workspace?.name || kept.map((service) => service.name).join(', ')}`,
-  ];
-  for (const service of kept) {
-    const consumes = links.filter((link) => link.from === service.name).map((link) => link.to);
-    lines.push('', `[service ${service.name}]`, `kind = ${service.kind}`, `repository = ${service.repo}`, `url = ${service.url}`, `base = ${service.base}`);
-    if (service.path !== null) lines.push(`path = ${service.path}`);
-    lines.push(`dir = ${dirOf(service)}`);
-    if (consumes.length > 0) lines.push(`consumes = ${consumes.join(', ')}`);
-    if (service.contract && contracts.has(service.name)) lines.push(`contract = ${service.contract.format}:${service.contract.path}`);
-    const earlier = before[`service ${service.name}`] ?? {};
-    for (const key of HAND_KEYS) if (earlier[key] !== undefined) lines.push(`${key} = ${earlier[key]}`);
-  }
-  const text = `${lines.join('\n')}\n`;
-  if (lines.some((line) => /[\r\0]/.test(line))) throw new ConnectError('invalid');
+  const text = renderWorkspace({
+    id,
+    name: before.workspace?.name || kept.map((service) => service.name).join(', '),
+    services: kept.map((service) => ({
+      name: service.name, kind: service.kind, repo: service.repo, url: service.url, base: service.base, path: service.path, dir: dirOf(service),
+      consumes: links.filter((link) => link.from === service.name).map((link) => link.to),
+      contract: service.contract && contracts.has(service.name) ? service.contract : null,
+      hand: Object.fromEntries(HAND_KEYS.flatMap((key) => {
+        const value = before[`service ${service.name}`]?.[key];
+        return value === undefined ? [] : [[key, value]];
+      })),
+    })),
+  });
   try {
     parseWorkspace(text, { file, authorModel: input.authorModel, stateDir: input.stateDir });
   } catch (error) {

@@ -6974,9 +6974,9 @@ French and English, accessible, fakes only. As earlier lanes noted, the brief's 
 2. A folder service gets a checkout of its own (applied). Or the folder services of one repository share its clone, which saves disk but lets two fetches of the flow meet in one folder.
 3. Only calls are proposed as `consumes` (applied). An events listener and a shared database stay what the map shows, since the train's landing order reads `consumes` alone.
 
-**Open: the running service reads the workspace at its start.** The flow's settings, the workspace included, are read once, when the service starts (`loadFlowConfig` in `flow/config.ts`), as the approval key is (P249's open point). A workspace the step writes is used from the service's next start, which the screen says. Proof step 9 needs it: lane `v2-j5-first-ticket` (or `v2-j5-compose`, with a restart the one command owns) closes it, with the approval key.
+**Open: the running service reads the workspace at its start (issue #420).** The flow's settings, the workspace included, are read once, when the service starts (`loadFlowConfig` in `flow/config.ts`), as the approval key is (P249's open point). A workspace the step writes is used from the service's next start, which the screen says. Proof step 9 needs it: lane `v2-j5-first-ticket` (or `v2-j5-compose`, with a restart the one command owns) closes it, with the approval key.
 
-**Open: the flow's own fetches of a private repository.** The step's clones give git the credential through `gh` (decision 3). The flow's later fetches (`projectCheckout` from `flow/effects.ts` and `modules/lead.ts`) take git's environment from `lib/forge.ts`. Without a GitHub App, that environment names no helper that reads `GH_TOKEN`, and the Compose image runs no `gh auth setup-git`, so a fetch of a private repository there would be refused. Not changed here: those files are not this lane's. The rehearsal (lane `v2-j5-proof`) shows it, and the lane that owns `lib/forge.ts` or the image closes it, for instance with the same helper line.
+**Open: the flow's own fetches of a private repository (issue #421).** The step's clones give git the credential through `gh` (decision 3). The flow's later fetches (`projectCheckout` from `flow/effects.ts` and `modules/lead.ts`) take git's environment from `lib/forge.ts`. Without a GitHub App, that environment names no helper that reads `GH_TOKEN`, and the Compose image runs no `gh auth setup-git`, so a fetch of a private repository there would be refused. Not changed here: those files are not this lane's. The rehearsal (lane `v2-j5-proof`) shows it, and the lane that owns `lib/forge.ts` or the image closes it, for instance with the same helper line.
 
 **Not done here.**
 - **No real run.** The plan's real run (section 9.5: listing and cloning the two example repositories with the `gh` login's credential) was not done, because the brief says fakes only. The step is proven against a fake `gh` on PATH over temporary bare repositories made from `examples/`. The real list and clone is the rehearsal's or the real run's.
@@ -7011,6 +7011,12 @@ Run on the merge of `origin/v2` at `4ec9ab52`, with pull request 413 merged.
 **The merge of 417** (lane `v2-j5-doctor`, issue #415, at `origin/v2` `c463e52`). 417 took the id P251 for the doctor's ready section, so this lane's line is P252: the matrix, section 9 of the plan and this entry say so. The assistant's browser test now waits for both filled steps: the workspace step's list and the checks step's lines.
 
 **The merge of 419** (lane `v2-j5-run`, issue #416, at `origin/v2` `9e37404`). 419 keeps P253, so this lane's P252 stands; both log entries and matrix lines are kept.
+
+**The review of 418** (at `2de3d6b`, blocking). The file's guard read each line once joined, for `\r` and NUL only. A `\n` inside one value went through, so a folder of a repository named with a line break, which git allows, could add a section to `workspace.conf`. Two fixes:
+- `renderWorkspace` now checks every value on its own for `\r`, `\n` and NUL before it is written, and refuses as `invalid`. That covers the id, the workspace's name, each service's name, repository, address, base, path, dir, consumes, contract path and the keys kept by hand.
+- The guess never proposes a folder whose name holds a control character, whether a top folder or a workspaces entry.
+
+Tests first (`65ed443d`): a render case per value, a guess case, and a repository with such a folder whose file gets no extra section. The two open points above became issues #420 and #421.
 
 - Pull request: 418, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-connect`.

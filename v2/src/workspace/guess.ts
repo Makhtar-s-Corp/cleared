@@ -50,16 +50,20 @@ export function wantedFiles(paths: readonly string[]): string[] {
 
 const hasManifest = (paths: ReadonlySet<string>, folder: string): boolean => [...MANIFESTS].some((name) => paths.has(`${folder}/${name}`));
 
+// A folder name git holds may carry a line break or another control
+// character; it would break the workspace file's lines, so it is never proposed.
+const CONTROL = /[\u0000-\u001f\u007f]/;
+
 // A workspaces entry as a folder or a folder's children (a trailing /*);
 // one that leaves the repository, is negated or has another wildcard is not read.
 function expand(pattern: string, paths: readonly string[], set: ReadonlySet<string>): string[] {
   const clean = pattern.trim().replace(/^\.\//, '').replace(/\/+$/, '');
-  if (!clean || clean.startsWith('/') || clean.startsWith('!') || clean.split('/').some((part) => part === '..' || part === '.')) return [];
+  if (!clean || CONTROL.test(clean) || clean.startsWith('/') || clean.startsWith('!') || clean.split('/').some((part) => part === '..' || part === '.')) return [];
   if (clean.endsWith('/*')) {
     const parent = clean.slice(0, -2);
     if (parent.includes('*')) return [];
     const children = new Set(paths.filter((path) => path.startsWith(`${parent}/`)).map((path) => path.slice(parent.length + 1).split('/')).filter((parts) => parts.length > 1).map((parts) => `${parent}/${parts[0]}`));
-    return [...children].filter((folder) => hasManifest(set, folder));
+    return [...children].filter((folder) => !CONTROL.test(folder) && hasManifest(set, folder));
   }
   return clean.includes('*') || !hasManifest(set, clean) ? [] : [clean];
 }
@@ -94,7 +98,7 @@ export function folderServices(tree: Tree): { readonly folders: string[]; readon
   const declared = [...new Set(workspacePatterns(tree).flatMap((pattern) => expand(pattern, tree.paths, set)))].sort();
   if (declared.length > 0) return { folders: declared, from: 'workspaces' };
   const top = [...new Set(tree.paths.map((path) => path.split('/')).filter((parts) => parts.length > 1).map((parts) => parts[0] as string))]
-    .filter((folder) => !folder.startsWith('.') && !NOT_SERVICES.has(folder) && hasManifest(set, folder)).sort();
+    .filter((folder) => !folder.startsWith('.') && !CONTROL.test(folder) && !NOT_SERVICES.has(folder) && hasManifest(set, folder)).sort();
   return top.length >= 2 ? { folders: top, from: 'manifests' } : null;
 }
 
