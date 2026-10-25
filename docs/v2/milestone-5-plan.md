@@ -108,6 +108,10 @@ None for the lane: its real run is on this server, labelled. The fresh machine i
 | Whether `[security] allow_shared_uid` is still needed when the broker runs under its own user in its own container | this lane |
 | How long the images take to build on a machine with no cache | this lane's real run, then the proof |
 
+### 4.7 Delivered
+
+Matrix line P248, pull request 410. Two decisions of section 3 changed, as the decisions log of 2026-10-25 says: nothing is published (decision 3), since the app finds the service on `127.0.0.1` and refuses any other address of its own, so the three containers share the host's network and bind `127.0.0.1` only; and the one command is `docker compose -f v2/compose.yaml run --rm install` (decision 4), since `up -d` cannot check the port first nor print the address. The broker runs under the service's account, not its own (decision 2), since the lock accepts the service's requests by its own uid.
+
 ## 5. The browser setup assistant (`v2-j5-assistant`)
 
 Matrix: B6.5. Wave 1. Effort L.
@@ -464,7 +468,7 @@ After wave 5: the rehearsal by the orchestrator, fix lanes for what it finds, th
 | B6.5p, the real run | a fresh Linux machine with Docker, a newcomer, a GitHub account, a Claude subscription | the owner (question 5) |
 | The model step with a real `claude setup-token` | a Claude subscription | the proof's real run |
 | GitLab for real (section 11) | a GitLab account and project | the owner (question 6) |
-| Published images and a remote Compose file | a registry and the owner's agreement to publish | the owner (question 1) |
+| Published images and a remote Compose file | a registry and the owner's agreement to publish | not taken: the owner chose (a) on 2026-10-25 at 19:33, nothing published (question 1) |
 | The forge and workspace steps, GitHub for real | the `gh` login's token, read into a scratch file and deleted | each lane, on the example repositories |
 | Docker real runs (compose, images, doctor, setup session) | Docker on this server, every object labelled `cleared.dev=v2` | each lane |
 
@@ -472,7 +476,7 @@ After wave 5: the rehearsal by the orchestrator, fix lanes for what it finds, th
 
 Grouped, each with options and a recommendation. A default is applied where the action stays inside this repository; publishing and a real person's run have none.
 
-1. **The one command.** (a) `git clone`, then `docker compose -f v2/compose.yaml up -d`, images built on the machine; (b) images published on the GitHub registry of the organisation this repository lives in, and a Compose file fetched from it, so the command is `docker compose -f oci://ghcr.io/<org>/cleared:<version> up -d` and nothing is built; (c) a small installer image, published the same way, that writes the Compose file and starts it. Recommended: (b), since a build on a fresh machine eats into the hour. The lanes build (a) first, which (b) packages. No default for (b) or (c): publishing is outward facing.
+1. **The one command.** (a) `git clone`, then `docker compose -f v2/compose.yaml up -d`, images built on the machine; (b) images published on the GitHub registry of the organisation this repository lives in, and a Compose file fetched from it, so the command is `docker compose -f oci://ghcr.io/<org>/cleared:<version> up -d` and nothing is built; (c) a small installer image, published the same way, that writes the Compose file and starts it. Recommended: (b), since a build on a fresh machine eats into the hour. The lanes build (a) first, which (b) packages. No default for (b) or (c): publishing is outward facing. **Answered by the owner on 2026-10-25 at 19:33, relayed by the lead: (a).** The install is `git clone`, then Docker Compose, with the images built on the machine; nothing is published to any registry ([decisions log](decisions-log.md), 2026-10-25).
 2. **What "live" means for the newcomer's first ticket.** (a) merged on the base branch by the lock and the project's health address green through the watch window, when the project declares one, else merged; (b) a starter repository with a deploy to GitHub Pages, published from a template in the organisation, so live is a page the newcomer opens. Recommended: (a) for any project, with (b) offered to a newcomer with no project of their own. Default: (a). (b) waits: a template repository is outward facing.
 3. **The model's login for a newcomer.** (a) a Claude subscription through `claude setup-token`, as today; (b) an API key, billed per token; (c) both offered, (a) first. Recommended: (c), since a newcomer may have only one. Default: (c). Milestone 1's open point stays: whether a self-hosted tool where the owner signs in with their own subscription is allowed is not settled.
 4. **The newcomer's machine.** (a) Linux with Docker Engine only, as decision 1 says; (b) also macOS with Docker Desktop, which needs the state folder's paths and the egress checked there and a Mac to run on. Recommended: (a) for milestone 5, (b) named for later. Default: (a).
@@ -481,7 +485,7 @@ Grouped, each with options and a recommendation. A default is applied where the 
 
 ## 20. Out of scope for milestone 5
 
-Docker Desktop and macOS or Windows (question 4); Kubernetes or several servers; TLS, a domain or a public address; published images and a registry until question 1; forges other than GitHub and GitLab; production secrets; the full devcontainer specification; billing, plans or several organisations; the real runs that need the owner's accounts (section 18).
+Docker Desktop and macOS or Windows (question 4); Kubernetes or several servers; TLS, a domain or a public address; published images and a registry (question 1, answered (a): nothing published); forges other than GitHub and GitLab; production secrets; the full devcontainer specification; billing, plans or several organisations; the real runs that need the owner's accounts (section 18).
 
 ## 21. Unknowns, and who closes them
 

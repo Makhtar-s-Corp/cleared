@@ -12,6 +12,45 @@ Node.js 24 or later. Node runs the service's and the app server's `.ts` files di
 
 The one exception is the app's front end (`app/web/`, React): Vite builds it into `app/dist/`, which the app serves (the owner's decision of 2026-10-22, in the [decisions log](../docs/v2/decisions-log.md)). `npm run app` and `npm test` build it first. The app reads the build's file names once, at its first page: restart it after a new `npm run build`.
 
+## Install with Docker Compose
+
+On Linux with Docker Engine and git, from a clone of this repository, as the account that will own Cleared (not root):
+
+```sh
+docker compose -f v2/compose.yaml run --rm install
+```
+
+The command needs nothing else on the machine: the install runs in Cleared's own image (`images/cleared/Dockerfile`, Node 24 with git, `gh`, the Docker CLI and Compose, v2 and the kept v1 lock), which Compose builds from the clone the first time. It ([`src/cli/install.ts`](src/cli/install.ts)), in this order:
+
+1. refuses a reserved port (80, 443, 8787, 8788, 8790), a port named twice, or a state folder that is not an absolute path, before it asks Docker anything;
+2. checks that Docker and Compose answer;
+3. when the project's service, app and broker already run, changes nothing and says the address;
+4. refuses a clone that belongs to root (the sessions run as the clone's owner), and any of the three ports something else holds (`lib/ports.ts`), before it writes anything;
+5. makes the state folder for the clone's owner (mode 700), or refuses one of another account or one others may write;
+6. builds the session and egress images when they are missing, starts the service, the app and the broker (`docker compose up -d`), waits for the app's first answer, and says the address, the time it took and the service's last log line that names `/setup` (the setup assistant's code).
+
+Run again, it changes nothing that runs. Its words are in `src/cli/messages/install.{en,fr}.json`, in `CLEARED_V2_APP_LANGUAGE`.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `CLEARED_V2_STATE_DIR` | `/var/lib/cleared-v2` | The ledger, the keys, the sessions' checkouts. Mounted at its own path in every container, since the service gives its paths to the session containers it starts. |
+| `CLEARED_V2_PORT` | `8791` | The service, on `127.0.0.1`. |
+| `CLEARED_V2_APP_PORT` | `8792` | The app, on `127.0.0.1`. |
+| `CLEARED_V2_PREVIEW_PORT` | `8794` | The Browser tab's previews, on `127.0.0.1`. |
+| `CLEARED_V2_APP_LANGUAGE` | `fr` | `fr` or `en`, for the app and the command. |
+| `COMPOSE_PROJECT_NAME` | `cleared-v2` | A second install on one machine, with its own state folder and ports. |
+
+What [`compose.yaml`](compose.yaml) holds (`test/install/compose.test.ts`):
+
+- **Three containers** of the image, each a role of `images/cleared/entrypoint.ts`: `service` (the core, the only one with the Docker socket), `app` and `broker` (the release lock). Each runs as the owner of the state folder, never as root, with `HOME` in the state folder; no home of the machine is mounted. The broker waits until `CLEARED_V2_PROJECT_DIR` names a checkout with `.cleared/agents.conf`.
+- **Nothing published.** The three share the host's network and bind `127.0.0.1` only, as an install by hand does: the app finds the service on `127.0.0.1` and refuses any other address of its own. From another computer, forward the port over SSH: `ssh -L 8792:127.0.0.1:8792 <this machine>`.
+- **Every object labelled.** Each container and each image it builds carries `cleared.dev=v2`; the file declares no network and no named volume, so Compose makes nothing the label could miss. The session and egress images are build-only entries (profile `images`) under the tags the service runs.
+- **The socket gives the `service` container root's reach on the host**, as membership of the `docker` group does for an install by hand.
+
+To stop Cleared: `docker compose -f v2/compose.yaml down`. The state folder stays. To remove the images too, by label: `docker image ls --filter label=cleared.dev=v2`, then `docker image rm` of the ids. Nothing is published to a registry: Cleared's images are built on the machine from the clone, as the owner decided on 2026-10-25 (question 1 of [the milestone 5 plan](../docs/v2/milestone-5-plan.md)); `pull_policy: never` keeps Compose from pulling Cleared's own image. The images' base, `node:24`, comes from Docker Hub when the machine does not have it. Docker Desktop waits for question 4.
+
+The `cleared` command ([`src/cli/cleared.ts`](src/cli/cleared.ts)) runs `src/cli/<command>.ts` with its arguments: `cleared status`, `cleared user`, and each command a later lane adds as a file. From a clone it is `node v2/src/cli/cleared.ts <command>`. In the image it is the entrypoint's `cleared` role, which runs it as the state folder's owner (`docker compose exec` would run it as root); `docker compose -f v2/compose.yaml run --rm --no-deps service cleared status`, with the variables the install was given, is the intended form, not yet run.
+
 ## Commands
 
 Run from `v2/`:
