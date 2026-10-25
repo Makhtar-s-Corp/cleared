@@ -19,6 +19,8 @@
   "start_ok": "A session on {tag} printed its first line {took} after its start (target: under {target}). The time covers its networks, its egress proxy and its container.",
   "start_slow": "A session on {tag} printed its first line {took} after its start, over the target of {target}. The time covers its networks, its egress proxy and its container.",
   "start_slow_todo": "Look at the machine's load and Docker's disk: the image was ready, so the time is the containers' own.",
+  "start_no_runner": "A session on {tag} started, and its image has no {runner}: the sessions of this service cannot run there.",
+  "start_no_runner_todo": "Name an image built from Cleared's session image in the project's .devcontainer, or remove its image key; then build again at the environment step.",
   "start_fail": "A session on {tag} did not start: {reason}",
   "start_fail_todo": "Run node scripts/doctor.ts docker for the details, then this section again."
 }

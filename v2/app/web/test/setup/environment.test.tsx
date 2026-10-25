@@ -19,14 +19,14 @@ const api = { get: async () => ({ status: 200, body: {} }), post: async () => ({
 const step = { id: 'environment', state: 'todo', filled: true, skippable: true, shownAt: null, doneAt: null, skippedAt: null, personMs: 0, machineMs: 0 } as const;
 
 const service = (over: Partial<EnvironmentService>): EnvironmentService => ({
-  name: 'api', readable: true, devcontainer: 'none', install: 'npm ci', state: 'none', image: null, builtAt: null, buildMs: null, startedAt: null, error: null, ...over,
+  name: 'api', readable: true, devcontainer: 'none', foreignImage: null, install: 'npm ci', state: 'none', image: null, builtAt: null, buildMs: null, startedAt: null, error: null, ...over,
 });
 const MIXED: EnvironmentView = {
   workspace: true,
   services: [
     service({ name: 'api', state: 'ready', image: 'cleared-v2-prep-api:9f2c4e6a8b0d1f3a', builtAt: '2026-10-25T20:00:00.000Z', buildMs: 184_000 }),
     service({ name: 'web', devcontainer: 'dockerfile', install: null, state: 'failed', error: 'npm error code ERESOLVE' }),
-    service({ name: 'jobs', devcontainer: 'image', state: 'building', startedAt: '2026-10-25T20:58:00.000Z' }),
+    service({ name: 'jobs', devcontainer: 'image', foreignImage: 'mcr.microsoft.com/devcontainers/javascript-node:24', state: 'building', startedAt: '2026-10-25T20:58:00.000Z' }),
     service({ name: 'mail', readable: false, devcontainer: null, install: null }),
   ],
 };
@@ -46,6 +46,7 @@ test('each service says its image in words, its build\'s time as a person reads 
     assert.match(text, /3\s?min/, 'the build\'s time');
     assert.ok(text.includes('cleared-v2-prep-api:9f2c4e6a8b0d1f3a'));
     assert.ok(text.includes('npm ci'));
+    assert.ok(text.includes(t('environment_foreign_image', { image: 'mcr.microsoft.com/devcontainers/javascript-node:24' })), 'an image not Cleared\'s says what a session needs in it');
     assert.match(text, /ERESOLVE/);
     assert.ok(text.includes(t('environment_failed_todo')));
     assert.doesNotMatch(text, /\d\s?ms\b/, 'no figure in milliseconds');

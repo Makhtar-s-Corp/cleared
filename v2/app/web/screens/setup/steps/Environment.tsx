@@ -34,6 +34,7 @@ function ServiceLine({ t, service, now }: { readonly t: Translate; readonly serv
       <div className="setup-env-body">
         <p className="setup-env-name">{service.name}</p>
         {what ? <p className="setup-env-text">{what}</p> : null}
+        {service.foreignImage ? <p className="setup-env-text">{t('environment_foreign_image', { image: service.foreignImage })}</p> : null}
         {service.readable ? (
           <p className="setup-env-text">{service.install ? <>{t('environment_install')} <code>{service.install}</code></> : t('environment_no_install')}</p>
         ) : null}

@@ -11,6 +11,9 @@ export type EnvironmentService = {
   readonly name: string;
   readonly readable: boolean;                                   // false: its base is not fetched yet
   readonly devcontainer: 'none' | 'image' | 'dockerfile' | null;
+  // The image its .devcontainer names when it is not Cleared's session
+  // image: a session needs Node 24, Claude Code and Cleared's runner in it.
+  readonly foreignImage: string | null;
   readonly install: string | null;                              // [session] install_command, as written
   readonly state: PreparedState;
   readonly image: string | null;                                // the ready image's tag

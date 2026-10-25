@@ -4,12 +4,14 @@
 // what its base holds now, with its age and its build's time; none yet,
 // stale, being built, or failed with what to do. Then one session started
 // on the newest ready image, labelled as every session is, running one
-// line of Node, and the time from its start to that line measured against
-// the 10-second target (decision 13); every object it made is removed. It
-// builds nothing, and the session has no login: an empty file is mounted.
+// line of Node that finds Cleared's runner, and the time from its start to
+// that line measured against the 10-second target (decision 13); every object
+// it made is removed. It builds nothing, and the session has no login: an
+// empty file is mounted. Its folders are under the state folder, the one
+// path the service shares with the host inside Compose, since Docker mounts
+// a host path.
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import type { Language } from '../../../app/src/catalog.ts';
@@ -18,10 +20,14 @@ import { Docker } from '../../container/docker.ts';
 import { PreparedError, preparedTag, readInputs, readRecord, stateDirOf } from '../../container/prepared.ts';
 import { removeSessionVolume, sessionNames, startSession, stopSession } from '../../container/session-runtime.ts';
 import { FlowConfigError, loadFlowConfig, workspaceOf } from '../../flow/config.ts';
+import { RUNNER_COMMAND } from '../../session/adapters/claude-code.ts';
 import { doctorTranslator, type DoctorLevel, type DoctorLine, type DoctorSection } from '../section.ts';
 
 export const START_TARGET_MS = 10_000;
 const FIRST_LINE_TIMEOUT_MS = 60_000;
+const RUNNER = RUNNER_COMMAND[1] as string;
+// One line: ready when the image holds the runner a session starts.
+const PROBE = `try { require('node:fs').accessSync(${JSON.stringify(RUNNER)}); console.log('ready'); } catch { console.log('no runner'); }`;
 
 const reasonOf = (error: unknown): string => (error instanceof Error ? error.message : String(error)).split('\n')[0]!.slice(0, 300);
 
@@ -88,25 +94,27 @@ export async function imagesChecks(input: {
   }
   const values = { tag: newest.tag, target: lasted(START_TARGET_MS, t) };
   const session = randomUUID();
-  const work = mkdtempSync(join(tmpdir(), 'cleared-v2-doctor-images-'));
+  const work = join(stateDir, 'doctor', `images-${session}`);
   try {
     const workdir = join(work, 'work');
-    mkdirSync(workdir);
+    mkdirSync(workdir, { recursive: true, mode: 0o700 });
     const tokenFile = join(work, 'no-login');
     writeFileSync(tokenFile, '', { mode: 0o600 });
     const began = clock();
     await startSession(docker, {
       session, workdir, tokenFile, allowDir: join(work, 'egress'), allowHosts: [], hostAddresses: [], services: [],
       user: `${process.getuid?.() ?? 1000}:${process.getgid?.() ?? 1000}`, image: newest.tag, readyPollMs: 100,
-      command: ['node', '-e', 'console.log("ready")'],
+      command: ['node', '-e', PROBE],
     });
     const deadline = Date.now() + FIRST_LINE_TIMEOUT_MS;
-    while (!(await docker.logs(session, sessionNames(session).container)).trim()) {
+    let first = '';
+    while (!(first = (await docker.logs(session, sessionNames(session).container)).trim())) {
       if (Date.now() >= deadline) throw new Error(`no line within ${lasted(FIRST_LINE_TIMEOUT_MS, t)}`);
       await sleep(50);
     }
     const took = clock() - began;
-    if (took < START_TARGET_MS) say('start', 'ok', 'start_ok', { ...values, took: lasted(took, t) });
+    if (first.includes('no runner')) say('start', 'fail', 'start_no_runner', { ...values, runner: RUNNER }, 'start_no_runner_todo');
+    else if (took < START_TARGET_MS) say('start', 'ok', 'start_ok', { ...values, took: lasted(took, t) });
     else say('start', 'notice', 'start_slow', { ...values, took: lasted(took, t) }, 'start_slow_todo');
   } catch (error) {
     say('start', 'fail', 'start_fail', { ...values, reason: reasonOf(error) }, 'start_fail_todo');

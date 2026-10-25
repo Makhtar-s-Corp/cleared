@@ -19,6 +19,8 @@
   "start_ok": "Une session sur {tag} a écrit sa première ligne {took} après son démarrage (objectif\u00a0: moins de {target}). Ce temps couvre ses réseaux, son proxy de sortie et son conteneur.",
   "start_slow": "Une session sur {tag} a écrit sa première ligne {took} après son démarrage, au-delà de l'objectif de {target}. Ce temps couvre ses réseaux, son proxy de sortie et son conteneur.",
   "start_slow_todo": "Regardez la charge de la machine et le disque de Docker\u00a0: l'image était prête, ce temps est donc celui des conteneurs.",
+  "start_no_runner": "Une session sur {tag} a démarré, et son image n'a pas de {runner}\u00a0: les sessions de ce service ne peuvent pas y tourner.",
+  "start_no_runner_todo": "Nommez dans le .devcontainer du projet une image construite depuis l'image de session de Cleared, ou retirez sa clé image\u202f; puis reconstruisez à l'étape de l'environnement.",
   "start_fail": "Une session sur {tag} n'a pas démarré\u00a0: {reason}",
   "start_fail_todo": "Lancez node scripts/doctor.ts docker pour le détail, puis cette section à nouveau."
 }

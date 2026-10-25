@@ -89,6 +89,11 @@ test('each service\'s image is said, then a session on the newest ready one is t
     const created = made.fake.calls.slice(before).filter((call) => call.args[0] === 'create');
     assert.ok(created.some((call) => call.args.includes(lines.find((l) => l.level === 'ok' && l.id === 'image')?.text.match(/cleared-v2-prep-\S+:[0-9a-f]{16}/)?.[0] ?? '?')), 'the session ran the prepared image');
     assert.ok(created.every((call) => call.args.includes('cleared.dev=v2')));
+    // Inside Compose only the state folder is the host's own path: every folder the session mounts is under it.
+    const sources = created.flatMap((call) => call.args.filter((arg, at) => call.args[at - 1] === '--mount' && arg.startsWith('type=bind,')).map((arg) => /source=([^,]+)/.exec(arg)?.[1] ?? ''));
+    assert.ok(sources.length >= 3);
+    for (const source of sources) assert.ok(source.startsWith(`${made.state}/`), `${source} is under the state folder`);
+    assert.ok(created.some((call) => call.args.some((arg) => arg.includes('/opt/cleared/runner/main.ts'))), 'the line looks for the runner');
     assert.ok(!made.fake.calls.slice(before).some((call) => call.args[0] === 'build'), 'the doctor builds nothing');
     assert.deepEqual([made.fake.containers.length, made.fake.networks.length, made.fake.volumes.length], [0, 0, 0], 'everything the measure made is removed');
   }
@@ -101,6 +106,21 @@ test('a session that does not start is a failure with what to do, and nothing is
   const start = lines.find((line) => line.id === 'start');
   assert.equal(start?.level, 'fail');
   assert.match(start?.text ?? '', /address pools/);
+  assert.ok(start?.todo);
+  assert.deepEqual([made.fake.containers.length, made.fake.networks.length], [0, 0]);
+});
+
+test('an image without Cleared\'s runner fails: its sessions cannot run there', async () => {
+  const made = await install();
+  made.fake.intercept = (args) => {
+    if (args[0] !== 'logs') return undefined;
+    const container = made.fake.containers.find((c) => c.id === args[args.length - 1]);
+    return container?.name.endsWith('-session') ? { code: 0, stdout: 'no runner\n', stderr: '' } : undefined;
+  };
+  const lines = await imagesChecks({ env: made.env, language: 'en', docker: made.docker, now: () => NOW, clock: clock() });
+  const start = lines.find((line) => line.id === 'start');
+  assert.equal(start?.level, 'fail');
+  assert.match(start?.text ?? '', /\/opt\/cleared\/runner\/main\.ts/);
   assert.ok(start?.todo);
   assert.deepEqual([made.fake.containers.length, made.fake.networks.length], [0, 0]);
 });

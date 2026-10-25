@@ -10,6 +10,7 @@
   "environment_no_devcontainer": "Pas de .devcontainer\u00a0: construite sur l'image de session de Cleared.",
   "environment_devcontainer_image": "Construite sur l'image que nomme son .devcontainer.",
   "environment_devcontainer_dockerfile": "Construite depuis le Dockerfile que nomme son .devcontainer.",
+  "environment_foreign_image": "{image} n'est pas l'image de session de Cleared\u00a0: une session y a besoin de Node 24, de Claude Code et du lanceur de Cleared, sinon elle ne peut pas démarrer.",
   "environment_unreadable": "Sa branche de base n'est pas encore récupérée.",
   "environment_install": "Installe ses dépendances avec",
   "environment_no_install": "Ne déclare aucune commande d'installation ([session] install_command dans .cleared/agents.conf), donc rien n'est installé à l'avance.",

@@ -269,6 +269,10 @@ export class PreparedImages {
     this.#now = deps.now ?? (() => new Date());
   }
 
+  get baseImage(): string {
+    return this.#baseImage;
+  }
+
   readInputs(source: PreparedSource): Promise<PreparedInputs | undefined> {
     return readInputs(source, { baseImage: this.#baseImage });
   }

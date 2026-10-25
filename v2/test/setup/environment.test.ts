@@ -105,6 +105,7 @@ test('each service with its devcontainer file, its install command and its image
     assert.equal(first.workspace, true);
     assert.deepEqual(first.services.map((s) => [s.name, s.devcontainer, s.install, s.state]), [['api', 'none', 'npm ci', 'none'], ['web', 'image', null, 'none']]);
     assert.equal(fake.calls.length, 0, 'reading the view asks Docker nothing');
+    assert.deepEqual(first.services.map((s) => s.foreignImage), [null, null], 'Cleared\'s session image under any tag is not another image');
 
     const started = await call('POST', '/api/setup/environment/build');
     assert.equal(started.status, 202);

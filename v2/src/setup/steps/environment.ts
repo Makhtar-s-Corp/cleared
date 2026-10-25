@@ -52,6 +52,7 @@ async function serviceView(images: PreparedImages, source: PreparedSource, queue
     name: source.service,
     readable: problem !== null || inputs !== undefined,
     devcontainer: inputs?.devcontainer ?? null,
+    foreignImage: inputs?.devcontainer === 'image' && inputs.from !== images.baseImage ? inputs.from : null,
     install: inputs?.installText ?? null,
     state,
     image: state === 'ready' ? record?.tag ?? null : null,
