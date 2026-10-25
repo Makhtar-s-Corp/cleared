@@ -5929,5 +5929,5 @@ With the CPU slowed four times the budget is at its edge: what is left is the ne
 
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no tunnel, no secret; the app, the fixtures source and the browser listen on port 0 on loopback.
 
-- Pull request: (named once it is open), against `v2`.
+- Pull request: 378, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-capture-detect`.
