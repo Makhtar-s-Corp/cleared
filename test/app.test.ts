@@ -1,6 +1,6 @@
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -13,6 +13,7 @@ import { checkRanges, ensureToken, hostAllowed, readToken, TAILSCALE } from '../
 import { spawnSync } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
 import type { Conf } from '../lib/conf.ts';
+import { message } from '../lib/i18n.ts';
 
 // The lib's own types, which it does not export.
 type AppOptions = Parameters<typeof appServer>[0];
@@ -59,7 +60,7 @@ test('the read routes are GET only; the write routes are the listed POSTs, and n
 });
 
 test('the server code holds no way to write: no tracker, ledger or process write is imported or called', () => {
-  const files = ['app/server.ts', 'app/sources/live.ts', 'app/lib/events.ts', 'app/lib/session.ts', 'app/lib/actions.ts', 'app/lib/webauthn.ts'];
+  const files = ['app/server.ts', 'app/sources/live.ts', 'app/lib/events.ts', 'app/lib/session.ts', 'app/lib/actions.ts'];
   for (const f of files) {
     const code = readFileSync(join(import.meta.dirname, '..', f), 'utf8').replace(/\/\/.*$/gm, '');
     for (const forbidden of [/\.createTicket\(/, /\.moveTicket\(/, /\.comment\(/, /\.editComment\(/, /\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bDROP\b/, /writeFile|appendFile|unlink|rmSync/, /runStart|runEnd|addEvent/, /spawn-lane|merge-pr|kill-lane/])
@@ -255,14 +256,35 @@ test('`cleared app` refuses a bad range and prints the address of the bind it is
   assert.equal(run(['--nonsense'], '').status, 64);
 });
 
+test('`cleared app passkey` says that passkeys are gone, in the owner\'s language, and starts nothing', () => {
+  const dir = scratch();
+  const conf = join(dir, 'agents.conf');
+  const socket = join(dir, 'app.sock');
+  const run = (language: string) => {
+    // A setting file of before, with its grant socket: it is no longer read.
+    writeFileSync(conf, `[owner]\nlanguage = ${language}\n[app]\ngrant_socket = ${socket}\n`);
+    return spawnSync(process.execPath, [join(import.meta.dirname, '..', 'cleared'), 'app', 'passkey'], { encoding: 'utf8', timeout: 30_000, env: { ...process.env, CLEARED_CONF: conf, CLEARED_REPO: dir } });
+  };
+  const en = run('en');
+  assert.equal(en.status, 2, en.stderr);
+  assert.equal(en.stdout, '');
+  assert.equal(en.stderr, `${message('cli_app_session_confirms', 'en')}\n`);
+  assert.match(en.stderr, /passkeys are gone/);
+  const fr = run('fr');
+  assert.equal(fr.status, 2, fr.stderr);
+  assert.equal(fr.stderr, `${message('cli_app_session_confirms', 'fr')}\n`);
+  assert.match(fr.stderr, /clés d’accès/);
+  assert.ok(!existsSync(socket), 'no socket, no server');
+});
+
 test('the design is followed: no gradient, fonts served by the app, light by default, amber only for the human', async () => {
   const pub = join(import.meta.dirname, '..', 'app', 'public');
   const css = readFileSync(join(pub, 'style.css'), 'utf8');
-  for (const f of ['style.css', 'app.js', 'actions.js', 'register.js', 'index.html', 'login.html', 'register.html']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /gradient|conic|image-set|filter:\s*blur/i, `${f} has no gradient`);
+  for (const f of ['style.css', 'app.js', 'actions.js', 'index.html', 'login.html']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /gradient|conic|image-set|filter:\s*blur/i, `${f} has no gradient`);
   assert.match(css, /font-family: Geist;[^}]*\/fonts\/Geist-Variable\.woff2/);
   assert.match(css, /font-family: "Geist Mono";[^}]*\/fonts\/GeistMono-Variable\.woff2/);
   assert.doesNotMatch(css, /prefers-color-scheme:\s*dark/, 'light by default; dark only when chosen');
-  for (const f of ['app.js', 'actions.js', 'register.js']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /\.style\.cssText|setAttribute\('style'/, `${f}: no inline style, which the content policy refuses`);
+  for (const f of ['app.js', 'actions.js']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /\.style\.cssText|setAttribute\('style'/, `${f}: no inline style, which the content policy refuses`);
   // the tokens of DESIGN.md are the ones of the style sheet
   for (const hex of ['#FAFAFA', '#FFFFFF', '#F4F4F4', '#EAEAEA', '#171717', '#4D4D4D', '#666666', '#8F8F8F', '#F5A623', '#AB570A', '#FFFBF2', '#FCE2B3', '#16A34A', '#F2FBF5', '#EE0000', '#0070F3', '#7928CA', '#0A9DB0', '#D97757', '#10A37F'])
     assert.ok(css.toUpperCase().includes(hex), `${hex} is in the style sheet`);
@@ -270,7 +292,7 @@ test('the design is followed: no gradient, fonts served by the app, light by def
   assert.deepEqual(amberViolations(css), [], 'amber used outside what waits for the human');
   assert.ok(amberViolations('.conn2 { background: var(--awaiting); }\n.x { color: #F5A623; }').length === 2, 'the check can fail');
   assert.doesNotMatch(css, /(^|\n)button\.ink/, 'the login button style does not leak to the placeholders');
-  for (const f of ['index.html', 'login.html', 'register.html']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /\sstyle=|<style/i, `${f}: no inline style, which the content policy refuses`);
+  for (const f of ['index.html', 'login.html']) assert.doesNotMatch(readFileSync(join(pub, f), 'utf8'), /\sstyle=|<style/i, `${f}: no inline style, which the content policy refuses`);
   const s = await serve();
   try {
     const font = await s.call('/fonts/Geist-Variable.woff2');
@@ -327,7 +349,7 @@ async function boardFixture(adapter = 'local', imageUrl: string | null = null) {
 }
 
 test('the app source has no tracker, forge, process or network dependency', () => {
-  for (const path of ['app/server.ts', 'app/sources/live.ts', 'app/lib/events.ts', 'app/lib/session.ts', 'app/lib/actions.ts', 'app/lib/webauthn.ts']) {
+  for (const path of ['app/server.ts', 'app/sources/live.ts', 'app/lib/events.ts', 'app/lib/session.ts', 'app/lib/actions.ts']) {
     const code = readFileSync(join(import.meta.dirname, '..', path), 'utf8').replace(/\/\/.*$/gm, '');
     assert.doesNotMatch(code, /tracker\/contract|tracker\/adapters|\bgh\b|fetch\(|execFile|spawn\(|https?\.request|createConnection/, path);
   }
@@ -504,12 +526,12 @@ const literalScriptTexts = (code: string) => {
 
 test('no text of the interface is written in a page or a script: it all comes from the message catalog', () => {
   const en = catalogOf('en'), fr = catalogOf('fr');
-  for (const page of ['index.html', 'login.html', 'register.html']) {
+  for (const page of ['index.html', 'login.html']) {
     const html = publicFile(page);
     assert.deepEqual(literalTexts(html), [], `${page}: text outside the catalog`);
     for (const key of [...html.matchAll(/data-i(?:-aria|-title|-placeholder)?="(app_[a-z_]+)"/g)].map((m) => m[1]!)) assert.ok(en[key] !== undefined && fr[key] !== undefined, `${page}: ${key} is missing from a catalog`);
   }
-  for (const script of ['app.js', 'actions.js', 'notify.js', 'login.js', 'register.js']) assert.deepEqual(literalScriptTexts(publicFile(script)), [], `${script}: text outside the catalog`);
+  for (const script of ['app.js', 'actions.js', 'notify.js', 'login.js']) assert.deepEqual(literalScriptTexts(publicFile(script)), [], `${script}: text outside the catalog`);
   // the check can fail
   assert.equal(literalTexts('<p>Hello there</p><button aria-label="Close it"></button>').length, 2);
   assert.equal(literalScriptTexts("node.textContent = 'Hello there'; b.title = `Open ${x}`;").length, 2);

@@ -1,5 +1,5 @@
 // What v2's ledger says of the service's health (docs/v2/milestone-4-plan.md,
-// section 7.3), read and never written: the beat the service last wrote,
+// section 8.3), read and never written: the beat the service last wrote,
 // its live sessions, what waits for the owner, the subscription's windows,
 // the mirrors' last full passes and the release trains not landed. The
 // sessions' tables are the store's own and always there; a module's table

@@ -1,4 +1,4 @@
-// The command (docs/v2/milestone-4-plan.md, section 7.2): npm run status,
+// The command (docs/v2/milestone-4-plan.md, section 8.2): npm run status,
 // the service's own settings, French by default, English when the app is,
 // --json for one schema 1 object, exit 0 without a problem (a notice never
 // counts), 1 with one, 2 when the status cannot be collected; the ledger

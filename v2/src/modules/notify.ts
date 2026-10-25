@@ -4,7 +4,7 @@
 // with the service, ticks at once and every 30 seconds, and needs no request
 // to the API. It declares no route: subscribing is the app's
 // (app/src/notifications.ts).
-// Milestone 4 (issue #392, P238): the service's heartbeat
+// Milestone 4 (issue #392, P239): the service's heartbeat
 // (heartbeat/beat.ts), what tells a push monitor the service is alive.
 // It starts with the service, a project set or not, beats at once and
 // every CLEARED_V2_HEARTBEAT_SECONDS, and stops with it; its tables,

@@ -301,7 +301,7 @@ for (const command of [['status'], ['ticket', 'show', 'LOCAL-1'], ['rollback', '
       env: childEnv({ CLEARED_REPO: p.repo, CLEARED_STATE_DIR: scratch('orch-refused-state-'), PATH: `${refusingGit()}:${process.env.PATH}` }) });
     assert.equal(run.status, 2, run.stderr);
     assert.match(run.stderr, new RegExp(`^cleared: git refused or could not read ${p.repo.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}: fatal: detected dubious ownership`, 'm'));
-    assert.doesNotMatch(run.stderr, /set \[app\] grant_socket|require \[tracker\] adapter/);
+    assert.doesNotMatch(run.stderr, /passkeys are gone|require \[tracker\] adapter/);
   });
 }
 
@@ -312,7 +312,7 @@ test('a project path that is not there, or that starts with ~, is said as such',
         env: childEnv({ CLEARED_REPO: project, CLEARED_STATE_DIR: scratch('orch-gone-state-') }) });
       assert.equal(run.status, 2, `${command.join(' ')}: ${run.stderr}`);
       assert.match(run.stderr, said, command.join(' '));
-      assert.doesNotMatch(run.stderr, /git refused|grant_socket/, command.join(' '));
+      assert.doesNotMatch(run.stderr, /git refused|passkeys are gone/, command.join(' '));
     }
   }
 });

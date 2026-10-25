@@ -1,10 +1,9 @@
-// The human's own accesses to the tracker, and the passkeys that confirm a
-// gesture. They live in one private directory, outside the project and the
-// Cleared checkout, owned by the app's service account and closed to every
-// other account (mode 0700, files 0600). The agents' account must never be
-// able to read them: serve/install.ts probes that, and every read below
-// refuses anything looser than that.
-import { chmodSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
+// The human's own accesses to the tracker. They live in one private
+// directory, outside the project and the Cleared checkout, owned by the app's
+// service account and closed to every other account (mode 0700, files 0600).
+// The agents' account must never be able to read them: serve/install.ts
+// probes that, and every read below refuses anything looser than that.
+import { lstatSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { isAbsolute, join } from 'node:path';
 import { ORCH_HOME } from '../../lib/conf.ts';
@@ -48,22 +47,4 @@ export function readCredentials(dir: string, { project, adapter }: { project?: s
   const token = data?.[adapter as string];
   if (adapter !== 'local' && (typeof token !== 'string' || token.length < 20)) throw new Error(`credentials.json has no user token for the “${adapter}” adapter`);
   return { token: typeof token === 'string' ? token : undefined, signingKey: join(root, 'human-signing.key') };
-}
-
-export type Passkey = { id: string; publicKey: string; signCount: number; name?: string; createdAt?: string };
-export function readPasskeys(dir: string, { project }: { project?: string } = {}): Passkey[] {
-  try {
-    const root = privateDir(dir, { project });
-    const list = JSON.parse(privateFile(join(root, 'passkeys.json'), { project }));
-    return Array.isArray(list) ? list.filter((key: Passkey) => typeof key.id === 'string' && typeof key.publicKey === 'string' && Number.isSafeInteger(key.signCount)) : [];
-  } catch { return []; }
-}
-export function writePasskeys(dir: string, list: Passkey[], { project }: { project?: string } = {}) {
-  const root = privateDir(dir, { project, create: true });
-  const path = join(root, 'passkeys.json');
-  const part = `${path}.part`;
-  const fd = openSync(part, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600);
-  try { fstatSync(fd); writeFileSync(fd, JSON.stringify(list)); } finally { closeSync(fd); }
-  chmodSync(part, 0o600);
-  renameSync(part, path);
 }

@@ -9,7 +9,6 @@ import { appServer } from './server.ts';
 import { demoSource } from './sources/demo.ts';
 import { createActions } from './lib/actions.ts';
 import type { AddressInfo } from 'node:net';
-import type { Passkey } from './lib/credentials.ts';
 
 
 const out = process.argv[2] ?? new URL('./screenshots', import.meta.url).pathname;
@@ -17,8 +16,7 @@ mkdirSync(out, { recursive: true });
 const token = 'd'.repeat(64);
 // As `cleared app --demo` serves it: the answer form of a question is there (a gesture is written nowhere).
 const source = demoSource();
-let keys: Passkey[] = [];
-const actions = createActions({ source, origin: '', owner: 'you', readPasskeys: () => keys, writePasskeys: (list) => { keys = list; }, run: async () => ({ ok: true }) });
+const actions = createActions({ source, origin: '', run: async () => ({ ok: true }) });
 const server = appServer({ source, token, ranges: ['127.0.0.0/8'], pollMs: 500, heartbeatMs: 2000, actions });
 await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
 const port = (server.address() as AddressInfo).port;

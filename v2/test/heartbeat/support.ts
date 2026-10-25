@@ -1,6 +1,6 @@
 // A ledger with the tables the heartbeat reads, and rows written as their
 // modules write them, for the heartbeat's tests (docs/v2/milestone-4-plan.md,
-// section 7). The monitor is a fake on loopback, port 0: never a real service.
+// section 8). The monitor is a fake on loopback, port 0: never a real service.
 import { createServer, type IncomingMessage } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { DatabaseSync } from 'node:sqlite';

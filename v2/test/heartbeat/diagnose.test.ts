@@ -1,4 +1,4 @@
-// The problems, case by case (docs/v2/milestone-4-plan.md, section 7.3):
+// The problems, case by case (docs/v2/milestone-4-plan.md, section 8.3):
 // a pure function of what the ledger says, the settings and the time. The
 // status sees the beat from outside (missing, late, the service silent);
 // the service's own beat does not judge itself by its last row.

@@ -1,5 +1,5 @@
 // cleared-v2 status: what the v2 service is doing, from its ledger and its
-// own /health (docs/v2/milestone-4-plan.md, section 7), kept from v1's
+// own /health (docs/v2/milestone-4-plan.md, section 8), kept from v1's
 // `cleared status` (B2.1, docs/heartbeat.md).
 //   node src/cli/status.ts            (npm run status)            one line per part
 //   node src/cli/status.ts --json     (npm run status -- --json)  one JSON object, schema 1

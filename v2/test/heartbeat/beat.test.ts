@@ -1,4 +1,4 @@
-// The service's beat (docs/v2/milestone-4-plan.md, section 7.4), against a
+// The service's beat (docs/v2/milestone-4-plan.md, section 8.4), against a
 // fake monitor on loopback: a GET to the success address with no problem,
 // a POST of the problems' codes to the failure address with one, each
 // continuous problem recorded once, a failed delivery said once an hour,

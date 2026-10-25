@@ -1,5 +1,5 @@
 // What the ledger says of the service's health (docs/v2/milestone-4-plan.md,
-// section 7.3), read on the real tables, read-only, and on a ledger whose
+// section 8.3), read on the real tables, read-only, and on a ledger whose
 // modules' tables do not exist yet.
 import test from 'node:test';
 import assert from 'node:assert/strict';

@@ -1,4 +1,4 @@
-// The heartbeat's settings (docs/v2/milestone-4-plan.md, section 7.4), read
+// The heartbeat's settings (docs/v2/milestone-4-plan.md, section 8.4), read
 // from the environment as the rest of the service's:
 //   CLEARED_V2_HEARTBEAT_SECONDS          a beat every 60 s (15 to 3600)
 //   CLEARED_V2_HEARTBEAT_SESSION_MINUTES  a live session unmoved past 120 min is stalled

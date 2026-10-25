@@ -1,4 +1,4 @@
-// What the status says (docs/v2/milestone-4-plan.md, section 7.4): one line
+// What the status says (docs/v2/milestone-4-plan.md, section 8.4): one line
 // per part for a person at the terminal, or one JSON object, schema 1, with
 // v1's stable keys where v2 has them. Its words are
 // messages/heartbeat.<language>.json, over the shell's for the units of a

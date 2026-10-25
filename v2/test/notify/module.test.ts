@@ -59,7 +59,7 @@ test('with a project the dispatcher ticks from the start of the service, with no
   }
 });
 
-// The heartbeat (docs/v2/milestone-4-plan.md, section 7): its tables are the
+// The heartbeat (docs/v2/milestone-4-plan.md, section 8): its tables are the
 // module's, and its beat starts with the service, a project set or not, and
 // stops with it.
 test('the module owns the heartbeat\'s tables', () => {

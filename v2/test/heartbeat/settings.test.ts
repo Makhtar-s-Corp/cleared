@@ -1,4 +1,4 @@
-// The heartbeat's settings (docs/v2/milestone-4-plan.md, section 7.4): the
+// The heartbeat's settings (docs/v2/milestone-4-plan.md, section 8.4): the
 // intervals from the environment, and the monitor's addresses from files
 // the service's account alone can read, outside the project's checkout,
 // HTTPS or HTTP on loopback. A refused file is named by its variable,
