@@ -85,7 +85,7 @@ B6.4 asks for v1's data to be reused: its memory, and its ticket history for the
    - **The minutes**: from the ticket's first run at or after its Todo time (else its Todo time) to its merge, less the time the owner took to answer (`human_wait_min`). v2 counts from the author's first start to the release request, less the owner's waits; v1 has no release request event, so the few minutes from the owner's answer to the merge are counted too.
    - **The size**: v1 had no sizes. A `size:<s>` label on the v1 ticket wins when there is one; else the lines its merged pull request changed (`runs.lines_changed`): 20 or fewer xs, 100 or fewer s, 400 or fewer m, more l. A ticket with neither has no size and is not a sample.
    - **The tokens**: the sum of its runs' tokens, kept and said, not used by the estimates.
-   - **No money.** v1 kept euros: either the CLI's dollars times a rate v1 does not keep, or tokens times a price table, which is not a real source. An imported sample has no cost; the estimates take the median cost of the samples that have one, and the default when fewer than three do.
+   - **No money.** v1 kept euros: either the CLI's dollars times a rate v1 does not keep, or tokens times a price table, which is not a real source. An imported sample has no cost; the estimates take the median cost of the samples that have one, and the default when fewer than three do. A default cost is never said to come from history: the plan's panel says "Estimates from {n} similar tickets" from three samples, so the count is then the samples that have a cost, and the panel says "Default estimates".
 2. **The approved decisions.** A decision file the owner approved in v1 stays approved in v2 when all of these hold: v1's entry is approved and v1 holds its `memory_approved` event; that event's owner is the owner v2's settings name (`[tracker] owner_id`); the file, at the same path in v2's checkout, has the same text committed and on disk as the text v1 approved. Then the import approves v2's entry through lib/memory, in a child process, as the knowledge module does, and keeps v1's record (who, when) in its own table. Anything else stays a proposal, as editing a file does in v1.
 
 Not imported: the files' entries themselves (lib/memory indexes them from the checkout); the handovers, scoped to a v1 ticket id that v2 gives to another ticket (`LOCAL-<n>` from 1 in both ledgers), so one would brief an unrelated ticket; proposals; v1's sessions, runs and events, which no v2 screen reads; the tickets themselves, which would appear on the board and in the mirrors.
@@ -93,7 +93,8 @@ Not imported: the files' entries themselves (lib/memory indexes them from the ch
 ### 3.4 Decisions this lane takes
 
 - **Read-only on v1.** The v1 ledger and its write-ahead log are copied into a private temporary folder and read there: SQLite opened read-only on a ledger in WAL mode still creates its `-shm` and `-wal` files beside it. The copy is removed at the end. The command refuses a v1 ledger that is v2's own file.
-- **Idempotent.** A sample is keyed by the workspace and the v1 ticket; an approval is not made twice. A second `--apply` writes nothing and says so. A v1 ticket measured again after the first import keeps its first sample.
+- **Idempotent.** A sample is keyed by the workspace and the v1 ticket; an approval is not made twice. A second `--apply` writes nothing and says so. A v1 ticket measured again after the first import keeps its first sample, and a ticket number already imported from another measure is said as such, never as already imported.
+- **One v1 ledger per workspace.** v1 kept a ledger per project; the import brings one into the workspace, read against the workspace's checkout (its first service's), where the workspace's memory reads its files.
 - **Its own tables.** `v1_ticket_samples` and `v1_memory_approvals`, created by the command; the estimates read the first one when it exists.
 - **The dry run** says what `--apply` would write and why each skipped item is skipped, in counts, durations a person reads and ticket ids; never a decision's text.
 - **Language.** `CLEARED_V2_APP_LANGUAGE`, French by default, as the service's other words.
@@ -102,7 +103,7 @@ Not imported: the files' entries themselves (lib/memory indexes them from the ch
 
 ### 3.5 Out of scope
 
-v1's handovers, events and sessions; a v1 tracker other than the ledger's (a Linear ticket's labels are not read: its size comes from its lines); a screen for the import; the import of a v2 ledger into another; the removal of v1's files, the cleanup lane's.
+v1's handovers, events and sessions; several v1 ledgers into one workspace (a second one's tickets of numbers already imported are left out and said, and its decisions, read against the first service's checkout, come out missing or changed, never filed in another service's level); a v1 tracker other than the ledger's (a Linear ticket's labels are not read: its size comes from its lines); a screen for the import; the import of a v2 ledger into another; the removal of v1's files, the cleanup lane's.
 
 ### 3.6 Files this lane owns
 

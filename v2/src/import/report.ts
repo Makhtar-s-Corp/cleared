@@ -42,7 +42,10 @@ export function renderReport(report: ImportReport, t: Translate, language: Langu
     }
   }
   if (samples.known.length > 0) lines.push(many(samples.known.length, t('samples_known_one', n(samples.known.length)), t('samples_known_other', n(samples.known.length))));
-  for (const skip of samples.skipped) lines.push(skip.reason === 'no_size' ? t('skip_no_size', { ticket: skip.ticket }) : t('skip_unreadable', { ticket: skip.ticket }));
+  for (const skip of samples.skipped) {
+    const why = { no_size: t('skip_no_size', { ticket: skip.ticket }), unreadable: t('skip_unreadable', { ticket: skip.ticket }), taken: t('skip_taken', { ticket: skip.ticket }) };
+    lines.push(why[skip.reason]);
+  }
 
   const approved = approvals.added.length;
   if (approved > 0) {

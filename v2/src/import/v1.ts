@@ -23,7 +23,9 @@ export type V1Sample = {
   readonly measuredAt: string;
 };
 
-export type V1Skip = { readonly ticket: string; readonly reason: 'no_size' | 'unreadable' };
+// `taken`: v2 already holds an imported sample of that ticket number from
+// another measure (another v1 ledger, or the ticket measured again since).
+export type V1Skip = { readonly ticket: string; readonly reason: 'no_size' | 'unreadable' | 'taken' };
 
 // A decision file the owner approved in v1, its text as approved, and
 // v1's record of the approval (null when v1 holds none).

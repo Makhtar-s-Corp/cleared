@@ -59,6 +59,8 @@ export async function importV1(options: ImportOptions): Promise<ImportReport> {
   const v1 = readV1(options.from);
   const known = knownOf(options.ledger, options.project, options.apply);
   const samples = v1.samples.filter((s) => !known.samples.has(s.ticket));
+  const same = (s: V1Sample) => known.samples.get(s.ticket) === s.measuredAt;
+  const taken: V1Skip[] = v1.samples.filter((s) => known.samples.has(s.ticket) && !same(s)).map((s) => ({ ticket: s.ticket, reason: 'taken' }));
 
   const skipped: { path: string; reason: ApprovalSkip }[] = [];
   const knownApprovals: string[] = [];
@@ -108,7 +110,7 @@ export async function importV1(options: ImportOptions): Promise<ImportReport> {
     project: options.project,
     applied: options.apply,
     measured: v1.measured,
-    samples: { added: samples, known: v1.samples.filter((s) => known.samples.has(s.ticket)).map((s) => s.ticket), skipped: v1.skipped },
+    samples: { added: samples, known: v1.samples.filter((s) => known.samples.has(s.ticket) && same(s)).map((s) => s.ticket), skipped: [...v1.skipped, ...taken].sort((a, b) => a.ticket.localeCompare(b.ticket, 'en', { numeric: true })) },
     approvals: { added: candidates.map(({ path, by, at }) => ({ path, by, at })), known: knownApprovals.sort((a, b) => a.localeCompare(b, 'en')), skipped: skipped.sort(order) },
     handovers: v1.handovers,
   };
@@ -131,22 +133,23 @@ function sameFile(from: string, ledger: string): boolean {
   }
 }
 
-// What v2's ledger already holds: the workspace's imported tickets and the
-// approved decisions. A dry run never makes the ledger.
-function knownOf(ledger: string, project: string, apply: boolean): { samples: Set<string>; approved: Set<string> } {
-  const out = { samples: new Set<string>(), approved: new Set<string>() };
+// What v2's ledger already holds: the workspace's imported tickets, each
+// with the time of the measure it came from, and the approved decisions. A
+// dry run never makes the ledger.
+function knownOf(ledger: string, project: string, apply: boolean): { samples: Map<string, string>; approved: Set<string> } {
+  const out = { samples: new Map<string, string>(), approved: new Set<string>() };
   if (!existsSync(ledger)) return out;
   const db = new DatabaseSync(ledger, { readOnly: !apply });
   try {
     const read = (sql: string, ...values: string[]) => {
-      try { return (db.prepare(sql).all(...values) as { key: string }[]).map((row) => row.key); }
+      try { return db.prepare(sql).all(...values) as { key: string; at?: string }[]; }
       catch (error) {
         if (/no such table/.test((error as Error).message)) return [];
         throw error;
       }
     };
-    for (const ticket of read('SELECT ticket AS key FROM v1_ticket_samples WHERE project = ?', project)) out.samples.add(ticket);
-    for (const id of read("SELECT id AS key FROM memory_entries WHERE status = 'approved'")) out.approved.add(id);
+    for (const row of read('SELECT ticket AS key, measured_at AS at FROM v1_ticket_samples WHERE project = ?', project)) out.samples.set(row.key, String(row.at));
+    for (const row of read("SELECT id AS key FROM memory_entries WHERE status = 'approved'")) out.approved.add(row.key);
   } finally {
     db.close();
   }

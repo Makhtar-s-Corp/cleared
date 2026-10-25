@@ -10,7 +10,7 @@
 //   defaults below. The v1 tickets the import brought (src/import/samples.ts,
 //   milestone 4 plan, section 3) are samples too, without a cost: the cost
 //   is the median of the samples that have one, three or more, else the
-//   default. The plan's time is its critical path: the runner's own
+//   default, and the sample count then says so. The plan's time is its critical path: the runner's own
 //   rule (ready items in position order, at most maxParallel at once) played
 //   on the estimates, not their sum.
 import type { DatabaseSync } from 'node:sqlite';
@@ -114,15 +114,19 @@ export function stepEstimate(samples: readonly StepSample[], size: Size, lane: L
   return fromSamples(samples.filter((s) => s.kind === kind && s.size === size && s.lane === lane), DEFAULT_ESTIMATES[stepSize(size, kind)]);
 }
 
-// The medians of `same`, from three samples; the cost from three that have one.
+// The medians of `same`, from three samples; the cost from three that have
+// one. A default cost is never counted as history: the plan's panel says
+// "Estimates from {n} similar tickets" from three samples, so the count is
+// then the samples that have a cost.
 function fromSamples(same: readonly Sample[], fallback: { readonly minutes: number; readonly costUsd: number }): Estimate {
   if (same.length < MIN_SAMPLES) return { ...fallback, weekPercent: null, samples: same.length };
   const costs = same.flatMap((s) => (s.costUsd === null ? [] : [s.costUsd]));
+  const costed = costs.length >= MIN_SAMPLES;
   return {
     minutes: Math.max(1, Math.round(median(same.map((s) => s.minutes)))),
-    costUsd: costs.length < MIN_SAMPLES ? fallback.costUsd : cents(median(costs)),
+    costUsd: costed ? cents(median(costs)) : fallback.costUsd,
     weekPercent: null,
-    samples: same.length,
+    samples: costed ? same.length : costs.length,
   };
 }
 

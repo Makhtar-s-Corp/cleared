@@ -23,6 +23,7 @@
   "samples_known_other": "{n} tickets were already imported.",
   "skip_no_size": "{ticket} is left out: no size label and no lines changed tell its size.",
   "skip_unreadable": "{ticket} is left out: its measure cannot be read.",
+  "skip_taken": "{ticket} is left out: v2 already holds a v1 ticket of that number, from another measure (another v1 ledger, or the ticket measured again since).",
   "approvals_added_one": "{n} decision is approved in v2, as in v1:",
   "approvals_added_other": "{n} decisions are approved in v2, as in v1:",
   "approvals_would_one": "{n} decision would be approved in v2, as in v1:",

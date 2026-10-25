@@ -23,6 +23,7 @@
   "samples_known_other": "{n} tickets étaient déjà importés.",
   "skip_no_size": "{ticket} est laissé de côté : ni étiquette de taille ni lignes modifiées ne disent sa taille.",
   "skip_unreadable": "{ticket} est laissé de côté : sa mesure est illisible.",
+  "skip_taken": "{ticket} est laissé de côté\u00a0: v2 a déjà un ticket v1 de ce numéro, d'une autre mesure (un autre registre v1, ou le ticket mesuré à nouveau depuis).",
   "approvals_added_one": "{n} décision est approuvée dans v2, comme dans v1 :",
   "approvals_added_other": "{n} décisions sont approuvées dans v2, comme dans v1 :",
   "approvals_would_one": "{n} décision serait approuvée dans v2, comme dans v1 :",

@@ -75,11 +75,11 @@ test('the same v1 ticket imported for two workspaces is a sample of each', async
 });
 
 test('a second v1 ledger whose ticket numbers are taken is said, never counted as already imported', async () => {
-  const { run } = setup([sized('LOCAL-1', 's', 10), sized('LOCAL-2', 'm', 40)]);
+  const { run } = setup([sized('LOCAL-1', 's', 10)]);
   await run(true);
-  const other = v1Ledger([sized('LOCAL-1', 'l', 70), { ...sized('LOCAL-3', 'xs', 5) }]);
+  const other = v1Ledger([sized('LOCAL-1', 'l', 70), sized('LOCAL-2', 'xs', 5)]);
   const report = await run(true, { from: other.ledger });
-  assert.deepEqual(report.samples.added.map((s) => s.ticket), ['LOCAL-3']);
+  assert.deepEqual(report.samples.added.map((s) => s.ticket), ['LOCAL-2']);
   assert.deepEqual(report.samples.known, []);
   assert.deepEqual(report.samples.skipped, [{ ticket: 'LOCAL-1', reason: 'taken' }]);
 });
