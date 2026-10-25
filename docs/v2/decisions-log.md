@@ -5991,6 +5991,7 @@ With the CPU slowed four times the budget is at its edge: what is left is the ne
 
 **Resources.** No Docker object, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, Impeccable's install, the Debian packages of pngquant and optipng unpacked in the scratchpad, `git fetch` and GitHub, no port but loopback port 0, no secret. The reference capture stays outside the repository.
 
+- Pull request: 377, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-visual-redesign`.
 
 **The merge of 374** (lane `j3-a11y`, P224, at `origin/v2` `2b2314e`). The log keeps 374's entry, then this one. The matrix keeps P224 and P225, then P227, every id once. The CI's browser list keeps 374's `a11y-browser.test.ts` beside this lane's file. After the merge, with 374's lock file installed:
