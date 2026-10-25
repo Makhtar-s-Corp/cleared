@@ -5924,7 +5924,7 @@ The slowed copies were made for the measure and are not committed.
 
 **Not this lane's.** In the first 50 runs of `wins-browser.test.ts`, the English test timed out twice waiting 30 s for the panel to show, in the round where the load average reached 24; the French test passed in the same processes. It did not come back in the 104 slowed runs, nor in 48 more with 12 copies at once (load average up to 35). The screen reads the Consumption once at its start and again every minute (`REFRESH_MS`): a first read that failed would leave it on its error for longer than the test's wait. The inbox's failure in the CI's list above has the same shape, a wait for data that never drew. Neither was reproduced, so neither is fixed; both are named here for the next lane that sees them.
 
-**Checks** (on `origin/v2` at `2b2314e`). `npm run typecheck` passes. `npm test`: 2133 Node tests, 2050 pass, 83 skipped (`CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_REAL_HARNESS` unset), 0 fail; 344 Vitest tests pass. `npm run guard -- --base origin/v2`: GUARD.
+**Checks** (on `origin/v2` at `2b2314e`). `npm run typecheck` passes. `npm test`: 2133 Node tests, 2050 pass, 83 skipped (`CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_REAL_HARNESS` unset), 0 fail; 344 Vitest tests pass. `npm run guard -- --base origin/v2`: nothing refused (run without a private-term list, `CLEARED_REPO` unset).
 
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read; the app on port 0 on loopback; no network beyond `npm ci` of the lock file, `git fetch` and GitHub (the CI's logs read with `gh`); no tunnel, no secret.
 
