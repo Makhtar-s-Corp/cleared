@@ -447,7 +447,7 @@ A week other than the last seven days (no week picker, no week before); a report
 
 ## 12. The GitHub mirror's doctor section (`v2-j4-mirror-doctor`, issue #400)
 
-This section was written on 2026-10-25 by the author of issue #400 (Opus 5.5), before the lane's tests and code. Inputs: issue #400, [mirrors.md](mirrors.md) ("there is no `doctor` section for the mirrors yet"), the [decisions log](decisions-log.md) (the entries of lanes `v2-j4-issue-mirrors`, `v2-j4-mirror-followups` and `v2-j4-heartbeat`, and the ten ideas of 2026-10-25), the [requirements matrix](requirements-matrix.md) (B5.8b, P230, B4.6), and the code at `origin/v2` `d849c6e`. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), whose "one doctor" rule this lane applies. Sections 10 and 11 are taken by the lanes of issues #398 and #397, which run beside this one (#397 holds section 11 and P245, #398 will need the next free id); this section and its id move at the merge if one of them lands first with the same. The branch is `v2-j4-mirror-doctor`: `v2/j4-mirror-doctor` cannot exist beside the local branch `v2`.
+This section was written on 2026-10-25 by the author of issue #400 (Opus 5.5), before the lane's tests and code. Inputs: issue #400, [mirrors.md](mirrors.md) ("there is no `doctor` section for the mirrors yet"), the [decisions log](decisions-log.md) (the entries of lanes `v2-j4-issue-mirrors`, `v2-j4-mirror-followups` and `v2-j4-heartbeat`, and the ten ideas of 2026-10-25), the [requirements matrix](requirements-matrix.md) (B5.8b, P230, B4.6), and the code at `origin/v2` `d849c6e`. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), whose "one doctor" rule this lane applies. Section 10 is the week's figures (pull request 399). The lanes of issues #397 and #398 run beside this one: #397's branch holds section 11 and P245, and #398's branch wrote a section 10 and P243, which it renumbers when it merges `origin/v2`, likely to the next free ones; this section and its id move at the merge if one of them lands first with the same. The branch is `v2-j4-mirror-doctor`: `v2/j4-mirror-doctor` cannot exist beside the local branch `v2`.
 
 ### 12.1 Context
 
@@ -457,7 +457,7 @@ The GitHub mirror (pull requests 384 and 390) ran for real twice, each time from
 
 - `src/tickets/mirror-doctor.ts`: `githubMirrorChecks({ env, fetch, now })`, the checks of 12.3, each one passed, failed, a notice, or not run, its words in `src/tickets/messages/mirror-doctor.{en,fr}.json` over the shell's units of time, in `CLEARED_V2_APP_LANGUAGE` (French by default).
 - `node scripts/doctor.ts mirror` (`npm run doctor -- mirror`): the section, run only when named, as `cursor` and `codex` are. It never runs by default: it calls GitHub.
-- A read-only method of `GitHubTracker`, `inspect()`: the repository's `has_issues` and `permissions`, and its labels' names, through the same requests and headers as the mirror's other calls.
+- Two read-only methods of `GitHubTracker`, `repository()` (its `has_issues` and `permissions`) and `labels()` (its labels' names, every page), through the same requests and headers as the mirror's other calls; `TrackerError` carries GitHub's status code when GitHub answered.
 - Proven by `test/tickets/mirror-doctor.test.ts` (each check against the fake GitHub on loopback, in English and French, and the token never in a line), `test/tickets/mirror-doctor-catalog.test.ts`, `test/tickets/mirror-doctor-cli.test.ts` (the section run by `doctor.ts` against the fake: its exit code, and the token in no output on any path, only in the fake's `authorization` header), and one real run on the example repository `cleared-example-guestbook`, quoted in the pull request.
 
 ### 12.3 The checks
@@ -482,10 +482,10 @@ Linear (its real trial is the owner's, and a section for it would only run again
 
 ### 12.6 Files this lane owns
 
-`v2/src/tickets/mirror-doctor.ts`, `v2/src/tickets/messages/mirror-doctor.{en,fr}.json`, `inspect()` in `v2/src/tickets/mirror-github.ts`, the `mirror` section of `v2/scripts/doctor.ts`, the repository and labels routes of `v2/test/tickets/fakes/github.ts`, `v2/test/tickets/mirror-doctor*.test.ts`; `docs/v2/mirrors.md`, a paragraph of `v2/README.md`'s doctor part; this section, its matrix lines and its log entry.
+`v2/src/tickets/mirror-doctor.ts`, `v2/src/tickets/messages/mirror-doctor.{en,fr}.json`, `repository()` and `labels()` in `v2/src/tickets/mirror-github.ts`, the `status` of `TrackerError` in `v2/src/tickets/mirror-tracker.ts`, the `mirror` section of `v2/scripts/doctor.ts`, the repository and labels routes of `v2/test/tickets/fakes/github.ts`, `v2/test/tickets/mirror-doctor*.test.ts`; `docs/v2/mirrors.md`, a sentence in `v2/README.md`'s paragraph on the mirrors; this section, its matrix lines and its log entry.
 
 ### 12.7 Unknowns, and who closes them
 
 | Unknown on 2026-10-25 | Closed by |
 | --- | --- |
-| Whether GitHub fills `permissions` for a fine-grained token with the token's rights or the account's | the real run of this lane reads a classic token's; a fine-grained token's is the owner's set-up, and a missing `permissions` is said, not failed |
+| Whether GitHub fills `permissions` for a fine-grained token with the token's rights or the account's | the real run of this lane: GitHub filled `permissions` for the `gh` login's token; a fine-grained token is the owner's set-up, and a missing `permissions` is said, not failed |
