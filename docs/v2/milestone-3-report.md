@@ -25,7 +25,7 @@ S'y ajoutent :
 - les correctifs de sécurité et de démarrage issus des relectures (#347 à #353) ;
 - un test instable réparé (#360) ;
 - une passe de relecture de la documentation (P221) ;
-- une passe de polissage des écrans (P222), avec captures avant/après dans `docs/v2/ui-polish/`, compressées de 11,3 Mo à 4,0 Mo.
+- une passe de polissage des écrans (P222), avec captures avant/après dans `docs/v2/ui-polish/`, compressées de 11,3 Mo à 4,0 Mo par la PR 369.
 
 ## Comment c'est vérifié
 
@@ -42,7 +42,7 @@ Les tests d'un changement sont écrits d'abord et échouent sur l'ancien code. C
 Trois lanes de finition tournent sur `v2`, sans nouvelle fonctionnalité :
 - la vitesse des changements d'onglet ;
 - l'accessibilité (WCAG 2.2 AA) ;
-- les trous de couverture de tests, avec deux tests instables en CI.
+- les trous de couverture de tests, avec deux tests instables en CI (lane `j3-test-gaps`).
 
 Viennent ensuite :
 - une refonte visuelle de la navigation, de la Session, de la Réception et de la Consommation ;
