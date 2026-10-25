@@ -5452,4 +5452,5 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, no tunnel, no secret: the test's service listens on port 0 on loopback.
 
+- Pull request: 355, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-mcp-startup`.
