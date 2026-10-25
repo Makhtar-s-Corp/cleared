@@ -4,7 +4,8 @@
 // reviewers ran with their result (flow/review-tests.ts, read from the
 // ledger), and the cost: the tokens and the time, and dollars only when
 // every session of the ticket reported a figure, never an estimate and
-// never euros (no source gives them).
+// never euros (no source gives them), as the ticket card counts them
+// (consumption/ticket-cost.ts, P211).
 //
 // The block is built from structured fields only: no report, no command
 // output, no error's text, no path of this machine. A capture is linked
@@ -16,8 +17,6 @@ import { readFileSync } from 'node:fs';
 import { loadCatalog, type Language } from '../../app/src/catalog.ts';
 import { translator, type Catalog, type Translate } from '../../app/web/lib/i18n.ts';
 import { lasted, quantity } from '../../app/web/lib/time.ts';
-import { turnTokens } from '../consumption/usage.ts';
-import type { SessionEvent } from '../session/events.ts';
 import type { CaptureMissing, ProofCapture } from './proof-capture.ts';
 
 export const RECEIPT_MESSAGES_DIR = new URL('./messages/', import.meta.url).pathname;
@@ -31,9 +30,10 @@ export type ReceiptData = {
   readonly ticket: string;
   readonly tests: readonly ReceiptTest[];         // one per review round that ran with a declared command, oldest first
   readonly testsDeclared: boolean;
-  readonly tokens: number | null;                 // null when no turn reported its usage
-  readonly costUsd: number | null;                // null unless every session that ran a turn reported a total
-  readonly elapsedMs: number;                     // from the first session's start to the publish
+  // The ticket's cost as its card says it (consumption/ticket-cost.ts ticketCost, P211).
+  readonly tokens: number | null;                 // null when no turn finished
+  readonly costUsd: number | null;                // null unless every session that finished a turn reported a total
+  readonly elapsedMs: number;                     // from the ticket's first stored event to its last
   readonly captures: readonly ReceiptCapture[];
   readonly linkBase?: string | undefined;         // the app's address, as CLEARED_NOTIFY_LINK_BASE gives it
 };
@@ -103,31 +103,6 @@ export function renderReceipt(data: ReceiptData, language: Language): string {
   lines.push(`- ${t('receipt_time', { time: lasted(data.elapsedMs, t) })}`);
   lines.push(RECEIPT_END);
   return lines.join('\n');
-}
-
-// What a ticket's sessions spent: the tokens of every finished turn, and
-// the dollars as the sum of each session's last reported total (Claude
-// Code's `total_cost_usd` is the session's running total, decisions log of
-// lane 25). A session that ran a turn and never reported a total (Codex,
-// Cursor) leaves the dollars unknown: a partial sum is not the cost.
-export function ticketUsage(sessions: readonly (readonly SessionEvent[])[]): { tokens: number | null; costUsd: number | null } {
-  let tokens: number | null = null;
-  let cost = 0;
-  let known = true;
-  for (const events of sessions) {
-    let last: number | null = null;
-    let turns = 0;
-    for (const { event } of events) {
-      if (event.type !== 'RUN_FINISHED') continue;
-      turns += 1;
-      tokens = (tokens ?? 0) + turnTokens(event);
-      if (typeof event.result.total_cost_usd === 'number') last = event.result.total_cost_usd;
-    }
-    if (turns === 0) continue;
-    if (last === null) known = false;
-    else cost += last;
-  }
-  return { tokens, costUsd: tokens !== null && known ? Math.round(cost * 1e6) / 1e6 : null };
 }
 
 // The body with the receipt first: in place of the receipt it holds, else before it.

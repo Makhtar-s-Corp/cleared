@@ -6,8 +6,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { RECEIPT_END, RECEIPT_START, RECEIPT_MESSAGES_DIR, proofLink, renderReceipt, ticketUsage, withReceipt, type ReceiptData } from '../../src/flow/receipt.ts';
-import type { SessionEvent } from '../../src/session/events.ts';
+import { RECEIPT_END, RECEIPT_START, RECEIPT_MESSAGES_DIR, proofLink, renderReceipt, withReceipt, type ReceiptData } from '../../src/flow/receipt.ts';
 
 const LINK = 'https://cleared.example.invalid';
 
@@ -100,26 +99,6 @@ test('the block holds only what its fields say: a command with a backtick cannot
   assert.equal(proofLink(`https://${['user', 'pass'].join(':')}@cleared.example.invalid`, 'DEMO-7', 'guestbook', 'before.png'), undefined);
   assert.equal(proofLink('file:///home/someone', 'DEMO-7', 'guestbook', 'before.png'), undefined);
   assert.equal(proofLink('https://cleared.example.invalid/some/path/', 'DEMO-7', 'guestbook', 'before.png'), 'https://cleared.example.invalid/api/service/tickets/DEMO-7/proof/guestbook/before.png');
-});
-
-// RUN_FINISHED events of a session: `total_cost_usd` is the session's running total.
-const turns = (session: string, costs: readonly (number | null)[], tokens = 100): SessionEvent[] => costs.map((cost, i) => ({
-  seq: i + 1, at: '2026-10-25T10:00:00.000Z', sessionId: session as SessionEvent['sessionId'], ticket: 'DEMO-7', project: 'guestbook',
-  event: { type: 'RUN_FINISHED', threadId: session, runId: `r${i}`, outcome: { type: 'success' }, usage: [{ inputTokens: tokens, outputTokens: 10, cachedInputTokens: 5, cacheWriteInputTokens: 1 }], result: { stopReason: 'end_turn', total_cost_usd: cost } },
-}));
-
-test('the cost is each session\'s last running total, summed over the sessions; one session that reports none leaves the dollars out', () => {
-  // An author of three turns (0.10, then 0.25, then 0.30 so far) and a reviewer of one.
-  const both = ticketUsage([turns('a', [0.1, 0.25, 0.3]), turns('r', [0.1])]);
-  assert.equal(both.costUsd, 0.4);
-  // Tokens are per turn: in + out + cache read + cache write, every turn.
-  assert.equal(both.tokens, 4 * 116);
-  // A Codex or Cursor session reports no cost: no dollar figure for the ticket.
-  assert.equal(ticketUsage([turns('a', [0.1]), turns('c', [null, null])]).costUsd, null);
-  // A cancelled turn's null after a reported total keeps the total.
-  assert.equal(ticketUsage([turns('a', [0.2, null])]).costUsd, 0.2);
-  // No turn at all: nothing known.
-  assert.deepEqual(ticketUsage([]), { tokens: null, costUsd: null });
 });
 
 test('the block goes first in a body, and replaces the one already there', () => {

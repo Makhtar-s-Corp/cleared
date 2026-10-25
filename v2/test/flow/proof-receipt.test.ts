@@ -13,6 +13,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { SERVICE_PROOF_HEADER } from '../../src/api/types.ts';
+import { ticketCost } from '../../src/consumption/ticket-cost.ts';
 import { proofRoutes } from '../../src/flow/proof-routes.ts';
 import type { ProofCapture } from '../../src/flow/proof-capture.ts';
 import type { ReceiptData } from '../../src/flow/receipt.ts';
@@ -79,7 +80,9 @@ test('the author\'s captures are taken before its session closes, and the publis
   assert.equal(receipt.tokens, 220);
   // The author's 0.30 and the reviewer's 0.10, each its session's last total.
   assert.equal(receipt.costUsd, 0.4);
-  assert.ok(receipt.elapsedMs >= 0);
+  // The figures are the ticket card's (P211): the same ticketCost over the ledger.
+  const card = ticketCost(t.store.db, { project: 'guestbook', ticket: t.ticket.id });
+  assert.deepEqual({ tokens: receipt.tokens, costUsd: receipt.costUsd, elapsedMs: receipt.elapsedMs }, { tokens: card.tokens, costUsd: card.costUsd, elapsedMs: card.elapsedMs });
   assert.deepEqual(receipt.captures, [{ service: 'guestbook', ...TAKEN }]);
   assert.equal(receipt.linkBase, 'https://cleared.example.invalid');
   // Nothing of a test's output reaches the receipt.

@@ -126,7 +126,8 @@ import { NO_ANSWER, answerMessage, channelOf, channelPrompt, lastSaid, verdictsO
 import { testComment, testLine, testRunOf } from './review-tests.ts';
 import type { ProofCapture } from './proof-capture.ts';
 import { PROOF_FILES } from './proof-capture.ts';
-import { ticketUsage, type ReceiptCapture, type ReceiptData, type ReceiptTest } from './receipt.ts';
+import type { ReceiptCapture, ReceiptData, ReceiptTest } from './receipt.ts';
+import { ticketCost } from '../consumption/ticket-cost.ts';
 import { CI_REPAIR_ATTEMPTS, onBase, repairComment, repairMessage, type CiFailures } from './ci-repair.ts';
 import type { PrClose } from './pr-close.ts';
 import { authorPrompt, contractSendBackMessage, fileDiff, handoverMessage, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
@@ -2685,27 +2686,28 @@ export class FlowEngine {
   }
 
   // The receipt's facts, from the ledger only: each review round's run of
-  // the declared tests, every session's tokens and cost, the time since the
-  // flow's first session started, the last captures of each service.
+  // the declared tests and the last captures of each service, in the
+  // current flow; the tokens, the dollars and the time of the ticket as its
+  // card says them (consumption/ticket-cost.ts, P211): every session of
+  // every run, from the ticket's first stored event to its last.
   #receipt(id: TicketId, reviewer: Live): ReceiptData {
-    const rows = this.#flowRows(id);
-    const events = rows.map((row) => ({ row, events: this.#store.events.after(row.id) }));
     const tests: ReceiptTest[] = [];
     const captures = new Map<string, ReceiptCapture>();
-    for (const { row, events: list } of events)
-      for (const { event } of list) {
+    for (const row of this.#flowRows(id))
+      for (const { event } of this.#store.events.after(row.id)) {
         if (event.type !== 'CUSTOM') continue;
         if (row.role === 'reviewer' && event.name === 'cleared.review_verdict' && event.value.tests)
           tests.push({ round: event.value.round, command: event.value.tests.command, outcome: event.value.tests.outcome });
         if (row.role === 'author' && event.name === 'cleared.proof_captured') captures.set(event.value.service, event.value);
       }
-    const first = Math.min(...rows.map((row) => Date.parse(row.createdAt)).filter(Number.isFinite));
+    const cost = ticketCost(this.#store.db, { project: reviewer.input.project, ticket: id });
     return {
       ticket: id,
       tests: tests.sort((a, b) => a.round - b.round),
       testsDeclared: (reviewer.settings.testCommand?.length ?? 0) > 0,
-      ...ticketUsage(events.map((e) => e.events)),
-      elapsedMs: Number.isFinite(first) ? Math.max(0, this.#now().getTime() - first) : 0,
+      tokens: cost.tokens,
+      costUsd: cost.costUsd,
+      elapsedMs: cost.elapsedMs,
       captures: [...captures.values()],
       ...(this.config.linkBase ? { linkBase: this.config.linkBase } : {}),
     };
