@@ -24,24 +24,27 @@
 //   contract = openapi:contract/openapi.yaml    openapi, jsonschema, protobuf or events, then the path
 //   broker_socket = /...                 its release broker (decision 21)
 //   broker_state = /...
+//   forge = github                       its forge's adapter (src/forge/); github by default
 //
 // Each service repository keeps its own .cleared/agents.conf, read at its
 // base branch, as before.
 import { readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import type { ContractFormat, Service, Workspace } from '../api/types.ts';
+import { FORGE_KINDS, type ForgeKind } from '../forge/contract.ts';
 
 export class WorkspaceError extends Error {
   override name = 'WorkspaceError';
 }
 
 // What the service knows of a service besides what the API shows: where its
-// checkout is on this server, and its release broker. None of these paths
-// leaves the service (publicWorkspace).
+// checkout is on this server, its release broker and its forge. None of
+// these leaves the service (publicWorkspace).
 export type ServiceConfig = Service & {
   readonly dir: string;
   readonly brokerSocket: string | null;          // null: the milestone 1 socket
   readonly brokerState: string | null;           // null: the milestone 1 state folder
+  readonly forge?: ForgeKind;                    // the file's forge key; absent: github (forge/index.ts forgeKindOf)
 };
 
 export type WorkspaceConfig = {
@@ -81,7 +84,7 @@ const ID = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,99}$/;
 // container's name on the session's network.
 const NAME = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
 const BRANCH = /^[A-Za-z0-9._/-]+$/;
-const SERVICE_KEYS = new Set(['kind', 'repository', 'url', 'base', 'path', 'dir', 'health_url', 'sensitivity', 'consumes', 'run', 'contract', 'broker_socket', 'broker_state']);
+const SERVICE_KEYS = new Set(['kind', 'repository', 'url', 'base', 'path', 'dir', 'health_url', 'sensitivity', 'consumes', 'run', 'contract', 'broker_socket', 'broker_state', 'forge']);
 
 // A clone address with no secret in it: an http address names no user and
 // no password (a token is often written as either), any other address no
@@ -183,11 +186,13 @@ function serviceOf(name: string, keys: Record<string, string>, options: Workspac
     if (!isAbsolute(value)) throw new WorkspaceError(`${where} ${key} must be an absolute path`);
     return value;
   };
+  const forge = keys.forge;
+  if (forge !== undefined && !(FORGE_KINDS as readonly string[]).includes(forge)) throw new WorkspaceError(`${where} forge is ${FORGE_KINDS.join(' or ')}, not "${forge.slice(0, 40)}"`);
   const consumes = [...new Set((keys.consumes ?? '').split(',').map((word) => word.trim()).filter(Boolean))];
   if (consumes.includes(name)) throw new WorkspaceError(`${where}: ${name} consumes itself`);
   return {
     name, kind, repo, url, base, path, dir, healthUrl, sensitivity: sensitivityOf(keys.sensitivity, where, options), consumes, run, contract,
-    brokerSocket: absolute('broker_socket'), brokerState: absolute('broker_state'),
+    brokerSocket: absolute('broker_socket'), brokerState: absolute('broker_state'), ...(forge ? { forge: forge as ForgeKind } : {}),
   };
 }
 
@@ -264,6 +269,6 @@ export function publicWorkspace(workspace: WorkspaceConfig): Workspace {
   return {
     id: workspace.id,
     name: workspace.name,
-    services: workspace.services.map(({ dir: _dir, brokerSocket: _socket, brokerState: _state, ...service }) => service),
+    services: workspace.services.map(({ dir: _dir, brokerSocket: _socket, brokerState: _state, forge: _forge, ...service }) => service),
   };
 }
