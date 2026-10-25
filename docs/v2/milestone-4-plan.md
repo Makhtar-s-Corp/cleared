@@ -138,7 +138,7 @@ The v2 app signs the human in with a password and has no passkeys (pull request 
 2. **The one behaviour change.** An installation with no passkey registered refused Clear to land, Send back and notifications; it now takes them from a signed-in session over https. An installation with passkeys registered no longer asks for one. A `passkeys.json` left in the human credentials directory is no longer read, and never deleted by Cleared.
 3. **`[app] grant_socket`** is no longer read; a setting file that still has it starts as before.
 4. **The pictures** of the gestures that show a passkey (`app/screenshots/`) are not retaken here; the v1 docs pages lose the lines that describe the passkey, nothing else.
-5. **Lines.** P237 (this lane; P236 is the cleanup's); B5.9d `done`; the shared line "B5.9d and D17: milestone 4" of "Reste avant v2 -> main" loses B5.9d, D17 keeps its own status (the Linear trial).
+5. **Lines.** P238 (this lane; P236 is the cleanup's, P237 the mirrors follow-ups'); B5.9d `done`; the shared line "B5.9d and D17: milestone 4" of "Reste avant v2 -> main" loses B5.9d, D17 keeps its own status (the Linear trial).
 
 ### 5.4 Out of scope
 
