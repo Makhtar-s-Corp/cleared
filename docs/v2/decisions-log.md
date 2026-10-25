@@ -5205,4 +5205,5 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Resources.** No Docker object, no account, no real GitHub call, no tunnel, no secret. The tests listen on port 0 on loopback; the browser test answers github.com from the test.
 
+- Pull request: 343, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-code-qa-links`.
