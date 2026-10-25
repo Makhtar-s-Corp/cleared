@@ -1,17 +1,21 @@
 // The tickets module (lane 8, approval and lock): the TicketStore on the local
 // tracker's tables in ledger.db, so ids, states and signatures are the ones
-// tracker.sh and merge-pr.sh read. The ticket routes of the API are lane 7's.
+// tracker.ts and merge-pr.ts read. The ticket routes of the API are lane 7's.
 // Milestone 2 (lane 14, decision 18): the workspace and its services, as
 // tables of this module beside the tracker's, their rows written at the
 // start from the configuration, and GET /api/workspace.
 // Milestone 4 (issue #381, P230): the mirrors on GitHub Issues and Linear
 // (tickets/mirror.ts), started with the service when their settings name a
-// token file, and stopped with it.
+// token file, and stopped with it; each ticket it writes is said on the
+// app's change stream (issue #386, P237).
 import type { DatabaseSync } from 'node:sqlite';
+import { changeHub } from '../api/events.ts';
 import { approvalEnvironment } from '../approval/service.ts';
 import { FlowConfigError, loadFlowConfig, workspaceOf } from '../flow/config.ts';
+import type { FlowEngine } from '../flow/engine.ts';
 import { runtime } from '../flow/runtime.ts';
 import { TICKET_TABLES, WORKSPACE_TABLES, recordWorkspace } from '../tickets/local-store.ts';
+import type { TicketId } from '../tickets/contract.ts';
 import { MIRROR_TABLES, MirrorConfigError, createMirror, loadMirrorConfig, type Mirror } from '../tickets/mirror.ts';
 import type { Module, Registry } from './registry.ts';
 
@@ -22,6 +26,15 @@ import type { Module, Registry } from './registry.ts';
 export function recordWorkspaceOf(db: DatabaseSync, env: NodeJS.ProcessEnv, now: () => string = () => new Date().toISOString()): void {
   const workspace = loadFlowConfig(env)?.workspace;
   if (workspace) recordWorkspace(db, workspace, now());
+}
+
+// A ticket the mirror wrote, said on the engine's change stream, so that an
+// open page refetches it (api/events.ts); nothing without an engine.
+export function sayTicketChange(engine: () => FlowEngine | undefined): (ticket: TicketId) => void {
+  return (ticket) => {
+    const running = engine();
+    if (running) changeHub(running).say('ticket', ticket);
+  };
 }
 
 let ledger: DatabaseSync | undefined;
@@ -49,6 +62,7 @@ export function startMirror(registry: Registry, db: DatabaseSync, env: NodeJS.Pr
     db, tickets: registry.ticketStore, project: flow.project,
     services: workspaceOf(flow).services.map((s) => ({ name: s.name, repo: s.repo })),
     flow: () => runtime.engine(registry),
+    changed: sayTicketChange(() => runtime.engine(registry)),
   });
   made?.start(config.pollMs);
   return made;

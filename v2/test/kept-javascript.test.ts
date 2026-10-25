@@ -1,6 +1,6 @@
 // B5.11b: the v2 core is TypeScript. The only JavaScript left under v2/ is
 // what a browser loads by its own address, before or without the bundle.
-// lib/notify/contract.mjs is outside v2/: v1 imports it until milestone 4
+// lib/notify/contract.ts is outside v2/: v1 imports it until milestone 4
 // removes v1 (docs/v2/decisions-log.md, 2026-10-22 and 2026-10-25).
 import test from 'node:test';
 import assert from 'node:assert/strict';

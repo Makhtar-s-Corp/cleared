@@ -6309,3 +6309,114 @@ The run made the labels `status:In Progress`, `status:In Review`, `status:Ready 
 
 - Pull request: 387, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-v1-import`.
+
+## 2026-10-25: v1 cleaned out of the core: the dropped files deleted, no bash left, the kept JavaScript in strict TypeScript (the author's choices, lane `v2-j4-cleanup`, P236, issue #382)
+
+**The need.** Issue #382, milestone 4: delete everything [keep-and-drop.md](keep-and-drop.md) marks dropped, remove every bash script of the core (proof: `git grep` finds none), and convert the kept JavaScript to strict TypeScript (the brief's line 177, carried by matrix lines B5.11a, B5.11b and D11; the brief is not in the repository, so it is cited through them), with no change of behaviour and the tests green. The plan was written first, in section 4 of [milestone-4-plan.md](milestone-4-plan.md); the brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight, so the conventions followed are those of sections 9 and 10 of `milestone-1-plan.md`. The branch is `v2-j4-cleanup`: `v2/j4-cleanup` cannot exist next to the `v2` branch (the entry "lane branches are named v2-jN-topic").
+
+**What was found** (at `origin/v2` `2cf78d4`). v2 still ran v1 for every release: `src/flow/effects.ts` and `src/approval/broker.ts` reach `serve/release-broker.mjs`, which ran `merge-pr.sh` and `ask-validation.sh`, which sourced `lib/common.sh` and ran `tracker.sh` and `host-state.sh`. v2's approval tests drive those scripts. So the dropped files could not all go first: the order was the plan's four steps, each commit green.
+
+**Decision.**
+1. **Step a: what nothing kept needs, deleted** (106 files, about 13 300 lines): the one-shot adapters and `lib/contract.sh`, the terminal adapters, the eight lane scripts, the heavy-command door (`when-free.sh`, `lib/screens.mjs`), the lead's model check, `talk.sh`, `talk-run.sh`, `decide.sh`, `confirm-decision.sh`, `digest-note.sh`, the static dashboard (`dashboard.sh`, `lib/dashboard.mjs`, `serve/serve-dashboard.mjs`, its three units), `self-update.sh`, `project-update.sh`, the lead bridge (`lead-command.mjs`, `serve/lead-actions.mjs`), the harness probe and `serve/check.sh`, `lib/lane-message.mjs`, `lib/lanes.mjs` with the legacy import and its units, `prompts/smoke.md`, the lead's event prompts (`prompts/events/`, `prompts/wake-events.jq`) and the tests of those areas. The `proposed` drops among them are taken as confirmed by the issue's words ("delete everything keep-and-drop.md marks dropped"): `confirm-decision.sh`, `dashboard.sh`, `decide.sh`, `digest-note.sh`, `project-update.sh`, `self-update.sh`, `lib/dashboard.mjs`, `lib/lane-message.mjs`, `lib/lanes.mjs`, `prompts/smoke.md`, the dashboard and legacy-import units, `test/dashboard`, `test/teams`.
+2. **`review-pr.sh` goes instead of being adapted** (plan, decision 3): it opened a review only through `spawn-lane.sh`, and cross-model review is v2's reviewer session (B5.7, D8). The merge tests record their review as the v2 service does (`v2/src/approval/review.ts`, `recordReview` in `test/support.ts`).
+3. **The wake keeps its pre-check.** The v1 lead's session went with the terminal and one-shot adapters it ran on; `lib/wake.mjs` stays, because the snapshot reads each pull request's size and checks from the state it writes (found while trimming the wake; the plan said so before the code of step c).
+4. **Step b: v2's release path in Node.** `merge-pr.ts`, `ask-validation.ts`, `tracker.ts` (with `lib/tracker/adapters/dispatch.ts`, as `tracker.sh` handed over to `dispatch.sh`), `lib/tracker/adapters/linear.ts`, `lib/tracker/guard.ts` and the host check of `host-state.sh` (inside `merge-pr.ts`). Each keeps its arguments, messages, records and exit codes (0, 3, 5, 6 for the merge; 4 for the hourly limit; 5 to 8 for `moved-by-owner`), so the broker, `release-request.ts` and v2's broker client change only the file they run. `lib/script.ts` holds what `lib/common.sh` gave them: where the project, its settings and its state are; the settings read as `conf_get` read them (first value, the tool's default, exit 2 for a required one); the catalog; the ledger; gh and git with the forge credential, given to every command as `forge_setup` exported it (no ambient GitHub token left in app mode); GitHub's status page; the locks (flock(1) on a descriptor, as `lib/notify/store.mjs` already did); the guard. Details kept on purpose:
+   - curl still carries the Linear adapter's requests, the token reaching it as `/dev/fd/3` from a file of a private folder removed before curl starts, as the process substitution of `linear.sh` gave it.
+   - The time of a request for agreement keeps nine digits after the second, as `date +%N` wrote it, and `moved-by-owner` compares the two times to the nanosecond, never rounded to the millisecond.
+   - What only v1's lanes wrote is no longer read: the fast lane's lane record (v2 writes none: `v2/src/flow/fast-lane.ts` says a fast ticket's merge waits as any) and the two teams on one ticket. The host's screen tests are no longer counted (they were the heavy-command door's). These are the only paths of the merge left out, all of dropped features.
+   - The merge's hint "have it reviewed (review-pr.sh …)" says "have it reviewed": the script is gone.
+5. **Step c: the rest of the kept bash.** `wake.ts` and `lib/queues.ts` (the outbox, the go-live queue, the tickets left open), `lib/ports.ts` and `serve/install.ts`. The installer installs the broker, the wake and the app; it no longer checks the dashboard's port (no dashboard) nor probes the agents' account through sudo and bubblewrap (dropped with the three accounts mode, as keep-and-drop said: "without the sudo and bubblewrap steps"); it keeps every other check, the port rules first. `lib/common.sh` went last. `checks.yml` lost its `bash -n` step.
+6. **Step d: the kept JavaScript in strict TypeScript, in place** (plan, decision 2): 87 `.mjs` files became `.ts`; `cleared` is `cleared.ts` behind a tracked link of the same name, which Node follows to the `.ts` file. A root `package.json` (`"type": "module"`, no dependency) and `tsconfig.json` (v2's rules: `strict`, `noUncheckedIndexedAccess`, `erasableSyntaxOnly`, `verbatimModuleSyntax`) type them with the TypeScript and Node types that `v2/` installs; `checks.yml` runs that check. Types only: the code that runs is the same, which each module's stripped output, compared with the original, confirmed. Casts sit at the parse boundaries (SQLite rows, parsed JSON, API answers). The screenshots take Playwright's types from v2's copy. The tests' bash stand-ins (the sandbox's fake tracker, gh and docker, and the curl, gh, git, ss, tailscale and systemctl ones) are Node scripts giving the same output, exit codes and files.
+7. **The guard copied from the branch the tool follows** is the `.ts` pair, else the `.mjs` pair of a branch from before this change, so a tool that follows `origin/main` keeps running the guard of `main` until `v2` is merged into it. The copy runs as an ES module (a `package.json` beside it).
+8. **The browser's scripts stay JavaScript** (plan, decision 4): `app/public/*.js`, loaded by their address with no build step, as v2's `sw.js` and `theme.js`.
+9. **The v1 passkeys stay** (plan, question 1, default (a)): `app/lib/webauthn.ts`, `app/lib/grant-socket.ts`, `app/public/register.*` and `test/app-authenticator.ts`, now TypeScript. What confirms Clear to land, Send back and turning notifications on in the v1 app without them is the owner's question of 2026-10-25, deferred to milestone 4; B5.9d stays `partial`.
+10. **Lines.** P236 (this lane; P229 to P235 are the other lanes'). D11 and B5.11b `done`; B6.4 and B6.4p keep the mirrors' part and gain this lane's; B2.1 `done` (the heartbeat and `cleared status` kept, in TypeScript, run by `wake.ts`); B5.9d unchanged. No user string changed but the merge hint above; the catalog lost the keys only dropped files used (the dashboard's, the decisions', the conversation's, the review queue's), in both languages.
+
+**For an installation.** The units on a server name `wake.sh` and `serve/install.sh`: run `serve/install.ts` again after this change so they name `wake.ts`. A project that lists the tool's own files in `[merge] guarded_paths` by name (rather than by its folder, as `ops/cleared/` does in the example) should rename them with the `.ts` extension.
+
+**Tests first.** `6be24bc` committed the proofs alone: `v2/test/keep-and-drop.test.ts` (every removal the page names is done, but what the plan keeps for now) and `v2/test/repository-core.test.ts` (no shell script tracked outside `examples/`; nothing outside `v2/`, its tests included, writes or runs bash; the core starts no shell, but the project's own health command, which `lib/release.ts` runs with `sh -c` as v1 always did; no JavaScript but the browser's scripts). There, 120 removals were left and every rule failed.
+
+**Checks** (after the merge of `origin/v2` at `f8b6b89`, pull requests 383, 384 and 387). v1's suite (`node --test test/*.test.ts`): 407 tests, 405 pass, 2 skipped (they need a second account reached through sudo), 0 fail; it had 630 tests before, the difference being the cases of the dropped areas, each named above. `tsc -p .` at the root: no error. v2: `npm run typecheck` passes; `npm test` runs 2265 Node tests, 2167 pass, 98 skipped (the browser tests without `CLEARED_V2_PLAYWRIGHT`, and the gated real-harness test), 0 fail, and 349 Vitest tests pass. Each module of `lib/`, `app/` and `serve/` was stripped of its types and compared with its untyped version of `6aedea1`: the same code, but `tracker.ts`, which hands over to `dispatch.ts`. The tests' stand-ins were run beside the bash ones on the same inputs (about 230 cases in all): the same output, exit codes and files. `npm run guard -- --base origin/v2`: the tree pass refused nothing; the pass on the lines changed refused no line this lane adds, and refused 26 it does not add (25 removed fixtures of the deleted v1 tests and modules, and one hunk header quoting an unchanged line). The owner then decided the diff pass reads added lines only: see the next entry of this lane, after which the guard refuses nothing. No Docker object was made; the doctor was not run.
+
+**Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no tunnel, no port opened but the tests' own ephemeral loopback ones, no secret. Six helper agents (Opus 5.5) typed disjoint sets of files in step d; every one of their changes is types only, checked as above.
+
+- Pull request: 388, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-cleanup`.
+
+## 2026-10-25: the mirrors carry comments and edits both ways, and an open page redraws on their writes (the author's choices, lane `v2-j4-mirror-followups`, P237, issue #386)
+
+**The need.** Issue #386, the follow-ups of pull request 384: mirror the comments both ways, mirror the later edits of the title and the description with the same conflict rule, and redraw an open page of the app when the mirror writes, where before it showed at the next reload. GitHub only against the example repositories, Linear only against the fake server, with no real key asked for. The plan is section 5 of [milestone-4-plan.md](milestone-4-plan.md), committed before the tests (`0a873df`); section 4 is the cleanup lane's (pull request 388, which also takes P236, so this lane's line is P237). The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight, as earlier lanes noted; the conventions followed are those of sections 9 and 10 of `milestone-1-plan.md` (a lane changes its own module, `api/types.ts` is untouched).
+
+**Decision.**
+1. **Comments, each once, both ways.**
+   - Each comment of a mirrored ticket goes once to each of its trackers, and each comment of a mirrored issue comes once into the app.
+   - `mirror_comments` keeps each pair of ids. The mirror's own comments on a tracker (the put-backs) are kept there too, so none comes back.
+   - A comment that came from one tracker goes on to the others as it is, never back to its own.
+   - Comments are read by their own time, not through their issue's: on GitHub, the repository's issue comments since the last read; on Linear, the team's. Whether a Linear comment changes its issue's `updatedAt` is not something the code relies on.
+2. **Who wrote it.** A first line in `CLEARED_V2_APP_LANGUAGE`:
+   - on a tracker, "{who}, in Cleared:" for the owner's signed comment, "A user of Cleared:" for another user's, "Cleared:" for the service's;
+   - in the app, "{who}, on {tracker}:".
+
+   A comment from a tracker is written as the mirror (`agents`, `cleared-mirror`), never signed, so it never counts as the owner's line.
+3. **Which comments go out.** All of a mirrored ticket's, the service's notes included. The app has no comment box today; the service's notes and v1's tools are its only writers, and those notes say why a ticket moved. The example repositories are public, and so are the notes written there.
+4. **Edits.**
+   - `mirror_fields` keeps, per link and field, the text both sides last agreed on, and the tracker's text as last read with who made it. `decide()` settles each field as it does a state.
+   - Who made the change: on GitHub, a title's `renamed` event; GitHub keeps no event for a description (checked on the real run, below), so no one is named for it and it counts as an agent's, as rule 5 of 384 says. On Linear, the issue's history (`fromTitle`, `toTitle`, `updatedDescription`).
+   - In the app the mirror is the only writer of a title or a description. `mirror_edits` keeps who made the text it wrote, as `mirror_applied` does for a state.
+5. **What a tracker never edits.**
+   - An approved ticket's title or description: the tracker's text is put back to the app's, with one comment for both fields (`refused_edit`).
+   - An empty title is never written in the app.
+   - A session working on the ticket is not stopped or told: it keeps the text it started with.
+6. **The store's edit.** `TicketStore.edit(id, { title?, body? }, by)` on both stores. It writes no history row: the history is the states'.
+   - Correction of 384's plan: section 2.4 said the approval binds the title and the body through `content_hash`. In the code, `content_hash` is written on the creation row only; the approval row has none.
+   - So an edit makes the creation row of a ticket the owner wrote read as `other`: the text is no longer the one they signed. No v2 code reads a ticket's creator; every reader of `history` filters on the go state. The approval is untouched. A test pins the effect.
+7. **New tables, not new columns.** `CREATE TABLE IF NOT EXISTS` cannot add a column to the `mirror_links` 384 made. So there are four new tables: `mirror_followed`, `mirror_fields`, `mirror_edits` and `mirror_comments`.
+   - A link 384 made is followed from the first pass after the upgrade. That pass copies no older comment either way, and takes the app's text as agreed by both sides.
+   - A later read of the tracker that shows another text is a change, and goes through the rule.
+8. **The redraw.** An optional `changed(ticket)` in the mirror's dependencies. `modules/tickets.ts` (`sayTicketChange`) wires it to the engine's change hub, `ChangeHub.say('ticket', id)`. The app's `ticket` kind already refetches the ticket, the list, its steps and the plans, so the stream's types do not change. The app shows no comment yet, so a comment that came in shows to the lead (its last five) and to v1's tools. The lead's tool (`lead/tools.ts`) names every comment not signed by a person `cleared`: a comment from a public issue reaches the lead as `cleared: jane, on GitHub: ...`, text anyone can write there under Cleared's name. It is named in [mirrors.md](mirrors.md); changing the lead's tool is another lane's.
+9. **Branch.** `v2/j4-mirror-followups` cannot exist beside the local branch `v2` (git refuses a ref under another ref), so the branch is `v2-j4-mirror-followups`, B4.1's form, as 384 and 387 did.
+
+**Question for the owner** (default applied): which of the app's comments go to the trackers. Options:
+- (a) all of them, the service's notes included (recommended, applied): a person on the tracker learns why a ticket moved;
+- (b) only people's comments, the owner's and the users': the trackers stay quieter, but today nothing would go out, since no one writes a comment in the app;
+- (c) none: the comments only come in.
+
+The choice is one condition in `#goOut` (`src/tickets/mirror.ts`).
+
+**Tests first.** `4c97d46` committed the tests before any code: the pass with comments, edits, the refusal, the follow from an older link and the redraw (`mirror.test.ts`), each tracker's comments and edits against its fake, the proof's comment and edit each way on both fakes, the store's edit on both stores, and the tables' order. The fakes are no more generous than what was checked: GitHub's records `renamed` and no event for a description; Linear's does not change an issue's time for a comment, which is not checked. Of the 22 new or changed cases, 20 failed on the old code. The other two passed there, as they must: they guard against a write or a loop the old code could not make (the mirror's own comments do not come into the app; an empty title is not written). Three of 384's Linear cases failed as well, since the fake now requires the history's edit fields in the query. No expectation changed after the code.
+
+**The real GitHub run** (2026-10-25 15:15:12 to 15:15:35 UTC, the example repository `cleared-example-guestbook` of the organisation this repository lives in, the mirror's code on the real ticket store over a scratch ledger, the token of the `gh` login read from a file and never printed):
+- LOCAL-1 in In Progress became issue #25.
+- A note of the service in the app became the comment "Cleared :" with its text on #25.
+- A comment and a new title and description made on #25 with the `gh` account came into the app at the next pass: the comment as the mirror's, headed "<the gh account>, sur GitHub :"; the title as a person's change (`renamed`, the account shared with a person, P231); the description as an agent's, no one named.
+- One more pass wrote nothing: #25 held two comments, the app two.
+- The issue's events read `labeled, renamed`, and its timeline `labeled, commented, commented, renamed`. Neither holds an event for the new description: GitHub's REST API does not say who changed it.
+- LOCAL-1 moved to Done, and #25 closed as completed.
+- The change stream heard LOCAL-1, and the mirror logged nothing.
+
+**Checks.** See the pull request. Before the READY: `npm run typecheck` passes; `npm test` runs 2277 Node tests, 2179 pass, 98 skipped, 0 fail, and 349 Vitest tests pass; `npm run guard -- --base origin/v2` is run.
+
+**Resources.** No Docker object, no port opened outside the tests (port 0 on loopback), no tunnel, no secret written; no Linear key asked for or used. One issue was made and closed on the example repository, with two comments, and nothing on any other.
+
+- Pull request: 390, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-mirror-followups`.
+
+## 2026-10-25: the guard's diff pass reads the added lines only (the owner's decision, lane `v2-j4-cleanup`, P236, issue #382)
+
+**Decision.** By the owner, 2026-10-25 16:30, relayed by the lead: the CI guard scans only the lines a change adds. A removed line, and an unchanged context line (the text git repeats after a hunk header's second `@@` included), are not read. The added lines are still read with every pattern.
+
+**Decision, the quota.** By the owner, 2026-10-25 16:34, relayed by the lead: for this project, no new lane starts past 90 % of the week's quota (it was 85 %). The other limits stay: 3 lanes at most, and each lane's stops at 5 % of the quota and 3 hours. This lane changes no code or default for it: the 85 % of B3.11 and of `CLEARED_V2_WEEK_STOP_PERCENT`'s default stays v2's own, and the project's 90 % is the value its runs set.
+
+**The need.** Deleting v1's tests and modules removed their fixtures: invented addresses, phone numbers, keys and tokens. The diff pass of `npm run guard -- --base origin/v2` read a deleted file's lines with every pattern, and git's `-U0` hunk headers quote the nearest unchanged line above a change, so it refused 26 lines this lane does not add, though each is already in `origin/v2`. v2's own `secret_shape` check already counts added lines only (see its entry above).
+
+**What changes.** `v2/scripts/guard.ts` keeps, from the `-U0` diff it hands the guard, the lines that start with `+` only: the added lines, and each file's `+++` line, so a code file keeps its own patterns (the snapshot's) and a deleted file (`+++ /dev/null`) adds nothing. It keeps `rename to` and `copy to` too, the new name of a file git moves without changing it. Hunk headers, removed lines, `---` lines and the other git headers are dropped. The pass is named `the lines added since <ref>`. `lib/guard/codex-guard.ts` is unchanged, and so is the tree pass, which reads every v2 file whole.
+
+**Tests first.** `v2/test/scripts/guard.test.ts`, committed failing at `ec0ee3d`:
+- a removed secret-shaped line passes, from a deleted file and from a kept one;
+- an added one still fails beside a removed one, and it is the only line refused;
+- an unchanged line that git repeats in a hunk header (the test checks that the diff holds it) is not read.
+
+**Checks.** The five guard tests pass. `npm run guard -- --base origin/v2`: the tree pass and the pass on the added lines refuse nothing. The suites' counts are in the pull request.
+
+- Pull request: 388, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-cleanup`; the decisions: the owner, 2026-10-25 16:30 (the guard) and 16:34 (the quota).

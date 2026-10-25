@@ -121,10 +121,51 @@ test('every page of a long list is read', async () => {
   }
 });
 
-test('a comment is written on the issue', async () => {
+test('a comment is written on the issue, and its id is given back', async () => {
   const made = await tracker.create({ title: 'Commented', body: '', labels: [], status: 'Todo' });
-  await tracker.comment(made.id, 'Ready to Ship is given in Cleared.');
-  assert.deepEqual(fake.comments.get(Number(made.id)), [{ body: 'Ready to Ship is given in Cleared.', user: 'cleared-bot' }]);
+  const id = await tracker.comment(made.id, 'Ready to Ship is given in Cleared.');
+  const [written] = fake.comments.get(Number(made.id)) ?? [];
+  assert.deepEqual([written?.body, written?.user.login], ['Ready to Ship is given in Cleared.', 'cleared-bot']);
+  assert.equal(id, String(written?.id));
+});
+
+test('the repository\'s comments since a time, each with its issue, who wrote it and when', async () => {
+  clock.tick(60);
+  const made = await tracker.create({ title: 'Talked about', body: '', labels: [], status: 'Todo' });
+  clock.tick();
+  const before = fake.comment(REPO, Number(made.id), JANE, 'Too early');
+  clock.tick();
+  const since = clock.iso;
+  clock.tick();
+  fake.comment(REPO, Number(made.id), JANE, 'Sort them by date, please.');
+  clock.tick();
+  fake.comment(REPO, Number(made.id), ACTIONS, 'The checks passed.');
+  clock.tick();
+  const own = await tracker.comment(made.id, 'Cleared: started.');
+  const comments = await tracker.commentsSince(since);
+  assert.deepEqual(comments.map((c) => [c.issue, c.body, c.actor, c.who]), [
+    [made.id, 'Sort them by date, please.', 'person', 'jane'],
+    [made.id, 'The checks passed.', 'agent', 'github-actions[bot]'],
+    [made.id, 'Cleared: started.', 'mirror', 'cleared-bot'],
+  ]);
+  assert.equal(comments.at(-1)?.id, own);
+  assert.ok(comments.every((c) => c.id !== String(before.id) && c.at >= since));
+  assert.ok(fake.requests.some((r) => r.path.startsWith(`/repos/${REPO}/issues/comments?`) && r.path.includes('since=')), 'one list for the repository');
+});
+
+test('an edit writes the title and the body; who changed a title is its renamed event, a body\'s change names no one', async () => {
+  clock.tick(60);
+  const since = clock.iso;
+  const made = await tracker.create({ title: 'Old title', body: 'Old body', labels: [], status: 'Todo' });
+  await tracker.edit(made.id, { title: 'Newest entry first', body: 'Sort the entries, newest first.' });
+  assert.deepEqual([fake.issue(REPO, Number(made.id)).title, fake.issue(REPO, Number(made.id)).body], ['Newest entry first', 'Sort the entries, newest first.']);
+  await tracker.edit(made.id, { body: 'Only the body.' });
+  assert.equal(fake.issue(REPO, Number(made.id)).title, 'Newest entry first');
+  clock.tick();
+  fake.edit(REPO, Number(made.id), JANE, { title: 'Newest entries first', body: 'Jane\'s words.' });
+  const issue = (await tracker.changed(since)).find((i) => i.id === made.id);
+  assert.deepEqual([issue?.title, issue?.body], ['Newest entries first', 'Jane\'s words.']);
+  assert.deepEqual(issue?.edits.map((e) => [e.field, e.actor, e.who]), [['title', 'mirror', 'cleared-bot'], ['title', 'person', 'jane']]);
 });
 
 test('an answer GitHub refuses is a TrackerError that names the request, never the token', async () => {

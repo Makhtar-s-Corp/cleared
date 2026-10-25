@@ -40,11 +40,11 @@ export type HookCallbackMatcher = {
 
 export type Hooks = Partial<Record<string, HookCallbackMatcher[]>>;
 
-// lib/memory's headings (adapters/local.mjs, HEADINGS), in its order: a
+// lib/memory's headings (adapters/local.ts, HEADINGS), in its order: a
 // handover without them is not stored. A test keeps them identical.
 export const HANDOVER_HEADINGS = ['## Done', '## Tried and failed, and why', '## Left to do', '## Where the artifacts are (screenshots, logs, branches)', '## Open questions'] as const;
 
-// The guard's patterns (lib/guard/codex-guard.mjs), word for word, in its
+// The guard's patterns (lib/guard/codex-guard.ts), word for word, in its
 // order: `always` and `envAssignments` (what it checks in a code file of a
 // diff), then `directOnly` (what it adds for any other input). A test keeps
 // them identical. The guard's private terms and its list of allowed

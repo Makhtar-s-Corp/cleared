@@ -1,7 +1,7 @@
 // The ticket store contract the flow codes against, with an in-memory
 // implementation for tests and fixtures. Lane 8 implements it on the local
 // tracker's tables in ledger.db (tracker_tickets, tracker_history,
-// tracker_comments, lib/tracker/adapters/local.mjs), so ids, states and
+// tracker_comments, lib/tracker/adapters/local.ts), so ids, states and
 // actor kinds are the local tracker's.
 import type { UserId } from '../session/contract.ts';
 
@@ -63,6 +63,9 @@ export type Ticket = {
 export type StatusChange = { readonly status: string; readonly by: Author; readonly at: string };
 export type Comment = { readonly id: string; readonly body: string; readonly by: Author; readonly createdAt: string };
 
+// A later change of a ticket's text (P237): its title, its body, or both.
+export type TicketEdit = { readonly title?: string; readonly body?: string };
+
 export type NewTicket = {
   readonly title: string;
   readonly body?: string;
@@ -79,6 +82,9 @@ export interface TicketStore {
   // Any state but go: the move to go is the human's approval, which only the
   // approval writer records (registry.ts ApprovalWriter, lane 8).
   move(id: TicketId, status: string, by: Actor): Promise<Ticket>;
+  // The title or the body changed after the creation; the mirror is its one
+  // writer (P237). No history row: the history is the states'.
+  edit(id: TicketId, change: TicketEdit, by: Actor): Promise<Ticket>;
   history(id: TicketId): Promise<StatusChange[]>;
   // Several tickets' history in one read, keyed by id, each as history gives
   // it; an id the store does not know is left out (mcp/lanes.ts reads every
@@ -152,6 +158,13 @@ export class MemoryTicketStore implements TicketStore {
     if (status === this.states.go) throw new TicketError(`${status} is written by the approval writer only, after the human's approval`);
     if (!Object.values(this.states).includes(status)) throw new TicketError(`unknown state ${status}`);
     return this.#set(id, status, by);
+  }
+
+  async edit(id: TicketId, change: TicketEdit, _by: Actor): Promise<Ticket> {
+    const entry = this.#entry(id);
+    if (change.title !== undefined && !change.title.trim()) throw new TicketError('a ticket needs a title');
+    entry.ticket = { ...entry.ticket, ...change, updatedAt: this.#now() };
+    return entry.ticket;
   }
 
   // What the in-memory approval writer calls: the human's move to go.

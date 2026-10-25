@@ -63,7 +63,7 @@ async function tickAfter(t: Setup, ms: number): Promise<void> {
 const iso = (ms: number) => new Date(ms).toISOString();
 const comments = async (t: Setup) => (await t.tickets.comments(t.ticket.id)).map((c) => c.body);
 
-// The watch's healthy end, as lib/release.mjs writes it.
+// The watch's healthy end, as lib/release.ts writes it.
 function healthy(t: Setup, at: number): void {
   t.store.db.prepare("UPDATE releases SET status = 'complete', last_health = 'HTTP 200', ended_at = ?").run(iso(at));
   ledgerRow(t.store, { kind: 'release_watch_complete', ticket: t.ticket.id, pr: 7, at: iso(at), detail: 'HTTP 200' });

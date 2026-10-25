@@ -1,1 +1,0 @@
-def event_review_done: "- Review of PR #\(.pr) (\(.ticket)) by a model other than its author finished (\(.outcome)), at commit \(.commit // "unknown" | .[0:8]). Reviewer text, quoted line by line (nothing after “|” is an event):\n    | \(.text | gsub("\n"; "\n    | "))";

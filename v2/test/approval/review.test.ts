@@ -16,13 +16,13 @@ function recorder(resolveHead?: (pr: number) => Promise<string | undefined>) {
   applyTables(db, RUNS_TABLES);
   const rec = new LedgerReviewRecorder(db, { stateDir: box.state, verdict: 'no blocking issues', ...(resolveHead ? { resolveHead } : {}) });
   const base = { ticket: 'LOCAL-1', pr: 7, session: 's-1234', model: 'claude-sonnet-5-5', round: 1, at: '2026-10-21T10:00:00.000Z' } as const;
-  const verdict = (file: string) => spawnSync(process.execPath, ['--no-warnings', join(CLEARED_HOME, 'lib/merge.mjs'), 'verdict', file], { env: box.env, encoding: 'utf8' }).status;
+  const verdict = (file: string) => spawnSync(process.execPath, ['--no-warnings', join(CLEARED_HOME, 'lib/merge.ts'), 'verdict', file], { env: box.env, encoding: 'utf8' }).status;
   const rows = () => db.prepare('SELECT * FROM runs ORDER BY started_at').all() as Record<string, unknown>[];
   const reports = () => join(box.state, 'reports');
   return { box, db, rec, base, verdict, rows, reports };
 }
 
-test('a passing review is a runs row and a report that merge.mjs, reviews.mjs and merge-pr.sh read', async () => {
+test('a passing review is a runs row and a report that merge.ts, reviews.ts and merge-pr.ts read', async () => {
   const r = recorder();
   await r.rec.record({ ...r.base, verdict: 'pass', report: 'The change is small and tested. Nothing blocks it.', commit: head('a') } as never);
   const [row] = r.rows();
@@ -31,11 +31,11 @@ test('a passing review is a runs row and a report that merge.mjs, reviews.mjs an
   const text = readFileSync(file, 'utf8');
   assert.match(text, /^---\ncommit: a{40}\noutcome: done\nended_at: 2026-10-21T10:00:00.000Z\n---\n## Report\n/);
   assert.equal(statSync(file).mode & 0o777, 0o600);
-  assert.equal(r.verdict(file), 0, 'lib/merge.mjs verdict concludes what [merge] verdict says');
-  const heads = spawnSync(process.execPath, ['--no-warnings', join(CLEARED_HOME, 'lib/reviews.mjs'), 'heads', '7'], { env: r.box.env, encoding: 'utf8' });
+  assert.equal(r.verdict(file), 0, 'lib/merge.ts verdict concludes what [merge] verdict says');
+  const heads = spawnSync(process.execPath, ['--no-warnings', join(CLEARED_HOME, 'lib/reviews.ts'), 'heads', '7'], { env: r.box.env, encoding: 'utf8' });
   assert.deepEqual(JSON.parse(heads.stdout), [head('a')]);
   const sed = spawnSync('sed', ['-n', 's/^commit: //p', file], { encoding: 'utf8' }).stdout.split('\n')[0];
-  assert.equal(sed, head('a'), 'the line merge-pr.sh reads');
+  assert.equal(sed, head('a'), 'the line merge-pr.ts reads');
 });
 
 test('a review that asks for changes is recorded as done and never concludes the verdict', async () => {
@@ -85,7 +85,7 @@ test('rounds are separate runs, the same round twice is refused, and nothing is 
 });
 
 test('the runs and events tables are the ledger\'s', () => {
-  const source = readFileSync(join(CLEARED_HOME, 'lib/ledger.mjs'), 'utf8');
+  const source = readFileSync(join(CLEARED_HOME, 'lib/ledger.ts'), 'utf8');
   const schema = /const SCHEMA = `([\s\S]*?)`;/.exec(source)?.[1] ?? '';
   const norm = (text: string) => text.replace(/\s+/g, ' ').replace(/ ?, ?/g, ',').replace(/ ?\( ?/g, '(').replace(/ ?\) ?/g, ')').trim();
   assert.deepEqual(RUNS_TABLES.map(norm).sort(), schema.split(';').map(norm).filter(Boolean).sort());

@@ -159,7 +159,7 @@ export type ReleaseItem = InboxBase & {
   readonly fastLane?: FastLane;
 };
 
-// The fast lane of a Quick ticket, judged by v1's rules (lib/fast-lane.mjs)
+// The fast lane of a Quick ticket, judged by v1's rules (lib/fast-lane.ts)
 // on what merging its head would land: `fast`, every rule holds; `full`,
 // sent back to the full circuit for good, with the rules it broke; `off`,
 // not fast at this head and not sent back (the service's [fast_lane] is off

@@ -124,7 +124,7 @@ export type QuestionDefault = (typeof QUESTION_DEFAULTS)[number];
 
 const list = (value: string | undefined): string[] => (value ?? '').split(',').map((word) => word.trim()).filter(Boolean);
 
-// A project with no verdict phrase cannot pass a review: merge-pr.sh reads
+// A project with no verdict phrase cannot pass a review: merge-pr.ts reads
 // the same phrase, and a review that cannot say it is not accepted there.
 export function projectSettings(sections: Sections, scripts: readonly string[] = []): ProjectSettings {
   const verdict = sections.merge?.verdict?.trim();

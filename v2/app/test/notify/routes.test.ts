@@ -1,7 +1,7 @@
 // The app's notification routes (milestone 2 plan, section 6): the status,
 // subscribe and unsubscribe, with the password session, the anti-forgery
 // token and the app's origin, no passkey. The subscriptions go to
-// lib/notify/store.mjs's private directory, which the service's dispatcher
+// lib/notify/store.ts's private directory, which the service's dispatcher
 // reads; the app sends nothing itself.
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';

@@ -19,7 +19,7 @@
 // (kind, ticket, adapter, the seconds since it happened), each failure one
 // notification_failed with a short code: what the milestone's proof counts.
 //
-// lib/notify is never imported here. Importing it (lib/conf.mjs) copies
+// lib/notify is never imported here. Importing it (lib/conf.ts) copies
 // every CLEARED_* variable of the process to ORCH_*, so the settings and the
 // sending run in a child process, src/cli/notify.ts, as lib/memory does for
 // the briefing. The child reads the same agents.conf as the app, so both
@@ -88,7 +88,7 @@ export const SETTINGS_MS = 5 * 60_000;
 const REASON = /^[a-z][a-z ]{0,40}(?: \(\d{3}\))?$/;
 
 // Whether `at` falls in the quiet hours, read on the configured clock
-// (lib/notify/contract.mjs isQuiet, which this process does not import).
+// (lib/notify/contract.ts isQuiet, which this process does not import).
 export function isQuiet(settings: Pick<NotifySettings, 'quiet' | 'timezone'>, at: number): boolean {
   if (!settings.quiet) return false;
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: settings.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })

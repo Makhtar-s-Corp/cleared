@@ -1,7 +1,7 @@
 // The ticket store on the local tracker's tables in ledger.db (plan, decision
 // 11): tracker_tickets, tracker_history, tracker_comments, as
-// lib/tracker/adapters/local.mjs creates and reads them, so tracker.sh,
-// ask-validation.sh and merge-pr.sh see what the service writes and the
+// lib/tracker/adapters/local.ts creates and reads them, so tracker.ts,
+// ask-validation.ts and merge-pr.ts see what the service writes and the
 // service sees what they write.
 //
 // Two kinds of writer, as in v1. The service acting for the agents writes
@@ -22,10 +22,10 @@ import { approvalPayload, commentPayload, type ApprovalSigner } from '../approva
 import type { WorkspaceConfig } from '../workspace/config.ts';
 import {
   DEFAULT_STATES, TicketError, newTicketServices,
-  type Actor, type Author, type Comment, type NewTicket, type StatusChange, type Ticket, type TicketId, type TicketService, type TicketStates, type TicketStore,
+  type Actor, type Author, type Comment, type NewTicket, type StatusChange, type Ticket, type TicketEdit, type TicketId, type TicketService, type TicketStates, type TicketStore,
 } from './contract.ts';
 
-// One statement each, as lib/tracker/adapters/local.mjs SCHEMA writes them
+// One statement each, as lib/tracker/adapters/local.ts SCHEMA writes them
 // (a test keeps them identical).
 export const TICKET_TABLES: string[] = [
   `CREATE TABLE IF NOT EXISTS tracker_tickets (
@@ -98,7 +98,7 @@ export function recordWorkspace(db: DatabaseSync, workspace: WorkspaceConfig, at
 }
 
 export type LocalStoreOptions = {
-  readonly stateDir: string;                       // where ask-validation.sh keeps validations/<ticket>.json
+  readonly stateDir: string;                       // where ask-validation.ts keeps validations/<ticket>.json
   readonly states?: TicketStates;
   readonly ownerId?: string;                       // [tracker] owner_id: the name a human's rows carry
   readonly publicKey?: string;                     // [tracker] human_public_key: base64 of the PEM
@@ -257,6 +257,18 @@ export class LocalTicketStore implements TicketStore {
       this.#db.prepare('UPDATE tracker_tickets SET status = ?, updated_at = ? WHERE id = ?').run(status, at, number);
       this.#insertHistory(number, status, who, at, null, null);
     });
+    return this.#toTicket(this.#row(id));
+  }
+
+  // The text changes, its history does not. The creation row's content_hash
+  // no longer matches, so a ticket the owner wrote no longer reads as theirs
+  // (#verified): the text is not the one they signed.
+  async edit(id: TicketId, change: TicketEdit, by: Actor): Promise<Ticket> {
+    const row = this.#row(id);
+    if (change.title !== undefined && !change.title.trim()) throw new TicketError('a ticket needs a title');
+    await this.#who(by);
+    this.#db.prepare('UPDATE tracker_tickets SET title = coalesce(?, title), body = coalesce(?, body), updated_at = ? WHERE id = ?')
+      .run(change.title ?? null, change.body ?? null, this.#now(), Number(row.id));
     return this.#toTicket(this.#row(id));
   }
 

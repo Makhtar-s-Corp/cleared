@@ -1,1 +1,0 @@
-def event_review_done_self_update_refused: "- The agent tools did not take their latest shipped version; they still run an older one. Tell \($user) once in one infrastructure line where you report. Do not retry: a person must inspect the host checkout. Script output, quoted:\n    | \(.text | gsub("\n"; " "))";

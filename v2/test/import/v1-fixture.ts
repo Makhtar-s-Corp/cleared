@@ -1,6 +1,6 @@
 // A v1 ledger for the import's tests, written by v1's own code in a child
-// Node process (lib/conf.mjs copies the environment at import, as
-// workspace/briefing.ts says): lib/ledger.mjs makes the runs and the events,
+// Node process (lib/conf.ts copies the environment at import, as
+// workspace/briefing.ts says): lib/ledger.ts makes the runs and the events,
 // the local tracker its tickets, lib/memory its entries and the owner's
 // approval. Every ticket, file and text is invented.
 import { execFileSync } from 'node:child_process';
@@ -31,9 +31,9 @@ const PROGRAM = `
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
 const r = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-const { openLedger, runStart, addEvent } = await import(r.lib + '/ledger.mjs');
-const { LocalTracker } = await import(r.lib + '/tracker/adapters/local.mjs');
-const { createMemory } = await import(r.lib + '/memory/contract.mjs');
+const { openLedger, runStart, addEvent } = await import(r.lib + '/ledger.ts');
+const { LocalTracker } = await import(r.lib + '/tracker/adapters/local.ts');
+const { createMemory } = await import(r.lib + '/memory/contract.ts');
 const conf = { sections: { memory: { enabled: 'true', budget: '8000' }, tracker: { owner_id: r.owner, todo_state: 'Todo', done_state: 'Done' } } };
 const db = openLedger(r.ledger);
 const tracker = new LocalTracker({ conf, db, actor: { kind: 'agents', id: 'cleared' }, approvalDir: r.state + '/validations' });

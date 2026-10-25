@@ -1,10 +1,6 @@
 # Every minute: tracker and GitHub are read, nothing is exposed.
 [Unit]
-Description=Cleared: wake of the project lead (every minute)
-# Started by hand or at boot, the timer first has the model of the lead
-# checked: it does not start on a model that was set aside.
-Requires=cleared-lead-model.service
-After=cleared-lead-model.service
+Description=Cleared: the wake (every minute)
 
 [Timer]
 OnCalendar=*:*:00

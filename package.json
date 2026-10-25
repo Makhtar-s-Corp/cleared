@@ -1,0 +1,5 @@
+{
+  "private": true,
+  "type": "module",
+  "description": "Cleared's v1 core, in TypeScript run by Node itself (type stripping). No dependency: the type check uses the TypeScript and Node types that v2/ installs (npm ci in v2/)."
+}

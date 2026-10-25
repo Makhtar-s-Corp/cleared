@@ -17,8 +17,8 @@ const databaseValue = 'p4ss' + '-w0rd-long';
 
 const cleaner = () => createCleaner({ secrets: [forgeValue], servicePaths: [servicePath] });
 
-test('the cleaner keeps the guard patterns word for word (lib/guard/codex-guard.mjs)', () => {
-  const guard = readFileSync(new URL('../../../lib/guard/codex-guard.mjs', import.meta.url), 'utf8');
+test('the cleaner keeps the guard patterns word for word (lib/guard/codex-guard.ts)', () => {
+  const guard = readFileSync(new URL('../../../lib/guard/codex-guard.ts', import.meta.url), 'utf8');
   assert.ok(GUARD_PATTERNS.length >= 10);
   for (const [category, pattern] of GUARD_PATTERNS) {
     assert.ok(guard.includes(`/${pattern.source}/${pattern.flags}`), `${category}: /${pattern.source}/${pattern.flags} is not in the guard`);

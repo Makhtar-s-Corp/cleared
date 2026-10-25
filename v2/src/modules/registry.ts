@@ -17,7 +17,7 @@ export interface UserDirectory {
   list(): Promise<User[]>;
 }
 
-// A review's outcome, written where merge-pr.sh reads it (lane 8): a `runs`
+// A review's outcome, written where merge-pr.ts reads it (lane 8): a `runs`
 // row with role review and a report file ending with the [merge] verdict.
 export type ReviewRecord = {
   readonly ticket: TicketId;

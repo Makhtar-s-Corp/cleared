@@ -1,5 +1,5 @@
 // The service worker of the Cockpit. It shows the notifications the service
-// pushes (lib/notify.mjs) and, when one is touched, opens the ticket's
+// pushes (lib/notify.ts) and, when one is touched, opens the ticket's
 // porthole in the app. It caches nothing, answers no request and reads no
 // page: the app stays live or says it is not.
 const sameOrigin = (value) => {

@@ -19,7 +19,7 @@ Paths under `[merge] tooling_paths` may merge without a ticket approval once rev
 The SQLite database lives under `~/.local/state/cleared/<project>/ledger.db` by default. `runs` records the selected and actual model, provider, role, worktree, times, outcome, token counts, estimated cost, pull request, and human decision data. `events` records routing changes, wakes, limits, reviews, refusals, merge events, and failures. Scripts write the ledger; agents do not. For example:
 
 ```sh
-CLEARED_REPO=/path/to/project node lib/ledger.mjs sql 'select model, count(*), sum(cost_eur) from runs group by model'
+CLEARED_REPO=/path/to/project node lib/ledger.ts sql 'select model, count(*), sum(cost_eur) from runs group by model'
 ```
 
 Agents can search the v2 sessions and their events through a read-only MCP server that removes secrets from every answer; give an agent this line to install it: `claude mcp add cleared-ledger -e CLEARED_STATE_DIR=<folder of ledger.db> -- node <cleared checkout>/v2/src/cli/ledger-mcp.ts` ([details](../v2/README.md#the-ledgers-mcp-server)).
@@ -33,17 +33,15 @@ CLI-reported cost is used when available. Otherwise `[prices]` and `[currency]` 
 ## Decisions
 
 - **2026-10-17: the installation never publishes on ports 80 and 443, nor on a port already in use, and checks it before writing anything** (issue #112). 80 and 443 belong to the machine's public reverse proxy: `tailscale serve` on its default port held 443 on the Tailscale address, and after a reboot the proxy could not bind `0.0.0.0:443`, which kept production offline for six hours. In a container or WSL, where the cgroup has no `user@UID.service`, the installer cannot recognise the unit of the running app as its own: it refuses that port, so stop the unit first or pass a free port.
-  `serve/install.sh` refuses those ports (also as the port of `[app] public_origin` or of the `tailscale serve` command it prints) and any port another process listens on, before its first write, and stops when it cannot read the listening ports; no setting turns this off.
+  `serve/install.ts` refuses those ports (also as the port of `[app] public_origin` or of the `tailscale serve` command it prints) and any port another process listens on, before its first write, and stops when it cannot read the listening ports; no setting turns this off.
   The port of an https `public_origin` (the one `tailscale serve` is told to publish) is checked as in use too: the one holder accepted is `tailscaled` (named by `ss`, or by `/proc/<pid>/comm`), or, since it runs as root and cannot be named without root, a holder of another account on a Tailscale address whose port `tailscale serve status` lists; anything else, or a holder it cannot tell from it, is refused with the `sudo ss -ltnp` command that names it.
   The notification link (`CLEARED_NOTIFY_LINK_BASE`, and the legacy `ORCH_NOTIFY_LINK_BASE`) is checked in the installer's shell and in the `Environment=` lines of the drop-ins of `cleared-wake.service` and `cleared-app.service` (read as text as systemd reads them, the last assignment winning, never evaluated; a drop-in it cannot read refuses): a value that is not `http(s)://host[:port]`, scheme in any case, or whose port is 80 or 443 (`HTTPS://host` included) is refused.
 
 ## Commands in daily use
 
-- `spawn-lane.sh dev EX-12 --dry-run` shows routing before opening anything.
-- `spawn-lane.sh dev EX-12` opens a team and starts its session.
-- `review-pr.sh 41 EX-12` opens a separate read-only review.
-- `ask-validation.sh EX-12 request.md --pr 41` shows the user the commit to approve.
-- `release-request.mjs request_release EX-12 41 < announcement.md` asks the local broker to verify and ship.
-- `dashboard.sh` rewrites the static dashboard page.
+- `ask-validation.ts EX-12 request.md --pr 41` shows the user the commit to approve.
+- `release-request.ts request_release EX-12 41 < announcement.md` asks the local broker to verify and ship.
+
+Teams, their sessions and their reviews are opened by the v2 service: see [`v2/README.md`](../v2/README.md). v1's lane commands were removed in milestone 4.
 
 For command flags and settings, use [Configuration](configuration.md), [Adapters](adapters.md), and [Security](security.md).

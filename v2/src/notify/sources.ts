@@ -8,7 +8,7 @@
 //                 catalog has no kind of their own: "open it to allow or
 //                 deny" is what each asks); a knowledge item waits for the
 //                 owner's morning, untold
-//   v1's events   what the release watch (lib/release.mjs) wrote since the
+//   v1's events   what the release watch (lib/release.ts) wrote since the
 //                 last tick: a rollback, or a watch that failed (health)
 //
 // The flow's FlowEvents are not read: the flow's engine is built on the
@@ -52,7 +52,7 @@ export function inboxOccurrences(items: readonly NextInboxItem[]): Occurrence[] 
   return out;
 }
 
-// The release watch's rows, as lib/notify.mjs (v1) read them.
+// The release watch's rows, as lib/notify.ts (v1) read them.
 const ROLLBACK = ['rollback_pushed', 'prod_revert'];
 const RELEASE_HEALTH = ['release_health_failing', 'rollback_health_still_failing', 'release_watch_failed', 'rollback_failed', 'rollback_migrations_blocked', 'rollback_ambiguous_base'];
 const TICKET = /^[A-Za-z0-9._-]{1,40}$/;
@@ -78,7 +78,7 @@ export function lastEvent(db: DatabaseSync): number {
 export function ledgerOccurrences(db: DatabaseSync, cursor: number): Occurrence[] {
   const kinds = [...ROLLBACK, ...RELEASE_HEALTH];
   const found = rows(() => db.prepare(`SELECT event_id, at, kind, ticket FROM events WHERE event_id > ? AND kind IN (${kinds.map(() => '?').join(',')}) ORDER BY event_id`).all(cursor, ...kinds) as Raw[]);
-  // The title the release was merged with (lib/release.mjs), as v1 said it.
+  // The title the release was merged with (lib/release.ts), as v1 said it.
   const titleOf = (ticket: string) => rows(() => [db.prepare('SELECT title FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get(ticket) as Raw | undefined])
     .map((row) => (row ? String(row.title) : ''))[0] ?? '';
   return found.map((row) => {

@@ -1,5 +1,5 @@
 // The few settings of the project's agents.conf that the approval needs,
-// read the way lib/conf.mjs reads the file: sections in brackets, `key =
+// read the way lib/conf.ts reads the file: sections in brackets, `key =
 // value` lines, the first value of a repeated key. The file is the one the
 // lock reads: CLEARED_CONF (or ORCH_CONF), else <project>/.cleared/agents.conf.
 import { readFileSync } from 'node:fs';

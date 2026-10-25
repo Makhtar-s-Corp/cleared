@@ -40,7 +40,7 @@ export type Train = {
   readonly stops: readonly Stop[];
   readonly compatibility: string | null;
   readonly blocked: TrainState['blocked'];
-  readonly announcement: string;               // what merge-pr.sh announces of each landing
+  readonly announcement: string;               // what merge-pr.ts announces of each landing
   readonly approver: UserId | null;            // the owner who approved the card, kept by the approval route
 };
 

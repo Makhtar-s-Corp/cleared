@@ -42,13 +42,58 @@ test('an issue is created in the team, in the state of the same name, as the mir
   for (const operation of fake.operations) assert.equal(operation.auth, TOKEN);
 });
 
-test('a move sets the state; a comment is written on the issue', async () => {
+test('a move sets the state; a comment is written on the issue, and its id is given back', async () => {
   clock.tick();
   const made = await tracker.create({ title: 'Move me', body: '', labels: [], status: 'Todo' });
   await tracker.move(made.id, 'Needs Approval');
   assert.equal(fake.stateOf(made.id), 'Needs Approval');
-  await tracker.comment(made.id, 'Ready to Ship is given in Cleared.');
-  assert.deepEqual(fake.issues.get(made.id)?.comments, [{ body: 'Ready to Ship is given in Cleared.', by: MIRROR.id }]);
+  const id = await tracker.comment(made.id, 'Ready to Ship is given in Cleared.');
+  const [written] = fake.issues.get(made.id)?.comments ?? [];
+  assert.deepEqual([written?.body, written?.user?.id, written?.id], ['Ready to Ship is given in Cleared.', MIRROR.id, id]);
+});
+
+test('the team\'s comments since a time, each with its issue, who wrote it and when', async () => {
+  clock.tick(60);
+  const made = await tracker.create({ title: 'Talked about', body: '', labels: [], status: 'Todo' });
+  fake.comment(made.id, JANE, 'Too early');
+  clock.tick();
+  const since = clock.iso;
+  clock.tick();
+  fake.comment(made.id, JANE, 'Sort them by date, please.');
+  clock.tick();
+  fake.comment(made.id, GITHUB_APP, 'Linked to a pull request.');
+  clock.tick();
+  const own = await tracker.comment(made.id, 'Cleared: started.');
+  const comments = await tracker.commentsSince(since);
+  assert.deepEqual(comments.map((c) => [c.issue, c.body, c.actor, c.who]), [
+    [made.id, 'Sort them by date, please.', 'person', 'Jane'],
+    [made.id, 'Linked to a pull request.', 'agent', 'GitHub'],
+    [made.id, 'Cleared: started.', 'mirror', 'Cleared'],
+  ]);
+  assert.equal(comments.at(-1)?.id, own);
+  assert.ok(comments.every((c) => c.at >= since));
+});
+
+test('an edit writes the title and the description; the history says who changed each', async () => {
+  clock.tick(60);
+  const since = clock.iso;
+  const made = await tracker.create({ title: 'Old title', body: 'Old body', labels: [], status: 'Todo' });
+  clock.tick();
+  await tracker.edit(made.id, { title: 'Newest entry first' });
+  assert.equal(fake.issues.get(made.id)?.title, 'Newest entry first');
+  clock.tick();
+  fake.edit(made.id, JANE, { description: 'Jane\'s words.' });
+  clock.tick();
+  fake.edit(made.id, GITHUB_APP, { title: 'Newest entries first', description: 'The app\'s words.' });
+  const issue = (await tracker.changed(since)).find((i) => i.id === made.id);
+  assert.deepEqual([issue?.title, issue?.body], ['Newest entries first', 'The app\'s words.']);
+  assert.deepEqual(issue?.edits.map((e) => [e.field, e.actor, e.who]), [
+    ['title', 'mirror', 'Cleared'],
+    ['body', 'person', 'Jane'],
+    ['title', 'agent', 'GitHub'],
+    ['body', 'agent', 'GitHub'],
+  ]);
+  assert.deepEqual(issue?.changes.map((c) => c.status), ['Todo'], 'an edit is not a change of state');
 });
 
 test('changed issues: a state the app does not have reads as none, and each change says who made it, oldest first', async () => {
