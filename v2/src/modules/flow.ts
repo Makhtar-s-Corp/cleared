@@ -15,8 +15,9 @@
 // editor's save (lane 31) are terminal/routes.ts's and flow/files.ts's,
 // with one human side per process (terminal/human.ts), made with the
 // engine and the store this module receives. The idle watchdog (issue #290,
-// session/watchdog.ts) starts with the engine, on its own timer. A ticket
-// launched from a chat (P212), POST /hooks/chat with chat_seen,
+// session/watchdog.ts) starts with the engine, on its own timer. The
+// captures of a pull request's proof receipt (P210) are flow/proof-routes.ts's.
+// A ticket launched from a chat (P212), POST /hooks/chat with chat_seen,
 // chat_launches and chat_replies, is flow/chat.ts's: a batch of one on the
 // batches' runner, whose replies follow the flow's events.
 import { LeverStore } from '../consumption/levers.ts';
@@ -26,6 +27,7 @@ import { CHAT_TABLES, ChatConfigError, ChatLauncher, chatRoutes, loadChatConfig,
 import { editorRoutes } from '../flow/editor.ts';
 import { filesRoutes } from '../flow/files.ts';
 import { planGateRoutes } from '../flow/plan-gate.ts';
+import { proofRoutes } from '../flow/proof-routes.ts';
 import { REPLAYS_TABLE, replayRoutes } from '../flow/replay.ts';
 import { runtime } from '../flow/runtime.ts';
 import { STEPS_TABLE, stepRoutes } from '../flow/steps.ts';
@@ -103,6 +105,7 @@ const flow: Module = {
     ...terminalRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof(), human: humanOf }),
     ...stepRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
     ...variantRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
+    ...proofRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
     ...replayRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
     ...batchRoutes({ runner: batchesOf, proof: () => runtime.proof() }),
     ...chatRoutes({ config: chatConfigOf, launcher: chatOf }),

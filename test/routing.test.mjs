@@ -322,7 +322,9 @@ test('the Codex adapter gives the work of a lane its tools through the door of t
   writeFileSync(task, `#!/usr/bin/env bash\nprintf '%s\\n' "$@" > "${join(box.home, 'task-args')}"\ncp "$2" "${join(box.home, 'task-prompt')}"\n(flock -n 9 && echo free || echo held) 9> "${join(box.state, 'heavy.lock')}" > "${join(box.home, 'door')}"\nprintf 'done'\n`, { mode: 0o755 });
   const env = { ...box.env, HOME: box.home, ORCH_PROC_DIR: join(box.home, 'proc-none'), ADAPTER_RUNNER: 'container', ADAPTER_TASK_SCRIPT: task };
   const call = (extra = {}, ci = 0) => {
-    writeFileSync(join(box.home, 'bin', 'gh'), `#!/usr/bin/env bash\necho ${ci}\n`, { mode: 0o755 });
+    // The runs in progress are `ci`; the base's last commit is old, so no deployment is in progress whatever the hour
+    // (an answer of 0 was read as today at midnight: the host was busy from 00:00 to 00:10).
+    writeFileSync(join(box.home, 'bin', 'gh'), `#!/usr/bin/env bash\nif [ "$1" = api ]; then echo 2026-01-01T00:00:00Z; else echo ${ci}; fi\n`, { mode: 0o755 });
     const run = spawnSync(join(ORCH_HOME, 'adapters', 'codex.sh'), ['run', '--model', 'm', '--prompt-file', join(box.home, 'prompt.md'), '--report', join(box.home, 'r.md'), '--usage', join(box.home, 'u.json')], { cwd: box.repo, encoding: 'utf8', env: { ...env, ...extra } });
     const read = (name) => { try { return readFileSync(join(box.home, name), 'utf8'); } catch { return ''; } };
     return { status: run.status, stderr: run.stderr, args: read('task-args').trim().split('\n'), prompt: read('task-prompt'), door: read('door').trim(), report: read('r.md') };

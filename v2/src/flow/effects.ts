@@ -17,6 +17,7 @@ import type { ServiceConfig } from '../workspace/config.ts';
 import type { Ticket } from '../tickets/contract.ts';
 import { failedChecks, jobOf, logTail } from './ci-repair.ts';
 import { closePullRequest } from './pr-close.ts';
+import { captureProof, playwrightBrowser, proofTargets, type ProofTarget } from './proof-capture.ts';
 import { parseConf, projectSettings, workspaceOf, type FlowConfig } from './config.ts';
 import type { FlowEffects } from './engine.ts';
 
@@ -37,6 +38,10 @@ export type EffectsOptions = {
   readonly releaseRequest?: string;       // the lock's client; release-request.mjs of the repository by default
   readonly requestTimeoutMs?: number;
   readonly mergeTimeoutMs?: number;
+  // The page of a session's trial environment, through the service's
+  // preview route (flow/proof-capture.ts previewAddress); none: no after
+  // page is captured.
+  readonly preview?: (session: string) => ProofTarget | undefined;
 };
 
 // A diff the release card reads is cut here: the flags need the files and
@@ -274,7 +279,16 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       return publish({
         project: dir, workdir: input.workdir, base, branch: input.branch, repo, ticket: input.ticket,
         report: input.report, gitEnv: environments.git, ghEnv: environments.gh,
+        ...(input.receipt ? { receipt: input.receipt } : {}),
       });
+    },
+
+    // The receipt's captures (P210): Playwright is started only when there
+    // is a page to open, and closed by the capture.
+    async captureProof({ session, service, dir }) {
+      const targets = proofTargets(service, options.preview?.(session));
+      const browser = targets.before || targets.after ? await playwrightBrowser(env) : undefined;
+      return captureProof({ browser, dir, ...targets });
     },
 
     // gh exits 8 while a check is pending, and prints the list all the same.

@@ -9,7 +9,8 @@ const read = (name: string) => JSON.parse(readFileSync(`${CHAT_MESSAGES_DIR}${na
 const placeholders = (text: string) => [...text.matchAll(/\{([a-z_]+)\}/g)].map((m) => m[1]).sort();
 
 test('the French catalog has every key of the English one, with the same placeholders, and no other key', () => {
-  assert.deepEqual(readdirSync(CHAT_MESSAGES_DIR).sort(), ['chat.en.json', 'chat.fr.json']);
+  // The folder also holds the proof receipt's catalogs (P210, flow/receipt.ts).
+  assert.deepEqual(readdirSync(CHAT_MESSAGES_DIR).filter((name) => name.startsWith('chat.')).sort(), ['chat.en.json', 'chat.fr.json']);
   const en = read('chat.en.json');
   const fr = read('chat.fr.json');
   assert.deepEqual(Object.keys(fr).sort(), Object.keys(en).sort());

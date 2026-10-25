@@ -7,6 +7,7 @@ import { createApiRoutes } from '../../src/api/routes.ts';
 import { editorRoutes } from '../../src/flow/editor.ts';
 import { filesRoutes } from '../../src/flow/files.ts';
 import { planGateRoutes } from '../../src/flow/plan-gate.ts';
+import { proofRoutes } from '../../src/flow/proof-routes.ts';
 import { stepRoutes } from '../../src/flow/steps.ts';
 import { takeoverRoutes } from '../../src/flow/takeover.ts';
 import { variantRoutes } from '../../src/flow/variants.ts';
@@ -55,7 +56,7 @@ test('the service declares every route of the API but the approval, which is lan
   // route per depth, since the registry matches a fixed number of segments:
   // it is files/* here.
   const deps = { engine: () => t.engine, proof: () => PROOF, human: () => undefined };
-  const routes = [...createApiRoutes(deps), ...planGateRoutes(deps), ...takeoverRoutes(deps), ...editorRoutes(deps), ...filesRoutes(deps), ...stepRoutes(deps), ...variantRoutes(deps), ...terminalRoutes(deps)];
+  const routes = [...createApiRoutes(deps), ...planGateRoutes(deps), ...takeoverRoutes(deps), ...editorRoutes(deps), ...filesRoutes(deps), ...stepRoutes(deps), ...variantRoutes(deps), ...terminalRoutes(deps), ...proofRoutes(deps)];
   const declared = [...new Set(routes.map((r) => `${r.method} ${r.path.replace(/\/files\/:p0(?:\/:p\d+)*$/, '/files/*')}`))].sort();
   // The preview is lane 15's (container/preview.ts). The ticket's steps and
   // the contract item's Approve and Send back are lane 23's (flow/steps.ts).
