@@ -5455,6 +5455,26 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 - Pull request: 355, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-mcp-startup`.
 
+## 2026-10-25: the lanes' MCP tools say no "NaN" and read the history once per call (the author's choices, lane `j3-mcp-lanes-perf`, P216, issues #351 and #352)
+
+**The need.** Two non-blocking follow-ups of pull request 344 (P216). Issue #351: `since()` in `v2/src/mcp/lanes.ts` never says "NaN"; a date that is none gives a duration that is absent (`null`), and a test proves it. Issue #352: `lanes()` reads the open tickets' history without one read per ticket, or the measured call stays under a budget the test writes; `locked_files` does not read the lanes twice. The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight, as earlier lanes noted; the conventions followed are those of sections 9 and 10 of `milestone-1-plan.md` (a lane changes its own files). Neither issue's text nor pull request 344's comments say where `locked_files` read the lanes twice: it calls `lanes()` once on `v2`, so the test pins that.
+
+**Decision.**
+1. **A duration from a date that is none is `null`.** `lasted` (`app/web/lib/time.ts`) gives "NaNd NaNh" for `NaN`, since `Math.max(0, NaN)` is `NaN`. The fix is in `lanes.ts`, not in the shared `time.ts`: `since()` returns `null` when the clock or the date is not a date, so `runningFor`, a session's `for` and a file's `heldFor` are `null`. The date itself (`startedAt`, `since`) is given as the tracker wrote it. No new word, so no catalog change.
+2. **Every open ticket's history in one read.** `TicketStore` gains `histories(ids)`: a map from id to history, each as `history` gives it, an id the store does not know left out (`history` throws on one; a tool that lists must not fail on a ticket that went away between the two reads). The in-memory store reads its map; the local store runs one query, `tracker_history` joined to the ids through `json_each`, prepared once, and verifies each row's signature as `history` does, so a signed row is still the human's and an altered one is not. `lanes()` lists the tickets once, then reads the open ones' history once. Only these two stores implement the contract in the repository.
+3. **A count, not a budget.** The issue allowed a time budget; it was not taken. On the in-memory store the whole test over 21 lanes ran in 17 ms on the old code, so a budget would pass on the old code (B4.6 asks a defect test to fail there) and would flake on a loaded runner, as the browser budget test does. The test counts the store's reads instead: over 21 lanes, `list_lanes` and `locked_files` each list once and read the history once, and `list_tickets` reads none.
+
+**Tests first.** `6d9bc71` committed the tests alone. On that code four tests fail: the invalid date (`runningFor` is "NaNd NaNh"), the reads (21 reads of the history for 21 lanes), and the two `histories` tests (`histories is not a function`).
+
+**Checks.** `npm run typecheck` passes. `npm test` runs 2052 Node tests, 1984 pass, 68 skipped (the browser tests, with no `CLEARED_V2_PLAYWRIGHT`), 0 fail; Vitest, 321 tests pass. No browser test was run: nothing of the app changed. `npm run guard -- --base origin/v2`: nothing refused.
+
+**The merge of 355** (P220, at `origin/v2` `26822ed`). The log keeps 355's entry, then this one; the matrix merged by itself and keeps every id once (P216 with these follow-ups, P220 from 355). After the merge: `npm run typecheck` passes; `npm test` runs 2053 Node tests, 1985 pass, 68 skipped (the browser tests), 0 fail, and 321 Vitest tests pass; `test/ci-triggers.test.mjs` passes 4 of 4; `npm run guard -- --base origin/v2`: nothing refused.
+
+**Resources.** No Docker object, no account, no network beyond `git fetch` and GitHub, no port, no secret.
+
+- Pull request: 356, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-mcp-lanes-perf`.
+
 ## 2026-10-25: a question to the code from a session's Plan tab (the author's choices, lane `j3-plan-ask`, matrix C11)
 
 **The need.** C11 was `partial`: decision 28 starts a reader "from the tower bar or a session's Plan tab", and the session screen only linked the reader's own rows. The section "Reste avant v2 -> main" listed it under code to write. No issue: the line is the brief. The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight; the conventions followed are those of section 10 of `milestone-1-plan.md` (a lane changes its own files, a screen's words in its catalogs, `api/types.ts` untouched), as the earlier lanes did.
@@ -5471,6 +5491,8 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 **Tests first.** `6d780d1` committed the tests and the fixture support alone. There, `app/test/session/plan-ask.test.ts` does not load (no `planAskBody` in `tabs.ts`), the five tests of `app/web/test/session/plan-ask.test.tsx` find no card, and both tests of `app/test/session/plan-ask-browser.test.ts` time out waiting for `#plan-ask-input`; `app/test/ask/app.test.ts` passes there with the fixture's change. Changed after that commit: the card's state field is `status`, not `note`, because the i18n audit reads a `note: ''` property as a catalog key; the Vitest file follows.
 
 **Checks** (on `origin/v2` at `26822ed`). `npm run typecheck` passes. `npm test`: 2054 Node tests, 1984 pass, 70 skipped (68 because `CLEARED_V2_PLAYWRIGHT` is not set, 2 because `CLEARED_V2_REAL_HARNESS` is not), 0 fail; 326 Vitest tests pass. With `CLEARED_V2_PLAYWRIGHT`, the 20 files of CI's browser job, run together: 56 tests, 55 pass; the one that failed is `app/test/foundation/budget-browser.test.ts` (p95 of the tab switches 122.9 ms, over its 100 ms, with twenty files at once), which passes alone, twice (31.0 ms and 26.1 ms). Run again: the 20 files fail it at 104.0 ms, and the 19 files without `plan-ask-browser.test.ts` fail it too, at 117.8 ms, so it is this machine running the files at once, not the new file. `test/ci-triggers.test.mjs` passes 4 of 4 with the new file in the browser job. Captures at the four widths, light and dark, and in French at 1440 and 390, are in `docs/v2/plan-ask/`. `npm run guard -- --base origin/v2`: nothing refused.
+
+**The merge of 356** (lane `j3-mcp-lanes-perf`, at `origin/v2` `3ba2799`). The log keeps 356's entry, then this one; the matrix merged by itself. After the merge: `npm run typecheck` passes; `npm test` runs 2058 Node tests, 1988 pass, 70 skipped, 0 fail, and 326 Vitest tests pass; with `CLEARED_V2_PLAYWRIGHT`, `plan-ask-browser`, `citations-browser` and `tabs-browser` pass 8 of 8; `npm run guard -- --base origin/v2`: nothing refused.
 
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, no tunnel, no secret; the browser tests listen on port 0 on loopback and abort any request that leaves the app.
 

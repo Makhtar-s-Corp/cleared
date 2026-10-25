@@ -80,6 +80,10 @@ export interface TicketStore {
   // approval writer records (registry.ts ApprovalWriter, lane 8).
   move(id: TicketId, status: string, by: Actor): Promise<Ticket>;
   history(id: TicketId): Promise<StatusChange[]>;
+  // Several tickets' history in one read, keyed by id, each as history gives
+  // it; an id the store does not know is left out (mcp/lanes.ts reads every
+  // open ticket's at once).
+  histories(ids: readonly TicketId[]): Promise<Map<TicketId, StatusChange[]>>;
   comment(id: TicketId, body: string, by: Actor): Promise<Comment>;
   comments(id: TicketId): Promise<Comment[]>;
 }
@@ -158,6 +162,15 @@ export class MemoryTicketStore implements TicketStore {
 
   async history(id: TicketId): Promise<StatusChange[]> {
     return [...this.#entry(id).history];
+  }
+
+  async histories(ids: readonly TicketId[]): Promise<Map<TicketId, StatusChange[]>> {
+    const out = new Map<TicketId, StatusChange[]>();
+    for (const id of ids) {
+      const entry = this.#tickets.get(id);
+      if (entry) out.set(id, [...entry.history]);
+    }
+    return out;
   }
 
   async comment(id: TicketId, body: string, by: Actor): Promise<Comment> {
