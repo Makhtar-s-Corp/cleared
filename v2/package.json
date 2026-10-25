@@ -19,7 +19,8 @@
     "guard": "node scripts/guard.ts",
     "doctor": "node scripts/doctor.ts",
     "notify": "node src/cli/notify.ts",
-    "repair-services": "node src/cli/repair-services.ts"
+    "repair-services": "node src/cli/repair-services.ts",
+    "import-v1": "node src/cli/import-v1.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "5.104.1",

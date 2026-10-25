@@ -2,7 +2,7 @@
 
 Written on 2026-10-25, before the code of milestone 4. The brief's section 6 for milestone 4 is not in this repository; its content is taken from the matrix's lines B6.4 and B6.4p ([requirements-matrix.md](requirements-matrix.md), section C), which repeat it: two-way Linear and GitHub Issues, v1 data reused, every removal of [keep-and-drop.md](keep-and-drop.md) done, no bash in the core; the proof, "a ticket created in the app appears in Linear and the reverse; a human move in Linear wins; `git grep` finds no bash script in the core".
 
-Milestone 4 runs as lanes, each with its issue: the mirrors (issue #381, lane `v2-j4-issue-mirrors`, section 2 below) and the cleanup (issue #382: the dropped files, the bash of the core, the kept JavaScript in strict TypeScript). Each lane adds its own section to this file. `milestone-2-plan.md` has no sections 9 and 10; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), as the lanes of milestone 3 noted: a lane fills its own module, never `main.ts`; a screen's words live in its catalogs; `api/types.ts` is not changed on the side.
+Milestone 4 runs as lanes, each with its issue: the mirrors (issue #381, lane `v2-j4-issue-mirrors`, section 2 below), the cleanup (issue #382: the dropped files, the bash of the core, the kept JavaScript in strict TypeScript) and the import of v1's data (issue #385, lane `v2-j4-v1-import`, section 3 below). Each lane adds its own section to this file. `milestone-2-plan.md` has no sections 9 and 10; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), as the lanes of milestone 3 noted: a lane fills its own module, never `main.ts`; a screen's words live in its catalogs; `api/types.ts` is not changed on the side.
 
 ## 1. The proof, the mirrors' part
 
@@ -65,3 +65,54 @@ Comments and later edits of title and body both ways; Linear's labels, projects 
 | How Linear shows an OAuth application acting as itself (`actor=app`) in an issue's history: `botActor`, or the user | the owner's real trial; until then such an event reads as an agent's |
 | Whether GitHub's issue events lag behind the issue's labels | the real GitHub run of this lane; a stale read of the mirror's own write is not a change either way |
 | A crash between the tracker's creation of an issue and the mirror's record of it creates the issue again at the next pass | not closed: named in `docs/v2/mirrors.md` |
+
+## 3. The v1 import lane (`v2-j4-v1-import`, issue #385)
+
+### 3.1 Context
+
+B6.4 asks for v1's data to be reused: its memory, and its ticket history for the estimates. v2 opens a ledger in v1's format (decision 11 of milestone 1), but v1 was stopped without an archive (log entry of 2026-10-21), and a v2 service started on a state folder of its own has none of v1's rows: its plans are estimated from the defaults until three v2 tickets of a size are done, and the decisions the owner approved in v1 are proposals again. This lane adds a command that reads a v1 ledger, never writing it, and brings into v2's ledger what v2 can use, once, however many times it is run.
+
+### 3.2 What exists at the end, and how it is proven
+
+- `src/import/v1.ts`: the reading of a v1 ledger; `src/import/apply.ts`: what it would bring and, with `--apply`, what is written in v2's ledger; `src/import/samples.ts`: the samples' table and its reading by the estimates; `src/import/report.ts` and `src/import/messages/import.{en,fr}.json`: its words. `src/cli/import-v1.ts`, run as `npm run import-v1 -- --from <v1 ledger.db>`: a dry run by default, `--apply` to write, as `repair-services` does.
+- The plans' estimates (`lead/plans/estimates.ts`) count the imported tickets with v2's own.
+- Proven by `test/import/v1.test.ts` (the reading, on fixtures written by v1's own code), `test/import/apply.test.ts` (dry run, apply, a second apply, the same file refused, the v1 file untouched), `test/import/memory.test.ts` (an approved decision briefed by v2 after the import, and the cases where it is not), `test/import/cli.test.ts` (the command, in French and in English), `test/import/catalog.test.ts`, and `test/lead/plans/estimates.test.ts` (samples without a cost).
+
+### 3.3 What is imported
+
+1. **The ticket history.** One sample per v1 ticket that v1 measured when its pull request merged (its last `ticket_measured` event), for the workspace the service is configured with:
+   - **The lane**: the event's own, fast or full.
+   - **The minutes**: from the ticket's first run at or after its Todo time (else its Todo time) to its merge, less the time the owner took to answer (`human_wait_min`). v2 counts from the author's first start to the release request, less the owner's waits; v1 has no release request event, so the few minutes from the owner's answer to the merge are counted too.
+   - **The size**: v1 had no sizes. A `size:<s>` label on the v1 ticket wins when there is one; else the lines its merged pull request changed (`runs.lines_changed`): 20 or fewer xs, 100 or fewer s, 400 or fewer m, more l. A ticket with neither has no size and is not a sample.
+   - **The tokens**: the sum of its runs' tokens, kept and said, not used by the estimates.
+   - **No money.** v1 kept euros: either the CLI's dollars times a rate v1 does not keep, or tokens times a price table, which is not a real source. An imported sample has no cost; the estimates take the median cost of the samples that have one, and the default when fewer than three do. A default cost is never said to come from history: the plan's panel says "Estimates from {n} similar tickets" from three samples, so the count is then the samples that have a cost, and the panel says "Default estimates".
+2. **The approved decisions.** A decision file the owner approved in v1 stays approved in v2 when all of these hold: v1's entry is approved and v1 holds its `memory_approved` event; that event's owner is the owner v2's settings name (`[tracker] owner_id`); the file, at the same path in v2's checkout, has the same text committed and on disk as the text v1 approved. Then the import approves v2's entry through lib/memory, in a child process, as the knowledge module does, and keeps v1's record (who, when) in its own table. Anything else stays a proposal, as editing a file does in v1.
+
+Not imported: the files' entries themselves (lib/memory indexes them from the checkout); the handovers, scoped to a v1 ticket id that v2 gives to another ticket (`LOCAL-<n>` from 1 in both ledgers), so one would brief an unrelated ticket; proposals; v1's sessions, runs and events, which no v2 screen reads; the tickets themselves, which would appear on the board and in the mirrors.
+
+### 3.4 Decisions this lane takes
+
+- **Read-only on v1.** The v1 ledger and its write-ahead log are copied into a private temporary folder and read there: SQLite opened read-only on a ledger in WAL mode still creates its `-shm` and `-wal` files beside it. The copy is removed at the end. The command refuses a v1 ledger that is v2's own file.
+- **Idempotent.** A sample is keyed by the workspace and the v1 ticket; an approval is not made twice. A second `--apply` writes nothing and says so. A v1 ticket measured again after the first import keeps its first sample, and a ticket number already imported from another measure is said as such, never as already imported.
+- **One v1 ledger per workspace.** v1 kept a ledger per project; the import brings one into the workspace, read against the workspace's checkout (its first service's), where the workspace's memory reads its files.
+- **Its own tables.** `v1_ticket_samples` and `v1_memory_approvals`, created by the command; the estimates read the first one when it exists.
+- **The dry run** says what `--apply` would write and why each skipped item is skipped, in counts, durations a person reads and ticket ids; never a decision's text.
+- **Language.** `CLEARED_V2_APP_LANGUAGE`, French by default, as the service's other words.
+- **Fixtures.** Written in the tests by v1's own code (`lib/ledger.mjs`, `lib/memory`, the local tracker), with invented tickets and texts. No real v1 ledger is read in this lane.
+- **Matrix lines.** P233 (the command), P234 (the samples and the estimates), P235 (the approved decisions); B6.4 updated.
+
+### 3.5 Out of scope
+
+v1's handovers, events and sessions; several v1 ledgers into one workspace (a second one's tickets of numbers already imported are left out and said, and its decisions, read against the first service's checkout, come out missing or changed, never filed in another service's level); a v1 tracker other than the ledger's (a Linear ticket's labels are not read: its size comes from its lines); a screen for the import; the import of a v2 ledger into another; the removal of v1's files, the cleanup lane's.
+
+### 3.6 Files this lane owns
+
+`v2/src/import/`, `v2/src/cli/import-v1.ts`, `v2/test/import/`; the `import-v1` script in `v2/package.json`; the samples read in `lead/plans/estimates.ts` (`historyOf`, and the cost's median over the samples that have one); a row in `v2/README.md`; its lines of the matrix and its log entry.
+
+### 3.7 Unknowns, and who closes them
+
+| Unknown on 2026-10-25 | Closed by |
+| --- | --- |
+| Whether the first piloted project's v1 ledger holds `ticket_measured` events and lines changed for most of its tickets (the samples need both) | the owner's dry run on that ledger; its counts say it, and nothing is written |
+| Whether the size thresholds (20, 100, 400 lines) match the sizes the lead gives | the owner (question in the log entry, default applied) |
+| A v1 ledger written while it is copied | not closed: v1 is stopped (D22), and the command is run on a stopped v1 |
