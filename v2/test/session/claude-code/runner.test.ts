@@ -115,7 +115,10 @@ test('the runner starts query() with the plan options, the token in the child en
   assert.equal(options.includePartialMessages, false);
   assert.equal(options.maxBudgetUsd, 0.5);
   assert.equal(options.pathToClaudeCodeExecutable, CLAUDE_BIN);
-  assert.deepEqual(options.systemPrompt, { type: 'preset', preset: 'claude_code' });
+  // Issue #335 (P219): the preset without its per-session sections (the
+  // working directory, git status), which the SDK moves to the first user
+  // message, and recorded once for the session: the prefix stays the same.
+  assert.deepEqual(options.systemPrompt, { type: 'preset', preset: 'claude_code', excludeDynamicSections: true, snapshot: true });
   // The runner's own policy check runs first, then lane 5's hooks; its
   // context measure runs after every tool call.
   const set = options.hooks as Record<string, { hooks: unknown[] }[]>;
@@ -155,7 +158,7 @@ test('resume passes the session id as resume, and CLAUDE.md is appended to the s
   const options = seen.options as Options;
   assert.equal(options.resume, start.sessionId);
   assert.equal(options.sessionId, undefined);
-  assert.deepEqual(options.systemPrompt, { type: 'preset', preset: 'claude_code', append: '# Briefing\nThe word is MAPLE.\n' });
+  assert.deepEqual(options.systemPrompt, { type: 'preset', preset: 'claude_code', append: '# Briefing\nThe word is MAPLE.\n', excludeDynamicSections: true, snapshot: true });
 });
 
 test('a permission request goes out as a line and the answer line decides it', async () => {

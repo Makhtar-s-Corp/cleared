@@ -7,6 +7,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { SessionPlan, SessionPlanItem } from '../../src/api/types.ts';
+import { AUTHOR_TOOLS } from '../../src/flow/author-tools.ts';
 import { FlowError } from '../../src/flow/engine.ts';
 import type { ProjectSettings } from '../../src/flow/config.ts';
 import type { FakeStep } from '../../src/session/adapters/fake.ts';
@@ -74,6 +75,10 @@ test('the author is given its two host tools, and its first turn is asked for th
   await t.engine.start(t.ticket.id, 'u1');
   const author = t.startedSessions[0]!;
   assert.deepEqual(author.input.tools?.map((tool) => tool.name), ['propose_session_plan', 'report_changes']);
+  // Issue #335 (P219): the definitions as written, in their order, nothing of the ticket in them,
+  // so every author of the project sends the same tools ahead of its prompt.
+  assert.equal(JSON.stringify(author.input.tools?.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))), JSON.stringify(AUTHOR_TOOLS));
+  assert.ok(!JSON.stringify(author.input.tools).includes(t.ticket.id));
   assert.match(author.input.prompt, /propose_session_plan/);
   assert.match(author.input.prompt, /before you change any file/i);
   assert.match(author.input.prompt, /report_changes/);

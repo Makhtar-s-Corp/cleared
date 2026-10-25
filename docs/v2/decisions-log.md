@@ -5352,3 +5352,86 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 ## 2026-10-25: the non-blocking follow-ups of P216 (pull request 344) filed as issues
 
 **Decision.** The non-blocking follow-ups of P216 (#344) are open as issues #347 to #353, label `v2`: the Host header check of `POST /mcp` (#347), the language and the cleaner read at the start (#348), the stop when the ledger is not found (#349), a test of the MCP token (#350), safe durations on an invalid date (#351), one read of the history per call (#352), and the refusal of a peer outside the tailnet (#353). None blocks the merge of 344.
+
+## 2026-10-25: stable prompt prefixes for the prompt cache, measured on a reference fake run (the author's choices, lane `j3-prompt-cache`, P219, issue #335)
+
+**The need.** Issue #335, the owner's decision of 01:09 (P219): stable prompt prefixes (a fixed order, no timestamp at the top) and grouped tools, so that the prompt cache serves more of what the sessions send. A before and after measure on a reference fake run (input tokens, the share served by the cache) is recorded here. Sessions behave as before, and the existing tests stay green.
+
+**What the cache can reuse.** A request is read as the tools, then the system prompt, then the messages. The cache serves a prefix only up to its first changed byte, and only at an end where an earlier request wrote an entry. An entry lives 5 minutes after its last use, and Opus 5.5 caches nothing shorter than 512 tokens (the Messages API's prompt caching). Within one session, Claude Code reuses its own prefix turn after turn, whatever Cleared writes. Cleared's choices change what one session can reuse of another's: the host tools, the preset, then the briefing (CLAUDE.md, which the runner appends to the system prompt).
+
+**What the reading found.**
+1. **The preset's per-session sections stood before the briefing.** With `append`, the `claude_code` preset writes the working directory and git status (the ticket's branch, its commits) into the system prompt, before CLAUDE.md. Two authors of a plan started together with the same briefing therefore differed before it, and shared only the tools and the preset's static part.
+2. **The lead's briefing had its generation number and start time right after the rules,** above all its data: the timestamp at the top.
+3. **The tools were already grouped.** The host tools are one in-process MCP server, `cleared`, loaded up front (`alwaysLoad`). The lead's list follows `LEAD_TOOLS` and the author's `AUTHOR_TOOLS`, whatever the generation or the ticket. An author who is not asked for a plan keeps `propose_session_plan`, which refuses the call. No description names a ticket. A step of a ticket on several services adds `leave_note` last. Nothing changed here; tests now pin it.
+4. **The author's and the reviewer's CLAUDE.md, and the first turns, are left as they are.** The cache reads at the end of the system prompt, not inside the briefing, so an order inside it gains nothing. A one-service workspace's briefing is also pinned byte for byte (`test/flow/effects.test.ts`). The first turn's end is reached only by a session that sends the same first turn.
+
+**Decision.**
+1. **The runner's system prompt leaves out the preset's per-session sections** (`images/session/runner/main.ts`): `{ type: 'preset', preset: 'claude_code', append, excludeDynamicSections: true, snapshot: true }`. These options come from `sdk.d.ts` of SDK 0.3.306, the version the image pins. The SDK gives the working directory, auto-memory and git status to the model as the first user message. The SDK says that context then steers the model "marginally less" than from the system prompt; this is the one change of what the model reads, and it reads the same facts. `snapshot` is the SDK's default, written out: the prompt is recorded once per session.
+   - The adapter turns a user frame into events only for its tool results. A context message the SDK might print reaches neither the ledger nor the thread (`test/session/claude-code/map.test.ts`).
+   - Not chosen: a custom system prompt in blocks around `SYSTEM_PROMPT_DYNAMIC_BOUNDARY`. It would replace Claude Code's own preset.
+   - Not chosen: moving a ticket's decisions and last handover from CLAUDE.md to the first turn. More briefings would be alike, but the model would get them as a message instead of its instructions, which changes the sessions.
+2. **The lead's briefing goes from what changes least to what changes most** (`src/lead/briefing.ts`): the rules, then under the reference line the memory, the open commitments, the last handover, and last one line, "You are generation N of the lead, started at T". The instruction that the structured parts win stays above the reference line. In the measure below this gains nothing: the briefing is read as one block, and a new generation starts hours after the last. It is done because the issue asks for no timestamp at the top, and it costs 14 tokens.
+3. **The tools stay as they are**, pinned by tests (item 3 above).
+
+**The measure.** `v2/scripts/prompt-cache.ts` (`node scripts/prompt-cache.ts`, or `--json`) builds the first request of each session of a reference fake run from Cleared's own code. The tools come from `LEAD_TOOLS` and `AUTHOR_TOOLS`. The briefings come from `renderLeadBriefing`, `renderBriefing` and `readerBriefing`, with the guestbook example's README as the project page. The first turns come from `authorPrompt`, `variantPrompt`, `pickPrompt`, `reviewPrompt`, `readerPrompt` and `openingPrompt`. The system prompt option comes from the runner itself, run on a stand-in query.
+- **The model.**
+  - The cache reads and writes at three ends: the end of the preset's static part, the end of the system prompt and the end of the first message. Of the first, `sdk.d.ts` says that blocks before that boundary are eligible for cross-session caching, and that blocks after it are not. The other two are this model's assumption: that the ordinary prefix cache still reads where Claude Code ends the system prompt and the first message. The briefing comes after the boundary, so every gain below rests on that assumption.
+  - An entry lives 5 minutes from its last use.
+  - The SDK's texts (the built-in tools, the preset, the per-session sections) count no tokens, and are told apart by what makes them differ: branch, commit, day.
+  - Cleared's texts count one token per 4 bytes of UTF-8. That is an estimate, not the tokenizer's count.
+  - Only each session's first request is measured.
+- **The run**, 11 sessions:
+  - the lead's first generation;
+  - the plan's two first tickets one minute later, LOCAL-12 and LOCAL-13 (a plan starts two at a time, and neither carries a decision of its own);
+  - a pick of three Claude Code variants of LOCAL-14 at 3 minutes, a ticket with an approved decision of its own;
+  - two questions to the code, at 6 and 8 minutes;
+  - the reviews of LOCAL-12 and LOCAL-13, at 25 and 26 minutes;
+  - the lead's second generation, three hours later.
+- **Before:** the script at `96f6437` (the tests and the script, the code as `origin/v2` at `c2bd384`). **After:** `9f5f54f`.
+
+| Session | Before: input | Before: served | After: input | After: served |
+| --- | ---: | ---: | ---: | ---: |
+| lead, generation 1 | 5980 | 0 (0 %) | 5994 | 0 (0 %) |
+| author LOCAL-12 | 3918 | 0 (0 %) | 3918 | 0 (0 %) |
+| author LOCAL-13 | 3923 | 401 (10.2 %) | 3923 | 3549 (90.5 %) |
+| author LOCAL-14, variant 1 of 3 | 4093 | 401 (9.8 %) | 4093 | 401 (9.8 %) |
+| author LOCAL-14, variant 2 of 3 | 4093 | 3581 (87.5 %) | 4093 | 3581 (87.5 %) |
+| author LOCAL-14, variant 3 of 3 | 4093 | 3581 (87.5 %) | 4093 | 3581 (87.5 %) |
+| reader: Where is an entry checked before it is stored? | 278 | 0 (0 %) | 278 | 0 (0 %) |
+| reader: What does /health answer when the database is slow? | 279 | 239 (85.7 %) | 279 | 239 (85.7 %) |
+| reviewer LOCAL-12 | 3620 | 0 (0 %) | 3620 | 0 (0 %) |
+| reviewer LOCAL-13 | 3625 | 0 (0 %) | 3625 | 3121 (86.1 %) |
+| lead, generation 2 | 6123 | 0 (0 %) | 6137 | 0 (0 %) |
+| **The run** | **40025** | **8203 (20.5 %)** | **40053** | **14472 (36.1 %)** |
+
+Estimated tokens. "Served" is the part of a session's first request a cache entry of an earlier session covers.
+
+**The lower bound.** `node scripts/prompt-cache.ts --no-system-entry` measures with no entry at the end of the system prompt. The run then shares only the authors' tools, 401 tokens in each of four sessions: 1604 of 40053, 4.0 %. That holds before and after alike, because the two entries left fall in the same places either way. If Claude Code writes no entry there, this change gains nothing.
+
+**What it shows, and what it does not.**
+- Under the model, the gain is in sessions of one role whose briefings are the same and that start within 5 minutes of each other: the plan's second ticket (401 to 3549) and its review (0 to 3121).
+- The variants of one ticket already shared their whole system prompt: same branch, same commit, same day.
+- A ticket with a decision or a handover of its own has a briefing of its own and gains nothing (LOCAL-14's first variant).
+- The lead gains nothing.
+- No money amount: no real source gives one for these runs.
+- The model's read points beyond the documented boundary and its token counts are not the API's. Two things remain unmeasured: a real run's `cachedInputTokens` in the ledger (`RUN_FINISHED`'s usage), and the real CLI with the two options (`docs/adapters.md`, the paragraph of 2026-10-25). Both need the session image and the service's login, which this lane did not use; they are the owner's to run.
+
+**Read.** `docs/v2/milestone-2-plan.md` has no sections 9 and 10, as lanes `j3-chat-launch`, `j3-code-qa-links` and `j3-mobile-ui` noted. Read in their place: `milestone-1-plan.md` sections 9 and 10 (waves, and the conventions that keep a lane to its own modules).
+
+**Tests first.** `96f6437` was committed before any code. On that code:
+- `test/lead/briefing.test.ts`'s new test fails: the two generations share 5152 characters, short of the memory's end at 5825.
+- The two `systemPrompt` assertions of `test/session/claude-code/runner.test.ts` fail: the options lack the two keys.
+- The last test of `test/scripts/prompt-cache.test.ts` fails: LOCAL-13 is served 401 tokens, not 3549.
+
+These pass on that code and are kept as guards: the map test, the tools assertions added to `test/lead/engine.test.ts` (both generations' tools, byte for byte) and `test/flow/plan-gate.test.ts` (`AUTHOR_TOOLS` as written, no ticket id), and the model's own tests. Existing tests changed: the two runner assertions, whose expected object gained the two keys, and the two tests that gained the tools assertions. No assertion was removed.
+
+**Checks** (on `origin/v2` at `c2bd384`, which had not moved when this was written). `npm run typecheck` passes. `npm test`: 2012 Node tests, 1948 pass, 64 skipped (the browser tests, with no `CLEARED_V2_PLAYWRIGHT`), 0 fail; 316 Vitest tests pass. `npm run guard -- --base origin/v2`: nothing refused, in the 685 v2 files and in the lines changed (run without a private-term list, `CLEARED_REPO` unset).
+
+**The merge of 344** (P216, at `origin/v2` `c1940c2`). The log keeps 344's entry, then this one; the matrix merged by itself and keeps every id once. 344 touches none of this lane's files. After the merge: `npm run typecheck` passes; `npm test` runs 2031 Node tests, 1967 pass, 64 skipped (the browser tests), 0 fail, and 316 Vitest tests pass; `node scripts/prompt-cache.ts` gives the same 36.1 %, and 4.0 % with `--no-system-entry`; `npm run guard -- --base origin/v2`: nothing refused, in the 692 v2 files and in the lines changed.
+
+**The merge of 346** (P218, at `origin/v2` `857a2b9`), after the two reviews passed. The log keeps 346's entry and the P216 follow-ups, then this one; the matrix keeps 346's P218 line and this lane's P219, every id once. 346 touches none of this lane's files. After the merge: `npm run typecheck` passes; `npm test` runs 2048 Node tests, 1980 pass, 68 skipped (the browser tests), 0 fail, and 321 Vitest tests pass; `node scripts/prompt-cache.ts` gives the same 36.1 %, and 4.0 % with `--no-system-entry`; `npm run guard -- --base origin/v2`: nothing refused, in the 698 v2 files and in the lines changed.
+
+**Resources.** No Docker object, no session image, no login file read, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, no port, no tunnel, no secret.
+
+- Pull request: 354, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-prompt-cache`.
