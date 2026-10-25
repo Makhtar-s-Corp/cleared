@@ -398,15 +398,62 @@ A screen that shows the page; a page edited by hand; a page in the project's lan
 
 `v2/src/workspace/project-page.ts`, the page's call in `v2/src/flow/effects.ts`, the lead's service lines in `v2/src/lead/briefing.ts`, `v2/test/workspace/project-page-workspace.test.ts`, the new cases of `v2/test/lead/briefing.test.ts`, this section, its matrix lines and its log entry.
 
-## 10. Delegation from GitHub Issues and Linear (`v2-j4-delegation`, issue #398)
+## 10. The week's figures (`v2-j4-weekly`, issue #396)
 
-Written on 2026-10-25 by the author of issue #398 (Opus 5.5), before the lane's tests and code. Sections 8 and 9 are the lanes of pull requests 393 and 395, merged into `v2` before this one. Inputs: issue #398, the [decisions log](decisions-log.md) (the entries of lanes `v2-j4-issue-mirrors`, `v2-j4-mirror-followups` and `j3-chat-launch`, and the ten ideas of 2026-10-25), the matrix (C3, D17, D18, P230 to P232, P237), [mirrors.md](mirrors.md), and sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), since `milestone-2-plan.md` has no sections 9 and 10.
+This section was written on 2026-10-25 by the author of issue #396 (Opus 5.5), before the lane's tests and code. Inputs: issue #396 (matrix C17), the [decisions log](decisions-log.md) (the ten ideas of 01:09 and their money rule, the entries of lanes `j3-ticket-cost` and `j3-visual-redesign`, the owner's decisions of 11:14 and 12:20 on Consumption), the [requirements matrix](requirements-matrix.md) (C17, O15, P211, B3.6, B3.7), and the code at `origin/v2` `99ee767`. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md). Section 7 is the deploy checklist; sections 8 and 9 are the heartbeat's and the project page's (pull requests 393 and 395), merged before this lane's code.
 
 ### 10.1 Context
 
-C3 asks for work to be handed to Cleared from Linear and GitHub Issues, Slack later. The mirrors (pull requests 384 and 390) bring an issue created on a tracker into the app as a ticket, but only one created after the mirror's first pass, and the ticket then waits in Todo: a tracker never starts a session by itself (P232). No one on the tracker can say "Cleared, take this one", and the lead never hears of the issue.
+C17 asks for the week's figures in the app. The ledger already holds what they need: each session's turns with their tokens, their times and the dollars the harness reported (`session_events`, `sessions` with its service), each ticket's moves (`tracker_history`), and each plan item's estimate (`plan_items`). The Consumption screen says the tokens per agent and the quotas, and a Done ticket's card says its own cost (P211), but nothing says what the week delivered and what it took. This lane reads those tables, writes nothing, and adds a panel to the Consumption screen.
 
 ### 10.2 What exists at the end, and how it is proven
+
+- `src/consumption/week.ts`: `weekFigures(db, tickets, { project, services, now, timeZone })`, the figures of the screen's seven days. `GET /api/consumption/week?tz=<zone>`, registered with the other Consumption routes and guarded as they are.
+- The Consumption screen's "This week" panel ("Cette semaine"), read on its own, so a failed read of the week leaves the rest of the screen as it is. Its words in `app/messages/consumption.{en,fr}.json`, its durations through `lib/time.ts`.
+- The fixtures source answers the route from a week of invented tickets, on request (`fixtureSource({ week: true })`), so the counts other tests pin do not move.
+- Proven by `test/consumption/week.test.ts` (each figure on a real ledger and a ticket store in memory), `test/consumption/routes.test.ts` (the route and its guard), `test/consumption/ticket-cost.test.ts` (the cost of a period), `app/web/test/consumption-week.test.tsx` (the panel in English and French, with and without dollars, with and without estimates), `app/test/consumption/week-browser.test.ts` (the panel in Chromium, at 1440 and 390), and the captures in `docs/v2/weekly/`.
+
+### 10.3 The figures
+
+1. **The week** is the screen's seven calendar days in the person's time zone (`lastDays`, `zoneOf`), from the first one's midnight to now. Its tokens are then the sum of the agents' tokens the screen already shows, when no Cursor session ran: the screen's cards are Claude Code's and Codex's, and the week counts every turn.
+2. **Tickets merged.** A ticket of the workspace that is Done now, whose last move to Done is in the week and was written by the service: the flow (`agents`), or the guarded merge, which `merge-pr.ts` writes through v1's tracker under the service account, a row the store reads as `other`. Never the mirror's (`cleared-mirror`, an issue closed on a tracker) nor a person's signed move (a move by hand is not a merge). Each with its id, its title and its services.
+3. **Tokens and time.** Every session of the workspace that finished a turn in the week, whatever its role: authors, reviewers, the lead, the questions to the code. The tokens are the four counts of each turn finished in the week; the agents' time is each turn from its start to its end, the part of it inside the week. Both as P211 counts them (`ticket-cost.ts`).
+4. **Dollars**, only as the harness reported them (`total_cost_usd`, the API-equivalent figure): each session's running total, its increase over the week. When a session that finished a turn in the week reported none (Codex, Cursor), the week has no dollar figure, and the panel says the week is counted in tokens and time. Never euros, never an estimate.
+5. **Estimates against what it took.** For each merged ticket that a plan estimated (`plan_items`), the estimate's minutes against its own minutes, measured as the estimates measure their samples (`ticketSample`: from the author's first start to the release request, less the owner's waits). Minutes only: an estimate's dollars fall back to invented defaults when history is short (`DEFAULT_ESTIMATES`), which is not a real source. The panel says how many of the merged tickets had an estimate.
+6. **Per service.** A session's service is its own when it names one; else its ticket's, when the ticket names one service; else, for a ticket that names none, the workspace's first service, where it runs. The lead's turns, the questions to the code and a session of a ticket on several services that names none go to one row of the workspace's own, so the rows add up to the week. A merged ticket counts once on each of its services, once in the total.
+
+### 10.4 Decisions this lane takes
+
+- **No table, no write.** The figures are read when the screen asks, from the tables above.
+- **The cost of a period** is P211's rule given a start: `sessionsCost(sessions, since)` counts only what finished after it, its dollars the increase of each running total, so a ticket's card and the week never count a dollar twice.
+- **Where.** The Consumption screen, which the quota gauge opens (owner decisions of 11:14 and 12:20): the sidebar stays the development's.
+- **Language.** The panel's words in the catalogs, French and English; durations as `lib/time.ts` says them ("42 min", "3 h 05", "2 j 4 h").
+- **Matrix lines.** P243 (P239 is pull request 393's, P240 to P242 are 395's); C17 updated.
+
+### 10.5 Out of scope
+
+A week other than the last seven days (no week picker, no week before); a report sent by mail or in a notification; euros; an estimate of the dollars; the figures of v1's imported tickets (they have no sessions in v2); a change of the Consumption screen's own cost panel, which still sums each turn's total (the log names it).
+
+### 10.6 Files this lane owns
+
+`v2/src/consumption/week.ts`, the `since` of `v2/src/consumption/ticket-cost.ts`, the route in `v2/src/consumption/routes.ts`, the ticket store and services given to it in `v2/src/modules/lead.ts`, the route and its type in `v2/src/api/types.ts` (and the pinned count of `test/api/types.test.ts`); the panel in `v2/app/web/screens/consumption/` and its keys in `v2/app/messages/consumption.*.json`; `v2/app/fixtures/week.ts` and its route in `v2/app/fixtures/source.ts`; the tests above, the browser test in `.github/workflows/v2.yml`'s list; `docs/v2/weekly/`; a section of `v2/README.md`; its matrix lines and its log entry.
+
+### 10.7 Unknowns, and who closes them
+
+| Unknown on 2026-10-25 | Closed by |
+| --- | --- |
+| Whether the owner wants the calendar week (from Monday) rather than the last seven days | the owner (question in the log entry, the seven days applied) |
+| Whether a week with one agent that reports no dollars should still say the dollars of the others, marked partial | the owner (question in the log entry, no dollars applied, as P211 does) |
+
+## 11. Delegation from GitHub Issues and Linear (`v2-j4-delegation`, issue #398)
+
+Written on 2026-10-25 by the author of issue #398 (Opus 5.5), before the lane's tests and code. Sections 8 to 10 are the lanes of pull requests 393, 395 and 399, merged into `v2` before this one. Inputs: issue #398, the [decisions log](decisions-log.md) (the entries of lanes `v2-j4-issue-mirrors`, `v2-j4-mirror-followups` and `j3-chat-launch`, and the ten ideas of 2026-10-25), the matrix (C3, D17, D18, P230 to P232, P237), [mirrors.md](mirrors.md), and sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), since `milestone-2-plan.md` has no sections 9 and 10.
+
+### 11.1 Context
+
+C3 asks for work to be handed to Cleared from Linear and GitHub Issues, Slack later. The mirrors (pull requests 384 and 390) bring an issue created on a tracker into the app as a ticket, but only one created after the mirror's first pass, and the ticket then waits in Todo: a tracker never starts a session by itself (P232). No one on the tracker can say "Cleared, take this one", and the lead never hears of the issue.
+
+### 11.2 What exists at the end, and how it is proven
 
 - **A delegation, read by each tracker.** On GitHub, the label `cleared` on an open issue, or the issue assigned to the mirror's own account. On Linear, the same label on the issue, or the issue assigned to the key's own user, in a state that is neither completed nor canceled. Who delegated and when come from the issue's events (GitHub's `labeled` and `assigned`) or its history (Linear's `addedLabelIds` and `toAssigneeId`), read with the actor rules the state uses (P231, rule 5).
 - **The mirror takes it once.** A person's delegation made after the tracker's first pass is kept in `mirror_delegations`, once per issue and time:
@@ -420,7 +467,7 @@ C3 asks for work to be handed to Cleared from Linear and GitHub Issues, Slack la
 - **Nothing is lost while the lead is off.** With no lead running, the delegation waits in its table, and is handed over at the first pass after the lead starts.
 - Proven by new cases in `test/tickets/mirror-github.test.ts` and `mirror-linear.test.ts` (the delegation each tracker reads, against its fake), `test/tickets/mirror-delegation.test.ts` (the pass: an older issue taken, a Backlog issue in Todo, an agent's label, a ticket in hand, once only, a lead not running, the settings), `test/tickets/delegation.test.ts` (the plan bound to the ticket, its approval starting it with no second ticket, the lead's line), `test/tickets/delegation-proof.test.ts` (C3's steps on both fakes, the real ticket store and the plan runner), `test/tickets/mirror-catalog.test.ts`, and a real run on the example repository `cleared-example-guestbook`, quoted in the pull request.
 
-### 10.3 Decisions this lane takes
+### 11.3 Decisions this lane takes
 
 - **The owner approves, the tracker does not.** A person on GitHub or Linear is never the owner, and nothing a tracker writes can carry the owner's signature (D18, P232). So a delegation makes the ticket and the plan, and the start waits for the owner's gesture in the app. No tracker account is linked to a user of the app, as the chat command does with `CLEARED_V2_CHAT_USERS` (P212). A start at once for linked accounts is a question for the owner, in the log entry, with this default applied.
 - **The service writes the plan, not the model.** `PlanRunner.proposeTicket` stores a one-item plan whose item is bound to the existing ticket, so the runner's approval creates no second ticket (`#createTickets` skips a bound item), and the mirror exports no second issue. Its estimate is the runner's, from the ticket's `size:<s>` label (else `s`), and its lane is the fast lane when the ticket carries the Quick label, after the services' sensitivity (decision 24). The item's body is the ticket's, with no acceptance criterion required: it is the person's text, not the model's. The lead's tools, `lead/contract.ts` and `api/types.ts` do not change.
@@ -429,19 +476,19 @@ C3 asks for work to be handed to Cleared from Linear and GitHub Issues, Slack la
 - **The label.** `CLEARED_V2_DELEGATION_LABEL`, `cleared` by default, compared without case; a name that starts with `status:` is refused, so it cannot be read as a state. The delegation is read whenever a mirror runs; `CLEARED_V2_DELEGATION=off` turns it off.
 - **The mirror's own account.** The mirror never puts the label on or assigns an issue, except when it creates one from a ticket that carries the label: such a label, put on within a minute of the mirror's own write, is not a delegation. Any other delegation by the mirror's account is a person's, as for a state (the mirrors' log entry, decision 4).
 - **Polling.** The delegation is read in the mirror's pass: no webhook, no new listener.
-- **Matrix lines.** P243 (the delegation); C3 updated. The lanes of issues #396 (C17) and #397 (M6) run beside this one: the id is checked again at each merge of `origin/v2`.
+- **Matrix lines.** P244 (the delegation); C3 updated. P243 is the week's figures' (pull request 399, issue #396); the lane of issue #397 (M6) runs beside this one, so the id is checked again at each merge of `origin/v2`.
 
-### 10.4 Out of scope
+### 11.4 Out of scope
 
 Slack (C3's "later"; the chat command is P212); a start without the owner's approval; linking a tracker's people to the app's users; removing the label or the assignee to take a delegation back (a person moves the issue instead, P232 rule 7); Linear's agent delegation (an issue delegated to an application user), which needs an OAuth application; a real Linear account.
 
-### 10.5 Files this lane owns
+### 11.5 Files this lane owns
 
 The delegation's parts of `v2/src/tickets/mirror.ts`, `mirror-tracker.ts`, `mirror-github.ts` and `mirror-linear.ts`; `v2/src/tickets/delegation.ts`; the delegation's keys of `v2/src/tickets/messages/mirror.{en,fr}.json`; `PlanRunner.proposeTicket` in `v2/src/lead/plans/runner.ts`; the wiring in `v2/src/modules/tickets.ts`; the fakes and tests named above, and the pinned tables in `test/tickets/services.test.ts`; `docs/v2/mirrors.md`; this section, its matrix lines and its log entry.
 
-### 10.6 Unknowns, and who closes them
+### 11.6 Unknowns, and who closes them
 
 | Unknown on 2026-10-25 | Closed by |
 | --- | --- |
-| Whether GitHub records a `labeled` and an `assigned` event for an issue created with them | this lane's real run on the example repository |
+| Whether GitHub records a `labeled` and an `assigned` event for an issue created with them | closed by this lane's real run on the example repository: an issue opened with the label has its `labeled` event, an assignment its `assigned` event |
 | Whether Linear's history fills `addedLabelIds` and `toAssigneeId` as its schema says, and names the actor of a label put on at creation | the owner's real trial; until then a delegation no event names is read from the issue's creator |

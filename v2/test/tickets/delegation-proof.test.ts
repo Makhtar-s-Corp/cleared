@@ -1,4 +1,4 @@
-// C3's steps (P243, docs/v2/milestone-4-plan.md section 10) on the fakes of
+// C3's steps (P244, docs/v2/milestone-4-plan.md section 11) on the fakes of
 // GitHub's REST API and Linear's GraphQL API, on loopback, never a real
 // account: a person hands an older issue over, the lead's plans hold its
 // ticket in the Inbox, the owner approves, the ticket starts, and the

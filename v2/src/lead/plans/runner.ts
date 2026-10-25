@@ -236,7 +236,7 @@ export class PlanRunner {
   }
 
   // A ticket that exists already, proposed as a one-item plan bound to it:
-  // a delegation from a tracker (tickets/delegation.ts, P243). The owner's
+  // a delegation from a tracker (tickets/delegation.ts, P244). The owner's
   // approval then creates no ticket and starts this one. Its body is the
   // person's text, so no acceptance criterion is asked of it; its size is
   // its size:<s> label, else s; its lane is the fast lane when it has the

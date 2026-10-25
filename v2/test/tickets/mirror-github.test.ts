@@ -177,7 +177,7 @@ test('an answer GitHub refuses is a TrackerError that names the request, never t
   await assert.rejects(missing.create({ title: 'x', body: '', labels: [], status: 'Todo' }), (error: unknown) => error instanceof TrackerError && /404/.test(error.message));
 });
 
-// ---- a delegation (C3, P243) ----------------------------------------------
+// ---- a delegation (C3, P244) ----------------------------------------------
 
 const delegationOf = async (since: string, number: number) => (await tracker.changed(since)).find((i) => i.id === String(number))?.delegation;
 

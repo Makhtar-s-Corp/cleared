@@ -8,7 +8,7 @@
 // (tickets/mirror.ts), started with the service when their settings name a
 // token file, and stopped with it; each ticket it writes is said on the
 // app's change stream (issue #386, P237). A delegation on a tracker (C3,
-// P243) is handed to the lead module's plans, which propose its ticket to
+// P244) is handed to the lead module's plans, which propose its ticket to
 // the owner.
 import type { DatabaseSync } from 'node:sqlite';
 import { changeHub } from '../api/events.ts';

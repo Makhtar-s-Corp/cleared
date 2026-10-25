@@ -20,7 +20,7 @@
 // last agreed on (mirror_fields); and each write in the app says its ticket
 // to the change stream (MirrorDeps.changed), so an open page redraws.
 //
-// A delegation (C3, P243): a person hands an issue over on a tracker (the
+// A delegation (C3, P244): a person hands an issue over on a tracker (the
 // delegation label, or the issue assigned to the mirror's account). The
 // mirror makes it a ticket if it is not one yet, whatever its age, and hands
 // the ticket to the lead's plans (MirrorDeps.delegate), once per issue and
@@ -84,7 +84,7 @@ export const MIRROR_TABLES: string[] = [
   ticket TEXT NOT NULL, tracker TEXT NOT NULL, local TEXT, remote TEXT NOT NULL, at TEXT NOT NULL, UNIQUE (tracker, remote)
 )`,
   'CREATE INDEX IF NOT EXISTS mirror_comments_local ON mirror_comments(tracker, local)',
-  // Each delegation (P243), once per issue and time: its ticket, and what
+  // Each delegation (P244), once per issue and time: its ticket, and what
   // the plans made of it once they were told (null until then).
   `CREATE TABLE IF NOT EXISTS mirror_delegations (
   tracker TEXT NOT NULL, issue TEXT NOT NULL, at TEXT NOT NULL, ticket TEXT NOT NULL, who TEXT NOT NULL, outcome TEXT, told_at TEXT,
@@ -525,7 +525,7 @@ export class Mirror {
     this.#paired(link.ticket, tracker.name, null, await tracker.comment(link.issue, text));
   }
 
-  // ---- a delegation (C3, P243) ----------------------------------------
+  // ---- a delegation (C3, P244) ----------------------------------------
 
   // A person's delegation made after the tracker's first pass, recorded
   // once with its ticket. The mirror's account labels an issue only when it

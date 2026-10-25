@@ -3,7 +3,7 @@
 // issue as a person or a bot through the methods, the mirror through HTTP.
 // As GitHub's, its issue events say a change of the title (`renamed`) and
 // nothing of a change of the body. An assignment is an `assigned` event
-// naming its assignee (a delegation, C3, P243).
+// naming its assignee (a delegation, C3, P244).
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 

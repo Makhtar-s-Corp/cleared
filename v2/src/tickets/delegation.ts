@@ -1,5 +1,5 @@
-// A delegation from a tracker, handed to the lead's plans (C3, P243,
-// docs/v2/milestone-4-plan.md section 10). The mirror (mirror.ts) makes the
+// A delegation from a tracker, handed to the lead's plans (C3, P244,
+// docs/v2/milestone-4-plan.md section 11). The mirror (mirror.ts) makes the
 // ticket; this proposes it as a one-item plan bound to it, which waits in
 // the Inbox for the owner as any plan does (a tracker still starts nothing,
 // P232), and tells the lead in its thread who handed it over and where.

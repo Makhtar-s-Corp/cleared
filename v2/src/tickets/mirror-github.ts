@@ -9,7 +9,7 @@
 // description, so no one is named for it (P237). Comments are read for the
 // whole repository, by their own time. An open issue with the delegation
 // label, or assigned to the token's own account, is handed over to Cleared
-// (C3, P243), by whoever the latest `labeled` or `assigned` event names, or
+// (C3, P244), by whoever the latest `labeled` or `assigned` event names, or
 // by the issue's author when no event does.
 import { DEFAULT_STATES, type TicketStates } from './contract.ts';
 import {

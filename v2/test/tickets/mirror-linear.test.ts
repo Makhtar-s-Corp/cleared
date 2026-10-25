@@ -140,7 +140,7 @@ test('a key Linear refuses, and a team it does not have, are TrackerErrors that 
   await assert.rejects(other.changed(clock.iso), (error: unknown) => error instanceof TrackerError && /OPS/.test(error.message));
 });
 
-// ---- a delegation (C3, P243) ----------------------------------------------
+// ---- a delegation (C3, P244) ----------------------------------------------
 
 const delegationOf = async (since: string, id: string) => (await tracker.changed(since)).find((i) => i.id === id)?.delegation;
 const BOT = { bot: { id: 'bot-zap', name: 'Zapier' } };

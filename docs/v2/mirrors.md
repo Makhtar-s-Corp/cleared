@@ -1,6 +1,6 @@
 # Cleared v2: the GitHub Issues and Linear mirrors
 
-The app holds the tickets. A mirror keeps a copy of them on GitHub Issues, on Linear, or on both, and brings back what people change there. With no mirror set up, the app alone is enough (D17). The code is `v2/src/tickets/mirror.ts`, `mirror-github.ts` and `mirror-linear.ts` (milestone 4, issue #381, matrix P230 to P232; the comments, the edits and the live redraw, issue #386, P237; the delegation, issue #398, C3 and P243, with `v2/src/tickets/delegation.ts`).
+The app holds the tickets. A mirror keeps a copy of them on GitHub Issues, on Linear, or on both, and brings back what people change there. With no mirror set up, the app alone is enough (D17). The code is `v2/src/tickets/mirror.ts`, `mirror-github.ts` and `mirror-linear.ts` (milestone 4, issue #381, matrix P230 to P232; the comments, the edits and the live redraw, issue #386, P237; the delegation, issue #398, C3 and P244, with `v2/src/tickets/delegation.ts`).
 
 ## Settings
 

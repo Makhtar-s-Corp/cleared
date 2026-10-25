@@ -4,7 +4,7 @@
 // real key: each token is an account of the fake. A comment does not change
 // its issue's time here: the mirror reads comments by their own. A label
 // put on and an assignment are history entries (`addedLabelIds`,
-// `toAssigneeId`), as Linear's schema names them (a delegation, C3, P243).
+// `toAssigneeId`), as Linear's schema names them (a delegation, C3, P244).
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 

@@ -1,7 +1,7 @@
 // What a tracker gives the mirror (tickets/mirror.ts): its issues changed
 // since a time, each with its state in the app's names and who made each
 // change of state, title or description, and whether it is handed over to
-// Cleared now (C3, P243); its comments since a time; and the four writes the
+// Cleared now (C3, P244); its comments since a time; and the four writes the
 // mirror makes on it. GitHub Issues (mirror-github.ts) and
 // Linear (mirror-linear.ts) implement it.
 
@@ -35,7 +35,7 @@ export type TrackerComment = {
   readonly at: string;                            // its creation
 };
 
-// An issue handed over to Cleared (C3, P243): the delegation label on it,
+// An issue handed over to Cleared (C3, P244): the delegation label on it,
 // or the issue assigned to the mirror's own account, on an issue still
 // open; who did it and when, as for a change of state.
 export type TrackerDelegation = {

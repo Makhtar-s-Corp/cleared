@@ -107,6 +107,38 @@
 .choice:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .levers-note { margin: 10px 0 0; color: var(--danger-text); font-size: var(--text-sm); }
 
+/* The week's figures (C17, issue #396), first in the main column: three
+   facts, the dollars or why there are none, each merged ticket with its
+   estimate, then a table per service that scrolls inside the panel on a phone. */
+.week h2 { margin-bottom: 2px; }
+.week-sub { margin: 0 0 12px; color: var(--text-muted); font-size: var(--text-sm); text-wrap: pretty; }
+.week-facts { display: flex; flex-wrap: wrap; gap: 6px 20px; margin: 0 0 8px; padding: 0; list-style: none; font-size: var(--text-md); font-weight: var(--weight-strong); font-variant-numeric: tabular-nums; }
+.week-dollars { margin: 0 0 12px; font-size: var(--text-sm); text-wrap: pretty; }
+.week-no-dollars, .week-failed { color: var(--text-muted); }
+.week-failed { margin: 4px 0 0; font-size: var(--text-md); }
+.week-tickets { display: flex; flex-direction: column; gap: 8px; margin: 0 0 10px; padding: 0; list-style: none; }
+.week-tickets li { padding: 8px 0 0; border-top: 1px solid var(--hairline); }
+.week-ticket-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; margin: 0; font-size: var(--text-md); }
+.week-ticket-title { min-width: 0; overflow-wrap: anywhere; }
+.week-ticket-meta { display: flex; flex-wrap: wrap; gap: 2px 6px; margin: 2px 0 0; color: var(--text-muted); font-size: var(--text-sm); }
+.week-estimates { margin: 0 0 14px; font-size: var(--text-sm); text-wrap: pretty; }
+.week-services { margin: 0 0 6px; font-size: var(--text-sm); font-weight: var(--weight-strong); }
+.week-scroll { overflow-x: auto; }
+.week-table { width: 100%; border-collapse: collapse; font-size: var(--text-md); }
+.week-table th { padding: 6px 12px 6px 0; white-space: nowrap; color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-regular); text-align: left; border-bottom: 1px solid var(--hairline); }
+.week-table td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--hairline); white-space: nowrap; }
+.week-table tr:last-child td { border-bottom: 0; }
+.week-table .n { text-align: right; }
+.week-table th:last-child, .week-table td:last-child { padding-right: 0; }
+/* On a phone the headers and the names wrap, so the five columns fit the panel without scrolling. */
+@media (max-width: 480px) {
+  .week-table { font-size: var(--text-sm); }
+  .week-table th, .week-table td { padding-right: 6px; white-space: normal; }
+  .week-table td.num { white-space: nowrap; }
+  .week-table td.dollars { white-space: normal; }
+}
+.week-table .num { font-variant-numeric: tabular-nums; }
+
 /* The harness pick's wins (issue #329), under the agents' cards: a table
    that scrolls in its own box on a phone rather than the page. */
 .wins-sub { margin: 2px 0 12px; color: var(--text-muted); font-size: var(--text-sm); text-wrap: pretty; }

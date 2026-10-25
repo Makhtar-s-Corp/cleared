@@ -160,7 +160,7 @@ A slash command `@cleared <task>` posted to `POST /hooks/chat` creates a ticket 
 
 ## GitHub Issues and Linear
 
-With `CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE` or `CLEARED_V2_MIRROR_LINEAR_TOKEN_FILE` set, the service keeps its tickets on GitHub Issues or Linear too, and brings back what people change there, every minute (P230 to P232, `src/tickets/mirror.ts`). A person's change wins over an agent's; a tracker never approves a ticket, never starts a session, and never writes as the owner. A person hands an issue over to Cleared there with the label `cleared` or by assigning it to the mirror's account: its ticket becomes a one-item plan that waits in the Inbox for your approval, and the lead is told (C3, P243). Settings, what is mirrored, the conflict rule and the delegation: [docs/v2/mirrors.md](../docs/v2/mirrors.md). Linear is tested against a fake only.
+With `CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE` or `CLEARED_V2_MIRROR_LINEAR_TOKEN_FILE` set, the service keeps its tickets on GitHub Issues or Linear too, and brings back what people change there, every minute (P230 to P232, `src/tickets/mirror.ts`). A person's change wins over an agent's; a tracker never approves a ticket, never starts a session, and never writes as the owner. A person hands an issue over to Cleared there with the label `cleared` or by assigning it to the mirror's account: its ticket becomes a one-item plan that waits in the Inbox for your approval, and the lead is told (C3, P244). Settings, what is mirrored, the conflict rule and the delegation: [docs/v2/mirrors.md](../docs/v2/mirrors.md). Linear is tested against a fake only.
 
 ## The heartbeat and the status
 
@@ -195,6 +195,16 @@ The receipt is built from structured fields only: no command output, no error te
 - **Time.** The agents' own time, each turn from its start to its end, and the ticket's time, from its first stored event to its last. Both are said as the app says a duration ("1 h 30", "1h 30m").
 - **Dollars.** Only the API-equivalent figure the harness reports (Claude Code's `total_cost_usd`), never an estimate and never euros. Codex and Cursor report none, so a ticket with one of their sessions has no dollar figure.
 - **Not counted.** The lead's turns: they serve several tickets at once, and the ledger gives no share of them to one.
+
+## The week's figures
+
+`GET /api/consumption/week?tz=<zone>` (C17, `src/consumption/week.ts`) reads the ledger and the ticket store, and writes nothing. The Consumption screen's "This week" panel shows it, over the screen's seven days in the person's zone.
+
+- **Merged.** The tickets Done now whose last move to Done in the week was the service's (the flow or the guarded merge). An issue closed on a tracker and a move by hand are not merges.
+- **Tokens and time.** Every turn finished in the week, the lead's and the questions' included, counted as the cost of a ticket is.
+- **Dollars.** Only as the harness reported them, each session's increase over the week. A week with a Codex or Cursor turn has no dollar figure, and the panel says so.
+- **Estimates.** Each merged ticket a plan estimated, its minutes against its own, never in dollars.
+- **Per service.** A session's service, else its ticket's; the lead and the questions on a row of the workspace's own, so the rows add up to the week.
 
 ## Ticket templates
 

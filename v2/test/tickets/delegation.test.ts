@@ -1,4 +1,4 @@
-// A delegated ticket in the lead's plans (C3, P243): a one-item plan bound
+// A delegated ticket in the lead's plans (C3, P244): a one-item plan bound
 // to the ticket the mirror made, proposed in the Inbox for the owner, the
 // lead told who handed it over and where; the owner's approval starts that
 // ticket and makes no second one. Over the real flow engine on the fake

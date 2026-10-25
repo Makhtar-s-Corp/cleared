@@ -21,6 +21,7 @@
 import type { LeversChange } from '../consumption/levers.ts';
 import type { TicketCost } from '../consumption/ticket-cost.ts';
 import type { Consumption, HarnessConsumption, LeverChoices, Projection, Quota } from '../consumption/usage.ts';
+import type { WeekFigures, WeekService, WeekTicket } from '../consumption/week.ts';
 import type { Decision, Harness, Role, SessionId, UserId } from '../session/contract.ts';
 import type { ContextShare, Question, SessionEvent, SessionPhase, SessionState, ToolInput } from '../session/events.ts';
 import type { Verdict } from '../session/policy.ts';
@@ -831,6 +832,8 @@ export type ApiRoutes = {
   // Milestone 3, the Consumption screen (O15): `?tz=<IANA zone>` gives the days.
   'GET /api/consumption': { readonly body: null; readonly response: Consumption };
   'POST /api/consumption/levers': { readonly body: LeversChange; readonly response: LeverChoices };
+  // Milestone 4, the week's figures (C17, issue #396).
+  'GET /api/consumption/week': { readonly body: null; readonly response: WeekFigures };
   // Milestone 3, the cost of a ticket from the ledger (P211, issue #327).
   'GET /api/tickets/:id/cost': { readonly body: null; readonly response: TicketCost };
   // Milestone 3, the production page checked after a release landed (P218, issue #334, flow/proof-routes.ts).
@@ -908,12 +911,13 @@ const routes = {
   'GET /api/events': true,
   'GET /api/consumption': true,
   'POST /api/consumption/levers': true,
+  'GET /api/consumption/week': true,
   'GET /api/tickets/:id/cost': true,
   'GET /api/tickets/:id/production': true,
   'GET /api/tickets/:id/captures': true,
   'POST /api/tickets/:id/captures': true,
 } satisfies Record<ApiRoute, true>;
-export type { Consumption, HarnessConsumption, LeverChoices, LeversChange, Projection, Quota, TicketCost };
+export type { Consumption, HarnessConsumption, LeverChoices, LeversChange, Projection, Quota, TicketCost, WeekFigures, WeekService, WeekTicket };
 export const API_ROUTES = Object.keys(routes) as ApiRoute[];
 
 // The preview route: lane 15 serves it (container/preview.ts), not the flow's API.
@@ -938,8 +942,8 @@ export const TERMINAL_ROUTES: readonly ApiRoute[] = [   // lane 31, terminal/ an
   'GET /api/sessions/:id/terminal/stream', 'PUT /api/sessions/:id/files/*',
 ];
 
-// The routes of the Consumption screen (milestone 3, O15) and a ticket's cost (P211): the lead module's, with the schedules'.
-export const CONSUMPTION_ROUTES: readonly ApiRoute[] = ['GET /api/consumption', 'POST /api/consumption/levers', 'GET /api/tickets/:id/cost'];
+// The routes of the Consumption screen (milestone 3, O15), its week's figures (C17) and a ticket's cost (P211): the lead module's, with the schedules'.
+export const CONSUMPTION_ROUTES: readonly ApiRoute[] = ['GET /api/consumption', 'POST /api/consumption/levers', 'GET /api/consumption/week', 'GET /api/tickets/:id/cost'];
 
 // The routes milestone 2 adds: the lead module's (lanes 5 and 7), not the flow's.
 export const MILESTONE_2_ROUTES: readonly ApiRoute[] = API_ROUTES.filter((route) => route.includes('/api/lead') || route.includes('/api/plans'));

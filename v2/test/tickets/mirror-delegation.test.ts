@@ -1,4 +1,4 @@
-// A delegation in the mirror's pass (C3, P243, docs/v2/mirrors.md): a
+// A delegation in the mirror's pass (C3, P244, docs/v2/mirrors.md): a
 // person hands an issue over on a tracker, the mirror makes it a ticket
 // once, whatever its age, and hands that ticket to the lead's plans; an
 // agent's delegation does nothing, and nothing is lost while the lead is off.

@@ -7,7 +7,7 @@
 // description (P237). Comments are read for the team, by their own time.
 // An issue with the delegation label, or assigned to the key's own user, in
 // a state neither completed nor canceled, is handed over to Cleared (C3,
-// P243), by whoever the latest history entry that put it on names
+// P244), by whoever the latest history entry that put it on names
 // (`addedLabelIds`, `toAssigneeId`), or by the issue's creator.
 // Proven against a fake of the API only; a real trial is the owner's
 // (docs/v2/mirrors.md).
