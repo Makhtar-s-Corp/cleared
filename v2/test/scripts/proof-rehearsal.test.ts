@@ -10,11 +10,12 @@ import { parseVerdict } from '../../src/flow/prompts.ts';
 import { parseRehearsalScript, type LeadRule } from '../../src/session/adapters/index.ts';
 import { LOGIN_WAIT, PLANTED } from '../../scripts/proof-report.ts';
 import { serviceTurn } from '../../src/lead/prompts.ts';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readApprovalRecord } from '../../src/approval/record.ts';
-import { REHEARSAL_PLAN, RESERVED_PORTS, brokerRequest, ghStub, freePort, rehearsalScript, writeValidation, type Forge } from '../../scripts/proof-rehearsal.ts';
+import { REHEARSAL_PLAN, RESERVED_PORTS, brokerRequest, ghStub, freePort, rehearsalScript, writeNodeStub, writeSendmailStub, writeValidation, type Forge } from '../../scripts/proof-rehearsal.ts';
 
 const DUE = '2026-10-23T06:00:00.000Z';
 const script = rehearsalScript({ due: DUE });
@@ -83,6 +84,30 @@ test('the gh stand-in opens one pull request per branch, lists the open one, pas
   assert.equal(gh('pr', 'merge', '101').code, 1);
   assert.equal(gh('api', 'user').code, 1);
   assert.equal(gh('pr', 'checks', '999', '--json', 'bucket').code, 1);
+});
+
+test('a stand-in on PATH is the script itself run by Node, in one process, with its words, the caller\'s arguments, input and exit code (D11)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cleared-v2-stub-'));
+  try {
+    const script = join(dir, 'target.mjs');
+    writeFileSync(script, "import { readFileSync } from 'node:fs';\nprocess.stdout.write(JSON.stringify({ argv: process.argv.slice(1), pid: process.pid, input: readFileSync(0, 'utf8') }));\nprocess.exit(3);\n");
+    const stub = join(dir, 'gh');
+    writeNodeStub(stub, script, ['gh-stub', 'a forge.json']);
+    assert.ok(readFileSync(stub, 'utf8').startsWith(`#!${process.execPath} `), 'Node runs it, no shell');
+    const ran = spawnSync(stub, ['pr', 'view', '1 2'], { input: 'body', encoding: 'utf8' });
+    assert.equal(ran.status, 3);
+    assert.deepEqual(JSON.parse(ran.stdout), { argv: [script, 'gh-stub', 'a forge.json', 'pr', 'view', '1 2'], pid: ran.pid, input: 'body' });
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('the sendmail stand-in appends each message to the mail file after a dated line, in Node (D11)', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cleared-v2-mail-'));
+  try {
+    const mail = join(dir, 'mail.log');
+    writeSendmailStub(dir, mail);
+    for (const body of ['To: a\n\nfirst\n', 'To: b\n\nsecond\n']) assert.equal(spawnSync(join(dir, 'sendmail'), ['-t'], { input: body }).status, 0);
+    assert.match(readFileSync(mail, 'utf8'), /^---- \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\nTo: a\n\nfirst\n---- \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\nTo: b\n\nsecond\n$/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
 test('the lock stand-in reads the requests of release-request.mjs and of the approval\'s broker client', () => {

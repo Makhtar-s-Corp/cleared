@@ -99,7 +99,7 @@ Every requirement of the brief (the orchestrator's prompt and the owner's decisi
 | D8 | Review is a session like the others, visible, another model | 1 | 150 | `test/flow/review.test.ts` | done |
 | D9 | A goal to the lead from the first version: a plan proposed, validated, run alone | 2 | 172 | `test/lead/plans/runner.test.ts` | done |
 | D10 | One container per team, Docker mandatory; the service alone talks to Docker; test services as siblings | 1 | 129 | `test/container/docker.test.ts` | done |
-| D11 | Node for the whole core, no bash; the rest migrated along the way | 0 then 4 | 120 | CI | partial (the v1 scripts go in milestone 4) |
+| D11 | Node for the whole core, no bash; the rest migrated along the way | 0 then 4 | 120; 364 (lane `j3-no-bash-core`: the lock harness's fake `gh` and `docker`, the rehearsal's stand-ins and the doctor's example seed in Node) | CI; `test/no-bash.test.ts` (`v2/` tracks and writes no bash script, its tests included; its core starts no shell on the host), `test/scripts/proof-rehearsal.test.ts` (the stand-ins in Node) | partial (`v2/` is done, with two exceptions the test names: util-linux's `script`, which runs the web terminal's docker client with `sh -c`, and the commands run inside a session's container. What is left is v1's, milestone 4: its 39 `.sh` files, and the v1 release broker that v2 still asks (`src/flow/effects.ts` through `release-request.mjs`, `src/approval/broker.ts`, `src/release/lock.ts`), which runs `merge-pr.sh` and `ask-validation.sh`; the approval tests drive the same scripts (`test/approval/harness.ts`)) |
 | D12 | Keep what serves, drop the rest, as listed | 0 | 118 | `docs/v2/keep-and-drop.md` | done |
 | D13 | Claude Code first, Codex next on the same contract | 1, 3 | 143; 300 (lane j3-codex-harness: the Codex adapter) | `doctor claude-code`; `test/session/codex/*.test.ts` | partial (Codex on the same contract, proven with fakes only: its real trial is the owner's; no flow path starts a Codex session yet) |
 | D14 | One server, Docker Compose, one-command install; the installer is part of the product | 5 | | | later (milestone 5) |
@@ -392,3 +392,4 @@ Rule 2, read on 2026-10-25 at `0baaf81`, then read again at `origin/v2` `292ec62
 
 - B5.9d and D17: milestone 4 (B5.9d by the owner's decision of 2026-10-25, option C: the v1 passkey code stays until then; B2.2 is `done`, pull request 362).
 - B5.11b: milestone 4, the kept v1 JavaScript (`lib/notify/contract.mjs` among it), converted with v1.
+- D11: milestone 4, v1's bash scripts; `merge-pr.sh` and `ask-validation.sh`, which v2's release requests still reach through the v1 release broker, move to Node first.
