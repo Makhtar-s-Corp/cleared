@@ -68,17 +68,20 @@ name = Cleared
 `;
 }
 
-const FAKE_GH = `#!/usr/bin/env bash
-dir="$FAKE_DIR"
-case "$1 $2" in
-  "pr view") cat "$dir/pr-view.json" ;;
-  "pr merge") printf '%s\\n' "$@" > "$dir/pr-merged" ;;
-  "run list") echo '[]' ;;
-  "pr list") echo '[]' ;;
-  "api "*) echo 2020-01-01T00:00:00Z ;;
-  *) echo 0 ;;
-esac
-`;
+// The fake gh and docker of the lock's scripts, in Node (D11).
+const FAKE_GH = [
+  `#!${process.execPath}`,
+  "const fs = process.getBuiltinModule('node:fs');",
+  'const dir = process.env.FAKE_DIR;',
+  'const args = process.argv.slice(2);',
+  "const command = (args[0] ?? '') + ' ' + (args[1] ?? '');",
+  "if (command === 'pr view') process.stdout.write(fs.readFileSync(dir + '/pr-view.json'));",
+  "else if (command === 'pr merge') fs.writeFileSync(dir + '/pr-merged', args.map((arg) => arg + '\\n').join(''));",
+  "else if (command === 'run list' || command === 'pr list') process.stdout.write('[]\\n');",
+  "else if (command.startsWith('api ')) process.stdout.write('2020-01-01T00:00:00Z\\n');",
+  "else process.stdout.write('0\\n');",
+  '',
+].join('\n');
 
 export type Lock = ReturnType<typeof lockBox>;
 
@@ -91,7 +94,7 @@ export function lockBox(options: { socket?: boolean } = {}) {
   const repo = join(dir, 'repo');
   for (const path of [state, fake, join(dir, 'bin'), home, join(dir, 'proc-none')]) mkdirSync(path, { recursive: true, mode: 0o700 });
   writeFileSync(join(dir, 'bin', 'gh'), FAKE_GH, { mode: 0o755 });
-  writeFileSync(join(dir, 'bin', 'docker'), '#!/usr/bin/env bash\n', { mode: 0o755 });
+  writeFileSync(join(dir, 'bin', 'docker'), `#!${process.execPath}\n`, { mode: 0o755 });
   writeFileSync(join(fake, 'github-status.json'), JSON.stringify({ components: ['Git Operations', 'Pull Requests', 'Actions', 'API Requests', 'Webhooks'].map((name) => ({ name, status: 'operational' })) }));
   const keys = keyPair();
   const keyFile = join(dir, 'approval.key');

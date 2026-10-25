@@ -997,7 +997,8 @@ async function workspaceSection(build: boolean): Promise<void> {
     const bare = join(scratch, 'forge', `${name}.git`);
     const work = join(scratch, 'seed', name);
     mkdirSync(work, { recursive: true });
-    execFileSync('sh', ['-c', `git -C "$1" archive HEAD "examples/${name}" | tar -x --strip-components=2 -C "$2"`, 'sh', join(V2, '..'), work]);
+    const tree = execFileSync('git', ['-C', join(V2, '..'), 'archive', 'HEAD', `examples/${name}`], { maxBuffer: 256 * 1024 * 1024 });
+    execFileSync('tar', ['-x', '--strip-components=2', '-C', work], { input: tree });
     for (const [path, text] of Object.entries(extra)) {
       mkdirSync(dirname(join(work, path)), { recursive: true });
       writeFileSync(join(work, path), text);
