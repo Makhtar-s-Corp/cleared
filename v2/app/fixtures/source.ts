@@ -25,12 +25,14 @@
 // its flow only moves a ticket to In Progress, and each read runs a pass.
 // A ticket's cost (P211) is the service's own ticketCost over the ledger
 // that holds the ticket's sessions; with `resolved`, the landed ticket
-// LOCAL-149 has its author's and its reviewer's sessions (fixtures/cost.ts).
+// LOCAL-149 has its author's and its reviewer's sessions (fixtures/cost.ts),
+// and its production page's check (P218), read by the service's own reader.
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { KEEPALIVE_MS } from '../../src/api/events.ts';
 import { changeFrame, leadFrame, sseFrame, type Ask, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
 import { ticketCost } from '../../src/consumption/ticket-cost.ts';
+import { productionChecksOf } from '../../src/flow/production.ts';
 import { BatchError, BatchRunner } from '../../src/flow/batch.ts';
 import { changedFiles } from '../../src/flow/files.ts';
 import type { SessionState } from '../../src/session/events.ts';
@@ -84,6 +86,8 @@ export type FixtureSource = DataSource & {
   changed(kind: ChangeKind, id: string | null): void; ask(item: QuestionItem): void;
   lanes(n: number | null): void; quota(percent: number): void;
 };
+
+const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 
 export async function fixtureSource(options: { readonly now?: () => Date; readonly project?: string; readonly resolved?: boolean } = {}): Promise<FixtureSource> {
   const now = options.now ?? (() => new Date());
@@ -345,6 +349,15 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
       if (method === 'GET' && sub === 'cost' && parts.length === 3) {
         const ticket = decodeURIComponent(id ?? '');
         return sendJson(response, 200, ticketCost(ledgerOf(ticket).db, { project, ticket }));
+      }
+      // The production page's checks (P218), and its capture: a blank PNG of one pixel.
+      if (method === 'GET' && sub === 'production' && parts.length === 3) {
+        const ticket = decodeURIComponent(id ?? '');
+        return sendJson(response, 200, productionChecksOf(ledgerOf(ticket), ticket, workspaceFixture(project).services.map((s) => s.name)));
+      }
+      if (method === 'GET' && sub === 'proof' && parts.length === 5 && parts[4] === 'production.png' && productionChecksOf(ledgerOf(decodeURIComponent(id ?? '')), decodeURIComponent(id ?? ''), [decodeURIComponent(parts[3] ?? '')]).some((c) => c.file)) {
+        response.writeHead(200, { 'content-type': 'image/png', 'content-length': String(PIXEL.length), 'cache-control': 'no-store' });
+        return void response.end(PIXEL);
       }
       if (method === 'GET' && parts.length === 2) {
         const ticket = (await all()).find((t) => t.id === id);

@@ -7,7 +7,7 @@
 // The browser may only `import type` from v2/src, so the names of the AG-UI
 // subset are copied here and a test keeps the copy equal to EVENT_TYPES.
 import type { Interrupt } from '@ag-ui/core';
-import type { SessionPlan, SessionSummary, TakenOver, TicketCost, TicketStep } from '../../../../src/api/types.ts';
+import type { ProductionCheck, SessionPlan, SessionSummary, TakenOver, TicketCost, TicketStep } from '../../../../src/api/types.ts';
 import type { Decision } from '../../../../src/session/contract.ts';
 import type { AgUiEvent, CustomValue, JsonPatchOperation, Question, SessionEvent, SessionPhase, SessionState, ToolInput, ToolOutput } from '../../../../src/session/events.ts';
 import type { Verdict } from '../../../../src/session/policy.ts';
@@ -483,6 +483,7 @@ export type SessionView = {
   readonly takenOver?: TakenOver | null;                  // what this tab knows of the take over, newer than the summary's
   readonly steps?: readonly TicketStep[] | null;          // the ticket's steps across services (lane 27); absent until read
   readonly cost?: TicketCost | null;                      // a resolved ticket's cost from the ledger (P211); absent until read
+  readonly production?: readonly ProductionCheck[] | null; // a resolved ticket's production page, checked after its release landed (P218); absent until read
   // The view of the ticket (lane 36, ticket.ts): its sessions with their
   // threads, this one among them, and the thread's filter. Absent: this
   // session alone, the whole thread.

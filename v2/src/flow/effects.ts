@@ -17,7 +17,7 @@ import type { ServiceConfig } from '../workspace/config.ts';
 import type { Ticket } from '../tickets/contract.ts';
 import { failedChecks, jobOf, logTail } from './ci-repair.ts';
 import { closePullRequest } from './pr-close.ts';
-import { captureProof, playwrightBrowser, proofTargets, type ProofTarget } from './proof-capture.ts';
+import { captureProduction, captureProof, playwrightBrowser, proofTargets, type ProofTarget } from './proof-capture.ts';
 import { parseConf, projectSettings, workspaceOf, type FlowConfig } from './config.ts';
 import type { FlowEffects } from './engine.ts';
 
@@ -289,6 +289,11 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       const targets = proofTargets(service, options.preview?.(session));
       const browser = targets.before || targets.after ? await playwrightBrowser(env) : undefined;
       return captureProof({ browser, dir, ...targets });
+    },
+
+    // The production page once a release landed healthy (P218): a read, never a deploy.
+    async captureProduction({ url, dir }) {
+      return captureProduction({ browser: await playwrightBrowser(env), url, dir });
     },
 
     // gh exits 8 while a check is pending, and prints the list all the same.

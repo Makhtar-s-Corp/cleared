@@ -107,6 +107,11 @@ export type ProjectSettings = {
   // (QUESTION_DEFAULTS; 'recommended' otherwise).
   readonly questionTimeoutMinutes?: number;
   readonly questionDefault?: QuestionDefault;
+  // [release] production_url, when set: the page the flow opens and
+  // captures once a release it merged after the human's approval is
+  // deployed and its watch ended healthy (P218, flow/proof-capture.ts
+  // captureProduction). Never the health address: the configured page only.
+  readonly productionUrl?: string;
 };
 
 // What a question's delay ends on when neither the owner nor the lead
@@ -137,6 +142,7 @@ export function projectSettings(sections: Sections, scripts: readonly string[] =
   const testCommand = testCommandOf(sections.session?.test_command, scripts);
   const questionTimeoutMinutes = positive(sections.session?.question_timeout_minutes, '[session] question_timeout_minutes', false);
   const questionDefault = questionDefaultOf(sections.session?.question_default);
+  const productionUrl = productionUrlOf(sections.release?.production_url);
   return {
     verdict, safeCommands: list(sections.session?.safe_commands), hosts: list(sections.session?.hosts), services, scripts,
     ...(planGoMinutes === undefined ? {} : { planGoMinutes }),
@@ -145,7 +151,20 @@ export function projectSettings(sections: Sections, scripts: readonly string[] =
     ...(testCommand === undefined ? {} : { testCommand }),
     ...(questionTimeoutMinutes === undefined ? {} : { questionTimeoutMinutes }),
     ...(questionDefault === undefined ? {} : { questionDefault }),
+    ...(productionUrl === undefined ? {} : { productionUrl }),
   };
+}
+
+// An http or https address with no user and no password: the capture is
+// read by anyone who opens the ticket, and the message never repeats it.
+function productionUrlOf(value: string | undefined): string | undefined {
+  const text = value?.trim();
+  if (!text) return undefined;
+  let url: URL | undefined;
+  try { url = new URL(text); } catch { url = undefined; }
+  if (!url || (url.protocol !== 'http:' && url.protocol !== 'https:')) throw new FlowConfigError('[release] production_url must be an http or https address');
+  if (url.username || url.password) throw new FlowConfigError('[release] production_url carries credentials: give the page\'s address without them');
+  return text;
 }
 
 function questionDefaultOf(value: string | undefined): QuestionDefault | undefined {

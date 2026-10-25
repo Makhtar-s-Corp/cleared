@@ -91,7 +91,7 @@
 // then the card says the checks still fail and the owner decides. A train
 // is not repaired.
 import { posix } from 'node:path';
-import { VARIANT_DIFF_MAX, VARIANTS_MAX, VARIANTS_MIN, type CiRepair, type InboxItem, type PermissionItem, type QuestionItem, type QuestionTimeout, type ReleaseItem, type SessionDetail, type SessionPlan, type SessionSummary, type TakenOver, type TicketStep, type TicketVariant } from '../api/types.ts';
+import { VARIANT_DIFF_MAX, VARIANTS_MAX, VARIANTS_MIN, type CiRepair, type InboxItem, type PermissionItem, type ProductionCheck, type QuestionItem, type QuestionTimeout, type ReleaseItem, type SessionDetail, type SessionPlan, type SessionSummary, type TakenOver, type TicketStep, type TicketVariant } from '../api/types.ts';
 import { isSessionId } from '../container/docker.ts';
 import type { SiblingSpec } from '../container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
@@ -129,8 +129,9 @@ import { sessionsCost } from '../consumption/ticket-cost.ts';
 import { GIVEN_BACK, GIVEN_BACK_REVIEW, TAKEN_OVER } from './takeover.ts';
 import { NO_ANSWER, answerMessage, channelOf, channelPrompt, lastSaid, verdictsOf, type ChannelMessage } from './channel.ts';
 import { testComment, testLine, testRunOf } from './review-tests.ts';
-import type { ProofCapture } from './proof-capture.ts';
-import { PROOF_FILES } from './proof-capture.ts';
+import type { ProductionCapture, ProofCapture } from './proof-capture.ts';
+import { PRODUCTION_FILE, PROOF_FILES } from './proof-capture.ts';
+import { productionChecksOf, productionComment } from './production.ts';
 import type { ReceiptCapture, ReceiptData, ReceiptTest } from './receipt.ts';
 import { ticketCost } from '../consumption/ticket-cost.ts';
 import { CI_REPAIR_ATTEMPTS, onBase, repairComment, repairMessage, type CiFailures } from './ci-repair.ts';
@@ -172,6 +173,13 @@ export type FlowEffects = {
   // author's session still runs. Never throws in the real one; a throw here
   // is journaled as failed. Absent: no capture is taken.
   captureProof?(input: { readonly ticket: TicketId; readonly session: SessionId; readonly service: ServiceConfig; readonly dir: string }): Promise<ProofCapture>;
+  // The production page at `url`, the service's [release] production_url,
+  // captured in `dir` once a release the human approved is deployed (by the
+  // human or their CI) and its watch ended healthy (P218,
+  // flow/proof-capture.ts captureProduction): its requests are reads of its
+  // own origin. Never throws in the real one. Absent: nothing is captured.
+  // Cleared has no effect that deploys (test/flow/never-deploys.test.ts).
+  captureProduction?(input: { readonly url: string; readonly dir: string }): Promise<ProductionCapture>;
   // The lock's `--ask` request; the request time the lock recorded, when it says one.
   requestRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<{ readonly requestedAt?: string }>;
   prChecks(pr: number, service?: ServiceConfig): Promise<ReleaseItem['pr']['checks']>;   // the pull request's checks on the forge now
@@ -814,6 +822,8 @@ export class FlowEngine {
   #emit(event: FlowEvent): void {
     // A merge, one-service or of a train, makes the project pages again (issue #274).
     if (event.type === 'release_merged') this.#pagesAfter(event.ticket, event.pr);
+    // A landing opens the production page each service configures (P218).
+    if (event.type === 'release_landed') this.#productionAfter(event);
     const failed = (error: unknown) => console.error(`cleared-v2: a flow listener failed on ${event.type} (${error instanceof Error ? error.name : typeof error})`);
     for (const listener of [...this.#listeners]) {
       try {
@@ -2838,13 +2848,83 @@ export class FlowEngine {
   }
 
   // A capture of the receipt as a file, for the app's link
-  // (GET /api/tickets/:id/proof/:service/:file): one of the three names, of a
+  // (GET /api/tickets/:id/proof/:service/:file): one of the three names, or
+  // the production page's (P218), of a
   // service of the workspace, of a ticket the store knows; a plain file.
   async proofFile(ticket: TicketId, service: string, file: string): Promise<string | undefined> {
-    if (!(Object.values(PROOF_FILES) as string[]).includes(file)) return undefined;
+    if (!(Object.values(PROOF_FILES) as string[]).includes(file) && file !== PRODUCTION_FILE) return undefined;
     if (!this.#workspace.services.some((s) => s.name === service)) return undefined;
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(ticket) || !(await this.registry.ticketStore.get(ticket))) return undefined;
     return posix.join(this.#proofDir(ticket, service), file);
+  }
+
+  // ---- the production page after a landing (P218, issue #334) -------------
+
+  // A release landed: the human approved it, the lock merged it, the human
+  // or their CI deployed it, and its watch read the deployed version. Each
+  // of its services that configures a [release] production_url has that
+  // page captured, once its own watch ended healthy; with no health check,
+  // nothing says the deploy is done, and no page is opened. Cleared deploys
+  // nothing here: it opens a page and reads it.
+  #productionAfter(event: Extract<FlowEvent, { type: 'release_landed' }>): void {
+    const { ticket } = event;
+    const row = this.#store.db.prepare("SELECT request_id FROM flow_inbox WHERE kind = 'release' AND ticket = ? AND state = 'handled' ORDER BY since DESC, id DESC LIMIT 1").get(ticket) as { request_id?: unknown } | undefined;
+    const session = row?.request_id ? String(row.request_id) : '';
+    if (!session) return;
+    let landed: { readonly service: ServiceConfig; readonly pr: number; readonly health: 'healthy' | 'unwatched' | undefined }[];
+    try {
+      landed = event.services
+        ? (this.#trains.latest(ticket)?.stops ?? []).map((stop) => {
+          const landing = landingOf(this.#store.db, { ticket, pr: stop.pr.number, since: stop.askedAt ?? stop.mergedAt ?? event.at, ...(stop.mergedAt ? { mergedHere: stop.mergedAt } : {}) });
+          return { service: this.#service(stop.service), pr: stop.pr.number, health: landing.state === 'landed' ? landing.health : undefined };
+        })
+        : [{ service: this.#workspace.services[0] as ServiceConfig, pr: event.pr, health: event.health }];
+    } catch (error) {
+      console.error(`cleared-v2: the production page of ${ticket} was not checked (${error instanceof Error ? error.name : typeof error})`);
+      return;
+    }
+    for (const one of landed) {
+      void this.#track(this.#checkProduction({ id: session, ticket, project: event.project }, one)
+        .catch((error: unknown) => { console.error(`cleared-v2: the production page of ${one.service.name} was not checked after pull request #${one.pr} (${error instanceof Error ? error.name : typeof error})`); }));
+    }
+  }
+
+  async #checkProduction(session: { readonly id: SessionId; readonly ticket: TicketId; readonly project: string }, landed: { readonly service: ServiceConfig; readonly pr: number; readonly health: 'healthy' | 'unwatched' | undefined }): Promise<void> {
+    const { service, pr, health } = landed;
+    if (health === undefined) return;
+    const filed = this.#store.events.after(session.id).some(({ event }) => event.type === 'CUSTOM' && event.name === 'cleared.production_checked' && event.value.service === service.name);
+    if (filed) return;
+    const url = (await this.#effects.settings(this.#several ? service : undefined)).productionUrl;
+    const capture = this.#effects.captureProduction;
+    if (!url || !capture) return;
+    let got: ProductionCapture | { readonly missing: 'unwatched' };
+    if (health === 'unwatched') got = { missing: 'unwatched' };
+    else {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        // A browser that hangs is given up after the cap, as the receipt's is.
+        const late = new Promise<ProductionCapture>((resolve) => { timer = setTimeout(() => resolve({ missing: 'failed' }), this.config.proofTimeoutMs ?? PROOF_TIMEOUT_MS); });
+        got = await Promise.race([capture({ url, dir: this.#proofDir(session.ticket, service.name) }), late]);
+      } catch {
+        got = { missing: 'failed' };
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+    const address = new URL(url);
+    const check: ProductionCheck = {
+      service: service.name, pr, url: `${address.origin}${address.pathname}`, at: this.#at(),
+      file: 'file' in got ? PRODUCTION_FILE : null, missing: 'missing' in got ? got.missing : null,
+    };
+    this.#journal(session, { type: 'CUSTOM', name: 'cleared.production_checked', value: check });
+    await this.registry.ticketStore.comment(session.ticket, this.#clean(productionComment(check)), SERVICE).catch(() => undefined);
+  }
+
+  // The last check of each service of the ticket, in the workspace's order;
+  // undefined for a ticket the store does not know.
+  async productionChecks(ticket: TicketId): Promise<ProductionCheck[] | undefined> {
+    if (!(await this.registry.ticketStore.get(ticket))) return undefined;
+    return productionChecksOf(this.#store, ticket, this.#workspace.services.map((s) => s.name));
   }
 
   // ---- a pass: publish, record, ask the lock -------------------------------
