@@ -125,6 +125,8 @@ button, input, textarea { font: inherit; color: inherit; }
 .muted { color: var(--text-muted); } .faint { color: var(--text-faint); } .small { font-size: var(--text-sm); }
 .id { font: var(--weight-regular) var(--text-sm)/1.4 var(--mono); color: var(--text-faint); white-space: nowrap; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* A live line that says nothing yet stays in the page, taking no room, so its message is read out when it comes. */
+:is(.choice-note, .plan-note):empty { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 @media (forced-colors: active) { :focus-visible { outline-color: Highlight; } }
 
 /* shell: the sidebar beside the main column, or a top bar and a bottom bar on a phone */

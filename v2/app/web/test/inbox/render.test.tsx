@@ -39,7 +39,8 @@ test('the list reads as the capture: what waits, with its time, then what was ha
     'Question', '1h', QUESTION_TEXT, 'LOCAL-164 · the team recommends: Show “Anonymous”',
     'Handled · 1',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
-  assert.doesNotMatch(renderInbox(viewOf(), en), /<h1/, 'no heading repeats the top bar\'s');
+  // No heading repeats the top bar's on screen; the screen's one is read out (P224), as the sessions index's.
+  assert.deepEqual([...renderInbox(viewOf(), en).matchAll(/<h1[^>]*>[^<]*<\/h1>/g)].map((m) => m[0]), ['<h1 class="sr-only">Inbox</h1>']);
   assert.ok(!shown.includes('Install date-fns to group dates by week'), 'the title is the app\'s sentence, not the harness\'s');
   const html = renderInbox(viewOf(), en);
   const order = (markup: string) => [...markup.matchAll(/data-item="([^"]+)"/g)].map((m) => m[1]?.split(':')[0]);

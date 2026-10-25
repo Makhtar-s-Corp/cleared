@@ -99,6 +99,8 @@
 .facts dt { color: var(--text-faint); }
 .facts dd { margin: 0; color: var(--text-secondary); overflow-wrap: anywhere; }
 .facts .sep { margin: 0 6px; color: var(--text-faint); }
+/* A link in a line of text is underlined: its colour alone does not tell it from the words around it (WCAG 1.4.1). */
+.facts dd a[href], a.stop-pr { text-decoration: underline; }
 
 /* a permission (lane 37): the question, then its answers at the top of the detail, at every width; the command
    folded under, one part per line after its operator */

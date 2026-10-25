@@ -421,11 +421,12 @@ function Shell({ shared }: { readonly shared: Shared }) {
           waiting={waiting} lead={leadDot(lead)} groups={groups} theme={theme} onTheme={flipTheme} language={language} onLanguage={pickLanguage}
           onSearch={openPalette} onToggle={toggleSidebar} onSignOut={onSignOut} onPick={onPick} />
         <div className="main">
-          <div className="top-bar" id="top-bar">
+          {/* The bar names the screen: the page's banner, so nothing on it lies outside a landmark. */}
+          <header className="top-bar" id="top-bar">
             <p className="top-title">{shownRow ? <><a className="crumb" href="/sessions">{t('title_session')}</a><span className="crumb" aria-hidden="true">/</span></> : null}<span className="here">{here}</span></p>
             {/* The sample data says so on every screen of a computer; a phone's top bar says it (Sidebar.tsx). */}
             {start.source === 'fixtures' ? <div className="top-actions"><p className="source-pill" id="source-pill">{t('source_fixtures')}</p></div> : null}
-          </div>
+          </header>
           <p className="sr-only" role="status" aria-live="polite" id="screen-said" ref={said} />
           <main id="screen" className="screen" tabIndex={-1}>
             {place.session ? null : <Fragment key={place.screen === 'ask' ? place.path : place.screen}>{host(place.screen, place.path)}</Fragment>}

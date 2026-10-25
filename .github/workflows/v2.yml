@@ -87,7 +87,8 @@ jobs:
       - name: Browser tests
         # The browser tests of app/test, run with the installed package and its Chromium: eight, and lane 34's
         # (the tab-switch budget, three runs in CI, and the session stack and the screens' boundary), and lane 35's (the
-        # palette, the keys and the sidebar). The TAP output is
+        # palette, the keys and the sidebar), and P224's (axe on the main screens, light and dark, French and English, 1440
+        # and 390 px, and Close by keyboard). The TAP output is
         # kept for the summary. Every test that ran must pass, none may be skipped, and there must be at least as many tests
         # as listed files, so an emptied file or a failed run fails the job without a fixed count to keep up to date.
         # The tab-switch budget runs alone, once the others have ended: run beside them, it measured their browsers'
@@ -106,7 +107,8 @@ jobs:
             app/test/consumption/wins-browser.test.ts app/test/redesign/redesign-browser.test.ts
             app/test/ask/citations-browser.test.ts app/test/inbox/mobile-browser.test.ts
             app/test/session/production-browser.test.ts test/flow/production-capture.test.ts
-            app/test/session/plan-ask-browser.test.ts app/test/polish/phone-fit-browser.test.ts app/test/foundation/switch-work-browser.test.ts"
+            app/test/session/plan-ask-browser.test.ts app/test/polish/phone-fit-browser.test.ts app/test/foundation/switch-work-browser.test.ts
+            app/test/a11y-browser.test.ts"
           alone="app/test/foundation/budget-browser.test.ts"
           node --test --test-reporter=tap $files | tee "$RUNNER_TEMP/browser.tap" || true
           node --test --test-reporter=tap $alone | tee -a "$RUNNER_TEMP/browser.tap" || true

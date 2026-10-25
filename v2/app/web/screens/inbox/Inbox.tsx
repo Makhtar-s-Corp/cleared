@@ -28,7 +28,7 @@ import { focusOf } from '@/shell/Shortcuts.tsx';
 import {
   ROW_ANSWERS_MIN, closesOnEscape, foldOf, foldOpen, inboxKey, permissionAsk, permissionTitle, reasonOf, rowAnswers, type Answer,
   CHANGE_MAX, CHECKS, GRACE_MS, SEND_BACK_MAX, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approveContract, approveKnowledge, approvePlan,
-  changeMessage, chooseVariant, chosen, chosenLine, clock, deadlineLine, decidedLine, decisionFor, detailKey, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
+  changeMessage, chooseVariant, chosen, chosenLine, clock, deadlineLine, decisionFor, detailKey, doneLine, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
   kept, known, laneLine, ordered, outcomeLine, pausedLine, planChange, planGo, planOf, readPlan, rejectKnowledge, releaseSession, sameOrigin, sendBack, sendBackContract, sendBackMessage,
   repairLine, sessionLink, sessionOf, sessionsLine, shareLine, short, variantFacts, variantHarness, variantTests,
   ticketTitle, trainLine, stopState, undoApproval, type Gesture, type InboxView, type Item, type Local,
@@ -537,16 +537,8 @@ export function Actions({ item, view, t, note = '', reason = '', ready = false, 
     <Button variant={primary ? 'ink' : 'outline'} className={primary ? 'btn primary' : 'btn'} data-act={name} disabled={disabled} onClick={() => onAct?.(name)} {...extra}>{label}</Button>
   );
   const signed = <span className="signed">{t('signed_in', { name: view.me.name })}</span>;
-  if (local?.kind === 'settled') return done(t('settled'));
-  if (local?.kind === 'answered') return done(t(`answered_${local.decision}`));
-  if (local?.kind === 'approved') return done(t('approved', { time: clock(local.at) }));
-  if (local?.kind === 'sent_back') return done(t('sent_back', { time: clock(local.at) }));
-  if (local?.kind === 'closed') return done(t('closed_done', { time: clock(local.at) }));
-  if (local?.kind === 'plan_approved') return done(t('approved_plan', { time: clock(local.at) }));
-  if (local?.kind === 'plan_go') return done(t('plan_go_done', { time: clock(local.at) }));
-  if (local?.kind === 'plan_changed') return done(t('plan_changed_done', { time: clock(local.at) }));
-  if (local?.kind === 'decided' && (item.kind === 'contract' || item.kind === 'knowledge')) return done(decidedLine(local, item, t));
-  if (local?.kind === 'chosen') return done(t('variant_chosen_done', { n: local.position, time: clock(local.at) }));
+  const line = local ? doneLine(item, local, t) : undefined;
+  if (line !== undefined) return done(line);
   if (item.state === 'handled') {
     if (item.kind === 'release' && item.outcome) return done(outcomeLine(item, view, t));
     if (item.kind === 'release' && item.train) return done(t('train_no_approval', { text: trainLine(item.train, t) }));
@@ -686,6 +678,9 @@ export function Detail({ view, t, note = '', message = '', onAct, onFrame, onMes
 
 type Given = { readonly reason: string; readonly answers: Answers; readonly message: string };
 
+// The button that opened the step a gesture leaves: the focus goes back to it.
+const OPENED_BY: Readonly<Record<string, string>> = { close_keep: 'close', keep: 'send_back', plan_keep: 'plan_change', contract_keep: 'contract_send_back', undo: 'approve' };
+
 export function InboxScreen({ view, t, note = '', message = '', onAct, onFrame, onMessage, detailRef, handledOpen, onHandled, onAnswer, said = '' }: {
   readonly view: InboxView; readonly t: Translate; readonly note?: string; readonly message?: string; readonly said?: string;
   readonly onAct?: (act: string, given: Given) => void; readonly onFrame?: (frame: InboxView['frame']) => void; readonly onMessage?: (value: string) => void;
@@ -694,9 +689,12 @@ export function InboxScreen({ view, t, note = '', message = '', onAct, onFrame, 
   const list = <List view={view} t={t} handledOpen={handledOpen} onHandled={onHandled} onAnswer={onAnswer} />;
   // What an answer did, said once, from outside the detail (which is drawn again with it).
   const live = <p className="sr-only" role="status" id="inbox-live">{said}</p>;
-  if (view.items.length === 0) return <div className="inbox empty-inbox" data-open="false"><aside className="inbox-list" id="inbox-list" aria-label={t('list_label')}>{list}</aside>{live}</div>;
+  // The top bar names the screen; its heading is read out, not drawn twice (as the sessions index's).
+  const title = <h1 className="sr-only">{t('screen_title')}</h1>;
+  if (view.items.length === 0) return <div className="inbox empty-inbox" data-open="false">{title}<aside className="inbox-list" id="inbox-list" aria-label={t('list_label')}>{list}</aside>{live}</div>;
   return (
     <div className="inbox" data-open={String(view.open)}>
+      {title}
       {live}
       <aside className="inbox-list" id="inbox-list" aria-label={t('list_label')}>{list}</aside>
       <section className="detail" id="detail" tabIndex={-1} aria-label={t('detail_label')} ref={detailRef}>
@@ -844,6 +842,26 @@ export default function Inbox() {
     detail.current?.focus({ preventScroll: true });
   });
 
+  // A gesture made in the detail draws other buttons in place of the one
+  // pressed (Close's reason, Send back's question, Change's field, Undo, the
+  // outcome): once they are drawn, the focus goes to the field the gesture
+  // opened, else back to the button that opened the step it leaves, else to
+  // the first button, else to the detail, whose line says the outcome.
+  const refocus = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const box = detail.current;
+    const gesture = refocus.current;
+    if (gesture === null || !box || shownLocal?.kind === 'busy') return;
+    refocus.current = null;
+    const active = document.activeElement;
+    if (active && active !== document.body && box.contains(active)) return;
+    const opener = OPENED_BY[gesture];
+    (box.querySelector<HTMLElement>('textarea:not(:disabled)')
+      ?? (opener ? box.querySelector<HTMLElement>(`[data-act="${opener}"]`) : null)
+      ?? box.querySelector<HTMLElement>('[data-act]:not(:disabled)')
+      ?? box).focus({ preventScroll: true });
+  });
+
   const keyState = useRef({ shown: undefined as Item | undefined, visible: false, busy: false });
   useEffect(() => {
     let lastG = -Infinity;
@@ -883,11 +901,10 @@ export default function Inbox() {
       const after = await run();
       change((next) => { if (after) next.set(item.id, after); else next.delete(item.id); });
       setNote('');
-      // The answer is said once, and the detail that shows it takes the focus.
-      if (after?.kind === 'answered') {
-        setSaid(t(`answered_${after.decision}`));
-        focusDone.current = true;
-      }
+      // What it did is said once, as the detail's line says it; an answer's detail takes the focus.
+      const line = after ? doneLine(item, after, t) : undefined;
+      if (line !== undefined) setSaid(line);
+      if (after?.kind === 'answered') focusDone.current = true;
       if (gesture === 'plan_change' || gesture === 'contract_send_back' || gesture === 'close') setMessage('');
       context.inboxChanged();
       void load();                                   // the list shows the item handled at once
@@ -921,6 +938,7 @@ export default function Inbox() {
 
   const onAct = (name: string, given: Given, item: Item | undefined = shown) => {
     if (!item) return;
+    if (detail.current?.contains(document.activeElement)) refocus.current = name;
     const at = context.now();
     switch (name) {
       case 'approve':
