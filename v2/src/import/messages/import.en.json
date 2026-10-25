@@ -16,7 +16,7 @@
   "samples_would_one": "{n} ticket would join the estimates' history:",
   "samples_would_other": "{n} tickets would join the estimates' history:",
   "sample": "{ticket}: size {size}, {lane}, {time} of work, {tokens} tokens",
-  "sample_no_tokens": "{ticket}: size {size}, {lane}, {time} of work",
+  "sample_time_only": "{ticket}: size {size}, {lane}, {time} of work",
   "lane_fast": "fast lane",
   "lane_full": "full circuit",
   "samples_known_one": "{n} ticket was already imported.",

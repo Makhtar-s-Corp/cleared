@@ -16,7 +16,7 @@
   "samples_would_one": "{n} ticket rejoindrait l'historique des estimations :",
   "samples_would_other": "{n} tickets rejoindraient l'historique des estimations :",
   "sample": "{ticket} : taille {size}, {lane}, {time} de travail, {tokens} jetons",
-  "sample_no_tokens": "{ticket} : taille {size}, {lane}, {time} de travail",
+  "sample_time_only": "{ticket} : taille {size}, {lane}, {time} de travail",
   "lane_fast": "voie rapide",
   "lane_full": "circuit complet",
   "samples_known_one": "{n} ticket était déjà importé.",

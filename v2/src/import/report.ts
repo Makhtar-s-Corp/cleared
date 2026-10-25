@@ -38,7 +38,7 @@ export function renderReport(report: ImportReport, t: Translate, language: Langu
       : many(count, t('samples_would_one', n(count)), t('samples_would_other', n(count))));
     for (const s of samples.added) {
       const values = { ticket: s.ticket, size: s.size, lane: s.lane === 'fast' ? t('lane_fast') : t('lane_full'), time: duration(s.minutes, t) };
-      lines.push(`  ${s.tokens === null ? t('sample_no_tokens', values) : t('sample', { ...values, tokens: quantity(s.tokens, t) })}`);
+      lines.push(`  ${s.tokens === null ? t('sample_time_only', values) : t('sample', { ...values, tokens: quantity(s.tokens, t) })}`);
     }
   }
   if (samples.known.length > 0) lines.push(many(samples.known.length, t('samples_known_one', n(samples.known.length)), t('samples_known_other', n(samples.known.length))));
