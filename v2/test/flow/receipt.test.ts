@@ -40,7 +40,7 @@ test('the receipt in English: the captures linked, each test with its round and 
   assert.match(body, /Round 1: `npm test` failed/);
   assert.match(body, /Round 2: `npm test` passed/);
   assert.match(body, /1,234,567 tokens/);
-  assert.match(body, /\$0\.40 as the harness reported it \(API-equivalent\)/);
+  assert.match(body, /\$0\.40 as the agents reported it \(API-equivalent\)/);
   assert.match(body, /42 min from the first session to this pull request/);
   assert.doesNotMatch(body, /€|EUR/);
 });
@@ -65,7 +65,7 @@ test('no dollar amount without a real figure for every session; the tokens and t
     assert.match(body, language === 'en' ? /1,234,567 tokens/ : /jetons/);
   }
   // No token count either: said as not reported, never as zero.
-  assert.match(renderReceipt({ ...full, costUsd: null, tokens: null }, 'en'), /Cost: tokens not reported by the harness/);
+  assert.match(renderReceipt({ ...full, costUsd: null, tokens: null }, 'en'), /Cost: tokens not reported by the agents/);
   assert.doesNotMatch(renderReceipt({ ...full, costUsd: null, tokens: null }, 'en'), /\b0 tokens/);
 });
 

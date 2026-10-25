@@ -13,7 +13,7 @@ import { consumptionFixture } from '../../fixtures/consumption.ts';
 import { inboxFixture } from '../../fixtures/inbox.ts';
 import { AUTHOR_ID, USER, sessionFixture } from '../../fixtures/session.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
-import { loadCatalog } from '../../src/catalog.ts';
+import { loadCatalog, type Screen } from '../../src/catalog.ts';
 import { translator } from '../lib/i18n.ts';
 import { ConsumptionView } from '../screens/consumption/Consumption.tsx';
 import { type InboxView } from '../screens/inbox/model.ts';
@@ -23,7 +23,7 @@ import { PlanAskCard } from '../screens/session/Tabs.tsx';
 import { Bar } from '../screens/tower/Tower.tsx';
 import { html, renderInbox, visibleText } from './render.tsx';
 
-const of = (screen: string, language: 'en' | 'fr') => translator({ ...loadCatalog('shell', language), ...loadCatalog(screen, language) });
+const of = (screen: Screen, language: 'en' | 'fr') => translator({ ...loadCatalog('shell', language), ...loadCatalog(screen, language) });
 const LANGUAGES = ['en', 'fr'] as const;
 const shown = (markup: string) => visibleText(markup).join('\n');
 

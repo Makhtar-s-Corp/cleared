@@ -38,8 +38,7 @@ test('the Plan tab asks about the code: the field, Ask, and what the reader read
   assert.match(ask, /role="status"/);
   const text = visibleText(ask);
   for (const expected of ['Ask about the code', 'Your question about the code', 'Ask',
-    'Read only, on the base branch of guestbook: the reader does not see this session\'s changes, and never edits, commits or pushes.',
-    'The answer opens on its own page, with each turn\'s cost.'])
+    'Read only, on the base branch of guestbook: the reader does not see this session\'s changes, and never edits, commits or pushes.'])
     assert.ok(text.includes(expected), `missing: ${expected}`);
   assert.doesNotMatch(markup, /style="/, 'no inline style');
 });
@@ -65,8 +64,7 @@ test('while the question is sent, the field and Ask wait; a note says what went 
 test('in French, every word of the card', () => {
   const text = visibleText(card(html(<PlanTab view={viewOf({ service: 'guestbook' })} plan={SESSION_PLAN} t={fr} />)));
   for (const expected of ['Interroger le code', 'Votre question sur le code', 'Demander',
-    'Lecture seule, sur la branche de base de guestbook : le lecteur ne voit pas les changements de cette session, et ne modifie, ne valide ni ne pousse jamais rien.',
-    'La réponse s\'ouvre sur sa propre page, avec le coût de chaque tour.'])
+    'Lecture seule, sur la branche de base de guestbook : le lecteur ne voit pas les changements de cette session, et ne modifie, ne valide ni ne pousse jamais rien.'])
     assert.ok(text.includes(expected), `missing: ${expected}`);
 });
 

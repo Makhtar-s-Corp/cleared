@@ -257,6 +257,9 @@ function ReleaseBody({ item, view, t, onFrame }: { readonly item: ReleaseItem; r
 }
 
 function Shots({ item, view, t, onFrame }: { readonly item: ReleaseItem; readonly view: InboxView; readonly t: Translate; readonly onFrame?: (frame: InboxView['frame']) => void }) {
+  // No picture on either side at either size: one line says so, not two empty frames and a switch (P221).
+  const none = (['before', 'after'] as const).every((side) => !sameOrigin(item.captures[side].desktop) && !sameOrigin(item.captures[side].phone));
+  if (none) return <><div className="shots-head"><h3>{t('shots_title')}</h3></div><p className="shot-none">{t('shot_none')}</p></>;
   return (
     <>
       <div className="shots-head">

@@ -131,13 +131,13 @@ export function PlanAskCard({ service, t, ask = { text: '', busy: false, status:
     <section className="card plan-ask" aria-labelledby="plan-ask-title">
       <h3 id="plan-ask-title" className="card-label">{t('plan_ask_title')}</h3>
       <form id="plan-ask" autoComplete="off" onSubmit={onSend}>
-        <label htmlFor="plan-ask-input" className="small">{t('plan_ask_label')}</label>
+        {/* The card's title says what the field is for: its label is read out, not drawn twice (P221). */}
+        <label htmlFor="plan-ask-input" className="sr-only">{t('plan_ask_label')}</label>
         <Textarea id="plan-ask-input" name="question" maxLength={QUESTION_MAX} rows={3} placeholder={t('plan_ask_placeholder')} value={ask.text} disabled={ask.busy}
           onChange={(event) => onText?.(event.target.value)} />
         <p className="faint small">{planAskScope(service, t)}</p>
         <div className="plan-actions">
           <Button variant="ink" className="btn primary" type="submit" data-act="plan_ask" disabled={ask.busy}>{t('plan_ask_send')}</Button>
-          <span className="faint small">{t('plan_ask_opens')}</span>
         </div>
         <p className="plan-ask-note" role="status">{ask.status}</p>
       </form>

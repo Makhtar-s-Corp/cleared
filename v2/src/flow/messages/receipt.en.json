@@ -1,7 +1,7 @@
 {
   "receipt_title": "Proof receipt",
   "receipt_captures_of": "Captures of {service}: {parts}",
-  "receipt_captures_none": "Captures: none taken (the flow has no browser to take them with)",
+  "receipt_captures_none": "Captures: none taken",
   "receipt_before": "before",
   "receipt_after": "after",
   "receipt_video": "video of the flow ({time})",
@@ -20,7 +20,7 @@
   "receipt_run_unclear": "Round {round}: {command} ran in a pipe or a list, so its exit status is not known",
   "receipt_run_missing": "Round {round}: {command} was not run",
   "receipt_cost": "Cost: {count} tokens",
-  "receipt_cost_unreported": "Cost: tokens not reported by the harness",
-  "receipt_usd": "{usd} as the harness reported it (API-equivalent)",
+  "receipt_cost_unreported": "Cost: tokens not reported by the agents",
+  "receipt_usd": "{usd} as the agents reported it (API-equivalent)",
   "receipt_time": "Time: {time} from the first session to this pull request"
 }

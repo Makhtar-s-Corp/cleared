@@ -39,10 +39,10 @@ test('a picked template is pressed, keeps its row shown, and gives the title its
     assert.match(markup, /id="ask-templates"/, 'shown while a template is picked');
     assert.match(markup, /aria-pressed="true"[^>]*data-template="bug"|data-template="bug"[^>]*aria-pressed="true"/);
     assert.doesNotMatch(markup, /aria-pressed="true"[^>]*data-template="(?:review|ci|question)"|data-template="(?:review|ci|question)"[^>]*aria-pressed="true"/);
-    assert.match(markup, /<input[^>]*id="ask-input"[^>]*placeholder="What breaks, in a few words"/);
+    assert.match(markup, /<input[^>]*id="ask-input"[^>]*placeholder="What breaks"/);
   }
   assert.match(html(<Bar t={en} title="" body="" />), /placeholder="A goal, a question or a ticket…"/, 'no template: the bar\'s own placeholder');
-  assert.match(html(<Bar t={fr} title="" body="" template="question" />), /placeholder="La question, en une ligne"/);
+  assert.match(html(<Bar t={fr} title="" body="" template="question" />), /placeholder="La question"/);
 });
 
 test('each template\'s sections, in both languages, from the catalogs', () => {

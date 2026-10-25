@@ -73,7 +73,7 @@ test('the wins of the harness pick, a row per ticket type and agent, as the ledg
 test('in French the panel is French, and holds on a phone', { skip }, async () => {
   await withBrowser({ language: 'fr' }, async (page) => {
     assert.equal(await page.locator('#wins-title').innerText(), "Quel agent l'emporte");
-    assert.deepEqual((await page.locator('.wins-table thead th').allInnerTexts()).map((h: string) => h.trim()), ['Type de ticket', 'Agent', 'Lancés', 'Tests réussis', 'Gardés']);
+    assert.deepEqual((await page.locator('.wins-table thead th').allInnerTexts()).map((h: string) => h.trim()), ['Type', 'Agent', 'Lancées', 'Tests réussis', 'Gardées']);
     assert.equal((await rows(page))[2]?.[0], 'Autre');
     await page.setViewportSize({ width: 390, height: 844 });
     assert.ok(await noOverflow(page), 'no horizontal scroll on a phone');
