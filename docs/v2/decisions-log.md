@@ -5799,5 +5799,5 @@ The 120 PNG captures of `docs/v2/ui-polish/` (P222, 366) weighed 11.3 MB. They w
 
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read, no network beyond `npm ci` of the lock file, `git fetch` and GitHub (the CI's logs read with `gh`), no tunnel, no secret; the app and the browser listen on port 0 on loopback.
 
-- Pull request: PR_PLACEHOLDER, against `v2`.
+- Pull request: 373, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-test-gaps`.
