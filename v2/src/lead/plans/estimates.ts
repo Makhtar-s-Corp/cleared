@@ -7,13 +7,17 @@
 //   release), less the time it waited for the owner (waiting_human and
 //   approval), and the sum of total_cost_usd of its sessions. With three
 //   samples or more an item's estimate is their median; with fewer, the
-//   defaults below. The plan's time is its critical path: the runner's own
+//   defaults below. The v1 tickets the import brought (src/import/samples.ts,
+//   milestone 4 plan, section 3) are samples too, without a cost: the cost
+//   is the median of the samples that have one, three or more, else the
+//   default. The plan's time is its critical path: the runner's own
 //   rule (ready items in position order, at most maxParallel at once) played
 //   on the estimates, not their sum.
 import type { DatabaseSync } from 'node:sqlite';
 import type { Estimate, PlanItem, PlanStep } from '../../api/types.ts';
 import { QUICK_LABEL } from '../../flow/engine.ts';
 import type { SessionEvent } from '../../session/events.ts';
+import { importedSamples } from '../../import/samples.ts';
 import type { Store } from '../../store/db.ts';
 import type { TicketStore } from '../../tickets/contract.ts';
 
@@ -31,7 +35,7 @@ export const DEFAULT_ESTIMATES: Readonly<Record<Size, { readonly minutes: number
 
 export const MIN_SAMPLES = 3;
 
-export type Sample = { readonly size: Size; readonly lane: Lane; readonly minutes: number; readonly costUsd: number };
+export type Sample = { readonly size: Size; readonly lane: Lane; readonly minutes: number; readonly costUsd: number | null };
 
 const SIZES: ReadonlySet<string> = new Set(['xs', 's', 'm', 'l']);
 const WAITS: ReadonlySet<string> = new Set(['waiting_human', 'approval']);
@@ -67,8 +71,9 @@ export function ticketSample(events: readonly (SessionEvent & { readonly role: s
   return { minutes: Math.max(0, (to - from - waited) / 60_000), costUsd: cents(cost) };
 }
 
-// The project's done tickets that carry a size, as samples.
-export async function historyOf(deps: { readonly tickets: TicketStore; readonly store: Pick<Store, 'events' | 'sessions'> }, project: string): Promise<Sample[]> {
+// The project's done tickets that carry a size, as samples, then the v1
+// tickets imported for it.
+export async function historyOf(deps: { readonly tickets: TicketStore; readonly store: Pick<Store, 'events' | 'sessions'> & Partial<Pick<Store, 'db'>> }, project: string): Promise<Sample[]> {
   const out: Sample[] = [];
   for (const ticket of await deps.tickets.list({ status: deps.tickets.states.done, project })) {
     const size = ticket.labels.find((label) => label.startsWith('size:'))?.slice(5);
@@ -78,6 +83,7 @@ export async function historyOf(deps: { readonly tickets: TicketStore; readonly 
     const sample = ticketSample(events);
     if (sample) out.push({ size: size as Size, lane: ticket.labels.includes(QUICK_LABEL) ? 'fast' : 'full', ...sample });
   }
+  if (deps.store.db) out.push(...importedSamples(deps.store.db, project));
   return out;
 }
 
@@ -105,9 +111,19 @@ export function stepSize(size: Size, kind: StepKind): Size {
 // The medians of the done steps of the same kind, item size and lane, with
 // three samples or more; else the default of the step's size.
 export function stepEstimate(samples: readonly StepSample[], size: Size, lane: Lane, kind: StepKind): Estimate {
-  const same = samples.filter((s) => s.kind === kind && s.size === size && s.lane === lane);
-  if (same.length < MIN_SAMPLES) return { ...DEFAULT_ESTIMATES[stepSize(size, kind)], weekPercent: null, samples: same.length };
-  return { minutes: Math.max(1, Math.round(median(same.map((s) => s.minutes)))), costUsd: cents(median(same.map((s) => s.costUsd))), weekPercent: null, samples: same.length };
+  return fromSamples(samples.filter((s) => s.kind === kind && s.size === size && s.lane === lane), DEFAULT_ESTIMATES[stepSize(size, kind)]);
+}
+
+// The medians of `same`, from three samples; the cost from three that have one.
+function fromSamples(same: readonly Sample[], fallback: { readonly minutes: number; readonly costUsd: number }): Estimate {
+  if (same.length < MIN_SAMPLES) return { ...fallback, weekPercent: null, samples: same.length };
+  const costs = same.flatMap((s) => (s.costUsd === null ? [] : [s.costUsd]));
+  return {
+    minutes: Math.max(1, Math.round(median(same.map((s) => s.minutes)))),
+    costUsd: costs.length < MIN_SAMPLES ? fallback.costUsd : cents(median(costs)),
+    weekPercent: null,
+    samples: same.length,
+  };
 }
 
 // The steps of the project's done tickets that carry a size, from the
@@ -149,9 +165,7 @@ export function itemOfSteps(steps: readonly { readonly kind: StepKind; readonly 
 }
 
 export function estimateFor(samples: readonly Sample[], size: Size, lane: Lane): Estimate {
-  const same = samples.filter((s) => s.size === size && s.lane === lane);
-  if (same.length < MIN_SAMPLES) return { ...DEFAULT_ESTIMATES[size], weekPercent: null, samples: same.length };
-  return { minutes: Math.max(1, Math.round(median(same.map((s) => s.minutes)))), costUsd: cents(median(same.map((s) => s.costUsd))), weekPercent: null, samples: same.length };
+  return fromSamples(samples.filter((s) => s.size === size && s.lane === lane), DEFAULT_ESTIMATES[size]);
 }
 
 // The plan's minutes: items started in position order once every item they

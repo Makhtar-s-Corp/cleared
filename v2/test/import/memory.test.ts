@@ -23,7 +23,7 @@ function setup(options: { edits?: Record<string, string>; dirty?: Record<string,
   const ledger = join(state, 'ledger.db');
   const checkout = v2Checkout(v1.checkout, options.edits, options.dirty);
   const env = { CLEARED_STATE_DIR: state };
-  const run = (apply: boolean, ownerId: string | undefined = OWNER) => importV1({ from: v1.ledger, ledger, project: 'shop', checkout, ownerId, apply, env });
+  const run = (apply: boolean, ownerId: string | null = OWNER) => importV1({ from: v1.ledger, ledger, project: 'shop', checkout, ownerId: ownerId ?? undefined, apply, env });
   const briefed = async () => (await readBriefing({ project: checkout, role: 'author', ticket: TICKET, env })).decisions.map((d) => d.split('\n')[0]);
   return { v1, ledger, checkout, run, briefed };
 }
@@ -74,7 +74,7 @@ test('another owner, no owner set, or an approval v1 holds no record of: nothing
   const { run, briefed } = setup({ approve: [QUEUE], approvedWithoutRecord: [FONTS] });
   const other = await run(true, 'someone-else');
   assert.deepEqual(other.approvals.skipped, [{ path: QUEUE, reason: 'other_owner' }, { path: FONTS, reason: 'no_record' }]);
-  const none = await run(true, undefined);
+  const none = await run(true, null);
   assert.deepEqual(none.approvals.skipped, [{ path: QUEUE, reason: 'no_owner' }, { path: FONTS, reason: 'no_record' }]);
   assert.deepEqual(await briefed(), []);
 });

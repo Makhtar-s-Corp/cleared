@@ -37,9 +37,9 @@ test('a dry run in French by default: what it would import, why the rest is left
   const { v1, state, run } = setup();
   const { code, out } = run(['--from', v1.ledger]);
   assert.equal(code, 0);
-  assert.match(out, /Essai à blanc pour l’espace de travail shop/);
-  assert.match(out, /LOCAL-1 : taille s, circuit complet, 1 h 15 de travail, 12 500 jetons/);
-  assert.match(out, /LOCAL-2 est laissé de côté : sa mesure est illisible\./);
+  assert.match(out, /Essai à blanc pour l'espace de travail shop/);
+  assert.match(out, /LOCAL-1\u00a0: taille s, circuit complet, 1\u00a0h\u00a015 de travail, 12[\u202f\u00a0]500 jetons/);
+  assert.match(out, /LOCAL-2 est laissé de côté\u00a0: sa mesure est illisible\./);
   assert.match(out, /docs\/decisions\/0001-queue\.md, approuvée par owner le /);
   assert.ok(!out.includes('Orders are sent through the queue'), 'a decision\'s text is never printed');
   assert.equal(existsSync(join(state, 'ledger.db')), false);
@@ -50,8 +50,8 @@ test('--apply in English writes, and a second run has nothing new', () => {
   const first = run(['--from', v1.ledger, '--apply'], { CLEARED_V2_APP_LANGUAGE: 'en' });
   assert.equal(first.code, 0, first.err);
   assert.match(first.out, /Import for the workspace shop\./);
-  assert.match(first.out, /1 ticket joined the estimates’ history:/);
-  assert.match(first.out, /LOCAL-1: size s, full circuit, 1h 15m of work, 12,500 tokens/);
+  assert.match(first.out, /1 ticket joined the estimates' history:/);
+  assert.match(first.out, /LOCAL-1: size s, full circuit, 1h\u00a015m of work, 12,500 tokens/);
   assert.match(first.out, /2 decisions are approved in v2, as in v1:/);
   assert.ok(existsSync(join(state, 'ledger.db')));
   const second = run(['--from', v1.ledger, '--apply'], { CLEARED_V2_APP_LANGUAGE: 'en' });
@@ -70,7 +70,7 @@ test('a wrong command line, a missing ledger and v2\'s own ledger end with 64 an
   assert.match(missing.err, /No v1 ledger at .*nothing\.db\./);
   const same = run(['--from', v1.ledger], { CLEARED_STATE_DIR: join(v1.ledger, '..'), CLEARED_V2_APP_LANGUAGE: 'en' });
   assert.equal(same.code, 64);
-  assert.match(same.err, /is v2’s own ledger, not v1’s/);
+  assert.match(same.err, /is v2's own ledger, not v1's/);
 });
 
 test('without a workspace the command says so', () => {

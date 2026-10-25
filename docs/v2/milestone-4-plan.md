@@ -74,7 +74,7 @@ B6.4 asks for v1's data to be reused: its memory, and its ticket history for the
 
 ### 3.2 What exists at the end, and how it is proven
 
-- `src/import/v1.ts`: the reading of a v1 ledger and what it would bring; `src/import/apply.ts`: what is written in v2's ledger; `src/import/messages/import.{en,fr}.json`: its words. `src/cli/import-v1.ts`, run as `npm run import-v1 -- --from <v1 ledger.db>`: a dry run by default, `--apply` to write, as `repair-services` does.
+- `src/import/v1.ts`: the reading of a v1 ledger; `src/import/apply.ts`: what it would bring and, with `--apply`, what is written in v2's ledger; `src/import/samples.ts`: the samples' table and its reading by the estimates; `src/import/report.ts` and `src/import/messages/import.{en,fr}.json`: its words. `src/cli/import-v1.ts`, run as `npm run import-v1 -- --from <v1 ledger.db>`: a dry run by default, `--apply` to write, as `repair-services` does.
 - The plans' estimates (`lead/plans/estimates.ts`) count the imported tickets with v2's own.
 - Proven by `test/import/v1.test.ts` (the reading, on fixtures written by v1's own code), `test/import/apply.test.ts` (dry run, apply, a second apply, the same file refused, the v1 file untouched), `test/import/memory.test.ts` (an approved decision briefed by v2 after the import, and the cases where it is not), `test/import/cli.test.ts` (the command, in French and in English), `test/import/catalog.test.ts`, and `test/lead/plans/estimates.test.ts` (samples without a cost).
 
@@ -106,7 +106,7 @@ v1's handovers, events and sessions; a v1 tracker other than the ledger's (a Lin
 
 ### 3.6 Files this lane owns
 
-`v2/src/import/`, `v2/src/cli/import-v1.ts`, `v2/test/import/`; the `import-v1` script in `v2/package.json`; the samples read in `lead/plans/estimates.ts` and `lead/plans/runner.ts`; a row in `v2/README.md`; its lines of the matrix and its log entry.
+`v2/src/import/`, `v2/src/cli/import-v1.ts`, `v2/test/import/`; the `import-v1` script in `v2/package.json`; the samples read in `lead/plans/estimates.ts` (`historyOf`, and the cost's median over the samples that have one); a row in `v2/README.md`; its lines of the matrix and its log entry.
 
 ### 3.7 Unknowns, and who closes them
 

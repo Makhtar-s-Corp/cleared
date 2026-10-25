@@ -6275,3 +6275,33 @@ The run made the labels `status:In Progress`, `status:In Review`, `status:Ready 
 
 - Pull request: 384, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-issue-mirrors`.
+
+## 2026-10-25: v1's ticket history in the estimates and its approved decisions in v2's memory (the author's choices, lane `v2-j4-v1-import`, P233 to P235, issue #385)
+
+**The need.** Issue #385, milestone 4 (B6.4, "v1 data reused: memory, ticket history for estimates"): import v1's data into v2, read-only on v1, idempotent, with a dry run, tested on invented fixtures only, never with real v1 data in the repository. The plan is section 3 of [milestone-4-plan.md](milestone-4-plan.md), committed before the tests (`42cbeb8`). The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight, as earlier lanes noted; the conventions followed are those of sections 9 and 10 of `milestone-1-plan.md` (a lane changes its own module and its own files).
+
+**What v1 holds.** v2's store is a ledger in v1's format (decision 11 of milestone 1), but a v2 service on a state folder of its own starts empty, and v1 was stopped without an archive (2026-10-21). What a v1 ledger holds that v2 can use:
+- its `ticket_measured` events, one per merged ticket: Todo to merge in minutes, the owner's wait, the lane;
+- its `runs`: tokens and the lines of each pull request;
+- its memory: the entries of the files (decisions, glossary, project page, lessons), which v2's lib/memory indexes again from the checkout; the owner's approval of a decision file, which lives in the ledger only; and handovers, each scoped to its v1 ticket.
+
+**Decision.**
+1. **Read-only.** SQLite opened read-only on a ledger in WAL mode still makes `ledger.db-shm` and `ledger.db-wal` beside it (tried on Node 24.21). The ledger and its log are therefore copied into a private temporary folder, read there, and the copy removed. A test makes the v1 file and folder read-only and checks the bytes and the listing after; another reads rows still in an uncheckpointed log. v2's own ledger is refused as v1's, by real path or inode, since the two share a format and a default place.
+2. **A sample per ticket.** The last `ticket_measured` of each ticket. The minutes run from its first run at or after Todo (else Todo) to the merge, less the owner's answer (`human_wait_min`, none when v1 did not measure one). v2 counts from the author's first start to the release request, less the owner's waits; v1 has no release request event, so the few minutes from the owner's answer to the merge are counted too.
+3. **The size.** v1 had no sizes. A `size:<s>` label on the ledger's own tracker ticket wins; else the lines the measured pull request changed: 20 or fewer xs, 100 or fewer s, 400 or fewer m, more l; else the ticket is said and left out. Rejected: importing only labelled tickets (v1 labelled none, so nothing would reach the estimates), and pooling unsized tickets across sizes (a median over sizes says nothing of one size).
+4. **No money.** v1 kept euros: the CLI's dollars times a rate v1 does not keep, or tokens times a price table, which is not a real source. Imported samples have no cost. `estimateFor` and `stepEstimate` now take the minutes' median over every sample and the cost's over the samples that have one, three or more, else the default; with every sample costed, as before, the figures do not change. The tokens are kept and said, not estimated from.
+5. **Where.** `v1_ticket_samples` (keyed by workspace and v1 ticket), read by `historyOf` when it exists, so `runner.ts` is unchanged. Never `tracker_tickets` or `session_events`: v1's `LOCAL-<n>` collide with v2's, and the tickets would appear on the board and in the mirrors.
+6. **Approved decisions.** A decision approved in v1 is approved in v2 through lib/memory, in a child process, as the owner (as `knowledge/memory.ts` does), only when v1 holds its `memory_approved` event, that event's owner is v2's `[tracker] owner_id`, and the file is the same text in v2's checkout, committed and on disk. lib/memory records v2's `memory_approved` event; v1's record (who, when) is kept in `v1_memory_approvals`. Anything else stays a proposal and the report says why. A decision's text is never printed.
+7. **Not imported.** The files' entries (lib/memory indexes them); the handovers, since `ticket:LOCAL-<n>` would brief v2's unrelated ticket of the same number; proposals; v1's runs and events beyond the samples.
+8. **The command.** `npm run import-v1 -- --from <v1 ledger.db>`, a dry run, `--apply` to write, reading the workspace and the ledger from the service's environment as `repair-services` does. A second `--apply` writes nothing and says so. Its words are `src/import/messages/import.{en,fr}.json`, in `CLEARED_V2_APP_LANGUAGE`, French by default; durations through `app/web/lib/time.ts`.
+9. **Branch.** `v2/j4-v1-import` cannot exist beside the local branch `v2` (the entry "lane branches are named v2-jN-topic" of 2026-10-21), so the branch is `v2-j4-v1-import`.
+
+**Question for the owner** (default applied): the size thresholds, 20, 100 and 400 lines changed. Options: (a) keep them, recommended; (b) other thresholds, a one-line change in `sizeOfLines`; (c) count only tickets with a size label. The owner's dry run on the first piloted project's ledger shows each ticket's size before anything is written.
+
+**Tests first.** `db2007a` committed the tests before any code. The fixtures are written by v1's own code in a child process (`lib/ledger.mjs`, the local tracker, lib/memory indexing and approving), with invented tickets and texts. On the old code the five import test files failed to load their modules, and the new estimates test failed (cost 0, not the default). Three test fixes came after, none of them a change of expectation: the no-owner case passed `undefined` to a parameter that defaults to the owner (now `null`); the command's French test expected U+00A0 where Intl groups thousands with U+202F; and its words used typographic apostrophes, where every catalog uses straight ones.
+
+**Checks.** See the pull request. `npm run guard -- --base origin/v2` is run before the READY.
+
+**Resources.** No Docker object, no port opened, no tunnel, no secret; no real v1 ledger was looked for or read, and its real dry run is the owner's.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-v1-import`.
