@@ -197,7 +197,7 @@ test('a refused tracked-file check is named as git\'s refusal, not as a missing 
     env: childEnv(fake, { CLEARED_REPO: project, FAKE_GIT_REFUSE_ALL: '1' }) });
   assert.equal(run.status, 2, run.stderr);
   assert.match(run.stderr, new RegExp(`^cleared: git refused or could not read ${project.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}: fatal: detected dubious ownership`, 'm'));
-  assert.doesNotMatch(run.stderr, /set \[app\] grant_socket/);
+  assert.doesNotMatch(run.stderr, /passkeys are gone/);
 });
 
 test('git that cannot run is named too, and a file that is simply untracked keeps the old answer', () => {
@@ -216,7 +216,7 @@ test('git that cannot run is named too, and a file that is simply untracked keep
   const plain = spawnSync(process.execPath, [join(ORCH_HOME, 'cleared'), 'app', 'passkey'], { encoding: 'utf8',
     env: childEnv(fake, { CLEARED_REPO: untracked }) });
   assert.equal(plain.status, 2);
-  assert.match(plain.stderr, /set \[app\] grant_socket \(and \[app\] public_origin\) first/);
+  assert.match(plain.stderr, /passkeys are gone/);
   assert.doesNotMatch(plain.stderr, /git refused/);
 });
 
@@ -439,7 +439,7 @@ test('no shell script declares a checkout safe, and those a human command reache
     }
     return out;
   };
-  // The Node files the human's commands run (cleared and what it starts for status, app passkey and rollback),
+  // The Node files the human's commands run (cleared and what it starts for status, app and rollback),
   // and the scripts they start: the first argument of a spawn.
   const human = ['cleared', 'lib/heartbeat.ts', 'app/main.ts', 'release-request.ts'];
   const reached = new Set<string>();

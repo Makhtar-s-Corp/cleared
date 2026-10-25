@@ -29,16 +29,9 @@ function removed(): string[] {
   });
 }
 
-// Still tracked, with why (each one is a step of the plan, or a question).
-const STILL: ReadonlyMap<string, string> = new Map([
-  // Question 1 of the plan, default (a): the passkey files stay with the v1 app (B5.9d), the modules in TypeScript
-  // under the same names (step d).
-  ['app/lib/webauthn.ts', 'passkeys'],
-  ['app/lib/grant-socket.ts', 'passkeys'],
-  ['app/public/register.html', 'passkeys'],
-  ['app/public/register.js', 'passkeys'],
-  ['test/app-authenticator.ts', 'passkeys'],
-]);
+// Still tracked, with why (each one is a step of the plan, or a question). None since the v1 passkeys went
+// (issue #389, section 6 of the plan).
+const STILL: ReadonlyMap<string, string> = new Map();
 
 const under = (path: string) => (file: string) => (path.endsWith('/') ? file.startsWith(path) : file === path);
 
@@ -57,4 +50,11 @@ test('nothing keep-and-drop.md removes in milestone 4 is tracked, but what the p
 
 test('every file kept for now is still tracked, so the list says what is left', () => {
   assert.deepEqual([...STILL.keys()].filter((file) => !tracked.includes(file)), []);
+});
+
+// Issue #389: the page names the v1 passkey files as they were before step d (`.mjs`); their TypeScript names
+// are checked here.
+test('the v1 passkey files are gone, under either name', () => {
+  const passkeys = ['app/lib/webauthn', 'app/lib/grant-socket', 'test/app-authenticator'].flatMap((name) => [`${name}.mjs`, `${name}.ts`]);
+  assert.deepEqual(tracked.filter((file) => [...passkeys, 'app/public/register.html', 'app/public/register.js'].includes(file)), []);
 });
