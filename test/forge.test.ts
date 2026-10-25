@@ -210,7 +210,10 @@ test('[forge] use_tracker_app = yes lends the GitHub tracker\'s app to the forge
   assert.throws(() => forgeSettings(parseConf('[tracker]\nadapter = github\n[forge]\nuse_tracker_app = yes\n')), /\[tracker\] app_id is missing/);
   assert.throws(() => forgeSettings(tracker('[forge]\nuse_tracker_app = true\n')), /use_tracker_app must be yes or no/);
   assert.throws(() => forgeSettings(parseConf('[forge]\napp_id = 1\napp_private_key_file = /srv/k.pem\napp_login = x[bot]\napp_user_id = 2\n')), /\[forge\] installation_id is missing/);
-  assert.throws(() => forgeSettings(parseConf('[forge]\nadapter = gitlab\n')), /unknown \[forge\] adapter/);
+  assert.throws(() => forgeSettings(parseConf('[forge]\nadapter = bitbucket\n')), /unknown \[forge\] adapter "bitbucket" \(known: github, gitlab\)/);
+  // A GitLab service's lock (merge-pr.ts) reads GitLab itself: no GitHub App, git's ambient credential.
+  assert.equal(forgeSettings(parseConf('[forge]\nadapter = gitlab\ngitlab_project = example/guestbook\n')), null);
+  assert.throws(() => forgeSettings(parseConf('[forge]\nadapter = gitlab\napp_id = 1\n')), /\[forge\] adapter = gitlab takes no GitHub App key/);
   assert.throws(() => forgeSettings(parseConf('[forge]\napp_id = 1\ninstallation_id = 2\napp_private_key_file = relative.pem\napp_login = x[bot]\napp_user_id = 2\n')), /absolute/);
   assert.throws(() => forgeSettings(parseConf('[forge]\napp_id = 1\ninstallation_id = 2\napp_private_key_file = /srv/k.pem\napp_login = x[bot]\n')), /\[forge\] app_user_id is missing/);
 });
