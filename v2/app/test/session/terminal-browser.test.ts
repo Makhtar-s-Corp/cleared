@@ -75,9 +75,31 @@ test('Take over, type in the terminal, save in the editor; no policy violation w
       (window as unknown as { violations: string[] }).violations = seen;
       document.addEventListener('securitypolicyviolation', (event) => seen.push(`${event.violatedDirective} ${event.blockedURI} ${event.sample}`));
     });
+    // Each time the terminal comes into the page or leaves it.
+    await context.addInitScript(() => {
+      const moves: string[] = [];
+      (window as unknown as { moves: string[] }).moves = moves;
+      let there = false;
+      new MutationObserver(() => {
+        const now = document.querySelector('[data-terminal-state]') !== null;
+        if (now !== there) moves.push(now ? 'in' : 'out');
+        there = now;
+      }).observe(document, { subtree: true, childList: true });
+    });
     const page = await context.newPage();
     page.on('pageerror', (error: Error) => errors.push(error.message));
     page.on('request', (request: { url(): string }) => { if (!request.url().startsWith(app.base)) away.push(request.url()); });
+    // The list of sessions answered as the service had it when asked, 400 ms
+    // later, as a slow runner's: the session's own answer lands first.
+    let given = false;
+    const late = new Set<unknown>();                         // the list reads asked after Give back
+    await page.route((url: URL) => url.pathname === '/api/service/sessions', async (route: any) => {
+      if (given) late.add(route.request());
+      const answer = await route.fetch();
+      await new Promise((resolve) => setTimeout(resolve, 400));
+      await route.fulfill({ response: answer });
+    });
+    const moves = () => page.evaluate(() => (window as unknown as { moves: string[] }).moves);
     await page.goto(`${app.base}/login`);
     await page.fill('#name', 'alex');
     await page.fill('#password', PASSWORD);
@@ -112,6 +134,7 @@ test('Take over, type in the terminal, save in the editor; no policy violation w
     assert.equal(typed, 'what changed?\rls\r', 'the keys as typed, Enter as a carriage return');
     assert.deepEqual(base.calls.filter((c) => c.path.endsWith('/terminal/open')).map((c) => (c.body as { mode: string }).mode), ['harness', 'shell']);
     assert.equal(base.calls.filter((c) => c.path.endsWith('/terminal/close')).length, 1, 'the harness closed before the shell opened');
+    assert.deepEqual(await moves(), ['in'], 'the terminal stays from Take over on, a list read before it notwithstanding');
     // A selection across the coloured lines: xterm writes its colours as style attributes there.
     const box = await page.locator('#tab-terminal .xterm-screen').boundingBox();
     assert.ok(box);
@@ -169,10 +192,18 @@ test('Take over, type in the terminal, save in the editor; no policy violation w
     assert.ok(await page.locator('style[nonce]').count() > 0, 'the packages\' style elements carry the nonce');
 
     // Give back closes the terminal: no Open again, the timeline back.
+    const opens = base.calls.filter((c) => c.path.endsWith('/terminal/open')).length;
+    const after = page.waitForResponse((answer: { request(): unknown }) => late.has(answer.request()));
+    given = true;
     await page.locator('#giveback').click();
     await page.locator('#takeover').waitFor();
     await page.locator('#timeline').waitFor();
     assert.equal(await page.locator('.term-host').count(), 0);
+    // The list read before Give back lands after it, then the one after: the terminal does not come back.
+    await after;
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    assert.deepEqual(await moves(), ['in', 'out'], 'the terminal leaves once, at Give back');
+    assert.equal(base.calls.filter((c) => c.path.endsWith('/terminal/open')).length, opens, 'no terminal opened after Give back');
   } finally {
     await browser?.close();
     await app.close();
