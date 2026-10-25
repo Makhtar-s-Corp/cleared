@@ -189,6 +189,10 @@ test('tickets: create, list, get, move; the move to go is refused; an unknown ti
   const before = ((await call('GET', '/api/tickets', signed)).json as Ticket[]).length;
   for (const variants of [0, null, '3', 5, 2.5])
     assert.equal((await call('POST', '/api/tickets', person, { title: 'Variants', project: 'guestbook', variants })).status, 400, `variants ${variants}`);
+  // The harness pick (issue #329): 2 to 4 harnesses the owner enabled, a count that agrees.
+  for (const harnesses of ['codex', ['claude-code'], ['claude-code', 'codex'], ['claude-code', 7], ['claude-code', 'claude-code', 'claude-code', 'claude-code', 'claude-code']])
+    assert.equal((await call('POST', '/api/tickets', person, { title: 'Pick', project: 'guestbook', harnesses })).status, 400, `harnesses ${JSON.stringify(harnesses)}`);
+  assert.equal((await call('POST', '/api/tickets', person, { title: 'Pick', project: 'guestbook', harnesses: ['claude-code', 'claude-code'], variants: 3 })).status, 400);
   assert.equal(((await call('GET', '/api/tickets', signed)).json as Ticket[]).length, before, 'no ticket is created');
   assert.equal(((await call('GET', '/api/tickets', signed)).json as Ticket[]).some((x) => x.id === created.id), true);
   assert.equal(((await call('GET', `/api/tickets/${created.id}`, signed)).json as Ticket).id, created.id);
