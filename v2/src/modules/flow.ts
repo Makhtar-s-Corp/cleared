@@ -16,7 +16,8 @@
 // with one human side per process (terminal/human.ts), made with the
 // engine and the store this module receives. The idle watchdog (issue #290,
 // session/watchdog.ts) starts with the engine, on its own timer. The
-// captures of a pull request's proof receipt (P210) are flow/proof-routes.ts's.
+// captures of a pull request's proof receipt (P210) and the human's choice
+// of them on a ticket (P226, capture_choices) are flow/proof-routes.ts's.
 // A ticket launched from a chat (P212), POST /hooks/chat with chat_seen,
 // chat_launches and chat_replies, is flow/chat.ts's: a batch of one on the
 // batches' runner, whose replies follow the flow's events. The lanes' MCP
@@ -27,6 +28,7 @@ import type { Language } from '../../app/src/catalog.ts';
 import { LeverStore } from '../consumption/levers.ts';
 import { Docker } from '../container/docker.ts';
 import { BATCH_TABLES, BatchRunner, batchRoutes } from '../flow/batch.ts';
+import { CAPTURE_CHOICES_TABLE } from '../flow/capture-choice.ts';
 import { CHAT_TABLES, ChatConfigError, ChatLauncher, chatRoutes, loadChatConfig, type ChatConfig } from '../flow/chat.ts';
 import { editorRoutes } from '../flow/editor.ts';
 import { FAST_LANES_TABLE } from '../flow/fast-lane.ts';
@@ -133,7 +135,7 @@ function humanOf(registry: Registry): HumanSide | undefined {
 }
 
 const flow: Module = {
-  tables: [TRAIN_TABLE, STEPS_TABLE, VARIANTS_TABLE, REPLAYS_TABLE, ...BATCH_TABLES, ...CHAT_TABLES, FAST_LANES_TABLE],
+  tables: [TRAIN_TABLE, STEPS_TABLE, VARIANTS_TABLE, REPLAYS_TABLE, ...BATCH_TABLES, ...CHAT_TABLES, FAST_LANES_TABLE, CAPTURE_CHOICES_TABLE],
   routes: [
     ...runtime.routes((path) => path.startsWith('/api/tickets')),
     ...planGateRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
