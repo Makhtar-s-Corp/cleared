@@ -15,6 +15,8 @@ import { HEARTBEAT_TABLES } from '../../src/heartbeat/beat.ts';
 import { NOW, events, fakeMonitor, ledger, minutesBefore, session } from './support.ts';
 
 const settings: HeartbeatSettings = { everyMs: 60_000, sessionMinutes: 120, trackerMinutes: 10, trackers: [] };
+// For the tests whose clock jumps an hour or more between two beats: beats an hour apart are not late.
+const hourly: HeartbeatSettings = { ...settings, everyMs: 3_600_000 };
 
 function clock(start = NOW) {
   let at = start.getTime();
@@ -51,7 +53,7 @@ test('a problem: a POST of its code alone to the failure address, recorded once 
   const log: string[] = [];
   session(store.db, { id: 'session-secret-name', ticket: 'LOCAL-77', updatedAt: minutesBefore(200) });
   try {
-    const beat = new Heartbeat({ db: store.db, settings, monitor: { ping: `${monitor.base}/ping`, fail: `${monitor.base}/fail`, refused: [] }, project: 'shop', now: time.now, log: (line) => log.push(line) });
+    const beat = new Heartbeat({ db: store.db, settings: hourly, monitor: { ping: `${monitor.base}/ping`, fail: `${monitor.base}/fail`, refused: [] }, project: 'shop', now: time.now, log: (line) => log.push(line) });
     const first = await beat.beat();
     assert.equal(first.sent, 'fail');
     assert.deepEqual(first.problems.map((p) => p.code), ['session_stalled']);
@@ -167,7 +169,7 @@ test('a delivery that fails is one event an hour, with no address, and the beat 
   const log: string[] = [];
   const ping = `${monitor.base}/ping/check-7f3a`;
   try {
-    const beat = new Heartbeat({ db: store.db, settings, monitor: { ping, fail: null, refused: [] }, project: 'shop', now: time.now, log: (line) => log.push(line) });
+    const beat = new Heartbeat({ db: store.db, settings: hourly, monitor: { ping, fail: null, refused: [] }, project: 'shop', now: time.now, log: (line) => log.push(line) });
     await beat.beat();
     time.advance(1);
     await beat.beat();
