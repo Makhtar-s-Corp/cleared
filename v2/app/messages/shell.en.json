@@ -29,6 +29,7 @@
   "nav_consumption": "Consumption",
   "quota_label": "Weekly quota",
   "quota_percent": "{percent}% used",
+  "quota_short": "{percent}%",
   "quota_resets": "resets {when}",
   "quota_none": "Not measured",
   "quota_name": "Weekly quota: {percent}% used, resets {when}. Opens Consumption.",

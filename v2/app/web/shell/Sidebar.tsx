@@ -63,7 +63,8 @@ export function ThemeButton({ t, theme, onFlip }: { readonly t: Translate; reado
 
 // The week's quota at the sidebar's foot (the product owner's decision of 2026-10-25, 11:14, P227): its percent in
 // the Consumption screen's verdict colour, its reset as a weekday and a clock, the whole a link to Consumption, read
-// out with its percent and its reset. Folded, the bar alone, its words in its tooltip.
+// out with its percent and its reset. Folded, the bar alone, its words in its tooltip. On a phone (the owner's answer
+// of 12:20), in the top bar: the percent alone over the bar, a 44 px target; the gauge's icon when nothing is measured.
 export function QuotaGauge({ t, quota, zone, current, onPick }: { readonly t: Translate; readonly quota: WeeklyQuota; readonly zone: string; readonly current: boolean; readonly onPick?: (href: string) => void }) {
   const when = quota.kind === 'measured' ? weekdayClock(quota.resetsAt, zone, t) : '';
   const name = quota.kind === 'measured' ? t('quota_name', { percent: quota.percent, when }) : t('quota_name_none');
@@ -75,6 +76,9 @@ export function QuotaGauge({ t, quota, zone, current, onPick }: { readonly t: Tr
         <span className="quota-gauge-label">{t('quota_label')}</span>{' '}
         <span className="quota-gauge-percent">{quota.kind === 'measured' ? t('quota_percent', { percent: quota.percent }) : t('quota_none')}</span>
       </span>
+      {quota.kind === 'measured'
+        ? <span className="quota-gauge-short" aria-hidden="true">{t('quota_short', { percent: quota.percent })}</span>
+        : <Gauge className="quota-gauge-icon" size={16} aria-hidden="true" />}
       {quota.kind === 'measured' ? (
         <>
           <progress className="quota-gauge-bar" max={100} value={Math.min(100, quota.percent)} aria-hidden="true" />{' '}

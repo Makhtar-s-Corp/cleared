@@ -6101,3 +6101,39 @@ With the CPU slowed four times the budget is at its edge: what is left is the ne
 
 - Pull request: 377, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-visual-redesign`.
+
+## 2026-10-25: the quota gauge on a phone too (owner answer of 12:20, P227, issue #375)
+
+**Decision** (the product owner, on pull request 377): "Ajouter la jauge sur mobile, puis merger." It replaces the previous entry's choice to leave the gauge off a phone.
+
+**The author's choices** (lane `j3-visual-redesign`).
+- **Its place:** the phone's top bar, between the search and the sample-data pill, the person and the bell.
+  - Not a row above the bar of screens. That row would take height from every screen. It would also move every offset P217 pins, such as the inbox's buttons held above that bar.
+  - The bar of screens keeps its four.
+- **Its look:** the percent ("62%", "62 %") over a thin bar, in the verdict's colour, a 44 px touch target. The label and the reset are in its accessible name only, the same name as on a computer ("Weekly quota: 62% used, resets Sat 21:41. Opens Consumption."). The percent shown is a word of that name, as WCAG 2.5.3 asks. With nothing measured it shows the gauge's icon.
+- **On the screen it opens** it takes the hover's fill, not the raised row, which reads as a button in a top bar.
+- **The project's name:** with the sample-data pill shown (the fixtures), the name in the top bar is shortened with an ellipsis ("Guest…"), as it already was whenever it did not fit. Without the fixtures there is no pill.
+- **A tap** opens Consumption. Nothing changes on a computer or a tablet.
+
+**Tests first.** `a4ed715` commits two tests alone, in `app/test/redesign/redesign-browser.test.ts`, in English and in French at 390. Both fail on the code before it, which hid the gauge on a phone. They check:
+- the gauge is shown in the top bar, at least 44 by 44 px;
+- its name holds its percent and its reset, and its text is the percent alone;
+- it is not in the bar of screens, which keeps its four;
+- nothing of the top bar overlaps, and the page has no sideways scroll;
+- a tap opens Consumption, which marks the gauge `aria-current`.
+
+P224's axe test reads the phone's screens at 390 in both languages and themes, the gauge included.
+
+**Captures.** The after set was taken again at this head with the same commands. Only the 16 captures at 390 changed (the gauge in the top bar); the others came out identical to the byte. They were compressed with `pngquant --quality=80-95 --skip-if-larger` then `optipng -o2`; the after set is 1,332,225 bytes in all.
+
+**Checks** (at `origin/v2` `2165da3`):
+- `npm run typecheck` passes.
+- `npm test` runs 2175 Node tests: 2079 pass, 96 skipped, 0 fail. 349 Vitest tests pass.
+- With the CI's Chromium, 80 of 80 pass: the CI's browser list (P224's axe test at 390 included) and `consumption-browser.test.ts`, the notify file left out.
+- The budget runs alone at 17.3, 20.6 and 18.6 ms, with no request per switch.
+- `npm run guard -- --base origin/v2`: nothing refused.
+
+**The merge.** The owner's "puis merger" asks for the merge into `v2`. This lane does not write to `v2` (the brief's rule); the pull request is left ready for the orchestrator, who merges.
+
+- Pull request: 377, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-visual-redesign`.

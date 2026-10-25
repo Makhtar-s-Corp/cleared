@@ -196,6 +196,7 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .quota-gauge[data-verdict="hit"] .quota-gauge-bar::-webkit-progress-value { background: var(--danger-text); }
 .quota-gauge[data-verdict="hit"] .quota-gauge-bar::-moz-progress-bar { background: var(--danger-text); }
 .quota-gauge-reset { color: var(--text-faint); white-space: nowrap; }
+.quota-gauge-short, .quota-gauge-icon { display: none; }
 /* The account menu's link to Consumption, drawn as its buttons are. */
 .menu .menu-link { display: flex; align-items: center; color: var(--text); }
 .menu .menu-link:hover { text-decoration: none; }
@@ -380,7 +381,14 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
   .lead-status { display: none; }
   .source-pill { padding: 2px var(--space-2); }
   .side-foot-row .theme { display: none; }
-  .quota-gauge { display: none; }
+  /* The gauge in the top bar (the owner's answer of 12:20): the percent over a thin bar, a 44 px target. */
+  .quota-gauge { flex: none; align-items: center; justify-content: center; gap: 3px; min-width: 44px; height: 44px; padding: 0 var(--space-1); }
+  .quota-gauge[aria-current="page"] { box-shadow: none; background: var(--tab-fill); }
+  .quota-gauge :is(.quota-gauge-head, .quota-gauge-reset) { display: none; }
+  .quota-gauge-short { display: block; color: var(--text); font-weight: var(--weight-strong); line-height: 1; white-space: nowrap; }
+  .quota-gauge[data-verdict="hit"] .quota-gauge-short { color: var(--danger-text); }
+  .quota-gauge-icon { display: block; color: var(--text-muted); }
+  .quota-gauge-bar { width: 32px; height: 3px; }
   .menu .menu-link { min-height: 44px; }
   .source-pill .long { display: none; }
   .icon { width: 44px; height: 44px; }
