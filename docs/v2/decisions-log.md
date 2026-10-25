@@ -6438,8 +6438,9 @@ The choice is one condition in `#goOut` (`src/tickets/mirror.ts`).
 
 **Tests first.** `273f461` committed the plan's section and the tests alone. On `origin/v2` 5 of the 9 new tests failed: the workspace part of the page, the three folder cases and the lead's line of a service with no committed page. The 4 that pass guard what already worked: a session of each repository service briefed on its own page, a merge on one service leaving the other's page unwritten, no secret in either example's page, and a committed page staying the lead's line. The tests run on local bare repositories seeded from the tracked files of `examples/guestbook` and `examples/filter-api`, as `examples/workspace.conf` names them. The implementation commit also types one helper of the lead's test, which the typecheck refused.
 
-**Checks.** `npm run typecheck`; `npm test`; `npm run guard -- --base origin/v2`. The counts are in the pull request.
+**Checks** (on `origin/v2` at `144e39d`). `npm run typecheck` passes. `npm test`: 2296 Node tests, 2198 pass, 98 skipped, 0 fail, and 349 Vitest tests pass. `npm run guard -- --base origin/v2`: nothing refused.
 
 **Resources.** No Docker object, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no port, no secret.
 
+- Pull request: 395, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-project-page`.
