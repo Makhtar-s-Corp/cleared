@@ -5,10 +5,16 @@
 // own user is the mirror's, a bot or an integration is an agent, any other
 // user a person; the same history says who changed the title and the
 // description (P237). Comments are read for the team, by their own time.
+// An issue with the delegation label, or assigned to the key's own user, in
+// a state neither completed nor canceled, is handed over to Cleared (C3,
+// P243), by whoever the latest history entry that put it on names
+// (`addedLabelIds`, `toAssigneeId`), or by the issue's creator.
 // Proven against a fake of the API only; a real trial is the owner's
 // (docs/v2/mirrors.md).
 import { DEFAULT_STATES, type TicketStates } from './contract.ts';
-import { TrackerError, trackerFetch, type Tracker, type TrackerChange, type TrackerComment, type TrackerEdit, type TrackerIssue } from './mirror-tracker.ts';
+import {
+  DELEGATION_LABEL, TrackerError, trackerFetch, type Tracker, type TrackerChange, type TrackerComment, type TrackerDelegation, type TrackerEdit, type TrackerIssue,
+} from './mirror-tracker.ts';
 
 const PAGE = 50;
 const HISTORY = 50;
@@ -17,17 +23,22 @@ type Named = { readonly id: string; readonly name: string } | null;
 type HistoryEntry = {
   readonly createdAt: string; readonly actor: Named; readonly botActor: Named; readonly toState: { readonly name: string } | null;
   readonly fromTitle?: string | null; readonly toTitle?: string | null; readonly updatedDescription?: boolean | null;
+  readonly addedLabelIds?: readonly string[] | null; readonly toAssigneeId?: string | null;
 };
 type Issue = {
   readonly id: string; readonly identifier: string; readonly url: string; readonly title: string; readonly description: string | null;
-  readonly createdAt: string; readonly updatedAt: string; readonly state: { readonly name: string } | null;
+  readonly createdAt: string; readonly updatedAt: string; readonly state: { readonly name: string; readonly type?: string } | null;
   readonly history: { readonly nodes: readonly HistoryEntry[] };
+  readonly labels?: { readonly nodes: readonly Named[] }; readonly assignee?: { readonly id: string } | null; readonly creator?: Named;
 };
 type Comment = { readonly id: string; readonly body: string; readonly createdAt: string; readonly user: Named; readonly botActor: Named; readonly issue: { readonly id: string } | null };
 type Setup = { readonly viewer: string; readonly team: string; readonly states: ReadonlyMap<string, string> };
 
-const ISSUE_FIELDS = `id identifier url title description createdAt updatedAt state { name }
-  history(first: ${HISTORY}) { nodes { createdAt actor { id name } botActor { id name } toState { name } fromTitle toTitle updatedDescription } }`;
+const ISSUE_FIELDS = `id identifier url title description createdAt updatedAt state { name type }
+  labels { nodes { id name } } assignee { id } creator { id name }
+  history(first: ${HISTORY}) { nodes { createdAt actor { id name } botActor { id name } toState { name } fromTitle toTitle updatedDescription addedLabelIds toAssigneeId } }`;
+// The workflow state types an issue is no longer handed over in.
+const ENDED = new Set(['completed', 'canceled']);
 
 const SETUP = `query MirrorSetup($key: String!) {
   viewer { id }
@@ -63,14 +74,16 @@ export class LinearTracker implements Tracker {
   readonly #team: string;
   readonly #states: TicketStates;
   readonly #fetch: typeof fetch;
+  readonly #delegation: string;
   #setup: Promise<Setup> | undefined;
 
-  constructor(options: { readonly api: string; readonly token: string; readonly team: string; readonly states?: TicketStates; readonly fetch?: typeof fetch }) {
+  constructor(options: { readonly api: string; readonly token: string; readonly team: string; readonly states?: TicketStates; readonly delegationLabel?: string; readonly fetch?: typeof fetch }) {
     this.#api = options.api;
     this.#token = options.token;
     this.#team = options.team;
     this.#states = options.states ?? DEFAULT_STATES;
     this.#fetch = options.fetch ?? fetch;
+    this.#delegation = (options.delegationLabel ?? DELEGATION_LABEL).toLowerCase();
     this.name = `linear:${options.team}`;
   }
 
@@ -119,6 +132,21 @@ export class LinearTracker implements Tracker {
     return { actor: 'agent', who: 'unknown' };
   }
 
+  // The latest hand-over that still holds, from the history sorted oldest first.
+  #delegationOf(issue: Issue, history: readonly HistoryEntry[], viewer: string): TrackerDelegation | null {
+    if (ENDED.has(issue.state?.type ?? '')) return null;
+    const found: TrackerDelegation[] = [];
+    const latest = (how: TrackerDelegation['how'], matches: (entry: HistoryEntry) => boolean) => {
+      const entry = [...history].reverse().find(matches);
+      const by = entry ? this.#actorOf(entry.actor, entry.botActor, viewer) : this.#actorOf(issue.creator ?? null, null, viewer);
+      found.push({ how, ...by, at: entry?.createdAt ?? issue.createdAt });
+    };
+    const label = issue.labels?.nodes.find((l) => l?.name.toLowerCase() === this.#delegation);
+    if (label) latest('label', (entry) => entry.addedLabelIds?.includes(label.id) === true);
+    if (issue.assignee?.id === viewer) latest('assignee', (entry) => entry.toAssigneeId === viewer);
+    return found.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0] ?? null;
+  }
+
   #issueOf(issue: Issue, viewer: string): TrackerIssue {
     const history = [...issue.history.nodes].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
     const changes: TrackerChange[] = history
@@ -135,6 +163,7 @@ export class LinearTracker implements Tracker {
     return {
       id: issue.id, key: issue.identifier, url: issue.url, title: issue.title, body: issue.description ?? '', labels: [],
       status: this.#known(state) ? state : null, createdAt: issue.createdAt, updatedAt: issue.updatedAt, changes, edits,
+      delegation: this.#delegationOf(issue, history, viewer),
     };
   }
 

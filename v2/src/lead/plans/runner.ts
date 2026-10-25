@@ -50,13 +50,13 @@ import type { InboxStore } from '../../inbox/store.ts';
 import { reportHealth } from '../../notify/queue.ts';
 import { HostToolRefused, type UserId } from '../../session/contract.ts';
 import type { Store } from '../../store/db.ts';
-import type { TicketId, TicketStore } from '../../tickets/contract.ts';
+import type { Ticket, TicketId, TicketStore } from '../../tickets/contract.ts';
 import { LeadConfigError } from '../config.ts';
-import type { LeadToolOutput } from '../contract.ts';
+import type { LeadToolOutput, PlanItemInput } from '../contract.ts';
 import { duration, estimateFor, historyOf, itemOfSteps, planTotals, stepHistoryOf } from './estimates.ts';
 import { retryContext } from './retry.ts';
 import { FINAL_ITEM_STATES, PlanStore, itemServices, publicPlan, type StoredItem, type StoredPlan } from './store.ts';
-import { validatePlan } from './tools.ts';
+import { MAX_BODY, MAX_TITLE, validatePlan, type ValidPlan } from './tools.ts';
 
 export type PlanConfig = {
   readonly maxParallel: number;              // a plan's tickets running at once
@@ -232,7 +232,29 @@ export class PlanRunner {
   // ---- the lead's tools ------------------------------------------------------------
 
   async propose(input: unknown): Promise<LeadToolOutput['propose_plan']> {
-    const valid = validatePlan(input, this.store.services());
+    return this.#propose(validatePlan(input, this.store.services()));
+  }
+
+  // A ticket that exists already, proposed as a one-item plan bound to it:
+  // a delegation from a tracker (tickets/delegation.ts, P243). The owner's
+  // approval then creates no ticket and starts this one. Its body is the
+  // person's text, so no acceptance criterion is asked of it; its size is
+  // its size:<s> label, else s; its lane is the fast lane when it has the
+  // Quick label and touches no full service (decision 24).
+  async proposeTicket(input: { readonly goal: string; readonly summary: string; readonly ticket: Ticket }): Promise<LeadToolOutput['propose_plan']> {
+    const { ticket } = input;
+    const services = this.store.services();
+    const touched = ticket.services?.length ? services.filter((s) => ticket.services?.some((t) => t.name === s.name)) : itemServices(ticket.body, services);
+    const size = ticket.labels.find((label) => /^size:(xs|s|m|l)$/.test(label))?.slice(5) as PlanItemInput['size'] | undefined;
+    const lane = ticket.labels.includes(QUICK_LABEL) && !touched.some((s) => s.sensitivity === 'full') ? 'fast' : 'full';
+    const title = ticket.title.trim().slice(0, MAX_TITLE) || ticket.id;
+    return this.#propose({
+      goal: input.goal, title, summary: input.summary,
+      items: [{ title, body: ticket.body.slice(0, MAX_BODY), lane, size: size ?? 's', after: [] }],
+    }, ticket.id);
+  }
+
+  async #propose(valid: ValidPlan, bound?: TicketId): Promise<LeadToolOutput['propose_plan']> {
     const clean = (text: string) => this.#clean(text);
     const samples = await historyOf({ tickets: this.#deps.tickets, store: this.#deps.store }, this.#deps.project);
     const stepSamples = valid.items.some((item) => item.steps) ? await stepHistoryOf({ tickets: this.#deps.tickets, db: this.#deps.store.db }, this.#deps.project) : [];
@@ -242,7 +264,10 @@ export class PlanRunner {
       return item.steps ? { ...base, ...itemOfSteps(item.steps, stepSamples, item.size, item.lane, maxParallel) } : { ...base, estimate: estimateFor(samples, item.size, item.lane) };
     });
     const totals = planTotals(items, maxParallel);
-    const { plan, superseded } = this.store.propose({ goal: valid.goal, title: clean(valid.title), summary: clean(valid.summary), maxParallel, totals, items });
+    const { plan: made, superseded } = this.store.propose({ goal: valid.goal, title: clean(valid.title), summary: clean(valid.summary), maxParallel, totals, items });
+    // Bound before any await, so no tick reads the item without its ticket.
+    if (bound) this.store.setTicket(made.id, 1, bound);
+    const plan = bound ? this.store.get(made.id) as StoredPlan : made;
     for (const id of superseded) {
       this.#deps.inbox.handle(`plan:${id}`, 'system');
       this.#publish(id);

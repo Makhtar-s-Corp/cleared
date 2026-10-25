@@ -79,10 +79,11 @@ test('a delegation made before the tracker\'s first pass is left alone', async (
 
 test('an agent\'s delegation does nothing: no ticket, no plan, no comment', async () => {
   const s = setup();
+  const older = s.tracker.open({ title: 'Older, labelled by a rule', status: 'Todo' });
+  s.clock.tick();
   await s.mirror.pass();
   s.clock.tick();
   const issue = s.tracker.open({ title: 'Labelled by a rule', status: 'Todo' });
-  const older = s.tracker.open({ title: 'Older, labelled by a rule', status: 'Todo' });
   s.clock.tick();
   s.tracker.delegate(issue.id, 'agent', 'zapier');
   s.tracker.delegate(older.id, 'agent', 'zapier');
@@ -198,6 +199,7 @@ test('the comment follows CLEARED_V2_APP_LANGUAGE', async () => {
 test('without the plans, a delegation is not read: an older issue stays out', async () => {
   const s = setup({ delegation: false });
   const issue = s.tracker.open({ title: 'Older', status: 'Todo' });
+  s.clock.tick();
   await s.mirror.pass();
   s.clock.tick();
   s.tracker.delegate(issue.id);
@@ -219,4 +221,12 @@ test('the settings: the label is cleared by default, another can be named, a sta
   assert.deepEqual(loadMirrorConfig({ ...base, CLEARED_V2_DELEGATION: 'on' })?.delegation, { label: 'cleared' });
   assert.throws(() => loadMirrorConfig({ ...base, CLEARED_V2_DELEGATION: 'maybe' }), (error: unknown) => error instanceof MirrorConfigError && /CLEARED_V2_DELEGATION /.test(`${error.message} `));
   assert.equal(loadMirrorConfig({ CLEARED_V2_DELEGATION_LABEL: 'cleared' }), undefined, 'no mirror, no delegation');
+});
+
+test('the tickets module hands a delegation to the lead\'s plans, and waits while no lead runs', async () => {
+  const { delegationOf } = await import('../../src/modules/tickets.ts');
+  const { defaultRegistry } = await import('../../src/modules/registry.ts');
+  const registry = defaultRegistry();
+  const ticket = await registry.ticketStore.create({ title: 'Delegated', project: PROJECT }, HUMAN);
+  assert.equal(await delegationOf(registry)({ ticket, tracker: 'GitHub', key: 'org/guestbook#1', url: 'https://github.com/org/guestbook/issues/1', who: 'jane' }), undefined);
 });

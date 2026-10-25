@@ -71,7 +71,7 @@ export class FakeLinear {
     return state;
   }
 
-  #entry(by: FakeLinearActor, toState: State | null, edit: Partial<Pick<HistoryEntry, 'fromTitle' | 'toTitle' | 'updatedDescription'>> = {}): HistoryEntry {
+  #entry(by: FakeLinearActor, toState: State | null, edit: Partial<Pick<HistoryEntry, 'fromTitle' | 'toTitle' | 'updatedDescription' | 'addedLabelIds' | 'toAssigneeId'>> = {}): HistoryEntry {
     return {
       createdAt: this.#clock(), actor: 'user' in by ? by.user : null, botActor: 'bot' in by ? by.bot : null, toState,
       fromTitle: null, toTitle: null, updatedDescription: null, addedLabelIds: null, toAssigneeId: null, ...edit,
