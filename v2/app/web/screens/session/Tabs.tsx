@@ -15,8 +15,9 @@ import { Empty } from '@/shell/Empty.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { quantity } from '@/lib/time.ts';
 import { ENDED, clock, parseCriteria, phaseOf, takenOverOf, type SessionView } from './model.ts';
+import { QUESTION_MAX } from '@/screens/ask/model.ts';
 import {
-  CHANGE_MAX, TABS, cutNote, fileLines, goLine, lineDiff, planView, stepCost, stepLine, stepsView, type BrowserView, type DiffLine, type Tab, type TakeoverView,
+  CHANGE_MAX, TABS, cutNote, fileLines, goLine, lineDiff, planAskScope, planView, stepCost, stepLine, stepsView, type BrowserView, type DiffLine, type Tab, type TakeoverView,
 } from './tabs.ts';
 import { Counts } from './Counts.tsx';
 
@@ -117,14 +118,42 @@ export function StepsCard({ view, t }: { readonly view: SessionView; readonly t:
   );
 }
 
+// A question to the code from the Plan tab (decision 28): sent to the
+// reader about the session's service, whatever the session's state; the
+// answer and its cost open on the /ask/:id screen.
+export type PlanAsk = { readonly text: string; readonly busy: boolean; readonly status: string };
+
+export function PlanAskCard({ service, t, ask = { text: '', busy: false, status: '' }, onText, onSend }: {
+  readonly service: string | undefined; readonly t: Translate; readonly ask?: PlanAsk;
+  readonly onText?: (text: string) => void; readonly onSend?: (event: FormEvent<HTMLFormElement>) => void;
+}) {
+  return (
+    <section className="card plan-ask" aria-labelledby="plan-ask-title">
+      <h3 id="plan-ask-title" className="card-label">{t('plan_ask_title')}</h3>
+      <form id="plan-ask" autoComplete="off" onSubmit={onSend}>
+        <label htmlFor="plan-ask-input" className="small">{t('plan_ask_label')}</label>
+        <Textarea id="plan-ask-input" name="question" maxLength={QUESTION_MAX} rows={3} placeholder={t('plan_ask_placeholder')} value={ask.text} disabled={ask.busy}
+          onChange={(event) => onText?.(event.target.value)} />
+        <p className="faint small">{planAskScope(service, t)}</p>
+        <div className="plan-actions">
+          <Button variant="ink" className="btn primary" type="submit" data-act="plan_ask" disabled={ask.busy}>{t('plan_ask_send')}</Button>
+          <span className="faint small">{t('plan_ask_opens')}</span>
+        </div>
+        <p className="plan-ask-note" role="status">{ask.status}</p>
+      </form>
+    </section>
+  );
+}
+
 // The Plan tab: the session plan with its confidence, Go and Change while it
-// waits, who gave the Go after; the ticket's steps across services; then
-// the ticket's criteria.
-export function PlanTab({ view, plan, t, changing = false, change = '', busy = false, note = '', onGo, onChangeOpen, onChangeText, onChangeSend, onChangeCancel }: {
+// waits, who gave the Go after; the ticket's steps across services; the
+// ticket's criteria; then a question to the code.
+export function PlanTab({ view, plan, t, changing = false, change = '', busy = false, note = '', ask, onGo, onChangeOpen, onChangeText, onChangeSend, onChangeCancel, onAskText, onAskSend }: {
   readonly view: SessionView; readonly plan: SessionPlan | null; readonly t: Translate;
-  readonly changing?: boolean; readonly change?: string; readonly busy?: boolean; readonly note?: string;
+  readonly changing?: boolean; readonly change?: string; readonly busy?: boolean; readonly note?: string; readonly ask?: PlanAsk;
   readonly onGo?: () => void; readonly onChangeOpen?: () => void; readonly onChangeText?: (text: string) => void;
   readonly onChangeSend?: (event: FormEvent<HTMLFormElement>) => void; readonly onChangeCancel?: () => void;
+  readonly onAskText?: (text: string) => void; readonly onAskSend?: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const takenOver = takenOverOf(view) !== null;
   const shown = planView(plan, { ended: ENDED.has(phaseOf(view)), takenOver });
@@ -173,6 +202,7 @@ export function PlanTab({ view, plan, t, changing = false, change = '', busy = f
         <h3 id="plan-criteria-title" className="card-label">{t('criteria_title')}</h3>
         <Criteria view={view} t={t} />
       </section>
+      <PlanAskCard service={view.summary.service} t={t} ask={ask} onText={onAskText} onSend={onAskSend} />
     </div>
   );
 }
