@@ -3,24 +3,31 @@
 // name as the app's; any other (Backlog, Triage, Canceled) reads as no
 // state. Who made each change is read from the issue's history: the key's
 // own user is the mirror's, a bot or an integration is an agent, any other
-// user a person. Proven against a fake of the API only; a real trial is
-// the owner's (docs/v2/mirrors.md).
+// user a person; the same history says who changed the title and the
+// description (P237). Comments are read for the team, by their own time.
+// Proven against a fake of the API only; a real trial is the owner's
+// (docs/v2/mirrors.md).
 import { DEFAULT_STATES, type TicketStates } from './contract.ts';
-import { TrackerError, trackerFetch, type Tracker, type TrackerChange, type TrackerIssue } from './mirror-tracker.ts';
+import { TrackerError, trackerFetch, type Tracker, type TrackerChange, type TrackerComment, type TrackerEdit, type TrackerIssue } from './mirror-tracker.ts';
 
 const PAGE = 50;
 const HISTORY = 50;
 
 type Named = { readonly id: string; readonly name: string } | null;
+type HistoryEntry = {
+  readonly createdAt: string; readonly actor: Named; readonly botActor: Named; readonly toState: { readonly name: string } | null;
+  readonly fromTitle?: string | null; readonly toTitle?: string | null; readonly updatedDescription?: boolean | null;
+};
 type Issue = {
   readonly id: string; readonly identifier: string; readonly url: string; readonly title: string; readonly description: string | null;
   readonly createdAt: string; readonly updatedAt: string; readonly state: { readonly name: string } | null;
-  readonly history: { readonly nodes: readonly { readonly createdAt: string; readonly actor: Named; readonly botActor: Named; readonly toState: { readonly name: string } | null }[] };
+  readonly history: { readonly nodes: readonly HistoryEntry[] };
 };
+type Comment = { readonly id: string; readonly body: string; readonly createdAt: string; readonly user: Named; readonly botActor: Named; readonly issue: { readonly id: string } | null };
 type Setup = { readonly viewer: string; readonly team: string; readonly states: ReadonlyMap<string, string> };
 
 const ISSUE_FIELDS = `id identifier url title description createdAt updatedAt state { name }
-  history(first: ${HISTORY}) { nodes { createdAt actor { id name } botActor { id name } toState { name } } }`;
+  history(first: ${HISTORY}) { nodes { createdAt actor { id name } botActor { id name } toState { name } fromTitle toTitle updatedDescription } }`;
 
 const SETUP = `query MirrorSetup($key: String!) {
   viewer { id }
@@ -35,8 +42,16 @@ const CREATE = `mutation MirrorCreate($input: IssueCreateInput!) {
 const MOVE = `mutation MirrorMove($id: String!, $input: IssueUpdateInput!) {
   issueUpdate(id: $id, input: $input) { success }
 }`;
+const EDIT = `mutation MirrorEdit($id: String!, $input: IssueUpdateInput!) {
+  issueUpdate(id: $id, input: $input) { success }
+}`;
 const COMMENT = `mutation MirrorComment($input: CommentCreateInput!) {
-  commentCreate(input: $input) { success }
+  commentCreate(input: $input) { success comment { id } }
+}`;
+const COMMENTS = `query MirrorComments($filter: CommentFilter, $first: Int, $after: String) {
+  comments(filter: $filter, first: $first, after: $after, orderBy: updatedAt) {
+    nodes { id body createdAt user { id name } botActor { id name } issue { id } } pageInfo { hasNextPage endCursor }
+  }
 }`;
 
 export class LinearTracker implements Tracker {
@@ -97,21 +112,29 @@ export class LinearTracker implements Tracker {
     return name !== undefined && Object.values(this.#states).includes(name);
   }
 
+  #actorOf(user: Named, bot: Named, viewer: string): Pick<TrackerChange, 'actor' | 'who'> {
+    if (user?.id === viewer) return { actor: 'mirror', who: user.name };
+    if (bot) return { actor: 'agent', who: bot.name };
+    if (user) return { actor: 'person', who: user.name };
+    return { actor: 'agent', who: 'unknown' };
+  }
+
   #issueOf(issue: Issue, viewer: string): TrackerIssue {
-    const changes: TrackerChange[] = [...issue.history.nodes]
+    const history = [...issue.history.nodes].sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt));
+    const changes: TrackerChange[] = history
       .filter((entry) => this.#known(entry.toState?.name))
-      .sort((a, b) => Date.parse(a.createdAt) - Date.parse(b.createdAt))
-      .map((entry) => {
-        const status = entry.toState?.name as string;
-        if (entry.actor?.id === viewer) return { status, actor: 'mirror', who: entry.actor.name, at: entry.createdAt };
-        if (entry.botActor) return { status, actor: 'agent', who: entry.botActor.name, at: entry.createdAt };
-        if (entry.actor) return { status, actor: 'person', who: entry.actor.name, at: entry.createdAt };
-        return { status, actor: 'agent', who: 'unknown', at: entry.createdAt };
-      });
+      .map((entry) => ({ status: entry.toState?.name as string, ...this.#actorOf(entry.actor, entry.botActor, viewer), at: entry.createdAt }));
+    const edits: TrackerEdit[] = history.flatMap((entry) => {
+      const by = { ...this.#actorOf(entry.actor, entry.botActor, viewer), at: entry.createdAt };
+      return [
+        ...(typeof entry.toTitle === 'string' && entry.toTitle !== entry.fromTitle ? [{ field: 'title' as const, ...by }] : []),
+        ...(entry.updatedDescription ? [{ field: 'body' as const, ...by }] : []),
+      ];
+    });
     const state = issue.state?.name;
     return {
       id: issue.id, key: issue.identifier, url: issue.url, title: issue.title, body: issue.description ?? '', labels: [],
-      status: this.#known(state) ? state : null, createdAt: issue.createdAt, updatedAt: issue.updatedAt, changes,
+      status: this.#known(state) ? state : null, createdAt: issue.createdAt, updatedAt: issue.updatedAt, changes, edits,
     };
   }
 
@@ -150,8 +173,31 @@ export class LinearTracker implements Tracker {
     if (!data.issueUpdate.success) throw new TrackerError('Linear did not move the issue');
   }
 
-  async comment(id: string, body: string): Promise<void> {
-    const data = await this.#request<{ commentCreate: { success: boolean } }>('MirrorComment', COMMENT, { input: { issueId: id, body } });
-    if (!data.commentCreate.success) throw new TrackerError('Linear did not write the comment');
+  async edit(id: string, fields: { readonly title?: string; readonly body?: string }): Promise<void> {
+    const input = { ...(fields.title !== undefined ? { title: fields.title } : {}), ...(fields.body !== undefined ? { description: fields.body } : {}) };
+    const data = await this.#request<{ issueUpdate: { success: boolean } }>('MirrorEdit', EDIT, { id, input });
+    if (!data.issueUpdate.success) throw new TrackerError('Linear did not edit the issue');
+  }
+
+  async comment(id: string, body: string): Promise<string> {
+    const data = await this.#request<{ commentCreate: { success: boolean; comment: { id: string } | null } }>('MirrorComment', COMMENT, { input: { issueId: id, body } });
+    if (!data.commentCreate.success || !data.commentCreate.comment) throw new TrackerError('Linear did not write the comment');
+    return data.commentCreate.comment.id;
+  }
+
+  async commentsSince(since: string): Promise<TrackerComment[]> {
+    const setup = await this.#ready();
+    const out: TrackerComment[] = [];
+    let after: string | null = null;
+    for (;;) {
+      const page: { comments: { nodes: Comment[]; pageInfo: { hasNextPage: boolean; endCursor: string | null } } } = await this.#request('MirrorComments', COMMENTS, {
+        filter: { issue: { team: { id: { eq: setup.team } } }, updatedAt: { gte: since } }, first: PAGE, after,
+      });
+      for (const c of page.comments.nodes) {
+        if (c.issue) out.push({ id: c.id, issue: c.issue.id, body: c.body, ...this.#actorOf(c.user, c.botActor, setup.viewer), at: c.createdAt });
+      }
+      if (!page.comments.pageInfo.hasNextPage || !page.comments.pageInfo.endCursor) return out;
+      after = page.comments.pageInfo.endCursor;
+    }
   }
 }
