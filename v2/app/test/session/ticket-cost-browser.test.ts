@@ -50,7 +50,8 @@ async function withBrowser(options: { language: 'en' | 'fr'; width?: number }, r
 
 const said = async (page: any) => ((await page.locator('#s-left [data-ticket-cost]').innerText()) as string).replace(/\s+/g, ' ').trim();
 const noOverflow = (page: any) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
-const shot = async (page: any, name: string) => { if (SHOTS) await page.locator('#s-left').screenshot({ path: join(SHOTS, `${name}.png`) }); };
+// The ticket card: on a phone the left column is `display: contents`, its cards placed in the screen's grid.
+const shot = async (page: any, name: string) => { if (SHOTS) await page.locator('#s-left > .card:first-child').screenshot({ path: join(SHOTS, `${name}.png`) }); };
 
 test('the ticket card of a resolved ticket says what its sessions used, as the ledger holds it', { skip }, async () => {
   await withBrowser({ language: 'en' }, async (page) => {
@@ -65,6 +66,7 @@ test('the ticket card of a resolved ticket says what its sessions used, as the l
 test('in French, and on a phone without a horizontal scroll', { skip }, async () => {
   await withBrowser({ language: 'fr', width: 390 }, async (page) => {
     assert.equal(await said(page), 'Coût : 232 900 jetons · 32 min de travail des agents sur 38 min · 1,03 $US en équivalent API, déclarés par les agents');
+    assert.ok(await page.locator('#s-left [data-ticket-cost]').isVisible(), 'the line is on the ticket card the phone shows first');
     assert.ok(await noOverflow(page), 'no horizontal scroll at 390');
     await shot(page, 'ticket-cost-fr-phone');
   });

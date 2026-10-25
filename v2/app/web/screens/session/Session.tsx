@@ -24,7 +24,7 @@ import {
   ArrowCounterClockwise, ArrowRight, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, Terminal, WarningCircle, X, type Icon,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react';
-import type { ConfirmableRule, EditorLinks, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketStep } from '../../../../src/api/types.ts';
+import type { ConfirmableRule, EditorLinks, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketCost, TicketStep } from '../../../../src/api/types.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import { Choices, OwnChoices } from '@/components/choices/Choices.tsx';
 import { sentText, type Answers } from '@/components/choices/model.ts';
@@ -57,7 +57,7 @@ import { CloseTicket } from './CloseTicket.tsx';
 import { BrowserTab, Confidence, Criteria, EditorTab, OpenInEditor, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown } from './Tabs.tsx';
 import { browserView, changeProblem, CHANGE_MAX, editorOffer, goLine, handoverFor, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import {
-  actingSession, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
+  actingSession, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketCostLine, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
   type Filter, type Handover, type ThreadEntry, type TicketPart,
 } from './ticket.ts';
 import { askHref } from '@/screens/ask/model.ts';
@@ -429,6 +429,8 @@ export function LeftCards({ view, t, onPlan, close }: { readonly view: SessionVi
   const parsed = parseCriteria(view.ticket?.body ?? '');
   const plan = ticketPlan(partsOf(view)) ?? view.thread.plan;
   const service = serviceLine(view.summary.service, t, stepsView(view.steps, view.summary.id));
+  // A resolved ticket's cost (P211): the ticket card says what its sessions used.
+  const cost = view.ticket?.status === 'Done' ? ticketCostLine(view.cost, view.language, t) : null;
   // A card with nothing to say is not drawn (lane 34's art director): the ticket card says it all.
   return (
     <>
@@ -436,6 +438,7 @@ export function LeftCards({ view, t, onPlan, close }: { readonly view: SessionVi
         <p className="eyebrow">{t('ticket_label')} <span className="id">{view.summary.ticket}</span>{service ? <> · <span className="service">{service}</span></> : null}</p>
         <h2 id="ticket-title" className="card-title">{view.ticket?.title ?? view.summary.ticket}</h2>
         {parsed.description.map((p, index) => <p key={index} className="desc">{p}</p>)}
+        {cost ? <p className="ticket-cost faint small" data-ticket-cost=""><span>{cost.use}</span>{cost.usd ? <> · <span>{cost.usd}</span></> : null}</p> : null}
         {close}
       </section>
       {parsed.criteria.length > 0 ? (
@@ -726,6 +729,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const [fileFailed, setFileFailed] = useState(false);
   const [mode, setMode] = useState<'diff' | 'file'>('diff');
   const [steps, setSteps] = useState<readonly TicketStep[] | null>(null);
+  const [cost, setCost] = useState<TicketCost | null>(null);
   const [editing, setEditing] = useState<EditorState | null>(null);
   const [generation, setGeneration] = useState(0);
   const [editable, setEditable] = useState<{ readonly file: SessionFile; readonly why: ReadOnlyWhy | undefined } | null>(null);
@@ -752,8 +756,16 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     }
     catch { /* the next change tries again */ }
   }, [context, ticketId]);
+  // A resolved ticket's cost (P211), read from the ledger by the service.
+  const resolved = loaded.ticket?.status === 'Done';
+  const readCost = useCallback(async () => {
+    if (!resolved) return;
+    try { setCost(await context.api<TicketCost>(`/tickets/${encodeURIComponent(ticketId)}/cost`)); }
+    catch { /* the next change tries again */ }
+  }, [context, ticketId, resolved]);
   const refresh = useCallback(async () => {
     void readSteps();
+    void readCost();
     try {
       const all = await context.api<SessionSummary[]>('/sessions');
       setSessions((before) => {
@@ -762,8 +774,9 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
       });
       setTaken((local) => (local && !gestureNow.current ? null : local));
     } catch { /* the next change tries again */ }
-  }, [context, loaded.detail, readSteps]);
+  }, [context, loaded.detail, readSteps, readCost]);
   useEffect(() => { void readSteps(); }, [readSteps]);
+  useEffect(() => { void readCost(); }, [readCost]);
   useLive(() => {
     if (shown) void refresh();
     else missed.current = true;
@@ -833,10 +846,10 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const actingThread = threads.get(id);
   const actingDetail = details.get(id);
   const view: SessionView = useMemo(() => ({
-    summary: acting, ticket: loaded.ticket, siblings: sessions, me: context.me.user.id, language: context.me.language, now, busy, answers, takenOver: actingTaken, steps,
+    summary: acting, ticket: loaded.ticket, siblings: sessions, me: context.me.user.id, language: context.me.language, now, busy, answers, takenOver: actingTaken, steps, cost,
     thread: actingThread ?? { lastSeq: 0, lastAt: undefined, state: actingDetail?.state, rows: [], turns: [], pending: [], interrupts: [], steps: [], plan: null, checkpoints: [] },
     parts, filter, unfolded,
-  }), [acting, loaded.ticket, sessions, context.me, now, busy, answers, actingTaken, steps, actingThread, actingDetail, parts, filter, unfolded]);
+  }), [acting, loaded.ticket, sessions, context.me, now, busy, answers, actingTaken, steps, cost, actingThread, actingDetail, parts, filter, unfolded]);
   const ended = ENDED.has(phaseOf(view));
   // Asked again when the session changes or ends; 403, 409 and the rest: no button.
   useEffect(() => {

@@ -123,7 +123,7 @@ type Turn = { readonly usage?: unknown; readonly result?: { readonly total_cost_
 
 const count = (value: unknown): number => (typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0);
 
-function turnTokens(turn: Turn): number {
+export function turnTokens(turn: Turn): number {
   const usage = Array.isArray(turn.usage) ? turn.usage : [];
   let total = 0;
   for (const u of usage) {

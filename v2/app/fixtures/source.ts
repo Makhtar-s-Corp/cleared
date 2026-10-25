@@ -23,10 +23,14 @@
 // The batches (requirement C6) are the service's own runner (flow/batch.ts)
 // over the created tickets and the consumption fixture's levers and windows;
 // its flow only moves a ticket to In Progress, and each read runs a pass.
+// A ticket's cost (P211) is the service's own ticketCost over the ledger
+// that holds the ticket's sessions; with `resolved`, the landed ticket
+// LOCAL-149 has its author's and its reviewer's sessions (fixtures/cost.ts).
 import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { KEEPALIVE_MS } from '../../src/api/events.ts';
 import { changeFrame, leadFrame, sseFrame, type Ask, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
+import { ticketCost } from '../../src/consumption/ticket-cost.ts';
 import { BatchError, BatchRunner } from '../../src/flow/batch.ts';
 import { changedFiles } from '../../src/flow/files.ts';
 import type { SessionState } from '../../src/session/events.ts';
@@ -37,6 +41,7 @@ import { leadFixture } from './lead.ts';
 import { ENVELOPE_BODY, ENVELOPE_RESUMED, ENVELOPE_TICKET, PREVIEW_KEY, envelopeStory, fixtureFile, fixtureHuman, workspaceFixture } from './session.ts';
 import { askFixture } from './ask.ts';
 import { consumptionFixture } from './consumption.ts';
+import { RESOLVED_TICKET, resolvedStory } from './cost.ts';
 import { contractItem, knowledgeItem, requestItems } from './inbox.ts';
 import { RECIPES, schedulesFixture, ticketSteps, towerFixture } from './tower.ts';
 
@@ -77,7 +82,7 @@ export type FixtureSource = DataSource & {
   lanes(n: number | null): void; quota(percent: number): void;
 };
 
-export async function fixtureSource(options: { readonly now?: () => Date; readonly project?: string } = {}): Promise<FixtureSource> {
+export async function fixtureSource(options: { readonly now?: () => Date; readonly project?: string; readonly resolved?: boolean } = {}): Promise<FixtureSource> {
   const now = options.now ?? (() => new Date());
   const fixture = await towerFixture(now(), options.project === undefined ? {} : { project: options.project });
   const lead = await leadFixture(now(), options.project === undefined ? {} : { project: options.project });
@@ -118,9 +123,14 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   const plans = [...lead.plans, ...fixture.plans.filter((plan) => plan.state !== 'proposed')];
   const envelopeReviewer = fixture.sessions.find((s) => s.ticket === ENVELOPE_TICKET && s.role === 'reviewer');
   const envelope = envelopeReviewer ? envelopeStory(now(), envelopeReviewer) : undefined;
-  const sessions = [...fixture.sessions, ...(envelope ? [envelope.author] : [])];
+  const landed = fixture.tickets.find((ticket) => ticket.id === RESOLVED_TICKET);
+  const resolved = options.resolved && landed ? resolvedStory(landed) : undefined;
+  const sessions = [...fixture.sessions, ...(envelope ? [envelope.author] : []), ...(resolved?.sessions ?? [])];
   const tickets = fixture.tickets.map((ticket) => (ticket.id === ENVELOPE_TICKET ? { ...ticket, body: ENVELOPE_BODY } : ticket));
-  const storeOf = (id: string) => (id === lead.session.id ? lead.store : envelope && (id === envelope.author.id || id === envelopeReviewer?.id) ? envelope.store : fixture.store);
+  const storeOf = (id: string) => (id === lead.session.id ? lead.store : envelope && (id === envelope.author.id || id === envelopeReviewer?.id) ? envelope.store
+    : resolved?.sessions.some((s) => s.id === id) ? resolved.store : fixture.store);
+  // The ledger that holds a ticket's sessions.
+  const ledgerOf = (ticket: string) => (ticket === ENVELOPE_TICKET && envelope ? envelope.store : ticket === RESOLVED_TICKET && resolved ? resolved.store : fixture.store);
   // What a session's stored events add up to, its deltas applied, as the service's detail says.
   const state = (id: string): SessionState | undefined => {
     const model = emptyModel();
@@ -329,6 +339,10 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
         return sendJson(response, 201, await created.create(body, { kind: 'human', id: user }));
       }
       if (method === 'GET' && sub === 'steps' && parts.length === 3) return sendJson(response, 200, steps(decodeURIComponent(id ?? '')));
+      if (method === 'GET' && sub === 'cost' && parts.length === 3) {
+        const ticket = decodeURIComponent(id ?? '');
+        return sendJson(response, 200, ticketCost(ledgerOf(ticket).db, { project, ticket }));
+      }
       if (method === 'GET' && parts.length === 2) {
         const ticket = (await all()).find((t) => t.id === id);
         return ticket ? sendJson(response, 200, ticket) : sendJson(response, 404, { error: 'no such ticket' });
