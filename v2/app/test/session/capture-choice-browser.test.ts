@@ -3,13 +3,17 @@
 // card of a ticket in progress draws Auto, On and Off, Auto pressed; a click
 // on Off saves the choice on the ticket through the service's route, and a
 // reload shows it kept; in English and in French, with no horizontal scroll
-// on a phone. With CLEARED_V2_SHOTS set to a folder it writes the card's
-// captures there, at 1440, 1280, 768 and 390 pixels, light and dark.
+// on a phone. The card is captured at 1440, 1280, 768 and 390 pixels, light
+// and dark, its buttons 44 px tall up to 1100 px: into CLEARED_V2_SHOTS when
+// it names a folder (docs/v2/capture-detect/after/), else into a temporary
+// folder removed after, so the CI's browser job runs it too (none skipped).
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/session/capture-choice-browser.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { TICKET_ID } from '../../fixtures/session.ts';
 import { fixtureSource } from '../../fixtures/source.ts';
@@ -60,7 +64,16 @@ const buttons = (page: any): Promise<string[]> => page.locator('#s-left [data-ti
 const pressed = (page: any): Promise<string[]> => page.locator('#s-left [data-ticket-captures] button[aria-pressed="true"]').evaluateAll((all: any[]) => all.map((b) => b.dataset.captures));
 const hint = async (page: any): Promise<string> => ((await page.locator('#s-left [data-ticket-captures] > p').first().innerText()) as string).trim();
 const noOverflow = (page: any) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
-const shot = async (page: any, name: string) => { if (SHOTS) await page.locator('#s-left > .card:first-child').screenshot({ path: join(SHOTS, `${name}.png`) }); };
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+// The card as a PNG file in `dir`, checked to be one, with its width and height in pixels.
+async function shot(page: any, dir: string, name: string): Promise<{ width: number; height: number }> {
+  const path = join(dir, `${name}.png`);
+  await page.locator('#s-left > .card:first-child').screenshot({ path });
+  const bytes = readFileSync(path);
+  assert.ok(bytes.subarray(0, 8).equals(PNG), `${name} is a PNG`);
+  return { width: bytes.readUInt32BE(16), height: bytes.readUInt32BE(20) };
+}
+const heights = (page: any): Promise<number[]> => page.locator('#s-left [data-ticket-captures] button').evaluateAll((all: any[]) => all.map((b) => b.getBoundingClientRect().height));
 
 test('the ticket card draws Auto, On and Off; Off is saved on the ticket and kept after a reload', { skip }, async () => {
   await withBrowser({ language: 'en' }, async (page) => {
@@ -91,10 +104,20 @@ test('in French, and on a phone with no horizontal scroll', { skip }, async () =
   });
 });
 
-test('the card\'s captures, when asked for', { skip: skip || (SHOTS ? false : 'CLEARED_V2_SHOTS is not set') }, async () => {
-  for (const width of [1440, 1280, 768, 390])
-    for (const scheme of ['light', 'dark'] as const)
-      await withBrowser({ language: 'en', width, scheme }, async (page) => { await shot(page, `capture-choice-en-${width}-${scheme}`); });
-  await withBrowser({ language: 'fr', width: 1440 }, async (page) => { await shot(page, 'capture-choice-fr-1440-light'); });
-  await withBrowser({ language: 'fr', width: 390 }, async (page) => { await shot(page, 'capture-choice-fr-390-light'); });
+test('the card\'s captures at the four widths, light and dark, and in French; 44 px buttons up to 1100 px', { skip }, async () => {
+  const dir = SHOTS ?? mkdtempSync(join(tmpdir(), 'cleared-v2-capture-choice-'));
+  try {
+    const card = async (page: any, name: string, width: number) => {
+      const size = await shot(page, dir, name);
+      assert.ok(size.width > 0 && size.height > 0, `${name} has pixels`);
+      if (width <= 1100) assert.ok((await heights(page)).every((h) => h >= 44), `${name}: each choice at least 44 px tall`);
+    };
+    for (const width of [1440, 1280, 768, 390])
+      for (const scheme of ['light', 'dark'] as const)
+        await withBrowser({ language: 'en', width, scheme }, (page) => card(page, `capture-choice-en-${width}-${scheme}`, width));
+    await withBrowser({ language: 'fr', width: 1440 }, (page) => card(page, 'capture-choice-fr-1440-light', 1440));
+    await withBrowser({ language: 'fr', width: 390 }, (page) => card(page, 'capture-choice-fr-390-light', 390));
+  } finally {
+    if (!SHOTS) rmSync(dir, { recursive: true, force: true });
+  }
 });
