@@ -8,7 +8,7 @@
 // `docker` and temporary repositories: no Docker, no network.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Docker, LABEL } from '../../src/container/docker.ts';
 import {
@@ -33,7 +33,7 @@ function recordBuilds(fake: FakeDocker): { dockerfile: string; context: string[]
     const context = args[args.length - 1] as string;
     const file = valueOf(args, '--file') ?? join(context, 'Dockerfile');
     const names = readdirSync(context).sort();
-    seen.push({ dockerfile: readFileSync(file, 'utf8'), context: names, files: Object.fromEntries(names.filter((n) => n !== 'Dockerfile' && !n.startsWith('.')).map((n) => [n, readFileSync(join(context, n), 'utf8')])) });
+    seen.push({ dockerfile: readFileSync(file, 'utf8'), context: names, files: Object.fromEntries(names.filter((n) => n !== 'Dockerfile' && statSync(join(context, n)).isFile()).map((n) => [n, readFileSync(join(context, n), 'utf8')])) });
     return undefined;
   };
   return seen;
@@ -73,9 +73,11 @@ test('the hash covers the lock files, the install command, the devcontainer file
   await after({ '.cleared/agents.conf': CONF('npm ci --omit=optional') });
   await after({ '.devcontainer/devcontainer.json': '{ "build": { "dockerfile": "Dockerfile" } }\n', '.devcontainer/Dockerfile': 'FROM cleared-v2-session:2.1.306\n' });
   await after({ '.devcontainer/Dockerfile': 'FROM cleared-v2-session:2.1.306\nRUN true\n' });
-  const latest = await readInputs(source);
-  assert.equal(latest?.devcontainer, 'dockerfile');
-  assert.notEqual((await readInputs(source, { baseImage: 'cleared-v2-session:9.9.9' }))?.hash, latest?.hash, 'Cleared\'s own session image is in the hash');
+  assert.equal((await readInputs(source))?.devcontainer, 'dockerfile');
+
+  // Cleared's own session image, which a project with no Dockerfile starts from.
+  const plain = project();
+  assert.notEqual((await readInputs(plain.source, { baseImage: 'cleared-v2-session:9.9.9' }))?.hash, (await readInputs(plain.source))?.hash, 'Cleared\'s own session image is in the hash');
 });
 
 test('a base that is not fetched has no inputs, and an install command that is not one simple command is refused', async () => {
@@ -234,7 +236,7 @@ test('the cleanup keeps the two newest images of the service and removes nothing
   const tags: string[] = [];
   for (const version of ['8.13.1', '8.13.2', '8.13.3']) {
     if (version !== '8.13.1') { land(bare, { 'package-lock.json': LOCK(version) }); fetched(source); }
-    tags.push((await prepared.ensure(source)).tag);
+    tags.push((await prepared.ensure(source)).tag ?? '');
   }
   const names = fake.images.map((image) => image.name).sort();
   assert.deepEqual(names, [
@@ -257,7 +259,7 @@ test('choose: the ready image; a stale one waits for its build and says so; no r
   const record = await prepared.ensure(source);
   const before = builds(fake).length;
   const ready = await prepared.choose('api', () => assert.fail('a ready image is not waited for'));
-  assert.deepEqual({ kind: ready.kind, image: ready.image }, { kind: 'prepared', image: record.tag });
+  assert.deepEqual(ready, { kind: 'prepared', image: record.tag, waitedMs: 0 });
   assert.equal(builds(fake).length, before, 'nothing built at the start');
 
   land(bare, { 'package-lock.json': LOCK('8.13.2') });

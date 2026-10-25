@@ -676,7 +676,7 @@ test('a prepared service\'s session starts on its ready image, and nothing is bu
   const record = await new PreparedImages({ docker: new Docker(fake.runner), stateDir }).ensure(source);
   const before = fake.calls.length;
   const started = await startSession(new Docker(fake.runner), runtimeSpec({ prepared: { service: 'api', stateDir } }));
-  assert.ok(byName(fake.containers, sessionNames(SESSION).container).args?.includes(record.tag));
+  assert.ok(byName(fake.containers, sessionNames(SESSION).container).args?.includes(record.tag ?? '?'));
   assert.ok(!fake.calls.slice(before).some((call) => call.args[0] === 'build'), 'no build at the start');
   assert.deepEqual(started.image, { image: record.tag, kind: 'prepared', waitedMs: started.image.waitedMs });
 });
