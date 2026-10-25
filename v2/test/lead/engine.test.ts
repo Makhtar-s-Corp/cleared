@@ -123,6 +123,12 @@ test('the thread, a question answered from the reply, a commitment, and the hand
   assert.equal(thread.filter((m) => m.kind === 'refresh').length, 1);
   assert.equal(thread.at(-1)?.kind, 'refresh');
   assert.equal(thread.at(-1)?.generation, 2);
+
+  // Issue #335 (P219): the tools come before the system prompt in what the
+  // model is sent, so both generations get the same list, byte for byte.
+  const toolsOf = (n: number) => JSON.stringify(t.generations[n]?.input.tools?.map(({ name, description, inputSchema }) => ({ name, description, inputSchema })));
+  assert.ok((t.generations[0]?.input.tools?.length ?? 0) > 0);
+  assert.equal(toolsOf(1), toolsOf(0));
   assert.deepEqual(threadTexts(t).slice(0, 8), [
     'owner:message:Hello', 'lead:message:Hello, I am the lead of the guestbook.',
     'owner:message:Make a long guestbook readable', 'lead:question:On desktop, pages of 20 or one long list?',

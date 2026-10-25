@@ -199,6 +199,20 @@ test('frames outside the subset map to nothing; a subagent frame keeps its tool 
   assert.ok(!JSON.stringify(events).includes('secret plan'), 'reasoning content is never emitted');
 });
 
+// Issue #335 (P219): with the preset's per-session sections excluded, the SDK
+// gives them to the model in a user message of its own. Should a frame of it
+// reach the runner's stdout, it is no event: the thread shows only what a
+// person or Cleared sent, and a user frame counts only its tool results.
+test('a user frame of text alone, such as the context the SDK moves out of the system prompt, maps to nothing in a turn', () => {
+  const mapper = createMapper({ sessionId: SESSION });
+  mapper.start('claude-haiku-5-5');
+  const turn = mapper.line({ type: 'sdk', message: { type: 'system', subtype: 'init', user_message_uuids: [id(40)] } });
+  assert.deepEqual(turn.map((event) => event.type), ['RUN_STARTED', 'STATE_DELTA']);
+  const context = { type: 'user', uuid: id(41), message: { role: 'user', content: [{ type: 'text', text: 'Working directory: /workspace\nGit status: on branch cleared/LOCAL-12' }] } };
+  assert.deepEqual(mapper.line({ type: 'sdk', message: context }), []);
+  assert.deepEqual(mapper.line({ type: 'sdk', message: { ...context, uuid: id(42), message: { role: 'user', content: 'Working directory: /workspace' } } }), []);
+});
+
 test('a token in a command output and an edit outside the workdir are cleaned', () => {
   const token = ['sk', 'ant', 'oat01', 'R4u9Kd0Qm2Zx7Lp1Vb8Nc3Ws6Ty5Hj0'].join('-');
   const mapper = createMapper({ sessionId: SESSION });

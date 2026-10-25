@@ -38,6 +38,29 @@ test('the rules stand outside the data; the handover, the messages and the commi
   assert.match(text, /structured parts win/i);
 });
 
+// Issue #335 (P219): the prompt cache reuses a prefix only up to its first
+// changed byte, so what changes least comes first and the generation's
+// number and time come last.
+test('two generations share their briefing up to the memory; the number and the time come after it', () => {
+  const memory = [{ type: 'project', content: 'The guestbook.' }, { type: 'lesson', content: 'Keep tickets small.' }];
+  const first = renderLeadBriefing({ generation: 1, at: '2026-10-25T08:00:00.000Z', commitments: [], handover: null, memory });
+  const second = renderLeadBriefing({
+    generation: 2, at: '2026-10-25T11:30:00.000Z', handover: record, memory,
+    commitments: [{ id: 'c1', text: 'Remind the owner at noon.', ticket: null, due: null, state: 'open', createdAt: '2026-10-25T09:00:00.000Z', fulfilledAt: null, note: null }],
+  });
+  let same = 0;
+  while (same < first.length && first[same] === second[same]) same++;
+  const memoryEnd = first.indexOf('Keep tickets small.');
+  assert.ok(memoryEnd > first.indexOf(REFERENCE_LINE), 'the memory is data');
+  assert.ok(same > memoryEnd, `the shared prefix (${same} characters) covers the rules and the memory (${memoryEnd})`);
+  for (const text of [first, second]) {
+    const at = text.search(/generation \d of the lead, started at/);
+    assert.ok(at > text.indexOf('Keep tickets small.'), 'the number and the time come after the memory');
+    assert.ok(at > text.indexOf('## Open commitments') && at > text.indexOf('## Last handover'), 'and after the commitments and the handover');
+  }
+  assert.ok(second.indexOf('Remind the owner at noon.') > second.indexOf(REFERENCE_LINE), 'the commitments stay data');
+});
+
 test('the parts of a handover record are cut to their limits, the newest messages kept', () => {
   assert.deepEqual(HANDOVER_LIMITS, { summary: 4096, messages: 6144 });
   const messages = Array.from({ length: 10 }, (_v, i) => ({ seq: i + 1, at: '2026-10-22T07:00:00.000Z', by: 'owner' as const, text: `${i + 1} ${'m'.repeat(1500)}`, kind: 'message' as const }));
