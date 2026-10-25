@@ -700,6 +700,18 @@ export function repairLine(item: ReleaseItem, t: Translate): string | undefined 
   return t(`repair_${repair.state}`, { n: repair.attempt, limit: repair.limit, checks });
 }
 
+// A Quick ticket's lane (matrix B2.2): on the fast lane, the approval is
+// asked while the checks run and the lock lands it once they are green;
+// sent back to the full circuit, or not fast at this head, why, in the
+// rules' words. Nothing for a ticket without the label.
+export function laneLine(item: ReleaseItem, t: Translate): string | undefined {
+  const lane = item.fastLane;
+  if (!lane) return undefined;
+  if (lane.state === 'fast') return t(`lane_fast_${CHECKS[item.pr.checks]}`);
+  const reasons = lane.reasons.map((reason) => t(`fast_reason_${reason}`)).join(', ');
+  return t(lane.state === 'full' ? 'lane_full' : 'lane_off', { reasons });
+}
+
 // Who asks, and for how long its session has been paused; a handled request pauses nothing.
 export function pausedLine(item: Item, session: SessionSummary, now: Date, t: Translate): string {
   const model = family(session.model);
