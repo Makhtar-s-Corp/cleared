@@ -116,3 +116,52 @@ v1's handovers, events and sessions; several v1 ledgers into one workspace (a se
 | Whether the first piloted project's v1 ledger holds `ticket_measured` events and lines changed for most of its tickets (the samples need both) | the owner's dry run on that ledger; its counts say it, and nothing is written |
 | Whether the size thresholds (20, 100, 400 lines) match the sizes the lead gives | the owner (question in the log entry, default applied) |
 | A v1 ledger written while it is copied | not closed: v1 is stopped (D22), and the command is run on a stopped v1 |
+
+## 5. The mirrors' follow-ups (`v2-j4-mirror-followups`, issue #386)
+
+Section 4 is the cleanup lane's (issue #382, pull request 388).
+
+### 5.1 Context
+
+Pull request 384 mirrors a ticket's creation and its state, and left three things out (section 2.5, and `docs/v2/mirrors.md`, "What is proven, and what is left"): the comments, the later edits of the title and the description, and an open page of the app, which does not redraw when the mirror writes in the store. This lane adds the three on the same mirror, with the same conflict rule for the edits, against GitHub's example repositories and a fake Linear server only.
+
+### 5.2 What exists at the end, and how it is proven
+
+- **Comments, both ways.** Each comment of a mirrored ticket is written once on each of its trackers, and each comment of a mirrored issue once in the app. The tracker's comments are read by their own time (GitHub: the repository's issue comments since the last read; Linear: the team's comments since then), not through the issue's last change.
+- **Edits of the title and the description, both ways**, one field at a time, settled by `decide()` (section 2.3) as the state is: against the value both sides last agreed on.
+- **Live redraw.** Each write the mirror makes in the app says the ticket on the change stream (`api/events.ts`, `ChangeHub.say('ticket', id)`), so an open board or ticket refetches it. No change to `api/types.ts`: the `ticket` kind already refetches the ticket, the list, its steps and the plans.
+- Proven by new cases in `test/tickets/mirror.test.ts` (the pass on the real store with the tracker in memory), `mirror-github.test.ts` and `mirror-linear.test.ts` (each tracker against its fake), `mirror-proof.test.ts` (a comment and an edit each way on both fakes), `mirror-catalog.test.ts`, `test/tickets/contract.test.ts` (the store's edit), `test/tickets/services.test.ts` (the tables), and the real run on the example repository, quoted in the pull request.
+
+### 5.3 The rules
+
+1. **What a comment carries.** Its text, with a first line that says who wrote it and where: on a tracker, "{who}, in Cleared:" for the owner's signed comment, "A user of Cleared:" for another user's, "Cleared:" for the service's; in the app, "{who}, on {tracker}:". A comment that came from a tracker is written in the app as the mirror (`agents`, `cleared-mirror`), never as a signed person, so it never counts as the owner's line. It goes on to the other trackers as it is, never back to the one it came from. Images (`local://capture/`) are not sent.
+2. **Which comments.** All the app's comments of a mirrored ticket, the service's notes included: today the app shows no comment and its users write none, so the service's notes and v1's tools are the only writers, and the tracker's reader learns from them why a ticket moved. A question for the owner, default applied (the log entry).
+3. **Each once.** The mirror keeps each comment's pair, the app's id and the tracker's, in `mirror_comments`, its own comments on a tracker (the put-backs) included, so none comes back. A link the mirror made before this lane's code ran starts from the first pass after it: comments older than that are not copied, either way.
+4. **Edits.** Per link and field, the value both sides last agreed on is kept (`mirror_fields`). One side changed: it is written on the other. Both changed: `decide()`, a person's change over an agent's, the later of two people's, the app's between agents or at the same second.
+5. **Who made an edit.** On GitHub, a title's change is the issue's `renamed` event, with its actor. GitHub's issue events have no event for a change of the description, so its author is not named, and the rule reads it as an agent's (2.3, rule 5). On Linear, the issue's history (`fromTitle`, `toTitle`, `updatedDescription`) with its actor. In the app, the mirror is the only writer of a title or a description: who made the value it wrote is kept in `mirror_edits`, as `mirror_applied` keeps it for a state.
+6. **What a tracker never edits.** A ticket the owner approved, until it is released: the tracker's field is put back to the app's, with a comment, as a move is (2.3, rule 6). A title left empty is not written in the app.
+7. **What an edit does to the creator's signature.** The store's `content_hash` is written on the creation row only, never on the approval's: section 2.4 says the approval binds the title and the body, and the code does not. A changed title or description therefore makes the creation row of a ticket the owner wrote read as `other` (`LocalTicketStore.#verified`): the text is no longer the one the owner signed. Nothing in v2 reads a ticket's creator (the readers of `history` filter on the go state), and the approval is untouched.
+
+### 5.4 Decisions this lane takes
+
+- **New tables, not new columns.** `CREATE TABLE IF NOT EXISTS` does not add a column to the `mirror_links` 384 made: `mirror_fields` (the agreed value and the tracker's last read, per link and field), `mirror_edits`, `mirror_comments` and `mirror_followed` (the time this code first followed a link) are new tables of the tickets module.
+- **The store's edit.** `TicketStore.edit(id, { title?, body? }, by)`, on `LocalTicketStore` and `MemoryTicketStore`: it writes `tracker_tickets` and its `updated_at`, no history row (the history is the states'). The mirror is its only caller.
+- **The tracker's interface.** `Tracker.comments(since)`, `Tracker.edit(id, fields)`, and `Tracker.comment` returns the comment's id; `TrackerIssue.edits` lists who changed a field, as `changes` does for the state.
+- **The redraw.** An optional `changed(ticket)` in the mirror's dependencies, wired by `modules/tickets.ts` to the engine's change hub.
+- **Language.** The comments' first lines and the edit's refusal follow `CLEARED_V2_APP_LANGUAGE`, French by default, as the mirror's other words.
+- **Matrix line.** P237 (P236 is the cleanup's); B5.8b, P230 and `docs/v2/mirrors.md` updated.
+
+### 5.5 Out of scope
+
+A comment edited or deleted after it was mirrored; a screen of the app that shows comments, or that edits a title or a description; the labels' later edits; a real Linear account; a webhook.
+
+### 5.6 Files this lane owns
+
+`v2/src/tickets/mirror*.ts`, `v2/src/tickets/messages/mirror.*.json`, `v2/test/tickets/mirror*.test.ts` and the fakes; the `edit` of `tickets/contract.ts` and `tickets/local-store.ts` and its case in `test/tickets/contract.test.ts`; the wiring in `modules/tickets.ts`; the pinned tables in `test/tickets/services.test.ts`; `docs/v2/mirrors.md`; its matrix line and its log entry.
+
+### 5.7 Unknowns, and who closes them
+
+| Unknown on 2026-10-25 | Closed by |
+| --- | --- |
+| Whether GitHub records who changed an issue's description anywhere its REST API reads | the real run of this lane, on the example repository |
+| Whether Linear's `Comment.botActor` names an integration's comment, and whether its history's `toTitle` and `updatedDescription` are filled as its schema says | the owner's real trial; until then an unnamed author reads as an agent's |
