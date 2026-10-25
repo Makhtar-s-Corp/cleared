@@ -27,32 +27,34 @@ function viewOf(overrides: Partial<SessionView> = {}, status = 'Done'): SessionV
   const ticket = fixture.ticket && { ...fixture.ticket, status };
   return { summary: fixture.sessions[0] as SessionSummary, thread: threadOf(model), ticket, siblings: fixture.sessions, me: USER, language: 'en', now: FIXTURE_NOW, ...overrides };
 }
-// The card's cost line, its spaces (no-break, narrow) said as plain spaces.
+// The card's cost facts, each on its line, their spaces (no-break, narrow) said as plain spaces.
 const costText = (markup: string): string | undefined => {
   const line = markup.match(/<p class="ticket-cost[^"]*" data-ticket-cost="">([\s\S]*?)<\/p>/)?.[1];
-  return line === undefined ? undefined : visibleText(`<p>${line}</p>`).join(' ').replace(/\s+/g, ' ');
+  if (line === undefined) return undefined;
+  assert.equal([...line.matchAll(/<span class="fact">/g)].length, visibleText(`<p>${line}</p>`).length, 'every fact in its own span');
+  return visibleText(`<p>${line}</p>`).map((fact) => fact.replace(/\s+/g, ' ')).join(' | ');
 };
 
 test('a resolved ticket\'s card says its tokens, the agents\' time over the ticket\'s, and the dollars the agents reported', () => {
   const markup = html(<LeftCards view={viewOf({ cost: COST })} t={en} />);
-  assert.equal(costText(markup), 'Cost: 1,234,567 tokens · 37 min of agent work over 1h 4m · $2.00 API-equivalent, as the agents reported it');
+  assert.equal(costText(markup), 'Cost: 1,234,567 tokens | 37 min of agent work over 1h 4m | $2.00 API-equivalent, as the agents reported it');
   assert.doesNotMatch(markup, /€|EUR/);
 });
 
 test('in French, with French numbers and durations', () => {
   const markup = html(<LeftCards view={viewOf({ cost: COST, language: 'fr' })} t={fr} />);
-  assert.equal(costText(markup), 'Coût : 1 234 567 jetons · 37 min de travail des agents sur 1 h 04 · 2,00 $US en équivalent API, déclarés par les agents');
+  assert.equal(costText(markup), 'Coût : 1 234 567 jetons | 37 min de travail des agents sur 1 h 04 | 2,00 $US en équivalent API, déclarés par les agents');
 });
 
 test('no dollar amount when one session reported none: the tokens and the time only', () => {
   const markup = html(<LeftCards view={viewOf({ cost: { ...COST, costUsd: null } })} t={en} />);
-  assert.equal(costText(markup), 'Cost: 1,234,567 tokens · 37 min of agent work over 1h 4m');
+  assert.equal(costText(markup), 'Cost: 1,234,567 tokens | 37 min of agent work over 1h 4m');
   assert.doesNotMatch(markup, /\$/);
 });
 
 test('an amount under a dollar keeps its cents and more', () => {
   const markup = html(<LeftCards view={viewOf({ cost: { ...COST, costUsd: 0.0123 } })} t={en} />);
-  assert.match(costText(markup) ?? '', /· \$0\.0123 API-equivalent/);
+  assert.match(costText(markup) ?? '', /\| \$0\.0123 API-equivalent/);
 });
 
 test('a short ticket says seconds; a ticket of days says days', () => {

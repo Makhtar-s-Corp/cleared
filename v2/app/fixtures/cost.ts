@@ -28,6 +28,7 @@ const finished = (threadId: string, usage: Record<string, number | string>, cost
   ({ type: 'RUN_FINISHED', threadId, runId: 'turn-1', outcome: { type: 'success' }, usage: [usage], result: { stopReason: 'end_turn', total_cost_usd: cost } } as AgUiEvent);
 
 // The author's one turn, 24 minutes; the reviewer's, 8 minutes, from 30 minutes after the author's start.
+// Their rows in the sessions table too, through which the service finds a ticket's sessions.
 export function resolvedStory(ticket: Ticket): { readonly store: Store; readonly sessions: readonly SessionSummary[] } {
   const store = openStore(':memory:');
   const project = ticket.project ?? 'guestbook';
@@ -62,10 +63,13 @@ export function resolvedStory(ticket: Ticket): { readonly store: Store; readonly
     snapshot('Done', 'review', at(30), at(38), reviewerUsage),
   );
 
-  const summary = (id: string, role: 'author' | 'reviewer', model: string, from: Date, to: Date): SessionSummary => ({
-    id, project, ticket: RESOLVED_TICKET, role, harness: 'claude-code', model, phase: 'done', status: 'Done',
-    startedAt: from.toISOString(), updatedAt: to.toISOString(), lastSeq: store.events.after(id).at(-1)?.seq ?? 0,
-  });
+  const summary = (id: string, role: 'author' | 'reviewer', model: string, from: Date, to: Date): SessionSummary => {
+    store.sessions.put({ id, project, ticket: RESOLVED_TICKET, role, harness: 'claude-code', model, status: 'done', createdAt: from.toISOString(), updatedAt: to.toISOString() });
+    return {
+      id, project, ticket: RESOLVED_TICKET, role, harness: 'claude-code', model, phase: 'done', status: 'Done',
+      startedAt: from.toISOString(), updatedAt: to.toISOString(), lastSeq: store.events.after(id).at(-1)?.seq ?? 0,
+    };
+  };
   return {
     store,
     sessions: [summary(RESOLVED_AUTHOR_ID, 'author', 'claude-opus-5-5', start, at(24)), summary(RESOLVED_REVIEWER_ID, 'reviewer', 'claude-sonnet-5-5', at(30), at(38))],

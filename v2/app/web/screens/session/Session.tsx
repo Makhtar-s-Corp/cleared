@@ -57,7 +57,7 @@ import { CloseTicket } from './CloseTicket.tsx';
 import { BrowserTab, Confidence, Criteria, EditorTab, OpenInEditor, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown } from './Tabs.tsx';
 import { browserView, changeProblem, CHANGE_MAX, editorOffer, goLine, handoverFor, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import {
-  actingSession, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketCostLine, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
+  actingSession, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketCostFacts, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
   type Filter, type Handover, type ThreadEntry, type TicketPart,
 } from './ticket.ts';
 import { askHref } from '@/screens/ask/model.ts';
@@ -429,8 +429,8 @@ export function LeftCards({ view, t, onPlan, close }: { readonly view: SessionVi
   const parsed = parseCriteria(view.ticket?.body ?? '');
   const plan = ticketPlan(partsOf(view)) ?? view.thread.plan;
   const service = serviceLine(view.summary.service, t, stepsView(view.steps, view.summary.id));
-  // A resolved ticket's cost (P211): the ticket card says what its sessions used.
-  const cost = view.ticket?.status === 'Done' ? ticketCostLine(view.cost, view.language, t) : null;
+  // A resolved ticket's cost (P211): the ticket card says what its sessions used, a fact a line.
+  const cost = view.ticket?.status === 'Done' ? ticketCostFacts(view.cost, view.language, t) : [];
   // A card with nothing to say is not drawn (lane 34's art director): the ticket card says it all.
   return (
     <>
@@ -438,7 +438,7 @@ export function LeftCards({ view, t, onPlan, close }: { readonly view: SessionVi
         <p className="eyebrow">{t('ticket_label')} <span className="id">{view.summary.ticket}</span>{service ? <> · <span className="service">{service}</span></> : null}</p>
         <h2 id="ticket-title" className="card-title">{view.ticket?.title ?? view.summary.ticket}</h2>
         {parsed.description.map((p, index) => <p key={index} className="desc">{p}</p>)}
-        {cost ? <p className="ticket-cost faint small" data-ticket-cost=""><span>{cost.use}</span>{cost.usd ? <> · <span>{cost.usd}</span></> : null}</p> : null}
+        {cost.length > 0 ? <p className="ticket-cost faint small" data-ticket-cost="">{cost.map((fact) => <span key={fact} className="fact">{fact}</span>)}</p> : null}
         {close}
       </section>
       {parsed.criteria.length > 0 ? (
@@ -756,16 +756,10 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     }
     catch { /* the next change tries again */ }
   }, [context, ticketId]);
-  // A resolved ticket's cost (P211), read from the ledger by the service.
-  const resolved = loaded.ticket?.status === 'Done';
-  const readCost = useCallback(async () => {
-    if (!resolved) return;
-    try { setCost(await context.api<TicketCost>(`/tickets/${encodeURIComponent(ticketId)}/cost`)); }
-    catch { /* the next change tries again */ }
-  }, [context, ticketId, resolved]);
+  // A resolved ticket's cost (P211), read from the ledger by the service
+  // once: a Done ticket's sessions spend nothing more.
   const refresh = useCallback(async () => {
     void readSteps();
-    void readCost();
     try {
       const all = await context.api<SessionSummary[]>('/sessions');
       setSessions((before) => {
@@ -774,9 +768,15 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
       });
       setTaken((local) => (local && !gestureNow.current ? null : local));
     } catch { /* the next change tries again */ }
-  }, [context, loaded.detail, readSteps, readCost]);
+  }, [context, loaded.detail, readSteps]);
   useEffect(() => { void readSteps(); }, [readSteps]);
-  useEffect(() => { void readCost(); }, [readCost]);
+  const resolved = loaded.ticket?.status === 'Done';
+  useEffect(() => {
+    if (!resolved) return;
+    let live = true;
+    void context.api<TicketCost>(`/tickets/${encodeURIComponent(ticketId)}/cost`).then((answer) => { if (live) setCost(answer); }, () => {});
+    return () => { live = false; };
+  }, [context, ticketId, resolved]);
   useLive(() => {
     if (shown) void refresh();
     else missed.current = true;

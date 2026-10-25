@@ -147,13 +147,14 @@ export function editsOf(parts: readonly TicketPart[]): TimedEdit[] {
 }
 
 // What a resolved ticket's sessions used (P211, the service's
-// consumption/ticket-cost.ts): its tokens, the agents' time over the
-// ticket's, and the dollars only when every session reported them; nothing
-// before the cost is read or when no turn finished. Never euros.
-export function ticketCostLine(cost: TicketCost | null | undefined, language: 'en' | 'fr', t: Translate): { readonly use: string; readonly usd: string | null } | null {
-  if (!cost || cost.tokens === null) return null;
-  const use = t('ticket_cost', { tokens: quantity(cost.tokens, t), work: lasted(cost.workMs, t), elapsed: lasted(cost.elapsedMs, t) });
-  if (cost.costUsd === null) return { use, usd: null };
+// consumption/ticket-cost.ts), as facts the card keeps whole: its tokens,
+// the agents' time over the ticket's, and the dollars only when every
+// session reported them; none before the cost is read or when no turn
+// finished. Never euros.
+export function ticketCostFacts(cost: TicketCost | null | undefined, language: 'en' | 'fr', t: Translate): string[] {
+  if (!cost || cost.tokens === null) return [];
+  const facts = [t('ticket_cost_tokens', { tokens: quantity(cost.tokens, t) }), t('ticket_cost_time', { work: lasted(cost.workMs, t), elapsed: lasted(cost.elapsedMs, t) })];
+  if (cost.costUsd === null) return facts;
   const usd = new Intl.NumberFormat(language, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: cost.costUsd < 1 ? 4 : 2 }).format(cost.costUsd);
-  return { use, usd: t('ticket_cost_usd', { usd }) };
+  return [...facts, t('ticket_cost_usd', { usd })];
 }

@@ -82,9 +82,14 @@ export function sessionsCost(sessions: readonly (readonly Pick<SessionEvent, 'at
 
 type Row = { session_id: string; at: string; event: string };
 
+// The ticket's sessions are found through the sessions table, indexed by
+// ticket; their events through session_events' key.
+const OF_TICKET = 'session_id IN (SELECT id FROM sessions WHERE project = ? AND ticket = ?) AND project = ? AND ticket = ?';
+
 export function ticketCost(db: DatabaseSync, input: { readonly project: string; readonly ticket: string }): TicketCost {
+  const keys = [input.project, input.ticket, input.project, input.ticket];
   const rows = db.prepare(`SELECT session_id, at, event FROM session_events
-    WHERE project = ? AND ticket = ? AND type IN ('RUN_STARTED', 'RUN_FINISHED', 'RUN_ERROR') ORDER BY session_id, seq`).all(input.project, input.ticket) as Row[];
+    WHERE ${OF_TICKET} AND type IN ('RUN_STARTED', 'RUN_FINISHED', 'RUN_ERROR') ORDER BY session_id, seq`).all(...keys) as Row[];
   const bySession = new Map<string, { at: string; event: AgUiEvent }[]>();
   for (const row of rows) {
     let event: AgUiEvent;
@@ -93,8 +98,7 @@ export function ticketCost(db: DatabaseSync, input: { readonly project: string; 
     list.push({ at: row.at, event });
     bySession.set(row.session_id, list);
   }
-  const span = db.prepare('SELECT MIN(at) AS first, MAX(at) AS last FROM session_events WHERE project = ? AND ticket = ?')
-    .get(input.project, input.ticket) as { first: string | null; last: string | null };
+  const span = db.prepare(`SELECT MIN(at) AS first, MAX(at) AS last FROM session_events WHERE ${OF_TICKET}`).get(...keys) as { first: string | null; last: string | null };
   const elapsedMs = span.first && span.last ? Math.max(0, Date.parse(span.last) - Date.parse(span.first)) : 0;
   return { ticket: input.ticket, ...sessionsCost([...bySession.values()]), elapsedMs };
 }

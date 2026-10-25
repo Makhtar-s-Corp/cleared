@@ -48,14 +48,18 @@ async function withBrowser(options: { language: 'en' | 'fr'; width?: number }, r
   }
 }
 
-const said = async (page: any) => ((await page.locator('#s-left [data-ticket-cost]').innerText()) as string).replace(/\s+/g, ' ').trim();
+// The card's facts, a line each, their spaces said as plain spaces.
+const said = async (page: any) => ((await page.locator('#s-left [data-ticket-cost] .fact').allInnerTexts()) as string[]).map((fact) => fact.replace(/\s+/g, ' ').trim());
+// No fact is cut: each holds as many lines as it would alone, and starts on a line of its own.
+const whole = (page: any) => page.evaluate(() => [...document.querySelectorAll('#s-left [data-ticket-cost] .fact')].every((fact: any) => fact.getBoundingClientRect().left === fact.parentElement.getBoundingClientRect().left && getComputedStyle(fact).display === 'block'));
 const noOverflow = (page: any) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 // The ticket card: on a phone the left column is `display: contents`, its cards placed in the screen's grid.
 const shot = async (page: any, name: string) => { if (SHOTS) await page.locator('#s-left > .card:first-child').screenshot({ path: join(SHOTS, `${name}.png`) }); };
 
 test('the ticket card of a resolved ticket says what its sessions used, as the ledger holds it', { skip }, async () => {
   await withBrowser({ language: 'en' }, async (page) => {
-    assert.equal(await said(page), 'Cost: 232,900 tokens · 32 min of agent work over 38 min · $1.03 API-equivalent, as the agents reported it');
+    assert.deepEqual(await said(page), ['Cost: 232,900 tokens', '32 min of agent work over 38 min', '$1.03 API-equivalent, as the agents reported it']);
+    assert.ok(await whole(page), 'a fact a line');
     const cost = await page.evaluate(async (ticket: string) => (await fetch(`/api/service/tickets/${encodeURIComponent(ticket)}/cost`)).json(), RESOLVED_TICKET);
     assert.deepEqual(cost, { ticket: RESOLVED_TICKET, sessions: 2, turns: 2, tokens: 232_900, workMs: 32 * 60_000, elapsedMs: 38 * 60_000, costUsd: 1.03 });
     assert.ok(await noOverflow(page));
@@ -65,7 +69,8 @@ test('the ticket card of a resolved ticket says what its sessions used, as the l
 
 test('in French, and on a phone without a horizontal scroll', { skip }, async () => {
   await withBrowser({ language: 'fr', width: 390 }, async (page) => {
-    assert.equal(await said(page), 'Coût : 232 900 jetons · 32 min de travail des agents sur 38 min · 1,03 $US en équivalent API, déclarés par les agents');
+    assert.deepEqual(await said(page), ['Coût : 232 900 jetons', '32 min de travail des agents sur 38 min', '1,03 $US en équivalent API, déclarés par les agents']);
+    assert.ok(await whole(page), 'a fact a line');
     assert.ok(await page.locator('#s-left [data-ticket-cost]').isVisible(), 'the line is on the ticket card the phone shows first');
     assert.ok(await noOverflow(page), 'no horizontal scroll at 390');
     await shot(page, 'ticket-cost-fr-phone');
