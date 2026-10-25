@@ -1,7 +1,7 @@
 // The words of the GitHub mirror's doctor section (issue #400): one English
 // and one French catalog, kept as the mirror's own are
-// (test/tickets/mirror-catalog.test.ts). No key says "token", "secret" or
-// "key": the guard reads such a key and its value as an assigned secret.
+// (test/tickets/mirror-catalog.test.ts). No key says "token", "secret",
+// "key" or "pass": the guard reads such a key and its value as an assigned secret.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
@@ -21,7 +21,7 @@ test('the French catalog has every key of the English one, with the same placeho
     assert.ok((value as string).trim() && (fr[key] as string).trim(), `${key} is empty`);
     assert.notEqual(fr[key], value, `${key}: the French is the English`);
     assert.deepEqual(placeholders(fr[key] as string), placeholders(value as string), `${key}: placeholders differ`);
-    assert.doesNotMatch(key, /token|secret|key/, key);
+    assert.doesNotMatch(key, /token|secret|key|pass/, key);
   }
 });
 

@@ -21,8 +21,8 @@
   "repo_unreachable": "{repo}: no answer from {api}: the address is wrong, the network is down, or GitHub took more than {limit}.",
   "labels_present": "{repo}: every status label a person picks on GitHub's page exists: {labels}.",
   "labels_missing": "{repo}: missing status labels: {labels}. The mirror makes a label the first time it writes it, but until then no one can pick that state on GitHub's page.",
-  "pass_recent": "{repo}: the mirror's last full pass was {time}.",
-  "pass_stale": "{repo}: the mirror's last full pass was {time}, past the limit of {limit} (CLEARED_V2_HEARTBEAT_TRACKER_MINUTES): is the service running?",
-  "pass_none": "{repo}: the ledger holds no pass of the mirror yet: the service has not run it, or not on this repository.",
+  "mirror_recent": "{repo}: the mirror's last full pass was {time}.",
+  "mirror_stale": "{repo}: the mirror's last full pass was {time}, past the limit of {limit} (CLEARED_V2_HEARTBEAT_TRACKER_MINUTES): is the service running?",
+  "mirror_never": "{repo}: the ledger holds no pass of the mirror yet: the service has not run it, or not on this repository.",
   "ledger_missing": "{repo}: the service's ledger cannot be read ({reason}), so its last pass is unknown."
 }

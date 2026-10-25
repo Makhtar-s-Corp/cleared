@@ -156,9 +156,9 @@ export async function githubMirrorChecks(input: { readonly env: NodeJS.ProcessEn
       continue;
     }
     const readAt = passes.get(tracker.name);
-    if (readAt === undefined) say('notice', t('pass_none', { repo }));
-    else if ((now.getTime() - Date.parse(readAt)) / 60_000 > staleMinutes) say('fail', t('pass_stale', { repo, time: ago(readAt, now, t), limit: duration(staleMinutes, t) }));
-    else say('pass', t('pass_recent', { repo, time: ago(readAt, now, t) }));
+    if (readAt === undefined) say('notice', t('mirror_never', { repo }));
+    else if ((now.getTime() - Date.parse(readAt)) / 60_000 > staleMinutes) say('fail', t('mirror_stale', { repo, time: ago(readAt, now, t), limit: duration(staleMinutes, t) }));
+    else say('pass', t('mirror_recent', { repo, time: ago(readAt, now, t) }));
   }
   return scrub(checks);
 }
