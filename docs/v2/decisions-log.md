@@ -6444,5 +6444,5 @@ The choice is one condition in `#goOut` (`src/tickets/mirror.ts`).
 
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read, no network beyond `npm ci` of v2's lock file, `git fetch` and GitHub, no tunnel, no port opened but the tests' own ephemeral loopback ones, no secret, no `passkeys.json` touched.
 
-- Pull request: PR_389, against `v2`.
+- Pull request: 391, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-passkeys`.
