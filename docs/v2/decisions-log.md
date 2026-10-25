@@ -5704,6 +5704,8 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 
 **Checks** (on `origin/v2` at `d66b5d0`, which had not moved when this was written). `npm run typecheck` passes. `npm test`: 2096 Node tests, 2026 pass, 70 skipped (`CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_REAL_HARNESS` unset), 0 fail; 330 Vitest tests pass. The i18n tests are among them (`app/test/catalog.test.ts`, `app/test/french-typography.test.ts`, `app/web/test/i18n.test.tsx`, each server's catalog test). `npm run guard -- --base origin/v2`: nothing refused. No browser test was run: no page and no sheet changed.
 
+**The merge of 363** (lane `j3-flaky-page`, P103, at `origin/v2` `ac24420`), after review round 2. The log keeps 363's entry, then this one; the matrix merged by itself, every id once. The review also found "within 1 seconds": the readiness wait now says "second" for one, as the engine's "review round" does. `4df76e5` committed its test alone (`test/container/session-runtime.test.ts`, a wait of one second), which failed on that code. After the merge and the fix: `npm run typecheck` passes; `npm test` runs 2098 Node tests, 2028 pass, 70 skipped, 0 fail, and 330 Vitest tests pass; `npm run guard -- --base origin/v2`: nothing refused.
+
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read, no network beyond `git fetch` and GitHub, no tunnel, no port opened, no secret.
 
 - Pull request: 365, against `v2`.
