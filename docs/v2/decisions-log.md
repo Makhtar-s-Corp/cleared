@@ -6878,5 +6878,5 @@ The three issues were then closed by hand as not planned. Nothing ran against Li
 
 **Resources.** No Docker object, no port but the tests' own ephemeral loopback ones, no Claude Code login read, no GitHub, Slack, Cursor or Codex account used. Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issue and the pull request. No tunnel, no secret.
 
-- Pull request: PR_RUN, against `v2`.
+- Pull request: 419, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-run`.
