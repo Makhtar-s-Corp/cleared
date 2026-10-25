@@ -264,31 +264,136 @@ A comment edited or deleted after it was mirrored; a screen of the app that show
 | Whether GitHub records who changed an issue's description anywhere its REST API reads | closed by the real run of this lane, on the example repository: neither the issue's events nor its timeline hold an event for it, a new title is `renamed` |
 | Whether Linear's `Comment.botActor` names an integration's comment, and whether its history's `toTitle` and `updatedDescription` are filled as its schema says | the owner's real trial; until then an unnamed author reads as an agent's |
 
-## 8. The project page, per service (`v2-j4-project-page`, issue #394)
+## 6. The passkeys lane (`v2-j4-passkeys`, issue #389)
 
-Written on 2026-10-25 by the author of issue #394 (Opus 5.5), before the lane's tests and code. Sections 6 and 7 are left to the lanes of the pull requests open at that time, 391 and 393. Inputs: issues #394 and #274, the [decisions log](decisions-log.md) (the entries of lanes `j3-project-page` and `j3-flaky-page`, and the ten ideas of 2026-10-25), the matrix (P59, P101 to P105), and sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), since `milestone-2-plan.md` has no sections 9 and 10.
+This section was written on 2026-10-25 by the author of issue #389 (Opus 5.5), before the lane's tests and code. Inputs: issue #389, the [decisions log](decisions-log.md) (the entries "app login by password, no passkeys" of 2026-10-21, "the v1 passkey code stays until milestone 4" of 2026-10-25, and the latest ones, the ten ideas among them), the [requirements matrix](requirements-matrix.md) (B3.9, B5.9d, B5.10g, D17, D18, D21), section 4 of this page (question 1), and the v1 app as pull request 388 leaves it, in TypeScript. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md).
+
+### 6.1 Context
+
+The v2 app signs the human in with a password and has no passkeys (pull request 135, B3.9). The v1 app (`app/`, kept and converted by pull request 388) still asks a passkey for Clear to land, Send back and turning a browser's notifications on or off, registered with `cleared app passkey` through a grant socket. Issue #389 removes that code, as the owner's decision of 2026-10-21 and B5.9d ask, and so answers question 1 of section 4.5, which 388 left at its default (a), the files kept.
+
+### 6.2 What exists at the end, and how it is proven
+
+- Gone: `app/lib/webauthn.ts`, `app/lib/grant-socket.ts`, `app/public/register.html`, `app/public/register.js`, `test/app-authenticator.ts`; the routes `GET /register`, `GET /register.js`, `POST /api/passkeys/options` and `POST /api/passkeys/finish`; the passkey file's reading and writing in `app/lib/credentials.ts`; the `[app] grant_socket` setting; the passkey words of both catalogs.
+- `cleared app passkey` says that passkeys are gone and where the gestures are confirmed now, in the owner's language, and exits 2 without starting the server.
+- The three gestures are confirmed by the signed-in session (decision below). The rest stays as it is: a one-time challenge bound to the session, the gesture, the version on screen and the text sent back (or the subscription); the 60 second grace delay held on the server and its Undo; a Send back that withdraws a waiting Clear; the board read again before the agreement is written; an https address (or this machine) required.
+- Proven by `test/app-actions.test.ts` and `test/app-notify.test.ts` (a session alone confirms; another session, a reused challenge, a changed text or subscription, no cookie, no anti-forgery token, another origin, an insecure address are refused and nothing is written), `test/app.test.ts` (the routes), `v2/test/keep-and-drop.test.ts` and `v2/test/repository-core.test.ts` (the passkey files no longer tracked), and the v1 and v2 suites green.
+
+### 6.3 Decisions this lane takes
+
+1. **What confirms the gestures: the signed-in session.** The owner's decisions already say it for v2: "the identity for an agreement is the app session" (D18) and "subscription without a passkey" (D21, B5.10g). The v1 access token, like v2's password, is held by the human alone: it lives in a private file of the app's account, which the agents' account cannot read (`test/app-writers.test.ts`), and nothing but the human's browser, `cleared app --link` and the screenshot tool (with a token of its own) sends it. Rejected: refusing the three gestures in v1 (the app would lose Clear to land, Send back and its notifications, far more than the passkey code); dropping the v1 app (question 2 of section 4.5, the owner's). Asked to the owner in the log entry, this default applied.
+2. **The one behaviour change.** An installation with no passkey registered refused Clear to land, Send back and notifications; it now takes them from a signed-in session over https. An installation with passkeys registered no longer asks for one. A `passkeys.json` left in the human credentials directory is no longer read, and never deleted by Cleared.
+3. **`[app] grant_socket`** is no longer read; a setting file that still has it starts as before.
+4. **The pictures** of the gestures that show a passkey (`app/screenshots/`) are not retaken here; the v1 docs pages lose the lines that describe the passkey, nothing else.
+5. **Lines.** P238 (this lane; P236 is the cleanup's, P237 the mirrors follow-ups'); B5.9d `done`; the shared line "B5.9d and D17: milestone 4" of "Reste avant v2 -> main" loses B5.9d, D17 keeps its own status (the Linear trial).
+
+### 6.4 Out of scope
+
+The v2 app and its password login (unchanged); the v1 access token and its sign-in; dropping the v1 app; the v1 docs beyond their passkey lines; retaking the v1 pictures.
+
+### 6.5 Files this lane owns
+
+The passkey files above; the passkey parts of `app/lib/actions.ts`, `app/lib/notifications.ts`, `app/lib/credentials.ts`, `app/main.ts`, `app/server.ts`, `app/public/actions.js`, `app/public/notify.js`, `app/public/login.js`, `app/screenshots.ts`, `app/screenshots-actions.ts`, `app/DESIGN.md`, `lib/i18n/{en,fr}.json`, and of the v1 tests and docs pages that name them; the passkey rows of `keep-and-drop.md`, `v2/test/keep-and-drop.test.ts` and `v2/test/repository-core.test.ts`; its lines of the matrix and its log entry.
+
+### 6.6 Unknowns, and who closes them
+
+| Unknown on 2026-10-25 | Closed by |
+| --- | --- |
+| Whether the owner wants the v1 gestures confirmed by the session, refused, or the v1 app dropped | the owner (question in the log entry, the session applied) |
+
+## 7. Deploy checklist (v2 server switch)
+
+Written on 2026-10-25 at the lead's request, after pull request 388 merged (the v1 drops gone, `wake.ts` in place of the bash wake). These are steps for the owner or the operator on each server; no lane runs them, and nothing in this repository does them.
+
+1. **Run `serve/install.ts` again on each server**, from the checkout the units should use, so that its systemd user units name `wake.ts` instead of `wake.sh` and `serve/install.sh` (decisions log, the cleanup's entry, "For an installation"). It checks every port it binds before it writes anything (its header, `serve/install.ts`).
+
+## 8. The v2 service's heartbeat and status (`v2-j4-heartbeat`, issue #392)
+
+Section 4 is the cleanup lane's (pull request 388); sections 6 and 7 are the passkeys lane's and its deploy checklist (pull request 391).
 
 ### 8.1 Context
 
-Milestone 3 made the page (pull requests 313 and 363, P101 to P105): made at a service's first fetch from its base branch, made again after each merge, quoted in every author's and reviewer's `CLAUDE.md`. P59 stayed `later` because three things were left. A folder service of a monorepo gets a page of the whole repository under its own name, so two folder services have the same page. The only test on an example copies the guestbook alone, never the two-service workspace of `examples/workspace.conf`. The lead's briefing reads a service's committed `docs/project.md` only, so a project that commits none gives the lead nothing of it.
+B2.1 keeps v1's heartbeat and `cleared status` (`keep-and-drop.md`: `lib/heartbeat.mjs`, now `lib/heartbeat.ts`, and `docs/heartbeat.md`). Pull request 388 keeps them as v1's modules, in TypeScript, run by v1's wake, and leaves out "the heartbeat and `cleared status` in the v2 service" (its section 4). v2 has neither: when its service stops, nobody hears it, and no command says what it is doing. This lane gives the v2 service a beat a push monitor listens to, and a status command that reads v2's ledger, in strict TypeScript, without touching v1's files that 388 rewrites.
 
 ### 8.2 What exists at the end, and how it is proven
+
+- `src/heartbeat/settings.ts`: the settings, read from the environment, and the monitor's addresses, read from private files. `src/heartbeat/snapshot.ts`: what v2's ledger says of the service's health, read-only. `src/heartbeat/beat.ts`: the problems (`diagnose`, a pure function), each continuous problem recorded once, and the beat sent to the monitor. `src/heartbeat/status.ts` and `src/heartbeat/messages/heartbeat.{en,fr}.json`: the status's words and its JSON.
+- `src/cli/status.ts`, run as `npm run status` (`-- --json` for one JSON object): exit 0 when nothing is wrong, 1 with a problem (a notice never counts), 2 when the status cannot be collected.
+- The notify module (`modules/notify.ts`) starts the beat at the service's start, with or without a project, and stops it at its stop.
+- Proven by `test/heartbeat/diagnose.test.ts` (each problem, case by case), `test/heartbeat/settings.test.ts` (the files and the addresses refused), `test/heartbeat/beat.test.ts` (the beat against a fake monitor on loopback: success, failure, a problem recorded once, a failed delivery said once an hour, and never an address, a title or a path in what leaves or in the ledger), `test/heartbeat/snapshot.test.ts` (on the real tables), `test/heartbeat/status.test.ts` (the words and the JSON), `test/heartbeat/cli.test.ts` (the command, in French and in English, its JSON and its exit codes, against a fake `/health`), `test/heartbeat/catalog.test.ts`, and `test/notify/module.test.ts` (the beat starts and stops with the service).
+
+### 8.3 What it watches, from what v2 has
+
+v2 has no per-minute wake: its service runs. The beat is the service's own timer, and what v1 read from its wake, its lanes and its processes is read from v2's tables.
+
+| Problem code | When | Read from |
+| --- | --- | --- |
+| `beat_missing` | no beat recorded (the status only) | `v2_heartbeat_state` |
+| `beat_late` | the last beat is older than three intervals (the status); the beat before this one was (the service) | `v2_heartbeat_state` |
+| `beat_failed` | the last beat could not read the ledger | `v2_heartbeat_state` |
+| `service_unreachable` | the service's `/health` does not answer (the status only) | `CLEARED_V2_HOST`, `CLEARED_V2_PORT` |
+| `session_stalled` | an author, reviewer or reader session alive and unmoved for more than two hours: the idle watchdog stops one at 15 minutes, so this one escaped it | `sessions`, `session_events` |
+| `tracker_stale` | a configured mirror whose last full pass is older than ten minutes | `mirror_trackers` |
+| `monitor_invalid` | a monitor address file the service refused | `v2_heartbeat_state` |
+
+A notice, never a failure: `monitor_off`, no success address is set, so nobody hears it when the service stops. The status also says, without a problem: the sessions running, what waits for the owner in the inbox (the oldest item, its kind and for how long), the subscription's two windows (`latestQuota`, percent only, no money), the mirrors' last reads and the release trains not landed.
+
+Not carried from v1, each for its reason: the wake's own records (`wake_failed`, `pending_stalled`), its lead (`lead_stuck`: v2's lead is a permanent session that waits by design, as the watchdog says), its lanes and orphan processes (`lane_idle`, `orphan_process`, `--reap`: v2's sessions are containers labelled `cleared.dev=v2`, stopped by the watchdog and the restart recovery), its forge and tracker probes (`forge_credential`, a `gh` or `tracker.sh` call: v2 runs neither for its status, and the mirrors' reads say a tracker's health), its shared-account and heavy-lock checks (v1's settings).
+
+### 8.4 Decisions this lane takes
+
+- **The beat.** Every `CLEARED_V2_HEARTBEAT_SECONDS` (60 by default, 15 to 3600), and once at the start. Each beat writes its time, finds the problems, records each continuous problem once (`v2_heartbeat_incidents`, and a `heartbeat_problem` row of the ledger's `events` with its code), then calls the success address with no problem, or the failure address with one. Without a failure address, the monitor sees the missing success.
+- **What leaves the host.** A GET with no body for a success; a POST whose body is `Cleared health: blocked` and the problems' codes, one per line, for a failure. Never a ticket, a title, a session id, a path or an address. A delivery that fails is a `heartbeat_delivery_failed` event, at most one an hour, with no address.
+- **The addresses are credentials.** `CLEARED_V2_HEARTBEAT_PING_URL_FILE` and `CLEARED_V2_HEARTBEAT_FAIL_URL_FILE` name files, as the mirrors' tokens do; never a variable holding the address. Each file is a regular file, not a link, owned by the service's account, readable by it alone (no group or other bit), outside the project's checkout. The address is HTTPS, or HTTP on loopback, without a user or a password. A refused file is said by its variable, never its content, and leaves the beat on without that address (`monitor_invalid`).
+- **The status reads no secret.** It reads the ledger read-only and the thresholds from the environment; whether the monitor is on, off or refused is what the service last wrote. It asks the service's own `/health` on its configured address, nothing else.
+- **Thresholds.** `CLEARED_V2_HEARTBEAT_SESSION_MINUTES` (120) and `CLEARED_V2_HEARTBEAT_TRACKER_MINUTES` (10), as v1's `lane_idle_minutes` and `service_minutes`.
+- **Tables.** `v2_heartbeat_state` and `v2_heartbeat_incidents`, of the notify module: v2's ledger is in v1's format and may be v1's own file, which has `heartbeat_state` and `heartbeat_incidents`.
+- **Where it starts.** In the notify module, the one whose job is what leaves the host for the owner, so neither `main.ts` nor `registry.ts` changes (388 changed the registry while this lane ran). A tenth module is the other way (question for the owner, default applied, in the log entry).
+- **JSON.** `schema: 1` and v1's stable keys where v2 has them (`schema`, `project`, `checkedAt`, `ok`, `problems`, `notices`, `waiting`, `quota`), with v2's own (`service`, `lastBeat`, `monitor`, `sessions`, `trackers`, `releases`). Each problem has `code`, `id`, `level` and a `message` in the status's language.
+- **Language.** `CLEARED_V2_APP_LANGUAGE`, French by default; every duration through `app/web/lib/time.ts` ("2 h", never "120 minutes").
+- **`cleared status`.** v1's root command keeps reading v1's state. Pointing it (`cleared.ts`, since 388) at v2's status is not done here, to keep the lane to v2; the v2 status is `npm run status` in `v2/`.
+- **Matrix lines.** P239 (the beat, the status, their settings); B2.1 updated.
+
+### 8.5 Out of scope
+
+v1's `lib/heartbeat.mjs`, `cleared`, `wake.sh` and `test/heartbeat.test.mjs`, which 388 made `lib/heartbeat.ts`, `cleared.ts`, `wake.ts` and `test/heartbeat.test.ts`; a screen of the app that shows the status; reaping processes; a real monitoring service (the tests' monitor is a fake on loopback); the lead's health.
+
+### 8.6 Files this lane owns
+
+`v2/src/heartbeat/`, `v2/src/cli/status.ts`, `v2/test/heartbeat/`; the `status` script in `v2/package.json`; the beat's start and stop and its tables in `modules/notify.ts` and their case in `test/notify/module.test.ts`; a row in `v2/README.md`; its lines of the matrix and its log entry.
+
+### 8.7 Unknowns, and who closes them
+
+| Unknown on 2026-10-25 | Closed by |
+| --- | --- |
+| Whether a monitoring service the owner picks accepts a POST body on its failure address | the owner's set-up; the body is plain text of a few lines, as v1's |
+| Whether the first piloted project's service runs the status under its own account | the owner; the status reads no secret, so another account reads it when it can read the ledger |
+
+## 9. The project page, per service (`v2-j4-project-page`, issue #394)
+
+Written on 2026-10-25 by the author of issue #394 (Opus 5.5), before the lane's tests and code. Sections 6 to 8 are the lanes of pull requests 391 and 393, merged into `v2` before this one. Inputs: issues #394 and #274, the [decisions log](decisions-log.md) (the entries of lanes `j3-project-page` and `j3-flaky-page`, and the ten ideas of 2026-10-25), the matrix (P59, P101 to P105), and sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), since `milestone-2-plan.md` has no sections 9 and 10.
+
+### 9.1 Context
+
+Milestone 3 made the page (pull requests 313 and 363, P101 to P105): made at a service's first fetch from its base branch, made again after each merge, quoted in every author's and reviewer's `CLAUDE.md`. P59 stayed `later` because three things were left. A folder service of a monorepo gets a page of the whole repository under its own name, so two folder services have the same page. The only test on an example copies the guestbook alone, never the two-service workspace of `examples/workspace.conf`. The lead's briefing reads a service's committed `docs/project.md` only, so a project that commits none gives the lead nothing of it.
+
+### 9.2 What exists at the end, and how it is proven
 
 - **A folder service's page is its folder's.** Its layout lists the folder only, its `package.json` and README are the folder's, its recent decisions are the first-parent commits that touch the folder or `.cleared/agents.conf`, and its header names the folder and the last such commit. A merge in another folder leaves the page as it is.
 - **The page says where the service sits in the workspace**: the services it consumes and the contract it provides, when the workspace names them.
 - **The lead reads the pages.** A service with no committed page gets a line in the lead's briefing from its generated page: the README's first paragraph, else the package name. The workspace's own service too, when its checkout commits no `docs/project.md`.
 - Proven by `test/workspace/project-page-workspace.test.ts`: the tracked files of `examples/guestbook` and `examples/filter-api` as the two services of `examples/workspace.conf`, through the real effects on local bare repositories (first connection of each, a merge on one, a session of each, no secret), then the same two as folders of one repository; and new cases in `test/lead/briefing.test.ts`.
 
-### 8.3 Decisions this lane takes
+### 9.3 Decisions this lane takes
 
 - **The folder's tip, not the base's.** The page carries the sha of the last commit that touched the folder or `.cleared/agents.conf` (the safe commands are the repository's), so `updateProjectPage`'s check stays "the page names the tip it was made from".
 - **The page stays English**, written for the sessions as before. No word a person reads in the app changes, so no catalog changes.
-- **Matrix lines.** P240 (a folder service's page), P241 (the workspace's part of the page), P242 (the lead's lines); P59 `done`, naming 313, 363 and this lane's pull request. P238 is lane `v2-j4-heartbeat`'s and P239 is left to lane `v2-j4-passkeys`.
+- **Matrix lines.** P240 (a folder service's page), P241 (the workspace's part of the page), P242 (the lead's lines); P59 `done`, naming 313, 363 and this lane's pull request. P238 is lane `v2-j4-passkeys`'s and P239 lane `v2-j4-heartbeat`'s.
 
-### 8.4 Out of scope
+### 9.4 Out of scope
 
 A screen that shows the page; a page edited by hand; a page in the project's language; the decisions folder of a project (read through `lib/memory`, as before); a real account of any kind. The tests run on local repositories in temporary folders, and nothing is pushed.
 
-### 8.5 Files this lane owns
+### 9.5 Files this lane owns
 
 `v2/src/workspace/project-page.ts`, the page's call in `v2/src/flow/effects.ts`, the lead's service lines in `v2/src/lead/briefing.ts`, `v2/test/workspace/project-page-workspace.test.ts`, the new cases of `v2/test/lead/briefing.test.ts`, this section, its matrix lines and its log entry.

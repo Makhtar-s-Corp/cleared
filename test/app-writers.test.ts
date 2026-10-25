@@ -183,14 +183,13 @@ test('human credentials: a private directory and files outside the project, owne
   assert.equal(JSON.parse(run.stdout).ok, false);
 });
 
-// A real second account: the agents' Unix account must not read the credentials, the passkeys or the access token.
+// A real second account: the agents' Unix account must not read the credentials or the access token.
 // Needs a passwordless sudo to that account (CLEARED_TEST_AGENT_USER); serve/install.ts runs the same probes on the server.
 const agentUser = process.env.CLEARED_TEST_AGENT_USER;
-test('the agents\' account cannot read the human credentials, the passkeys or the access token', { skip: agentUser ? false : 'set CLEARED_TEST_AGENT_USER (a second account reachable with sudo -n) to run it' }, () => {
+test('the agents\' account cannot read the human credentials or the access token', { skip: agentUser ? false : 'set CLEARED_TEST_AGENT_USER (a second account reachable with sudo -n) to run it' }, () => {
   const b = box('github');
   b.credentials(HUMAN_GH);
-  writeFileSync(join(b.creds, 'passkeys.json'), '[]', { mode: 0o600 });
-  for (const path of [b.creds, join(b.creds, 'credentials.json'), join(b.creds, 'human-signing.key'), join(b.creds, 'passkeys.json'), process.env.CLEARED_TEST_APP_TOKEN].filter(Boolean) as string[]) {
+  for (const path of [b.creds, join(b.creds, 'credentials.json'), join(b.creds, 'human-signing.key'), process.env.CLEARED_TEST_APP_TOKEN].filter(Boolean) as string[]) {
     const probe = spawnSync('sudo', ['-n', '-u', agentUser!, '--', 'test', '-r', path]);
     assert.notEqual(probe.status, 0, `${path} must not be readable by ${agentUser}`);
     assert.notEqual(spawnSync('sudo', ['-n', '-u', agentUser!, '--', 'test', '-w', path]).status, 0, `${path} must not be writable by ${agentUser}`);

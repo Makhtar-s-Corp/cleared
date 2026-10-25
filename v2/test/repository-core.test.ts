@@ -63,8 +63,6 @@ test('no JavaScript is kept outside examples/ but what a browser loads by its ad
     'app/public/app.js',
     'app/public/login.js',
     'app/public/notify.js',
-    // Question 1 of the plan, default (a): the passkey registration stays.
-    'app/public/register.js',
     'app/public/sw.js',
     'v2/app/public/sw.js',
     'v2/app/public/theme.js',

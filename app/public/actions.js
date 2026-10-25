@@ -1,19 +1,9 @@
 // The three gestures on the porthole: Clear to land, Send back, Answer. The
 // page never decides anything: it asks the server, which checks the session,
-// the anti-forgery token, the version on screen and (for the first two) the
-// passkey. Text from the server is put on the page as text, never as HTML.
-const bytes = (text) => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0)).buffer;
-const text64 = (buffer) => btoa(String.fromCharCode(...new Uint8Array(buffer))).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+// the anti-forgery token, the version on screen and (for the first two) that
+// the same session confirms what it asked for. Text from the server is put on
+// the page as text, never as HTML.
 const sameVersions = (a, b) => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-
-// The passkey answers a challenge of the server (also used by notify.js).
-export async function passkey(challenge) {
-  if (!window.PublicKeyCredential || !navigator.credentials) throw Object.assign(new Error('x'), { code: 'insecure' });
-  const k = challenge.publicKey;
-  const got = await navigator.credentials.get({ publicKey: { challenge: bytes(k.challenge), rpId: k.rpId, timeout: k.timeout, userVerification: 'required',
-    allowCredentials: k.allowCredentials.map((c) => ({ type: c.type, id: bytes(c.id) })) } });
-  return { id: got.id, response: { clientDataJSON: text64(got.response.clientDataJSON), authenticatorData: text64(got.response.authenticatorData), signature: text64(got.response.signature) } };
-}
 
 export function initActions({ t, el, $, state, clock, redraw, reopen }) {
   const box = $('ph-actions');
@@ -35,13 +25,11 @@ export function initActions({ t, el, $, state, clock, redraw, reopen }) {
     return me;
   }
 
-  // Asks, has the passkey confirm, and returns the server's answer to the confirmation.
+  // Asks, confirms what was asked, and returns the server's answer to the confirmation.
   async function confirmed(gesture, card, extra = {}) {
     const asked = await api('/api/actions/challenge', { gesture, ticket: card.ref, versions: seen, ...extra });
     if (!asked.ok) return asked;
-    let assertion;
-    try { assertion = await passkey(asked.json); } catch (error) { return { ok: false, json: { error: error.code === 'insecure' ? 'insecure' : 'cancelled' } }; }
-    return api('/api/actions/confirm', { challengeId: asked.json.challengeId, assertion, ...extra });
+    return api('/api/actions/confirm', { challengeId: asked.json.challengeId, ...extra });
   }
 
   const note = (card, message) => { notes.set(card.id, { text: message, generatedAt: state.snap?.generatedAt }); mode = { name: 'idle' }; redraw(); mount(card); };
@@ -96,7 +84,7 @@ export function initActions({ t, el, $, state, clock, redraw, reopen }) {
   async function sendBackForm(card) {
     mode = { name: 'sendback' };
     const area = el('textarea', { className: 'act-text', rows: 3, maxLength: 4000, required: true, id: 'sb-text', placeholder: t('app_act_send_back_hint') });
-    const go = button(t('app_act_confirm_key'), 'ink', async () => {
+    const go = button(t('app_send_back'), 'ink', async () => {
       go.disabled = true;
       const r = await confirmed('sendback', card, { text: area.value });
       if (r.ok && r.json.ok) return note(card, t('app_act_sent_back_note', { time: clock(new Date().toISOString()) }));
@@ -160,7 +148,7 @@ export function initActions({ t, el, $, state, clock, redraw, reopen }) {
       return answerForm(card);
     }
     if (mode.name === 'sendback') return;
-    const why = !card.approval ? 'app_act_no_request' : me.actions.confirm ? null : `app_act_${me.actions.reason === 'insecure' ? 'insecure' : 'no_passkey'}`;
+    const why = !card.approval ? 'app_act_no_request' : me.actions.confirm ? null : 'app_act_insecure';
     if (!why && !sameVersions(seen, card.approval.versions)) {
       box.replaceChildren(el('p', { className: 'act-warn', textContent: t('app_act_new_version_hint') }),
         button(t('app_act_new_version'), 'ink', () => { seen = card.approval.versions; reopen(card.id); }));
