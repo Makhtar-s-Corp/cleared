@@ -174,6 +174,9 @@ test('no ledger, a bad setting or an unknown argument: exit 2, said in a line', 
   assert.equal(parsed.ok, false);
   assert.deepEqual(parsed.problems.map((p) => [p.code, p.level]), [['status_error', 'problem']]);
   assert.match(parsed.problems[0]?.message ?? '', /^No ledger at .+ledger\.db: the service has not run with this state folder\.$/);
+  // The same keys as a status collected, so that a script reading one finds them in the other.
+  assert.deepEqual(Object.keys(parsed), ['schema', 'project', 'checkedAt', 'ok', 'service', 'lastBeat', 'monitor', 'sessions', 'waiting', 'quota', 'trackers', 'releases', 'problems', 'notices']);
+  assert.deepEqual(parsed, { ...parsed, service: null, lastBeat: null, monitor: null, sessions: { running: 0, names: [] }, waiting: null, quota: null, trackers: [], releases: [], notices: [] });
   const bad = await run([], { CLEARED_V2_HEARTBEAT_SECONDS: '5', CLEARED_V2_APP_LANGUAGE: 'en' });
   assert.equal(bad.code, 2);
   assert.match(bad.err, /CLEARED_V2_HEARTBEAT_SECONDS/);
