@@ -338,18 +338,24 @@ export function onlyBaseMerges(commit: string, head: string): boolean {
   return true;
 }
 
+// A pull request's state as gh says it (OPEN, CLOSED, MERGED); '' when gh
+// cannot say. A GitLab service's lock gives its own reader.
+function ghState(pr: number): string {
+  const viewed = gh(['pr', 'view', String(pr), '--json', 'state']);
+  if (viewed.status !== 0) return '';
+  try { return String((JSON.parse(viewed.stdout) as { state?: unknown }).state ?? ''); } catch { return ''; }
+}
+
 // Of the pull requests the user was shown on a ticket and that are not live,
 // how many are still open and how many GitHub cannot be asked about. One
 // GitHub says closed, or merged by another hand, no longer counts.
-export function shownLeft(recordPath: string): { readonly open: number; readonly unknown: number } {
+export function shownLeft(recordPath: string, stateOf: (pr: number) => string = ghState): { readonly open: number; readonly unknown: number } {
   let open = 0;
   let unknown = 0;
   const record = JSON.parse(readFileSync(recordPath, 'utf8')) as { pulls?: { pr: number; merged_at?: string | null }[] };
   for (const pull of record.pulls ?? []) {
     if (pull.merged_at != null) continue;
-    let state = '';
-    const viewed = gh(['pr', 'view', String(pull.pr), '--json', 'state']);
-    if (viewed.status === 0) { try { state = String((JSON.parse(viewed.stdout) as { state?: unknown }).state ?? ''); } catch { state = ''; } }
+    const state = stateOf(pull.pr);
     if (state === 'OPEN') open += 1;
     else if (state !== 'CLOSED' && state !== 'MERGED') unknown += 1;
   }

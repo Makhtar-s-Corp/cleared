@@ -16,6 +16,7 @@ import { openLedger, addEvent } from './ledger.ts';
 import { createTracker } from './tracker/contract.ts';
 import { message } from './i18n.ts';
 import { forgeEnv, forgeGhEnv } from './forge.ts';
+import { gitlabLockClient, gitlabLockSettings, mergedOnGitLab } from './gitlab.ts';
 import { checkoutReadEnv } from './git-checkout.ts';
 
 type ReleaseRow = { id: number; ticket: string; pr: number; merge_sha: string; title: string; merged_at: string; status: string; failures: number;
@@ -499,6 +500,17 @@ export function startRelease(conf: Conf, db: DatabaseSync, repo: string, ticket:
   schedule(repo, row.id);
 }
 
+// A GitLab service's merged merge request ([forge] adapter = gitlab), read
+// from GitLab before the start, which reads its pull request at once: its
+// merge commit and when it was merged. A GitHub service's is gh's, in the start.
+async function mergedPullOf(conf: Conf, repo: string, pr: number): Promise<{ readPull?: () => Pull }> {
+  const forge = conf.sections?.forge;
+  if (forge?.adapter !== 'gitlab') return {};
+  const settings = gitlabLockSettings(forge, repo);
+  const pull = await mergedOnGitLab(gitlabLockClient(settings), settings.project, pr);
+  return { readPull: () => pull };
+}
+
 async function main([command, ...args]: string[]) {
   const conf = loadConf();
   const lockEnabled = Boolean(conf.sections.security?.agent_user || conf.sections.security?.allow_shared_uid === 'true');
@@ -510,7 +522,7 @@ async function main([command, ...args]: string[]) {
     if (command === 'check') { releaseSettings(conf); return; }
     if (command === 'reconcile') return resumeWatches(conf, db, repo);
     if (command === 'active') { if (holdsMerge(db)) process.exitCode = 3; return; }
-    if (command === 'start') return startRelease(conf, db, repo, args[0]!, Number(args[1]), { lane: args[2] || 'full' });
+    if (command === 'start') return startRelease(conf, db, repo, args[0]!, Number(args[1]), { lane: args[2] || 'full', ...(await mergedPullOf(conf, repo, Number(args[1]))) });
     if (command === 'watch') {
       if (!lockEnabled) {
         conf.sections.release ||= {};

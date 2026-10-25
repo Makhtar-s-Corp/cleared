@@ -66,7 +66,12 @@ export const FORGE_RIGHTS: readonly ForgeRight[] = [
   { permission: 'issues', access: 'write', optional: true },         // only for the GitHub Issues mirror (P230)
 ];
 
-export type ForgeView = { readonly credential: CredentialView; readonly rights: readonly ForgeRight[] };
-export type ForgeChecked = { readonly credential: CredentialView; readonly repositories: number; readonly more: boolean; readonly sample: readonly string[] };
+// GitLab, the other forge (section 11): its token, and the address it is
+// saved for (gitlab.com until one is saved).
+export type GitLabView = { readonly credential: CredentialView; readonly address: string };
+
+export type ForgeView = { readonly credential: CredentialView; readonly rights: readonly ForgeRight[]; readonly gitlab: GitLabView };
+// POST /api/setup/forge { forge?: 'github' | 'gitlab', value, address? }.
+export type ForgeChecked = { readonly forge: 'github' | 'gitlab'; readonly credential: CredentialView; readonly repositories: number; readonly more: boolean; readonly sample: readonly string[] };
 
 export type ModelView = { readonly credential: CredentialView; readonly terminal: boolean };

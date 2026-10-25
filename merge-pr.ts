@@ -38,10 +38,20 @@
 // with the same messages, records and exit codes. What only v1's lanes
 // wrote is not read any more: their records (the fast lane's mark, the two
 // teams on one ticket), so every merge waits as the full circuit's does.
+//
+// A service on GitLab (docs/v2/milestone-5-plan.md, section 11) says so in
+// its agents.conf ([forge] adapter = gitlab, with gitlab_url, gitlab_project
+// and gitlab_token_file): its merge request is read from GitLab's REST API
+// (lib/gitlab.ts) in gh's words, so the same checks judge it, in the same
+// order; its host is free when no pipeline of the project runs or waits; it
+// is merged at the commit that was checked (GitLab's `sha`), its branch
+// kept. gh is never called for it. GitLab silent is "not now", as GitHub
+// down is.
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { confGet, confSoft, die, gh, ghShown, git, githubDown, hasText, idsOf, ledgerEvent, ledgerInit, ledgerRows, lockFile, main, nowUtc, ORCH_HOME, onlyBaseMerges, projectEnv, readJson, say, ScriptExit, scratchDir, shownLeft, tracker, userMessage, writeWhole } from './lib/script.ts';
+import { GitLabClient, GitLabError, gitlabLockClient, gitlabLockSettings, hostOnGitLab, lockPull, mergeOnGitLab } from './lib/gitlab.ts';
 
 const USAGE = 'usage: merge-pr.ts <pull request> <ticket> [<announcement file|->] [--dry-run]';
 
@@ -49,6 +59,12 @@ type Pull = { state?: unknown; isDraft?: unknown; headRefName?: unknown; headRef
 type Asked = { at?: unknown; pulls?: { pr: number; head?: string; merged_at?: string | null }[]; closing?: boolean; [key: string]: unknown };
 
 const jqOr = (...values: unknown[]): unknown => values.find((value) => value !== null && value !== undefined && value !== false) ?? values.at(-1);
+
+// A GitLab service's project and the client that holds its token.
+type Lab = { readonly client: GitLabClient; readonly project: string };
+const FORGE_KEYS = ['gitlab_url', 'gitlab_project', 'gitlab_token_file', 'app_id', 'installation_id', 'app_private_key_file', 'app_login', 'app_user_id', 'use_tracker_app'];
+// GitLab gave no answer, or one of its own trouble: not now.
+const silent = (error: unknown): boolean => error instanceof GitLabError && (error.status === undefined || error.status >= 500);
 
 // A Node command of the tool whose output goes where this one's goes.
 function node(file: string, args: readonly string[], options: { readonly stderr?: 'inherit' | 'pipe' | 'ignore'; readonly stdout?: 'inherit' | 'pipe' | 'ignore' } = {}): { status: number; stdout: string; stderr: string } {
@@ -72,14 +88,37 @@ function hostState(): { free: boolean; down: string | null } {
   const committed = ghShown(['api', `repos/{owner}/{repo}/commits/${target}`, '--jq', '.commit.committer.date']);
   const merged = Date.parse(committed.stdout.trim());
   if (committed.status !== 0 || !Number.isFinite(merged)) throw new ScriptExit(1);
+  return { free: runs.length === 0 && !deploying(merged), down: null };
+}
+
+function deploying(merged: number): boolean {
   const sinceMerge = Math.trunc((Math.floor(Date.now() / 1000) - Math.floor(merged / 1000)) / 60);
   const docker = spawnSync('docker', ['ps', '--format', '{{.Status}}'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'inherit'] });
   const settling = (docker.stdout ?? '').split('\n').filter((line) => /Up ([0-9]+ seconds|About a minute|[1-3] minutes)/.test(line)).length;
-  const deploying = sinceMerge < 10 || settling > 0;
-  return { free: runs.length === 0 && !deploying, down: null };
+  return sinceMerge < 10 || settling > 0;
 }
 
-await main(() => {
+// The same, on GitLab's side: its pipelines running or waiting on the
+// project, and the base's last change.
+async function hostStateOnGitLab(lab: Lab): Promise<boolean> {
+  const target = confGet('lanes', 'base').replace(/^origin\//, '');
+  const host = await hostOnGitLab(lab.client, lab.project, target);
+  if (!Number.isFinite(host.baseChangedAt)) throw new ScriptExit(1);
+  return host.runs === 0 && !deploying(host.baseChangedAt);
+}
+
+// What GitLab says now of each merge request shown on the ticket and not
+// merged by this lock, in gh's words; one it cannot say is left unsaid.
+async function statesOnGitLab(lab: Lab, pulls: readonly { readonly pr: number; readonly merged_at?: string | null }[]): Promise<(pr: number) => string> {
+  const states = new Map<number, string>();
+  for (const one of pulls) {
+    if (one.merged_at != null) continue;
+    try { states.set(one.pr, (await lockPull(lab.client, lab.project, one.pr)).state); } catch { /* unsaid: the ticket is not closed on a guess */ }
+  }
+  return (pr) => states.get(pr) ?? '';
+}
+
+await main(async () => {
   const { state } = projectEnv();
   const name = basename(process.argv[1] ?? 'merge-pr.ts');
   function refuse(text: string): never { say(`${name}: ${text}`); throw new ScriptExit(6); }
@@ -96,6 +135,14 @@ await main(() => {
 
   const args = process.argv.slice(2);
   if (args.length < 2 || !/^[0-9]+$/.test(args[0]!) || !/^[A-Z]+-[0-9]+$/.test(args[1]!)) die(USAGE);
+  // A GitLab service: its settings and its token are checked before anything is read.
+  let lab: Lab | null = null;
+  if (confSoft('forge', 'adapter') === 'gitlab') {
+    try {
+      const settings = gitlabLockSettings(Object.fromEntries(FORGE_KEYS.map((key) => [key, confSoft('forge', key)])), projectEnv().repo);
+      lab = { client: gitlabLockClient(settings), project: settings.project };
+    } catch (error) { refuse(error instanceof Error ? error.message : String(error)); }
+  }
   const pr = args[0]!;
   const ticket = args[1]!;
   let announcement = '';
@@ -141,14 +188,25 @@ await main(() => {
     if (active !== 0) { if (active === 3) later('the previous release is still being monitored'); die('release watch state could not be read'); }
     if (node('lib/release.ts', ['check']).status !== 0) no('[release] settings are invalid; fix them before shipping');
 
-    const down = githubDown();
-    if (down.code === 0 && down.out) later(`GitHub is down (${down.out})`);
-
-    // 1. Open, not a draft, green.
-    const viewed = ghShown(['pr', 'view', pr, '--json', 'number,state,isDraft,headRefName,headRefOid,baseRefName,createdAt,statusCheckRollup']);
-    if (viewed.status !== 0) die(`pull request #${pr} could not be read`);
     let pull: Pull;
-    try { pull = JSON.parse(viewed.stdout) as Pull; } catch { die(`pull request #${pr} could not be read`); }
+    if (lab) {
+      // 1, on GitLab: its merge request and the statuses of its head, in gh's words.
+      try {
+        const read = await lockPull(lab.client, lab.project, Number(pr));
+        pull = { ...read, statusCheckRollup: read.checks.map((conclusion) => ({ conclusion })) };
+      } catch (error) {
+        if (silent(error)) later(`GitLab does not answer (${(error as Error).message})`);
+        die(`merge request !${pr} could not be read: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    } else {
+      const down = githubDown();
+      if (down.code === 0 && down.out) later(`GitHub is down (${down.out})`);
+
+      // 1. Open, not a draft, green.
+      const viewed = ghShown(['pr', 'view', pr, '--json', 'number,state,isDraft,headRefName,headRefOid,baseRefName,createdAt,statusCheckRollup']);
+      if (viewed.status !== 0) die(`pull request #${pr} could not be read`);
+      try { pull = JSON.parse(viewed.stdout) as Pull; } catch { die(`pull request #${pr} could not be read`); }
+    }
     if (pull.state !== 'OPEN') no('it is not open');
     if (pull.isDraft !== false) no('it is a draft');
     const head = String(pull.headRefOid ?? 'null');
@@ -261,7 +319,15 @@ await main(() => {
     }
 
     // 5. The host.
-    if (!hostState().free) later('the host is not free for a merge (a CI or a deployment settling)');
+    let free: boolean;
+    if (lab) {
+      try { free = await hostStateOnGitLab(lab); }
+      catch (error) {
+        if (silent(error)) later(`GitLab does not answer (${(error as Error).message})`);
+        throw error;
+      }
+    } else free = hostState().free;
+    if (!free) later('the host is not free for a merge (a CI or a deployment settling)');
 
     if (dryRun) {
       process.stdout.write(`${JSON.stringify({ would_merge: Number(pr), ticket, head, reviewed_commit: reviewed, kind: needs, agreement: agreed || 'none needed' }, null, 2)}\n`);
@@ -269,9 +335,14 @@ await main(() => {
     }
 
     // The very commit that was checked, and nothing that arrived since.
-    const merged = gh(['pr', 'merge', pr, '--merge', '--match-head-commit', head]);
-    if (merged.stderr) process.stderr.write(merged.stderr);
-    if (merged.status !== 0) die(`GitHub did not merge #${pr}`);
+    if (lab) {
+      try { await mergeOnGitLab(lab.client, lab.project, Number(pr), head); }
+      catch (error) { die(`GitLab did not merge !${pr}: ${error instanceof Error ? error.message : String(error)}`); }
+    } else {
+      const merged = gh(['pr', 'merge', pr, '--merge', '--match-head-commit', head]);
+      if (merged.stderr) process.stderr.write(merged.stderr);
+      if (merged.status !== 0) die(`GitHub did not merge #${pr}`);
+    }
     ledgerEvent({ kind: 'merged_by_script', ticket, value: Number(pr), detail: `#${pr} at ${head.slice(0, 8)}, reviewed at ${reviewed.slice(0, 8)}, ${needs}, agreement: ${agreed || 'none needed'}, full lane` });
     // Its time from Todo to Done, in working time, the human's wait and the
     // machine's (lib/fast-lane.ts measure): never a reason not to go on.
@@ -309,7 +380,7 @@ await main(() => {
       const record = readJson<Asked>(askedPath) ?? {};
       record.pulls = (record.pulls ?? []).map((one) => (one.pr === Number(pr) ? { ...one, merged_at: nowUtc() } : one));
       writeWhole(askedPath, `${JSON.stringify(record, null, 2)}\n`);
-      const left = shownLeft(askedPath);
+      const left = lab ? shownLeft(askedPath, await statesOnGitLab(lab, record.pulls ?? [])) : shownLeft(askedPath);
       if (left.unknown !== 0) {
         writeWhole(askedPath, `${JSON.stringify({ ...record, closing: true }, null, 2)}\n`);
         const pending = (record.pulls ?? []).filter((one) => one.merged_at === null || one.merged_at === undefined).map((one) => `#${one.pr}`).join(', ');
