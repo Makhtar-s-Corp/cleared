@@ -49,7 +49,8 @@ test('every milestone 5 line of the matrix is named in the plan', () => {
 });
 
 test('each lane of the waves has its section, and no wave runs more than three lanes', () => {
-  const waves = plan.split('\n').filter((line) => /^\| \d+ \|/.test(line));
+  const section = plan.split(/^(?=## )/m).find((part) => /^## \d+\. Waves$/m.test(part)) ?? '';
+  const waves = section.split('\n').filter((line) => /^\| \d+ \|/.test(line));
   assert.ok(waves.length > 0, 'the plan has no waves table');
   const sections = new Set([...plan.matchAll(/^## \d+\. .*\(`(v2-j5-[a-z0-9-]+)`/gm)].map(([, lane]) => lane!));
   for (const wave of waves) {

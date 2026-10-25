@@ -6677,3 +6677,32 @@ The three issues were then closed by hand as not planned. Nothing ran against Li
 
 - Pull request: 403, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-mirror-doctor`.
+
+## 2026-10-25: milestone 5's plan, in sixteen lanes and five waves, and C5 done (the author's choices, lane `v2-j5-plan`, issue #404)
+
+**The need.** Issue #404, docs only. (1) Matrix line C5 (the project page kept up to date) still read `later`, though P59 delivered it in pull request 395 with its tests. (2) Milestone 5 had no plan. The issue asks for `docs/v2/milestone-5-plan.md` from the brief's section 6 and the matrix lines D14, B6.5, B6.5p, C4, C15, C16, C18 and M10: the one-command install (Docker Compose, label `cleared.dev=v2`), the browser setup assistant, `cleared doctor` and the README, with the proof that a newcomer gets a first ticket live in under an hour following the assistant only. The plan splits the work into lanes (files owned, tests, proof) and marks what needs real accounts or a fresh machine. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository. The content is taken from the matrix lines and the two complements, and the conventions from sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md).
+
+**The branch.** The brief asked for `v2/j5-plan`. Git refuses that name while a local branch `v2` exists, so the lane runs on `v2-j5-plan`, the `v2-jN-topic` form of B4.1.
+
+**Decision.**
+1. **C5 is `done`**, delivered by 395 (P59, P240 to P242) after 313 and 363, and proven by P59's three test files. It keeps P59's limit: no screen shows the page.
+2. **The plan** ([milestone-5-plan.md](milestone-5-plan.md)) has the proof as ten measured steps (section 1), where milestone 5 starts (section 2) and sixteen decisions (section 3). Among them: Linux with Docker Engine for this milestone, since sibling containers get host paths. A labelled Compose project with `service`, `app` and `broker`, only the app published, on `127.0.0.1`, the port checked first. A setup code on first start. A settings file under the environment, with tokens in their own files and never sent back. One `cleared` command that runs `src/cli/<command>.ts`. Steps and doctor sections as files, so that lanes add files rather than edit shared ones. A forge contract with GitHub behind it. API tokens that never approve. Test secrets encrypted at rest and cleaned from every output. Prepared images keyed by a hash. The setup session as a ticket. Links proposed, never written alone.
+3. **Lanes and waves.** Wave 1: `v2-j5-compose`, `v2-j5-assistant`, `v2-j5-forge`. Wave 2: `v2-j5-doctor`, `v2-j5-run`, `v2-j5-connect`. Wave 3: `v2-j5-images`, `v2-j5-gitlab`. Wave 4: `v2-j5-secrets`, `v2-j5-env-setup`, `v2-j5-first-ticket`. Wave 5: `v2-j5-docs`, `v2-j5-proof`. Each lane has its own section with its context, what exists at the end and how it is proven, what is out of scope, the files it owns and the real accounts or machines it needs. Section 17 names the files two waves share.
+4. **Matrix.** D14, B6.5, B6.5p, C4, C15, C16, C18 and M10 go from `later` to `planned`, each naming its lanes and the plan's section (rule 3). No `P` line is added: each lane adds its own when it delivers, as the issue says.
+
+**Questions for the owner** (section 19 of the plan; defaults applied where the action stays in this repository):
+1. The one command: from a clone with images built on the machine; published images and a Compose file fetched from the registry (recommended); or a published installer image. The lanes build the first. No default for publishing: it is outward facing.
+2. What "live" means for a newcomer: merged by the lock with the project's health address green, when it has one (default); or a starter repository deployed to GitHub Pages from a template, which waits, being outward facing.
+3. The model's login: a subscription, an API key, or both offered (default: both, the subscription first).
+4. The newcomer's machine: Linux with Docker Engine only (default), or macOS with Docker Desktop too.
+5. The real run of the proof: a developer and a fresh machine the owner finds (recommended), with a stand-in run as a second rehearsal. No default: it needs a person, accounts and a machine.
+6. GitLab: against a fake in milestone 5 with the real trial the owner's (default), or after milestone 5.
+
+**Tests first.** `25c15e1` committed `v2/test/milestone-5-plan.test.ts` alone. On `origin/v2` 5 of its 6 tests failed: C5 not done, no plan, no milestone 5 line in it, no waves, no lane sections. The em dash test passed with nothing to read. One change came with the plan. The waves check read every row that starts with a number, which matched the proof's table of steps, so it now reads the "Waves" section only. The tests check what stays true as lanes deliver: C5 and its test files, every milestone 5 line named in the plan, every lane of the waves with its own section, at most three lanes a wave, and the four headings of each lane. They do not check the `planned` status, which the first lane to deliver changes.
+
+**Checks** (at `origin/v2` `c3de885`). CHECKS_PLACEHOLDER
+
+**Resources.** No Docker object, no Claude Code login read, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, `git fetch` and GitHub (the issue and the pull request), no port but the tests' own ephemeral loopback ones, no tunnel, no secret.
+
+- Pull request: PR_PLACEHOLDER, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-plan`.
