@@ -5753,7 +5753,7 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 
 ## 2026-10-25: the polish captures are compressed before v2 goes to main
 
-The 120 PNG captures of `docs/v2/ui-polish/` (P222, 366) weighed 11.3 MB. `v2/scripts/compress-captures.sh` runs `pngquant --quality=80-95 --skip-if-larger` then `optipng -o2` on a folder (system tools, no npm dependency): 11,267,957 bytes before, 4,003,907 after (-64 %). Lossless alone (`optipng -o2`) gave 9.3 MB (-18 %); the quantized captures read the same for UI review. No code changes; the history keeps the old files (no rewrite, no force push), so only checkouts get lighter. Future captures can run the script before they are committed.
+The 120 PNG captures of `docs/v2/ui-polish/` (P222, 366) weighed 11.3 MB. They were compressed once, on a workstation, with `pngquant --quality=80-95 --skip-if-larger --force --ext .png` then `optipng -o2` on each file (system tools; no script is committed, since `v2/` tracks no shell script): 11,267,957 bytes before, 4,003,907 after (-64 %). Lossless alone (`optipng -o2`) gave 9.3 MB (-18 %); the quantized captures read the same for UI review. No code changes; the history keeps the old files (no rewrite, no force push), so only checkouts get lighter. Future captures can go through the same two commands before they are committed.
 
 - Pull request: against `v2`, branch `amdiakhate/j3-png`.
 - Author: the night driver, approved by the product owner on 2026-10-25.
