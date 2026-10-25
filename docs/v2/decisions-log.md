@@ -5861,6 +5861,7 @@ With the CPU slowed four times the budget is at its edge: what is left is the ne
 
 - Pull request: 373, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-test-gaps`.
+
 ## 2026-10-25: the navigation, the session, the inbox and Consumption redrawn as one calm workbench (the author's choices, lane `j3-visual-redesign`, P227, issue #375)
 
 **Design direction** (written after Impeccable's `init`, `document` and `critique`, before the screens' sheets changed). The brief pins the world: the web and desktop apps of Codex and Devin, which `ui-overhaul-plan.md` section 3 already reads, with Linear and Raycast as second references; the tokens of `styles/app.css` stay, no gradient, no new feature. So this is the category's own look played straight, not a new world: no concept roll, no comp.
@@ -5870,3 +5871,77 @@ With the CPU slowed four times the budget is at its edge: what is left is the ne
 4. **A computer's controls on a computer.** With a mouse from 1024 px, buttons are 32 to 36 px, one line each (Approve's commit beside its label); touch screens and every width under 1024 keep 44 px (P217).
 5. **Consumption after the product owner's reference** (a capture validated for this screen, kept out of the repository, nothing of its names taken): the period, the title, the line under it, the dates at the right; a card per agent on the sunken ground with its figures on the left and its curve beside them; the limits, the cost and the levers as sections of the page; each lever's choices drawn as radio options, the picked one ringed in ink, not filled. What the reference shows and Cleared does not have (a stacked cost bar, a button to a principle, one radio group across levers) is not added.
 6. **Type and colour.** Sentence case everywhere, no letters spaced out (DESIGN.md section 3); the token scale only; red text for a limit that will be reached, its bar in the same red, not the brighter fill.
+
+**The need.** Issue #375: a full visual redesign, with no new feature and no behaviour change, of the navigation, the session, the inbox and Consumption. The look should be a modern native app's, with the Codex and Devin apps as references. Impeccable runs first. The design direction is written here before the code. The work is audited and polished, with before and after captures. The brief named sections 9 and 10 of `milestone-2-plan.md`, which has eight; read in their place, as earlier lanes did: `ui-overhaul-plan.md` sections 3 (the references), 5 (the visual loop), 6 (Impeccable), 9 (its questions' defaults: the phone's bottom bar is kept) and 10 (out of scope).
+
+**The id.** P224 (pull request 374) and P225 (373) were taken. Issue #368, the coming lane `j3-capture-detect`, was opened before #375 and takes the next free id, so this lane took P227. Checked again before the pull request: `origin/v2` holds P223 and P225, and no open pull request claims P226 or P227.
+
+**The product owner's reference.** The owner validated a capture as the reference for Consumption during the lane. It is kept out of the repository: it carries other products' names (rule 6 of the matrix), and none of them is written here. Taken from it: the hierarchy, the card per agent with its curve, the block that anticipates the limits, the levers' choices as radio options, the sober colours. Not taken: its capitals over the title (DESIGN.md section 3; the period stays, in sentence case), a stacked cost bar, a button to a principle and one radio group across the levers. Cleared has none of these: the levers are independent settings, and Pause is an action.
+
+**Impeccable.** 4.7.0 in the lane's worktree, out of git; the installer's hooks file was removed before any edit; `DO_NOT_TRACK=1`; no live server, no listener.
+- `init` wrote PRODUCT.md from the plans and the brief, with no interview, since the brief fixes its inputs.
+- `document` recorded the incumbent sheets in the root DESIGN.md (excluded from git; the tracked `app/DESIGN.md` is untouched).
+- The direction is pinned by the brief, so `concept-seed`, the decision page (a listener), comps and `build-phase` did not run. The build is code-led on the existing tokens.
+- `critique` ran in a fresh agent (Opus 5.5) on the before captures and the code, and scored 27 of 40. Its first finding, that screen sheets leak into each other, is a false positive: `lib/sheets.ts` turns every other screen's sheets off (`media="not all"`). Its other CSS-level findings were taken: the session's side cards made flat, the composer, a quiet disabled Send, the tab track at 768, the inbox's amber made a dot, the quiet row answers, the summary on the sunken ground, the search as a row, a quiet avatar, the agent cards' curve beside the figures, the limit's bar in the danger text colour, the warning chip without a ring.
+- The detector, run once on the four changed sheets, flags only Geist, which B3.8 requires.
+
+**What changed**, in `styles/app.css`, `inbox.css`, `session.css` and `consumption.css` only. No DOM, copy, catalog or token was added or renamed.
+- The sidebar:
+  - The search is a row of the list.
+  - The screen shown and the session shown are a raised row (the surface and its ring), with no change of weight.
+  - The live sessions' state dots sit in the icons' column, and their titles at the screens' names.
+  - There is no hairline above the sessions.
+  - The phone's bar draws its current item with no ring.
+- The session:
+  - The left and right columns' sections lie on the page, parted by hairlines.
+  - The ticket's title is the screen's 20 px.
+  - The thread is the one framed surface (12 px, the card's elevation).
+  - The composer is a full-width field, then one row with Send at its right.
+  - With a mouse, buttons are 32 px; on touch, 44 at every width.
+- The inbox:
+  - The page uses the scale's spacing.
+  - The detail is the one framed surface.
+  - A kind is said in words with an amber dot (a train's coloured chips stay).
+  - The row answers are quiet fills, 44 px under a coarse pointer.
+  - From 1024 px with a mouse, the detail's buttons are 36 px, one line each, the commit beside Approve's label.
+- Consumption:
+  - The period is in sentence case.
+  - The agents' cards and the wins sit on the sunken ground.
+  - The right column's three sections lie on the page.
+  - The quota bars are 4 px.
+  - The levers are sections with a hairline between them, and their choices are radio options (a ringed mark, the picked one ringed in ink, never filled).
+  - A lever of one button has no mark.
+
+**Art-director pass** (Sonnet 5.5 in a fresh agent, a different model from the author, on the before and after captures, the diff, the reference and Impeccable's critique and polish). Of its eight items:
+- Taken: the 32 px buttons, choices and row answers on a touch screen wider than a phone, now 44 under a coarse pointer.
+- Not taken, as the before set already had them: the phone bar's "Consumption" (P222 measured it within its slot at 375 and 390, in both languages), the fixed bar drawn mid-page in a whole-page capture (a capture artefact), and the phone's Interrupt as an icon (lane 38's).
+- Not taken, disproved: the danger text's and the group titles' contrast. `tokens.test.ts` holds `--danger-text` and `--text-faint` at 4.5:1 or more on those grounds in both themes.
+- Logged for later: two columns of unequal length on Consumption (moving the wins is a DOM change); the figure as large as the reference's (20 px is the scale's largest size); copy (the limit's sentence says three things; French "reset"; one cost row repeating the total); the sample-data pill on every screen; the permission card's amber fill; a pass of its own at 768.
+
+**Tests first.**
+- `5388c3d` commits the tests alone, failing on `6d7097f`:
+  - `app/test/redesign/rules.test.ts` fails on Consumption's capitals.
+  - `app/test/redesign/redesign-browser.test.ts` (added to the CI's `browser` list) fails four of five: the session's title at 16 px for the screens' 40; the side sections drawn as cards; the inbox's 44 px buttons at 1440; the levers as cards in a card. The fifth, the phone's 44 px buttons, is the guard that passes on both sides.
+- After the critique, the lever test learnt that a lone action has no mark (Pause is not an option). This was written in the same commit as the sheets and noted in its message.
+- No earlier test needed a change: the tests that pin the inbox on a phone, the wins table and the placeholders pass as they were.
+
+**Captures.** On the fixtures with `scripts/capture-screens.ts`, ports 0 on loopback, no page error and no request off the app's origins: inbox, session, sessions and consumption at 1440, 768 and 390, light and dark, in English, and at 1440 and 390 in French, under `docs/v2/visual-redesign/{before,after}/`. Each set was compressed with `pngquant --quality=80-95 --skip-if-larger` then `optipng -o2` (system tools, run once, nothing scripted in `v2/`): before 3,255,956 bytes to 1,138,773; after 3,203,724 to 1,111,125. A wider set in the scratchpad (the tower, the Lead, the palette, the rail's tooltip, the release on a phone and the Plan tab, at the three widths, both themes) was compared before and after. Each differs only in the shared shell, and the phone's release keeps Approve on its own row with 44 px buttons.
+
+**The tab-switch budget (P223).**
+- Measured alone with `CI=true` on this lane's host, which other lanes shared (load average 9 to 29). The lane and an untouched `origin/v2` (`6d7097f`) were built in a scratchpad worktree and run alternately.
+- Unslowed: the base's runs gave a median p95 of 42.4 and 31.0 ms, the lane's 39.6 and 37.8 ms, in a quiet stretch; a loaded first round gave 57 to 68 ms for the base and 77 to 117 ms for the lane.
+- Slowed four times: the median p95 was 163.6 and 149.0 ms on the base, 167.0 and 166.5 ms on the lane.
+- The budget passed every unslowed run, and after the merge alone at 22.8, 25.3 and 23.6 ms. A cost of a few percent at most cannot be ruled out on this host; the lane adds no animation, no blur and no forced layout.
+
+**Checks** (after the merge of 373).
+- `npm run typecheck` passes.
+- `npm test` runs 2135 Node tests: 2051 pass, 84 skipped (`CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_REAL_HARNESS` unset), 0 fail. 342 Vitest tests pass.
+- The CI's browser list with this lane's file: 68 of 68, then the budget alone.
+- `app/test/notify/browser.test.ts` times out on this host and does the same on an untouched `origin/v2` (`6d7097f`) built in a scratchpad worktree, as lane `j3-ui-polish` logged. It is not this lane's, and its CI run decides.
+- `npm run guard -- --base origin/v2`: nothing refused.
+
+**The merge of 373** (lane `j3-test-gaps`, P225, at `origin/v2` `819ce38`). The log keeps 373's entry, then this one; the matrix keeps P225, then P227. 373's changed browser tests (the phone's inbox, the wins) pass on this lane's sheets.
+
+**Resources.** No Docker object, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, Impeccable's install, the Debian packages of pngquant and optipng unpacked in the scratchpad, `git fetch` and GitHub, no port but loopback port 0, no secret. The reference capture stays outside the repository.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-visual-redesign`.
