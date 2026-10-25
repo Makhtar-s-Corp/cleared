@@ -110,6 +110,24 @@ test('the block goes first in a body, and replaces the one already there', () =>
   assert.equal(replaced.split(RECEIPT_START).length, 2);
 });
 
+test('the limits: a link address that is no URL links nothing, a figure of a dollar or more has two decimals, a video of unknown length, an empty body', () => {
+  assert.equal(proofLink('not an address', 'DEMO-7', 'guestbook', 'before.png'), undefined);
+  assert.equal(proofLink('', 'DEMO-7', 'guestbook', 'before.png'), undefined);
+  const edge: ReceiptData = { ...full, tests: [], tokens: 0, costUsd: 12.5, elapsedMs: 0, captures: [{ service: 'guestbook', video: 'flow.webm', missing: [] }], linkBase: 'not an address' };
+  const en = lines(renderReceipt(edge, 'en'));
+  assert.ok(en.includes('- Captures of guestbook: video of the flow (0s) kept by Cleared, without a link'), en.join('\n'));
+  assert.ok(en.includes('- Cost: 0 tokens, $12.50 as the agents reported it (API-equivalent)'), en.join('\n'));
+  assert.ok(en.includes('- Time: 0s from the first session to this pull request'), en.join('\n'));
+  const fr = lines(renderReceipt(edge, 'fr')).join('\n');
+  assert.match(fr, /12,50\u00a0\$US/);
+  assert.match(fr, /vidéo du parcours \(0\u00a0s\)/);
+  const block = renderReceipt(full, 'en');
+  assert.equal(withReceipt('', block), block);
+  assert.equal(withReceipt(' \n\t', block), block);
+  // A start marker with no end is no receipt: the new one goes first, the text stays.
+  assert.equal(withReceipt(`${RECEIPT_START}\nhalf`, block), `${block}\n\n${RECEIPT_START}\nhalf`);
+});
+
 test('the receipt\'s catalogs: French has every English key, and no French sentence is the English one', () => {
   const read = (language: string) => JSON.parse(readFileSync(`${RECEIPT_MESSAGES_DIR}receipt.${language}.json`, 'utf8')) as Record<string, string>;
   const en = read('en');

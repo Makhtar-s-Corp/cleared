@@ -11,6 +11,7 @@
 // broker and clone address it names, must be temporary too. Tests and
 // fixtures create the fake adapter themselves.
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -267,15 +268,16 @@ export function createRehearsalAdapter(options: RehearsalOptions): SessionAdapte
     // are added when its message comes, before the message is given to it.
     const steps: FakeStep[] = [{ context: measure(start) }, { awaitMessage: true }];
     const handle = await fake(steps).start({ ...input, tools });
-    let turns = 0;
     let share = start;
     return {
       ...handle,
       async send(message) {
-        const turn = `${handle.id}-turn-${++turns}`;
-        let n = 0;
+        // Each id a UUID, the shape the cleaner keeps whole (GENERATED_ID):
+        // built from the session's id, its digits could read as a phone
+        // number, and a question stored under a cleaned id has no answer.
+        const turn = randomUUID();
         const acts: FakeStep[] = choose(message.text).flatMap((act): FakeStep[] => {
-          const id = `${turn}-${++n}`;
+          const id = randomUUID();
           if ('say' in act) return [
             { emit: { type: 'TEXT_MESSAGE_START', messageId: id, role: 'assistant' } },
             { emit: { type: 'TEXT_MESSAGE_CONTENT', messageId: id, delta: act.say } },

@@ -21,6 +21,7 @@ import { variantFolder } from '../../src/flow/variants.ts';
 import type { FakeStep } from '../../src/session/adapters/fake.ts';
 import type { Harness } from '../../src/session/contract.ts';
 import { toolArgs, toolResult } from '../../src/session/events.ts';
+import { openStore } from '../../src/store/db.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
 import { FakeDocker } from '../container/fake-docker.ts';
 import { CONFIG, REPORT_FIX, fakeEffects, reviewerScript, scriptedAdapter, setup, started, text, until, type Setup, type Scripts } from './support.ts';
@@ -61,6 +62,24 @@ test('the pick: only a variant whose tests passed; the fewest tokens when every 
   // None green: no pick, the owner chooses.
   assert.equal(pickWinner([entry(1, 'claude-code', false, 10, 10), entry(2, 'codex', false, 10, 10)]), undefined);
   assert.equal(pickWinner([]), undefined);
+});
+
+test('the pick\'s limits: zero tokens is no report, the time ties broken by the tokens with an unreported one last, then the position', () => {
+  const entry = (position: number, harness: Harness, tokens: number | null, workMs: number) => ({ position, harness, green: true, tokens, workMs });
+  // A green variant that says 0 tokens reported nothing: the time decides.
+  assert.deepEqual(pickWinner([entry(1, 'claude-code', 0, 9_000), entry(2, 'codex', 40_000, 3_000)]), { position: 2, measure: 'time' });
+  // Same time: the tokens, an unreported count after any reported one.
+  assert.deepEqual(pickWinner([entry(1, 'cursor', null, 3_000), entry(2, 'codex', 40_000, 3_000), entry(3, 'claude-code', 50_000, 3_000)]), { position: 2, measure: 'time' });
+  // Same time, nothing reported: the position, whatever the order given.
+  assert.deepEqual(pickWinner([entry(3, 'cursor', null, 3_000), entry(1, 'cursor', null, 3_000), entry(2, 'cursor', null, 3_000)]), { position: 1, measure: 'time' });
+});
+
+test('the wins of a ledger from before the pick: no variants table, or one without its pick column, count nothing', () => {
+  const store = openStore(':memory:');
+  assert.deepEqual(harnessWins(store.db, 'guestbook'), []);
+  store.db.exec("CREATE TABLE ticket_variants (ticket TEXT, round INTEGER, project TEXT, kind TEXT, harness TEXT, state TEXT, session TEXT, tests TEXT, files TEXT, won INTEGER)");
+  store.db.exec("INSERT INTO ticket_variants VALUES ('LOCAL-1', 1, 'guestbook', 'bug', 'claude-code', 'done', 's1', 'passed', '[\"a\"]', 1)");
+  assert.deepEqual(harnessWins(store.db, 'guestbook'), []);
 });
 
 test('the pick\'s prompt names the declared test command, and says nothing of it when none is declared', () => {
