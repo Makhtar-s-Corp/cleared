@@ -5525,3 +5525,25 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 
 - Pull request: 357, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-mcp-access-sec`.
+
+## 2026-10-25: the kept JavaScript of v2 converted, `lib/notify/contract.mjs` still an exception (the author's choices, lane `j3-js-convert`, matrix B5.11b)
+
+**The need.** B5.11b was `partial`: kept JavaScript is converted when touched, and entirely before the end of milestone 4, with one logged exception (`lib/notify/contract.mjs`, 2026-10-22, lane `v2-j2-notify`, choice 8). The brief asked to start with that exception if its reason is gone, then convert what is left in the v2 core in one batch, with no change of behaviour. No issue: the line is the brief. The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight; the conventions followed are those of section 10 of `milestone-1-plan.md` (a lane changes its own files), as the earlier lanes did.
+
+**Decision.**
+1. **`lib/notify/contract.mjs` stays `.mjs`: its reason holds.** On `origin/v2` at `b095624`, `git grep -l notify/contract` names four v1 files that import it, `lib/notify.mjs`, `app/main.mjs`, `test/notify.test.mjs` and `test/app-notify.test.mjs`, beside v2's `src/notify/dispatcher.ts` (a comment) and `test/notify/contract.test.ts`. The file itself imports seven v1 modules (`lib/i18n.mjs`, `lib/board-scrub.mjs`, `lib/conf.mjs` and the four adapters under `lib/notify/adapters/`). A `.ts` there means editing those four v1 files, which milestone 4 removes or rewrites. It is converted with them. The same holds for the rest of v1's kept JavaScript, the `keep` and `adapt` rows of [keep-and-drop.md](keep-and-drop.md) under `lib/`, `app/`, `serve/` and `test/`, and `release-request.mjs`: v1 runs and imports it, so B5.11b stays `partial` for milestone 4. This lane's batch is the JavaScript of the v2 core, `v2/`.
+2. **The batch: the two v1 oracles of the tests.** `test/approval/oracle.mjs` and `test/store/v1-list.mjs` were the only kept JavaScript of `v2/`. They become `oracle.ts` and `v1-list.ts` (`git mv`, so the history follows), run by Node's type stripping as `test/store/failing-start.ts` already is. Their imports of v1 stay dynamic, each cast to the few members it uses, as `test/notify/contract.test.ts` does; the arguments are read with `as`, as `failing-start.ts` does. Same arguments, same output, same v1 code read. Their three callers (`test/approval/local-store.test.ts`, `test/approval/writer.test.ts`, `test/store/migrations.test.ts`) name the new files. The log's earlier entries keep the old names: they say what was true then.
+3. **`app/public/sw.js` and `app/public/theme.js` stay JavaScript, by design.** They are not kept v1 code; they are v2's, served as they are. A browser registers the service worker by its address, before any page code runs, and `theme.js` runs in `<head>` before the bundle so the page never paints in the wrong theme. Each says so in its header. Making them TypeScript needs a build entry of their own, a change of the build and of what is served, which this batch does not make.
+4. **A test holds the line.** `test/kept-javascript.test.ts` lists the tracked files of `v2/` (`git ls-files`) and expects exactly those two browser files with a JavaScript extension. A new `.mjs` under `v2/` now fails CI, not a `git grep` at milestone 4.
+5. **No user string.** Nothing a person reads changed, so no catalog changed.
+
+**Tests first.** `8c4fbb3` committed the test alone. There it fails: `test/approval/oracle.mjs` and `test/store/v1-list.mjs` are listed beside the two browser files.
+
+**Checks** (on `origin/v2` at `b095624`). `npm run typecheck` passes. `npm test`: 2059 Node tests, 1989 pass, 70 skipped (the browser tests, with no `CLEARED_V2_PLAYWRIGHT`, and the gated real-harness tests), 0 fail; 326 Vitest tests pass. The callers of the two oracles, `test/approval/local-store.test.ts`, `test/approval/writer.test.ts` and `test/store/migrations.test.ts`, pass 32 of 32 with the `.ts` files. No browser test was run: nothing of the app changed. No v1 file changed, so v1's checks were not run. `npm run guard -- --base origin/v2`: nothing refused.
+
+**The merge of 357** (lane `j3-mcp-access-sec`, at `origin/v2` `7304f41`). The log keeps 357's entry, then this one; the matrix merged by itself and keeps every id once. 357 adds no JavaScript under `v2/`. After the merge: `npm run typecheck` passes; `npm test` runs 2064 Node tests, 1994 pass, 70 skipped, 0 fail, and 326 Vitest tests pass; `test/kept-javascript.test.ts` passes; `npm run guard -- --base origin/v2`: nothing refused.
+
+**Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no port, no secret.
+
+- Pull request: 359, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-js-convert`.
