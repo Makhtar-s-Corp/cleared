@@ -5,9 +5,11 @@
 //   the week  the Consumption screen's seven days in the person's zone
 //             (usage.ts lastDays), from the first one's midnight to now
 //   merged    a ticket of the workspace Done now, whose last move to Done is
-//             in the week and was the service's agents' (the flow, the
-//             guarded merge), never the mirror's (an issue closed on a
-//             tracker) nor a person's (a move by hand is not a merge)
+//             in the week and was the service's: the flow's (agents), or the
+//             guarded merge's, which merge-pr.ts writes through v1's tracker
+//             under the service account, read as `other`; never the mirror's
+//             (an issue closed on a tracker) nor a person's signed move (a
+//             move by hand is not a merge)
 //   spend     every session of the workspace that finished a turn in the
 //             week, whatever its role, counted as a ticket's cost is
 //             (ticket-cost.ts sessionsCost from the week's start): tokens,
@@ -134,7 +136,7 @@ export async function weekFigures(db: DatabaseSync, tickets: TicketStore | undef
     const histories = await tickets.histories(done.map((t) => t.id));
     for (const ticket of done) {
       const last = (histories.get(ticket.id) ?? []).filter((h) => h.status === tickets.states.done).at(-1);
-      if (!last || last.by.kind !== 'agents' || last.by.id === MIRROR_ACTOR.id) continue;
+      if (!last || last.by.kind === 'human' || (last.by.kind === 'agents' && last.by.id === MIRROR_ACTOR.id)) continue;
       const at = Date.parse(last.at);
       if (!(at >= from && at <= input.now.getTime())) continue;
       merged.push({
