@@ -6733,5 +6733,5 @@ The three issues were then closed by hand as not planned. Nothing ran against Li
 
 **Resources.** No Docker object, no Claude Code login read, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, `git fetch` and GitHub (the issue, the example repository's clone, push and pull request 29, the pull request of this lane). No port but the tests' own ephemeral loopback ones, no tunnel, no secret printed.
 
-- Pull request: PR_TBD, against `v2`.
+- Pull request: 409, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-forge`.
