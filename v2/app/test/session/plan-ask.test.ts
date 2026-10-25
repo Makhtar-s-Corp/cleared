@@ -30,8 +30,8 @@ test('an empty question and one past the reader\'s limit are refused before anyt
 });
 
 test('the card says what the reader reads: the base branch of the session\'s service, or of every service, not the session\'s changes', () => {
-  assert.equal(planAskScope('guestbook', en), 'Read only, on the base branch of guestbook: the reader does not see this session\'s changes, and never edits, commits or pushes.');
-  assert.equal(planAskScope(undefined, en), 'Read only, on the base branch of every service: the reader does not see this session\'s changes, and never edits, commits or pushes.');
-  assert.equal(planAskScope('guestbook', fr), 'Lecture seule, sur la branche de base de guestbook : le lecteur ne voit pas les changements de cette session, et ne modifie, ne valide ni ne pousse jamais rien.');
-  assert.equal(planAskScope(undefined, fr), 'Lecture seule, sur la branche de base de chaque service : le lecteur ne voit pas les changements de cette session, et ne modifie, ne valide ni ne pousse jamais rien.');
+  assert.equal(planAskScope('guestbook', en), "Reads the base branch of guestbook, without this session's changes, and never edits the code.");
+  assert.equal(planAskScope(undefined, en), "Reads the base branch of every service, without this session's changes, and never edits the code.");
+  assert.equal(planAskScope('guestbook', fr), 'Lit la branche de base de guestbook, sans les changements de cette session, et ne modifie jamais le code.');
+  assert.equal(planAskScope(undefined, fr), 'Lit la branche de base de chaque service, sans les changements de cette session, et ne modifie jamais le code.');
 });

@@ -489,11 +489,14 @@ export function RightCards({ view, t, onFile }: { readonly view: SessionView; re
   const files = ticketFiles(parts);
   const checks = ticketChecks(parts);
   const steps = ticketSteps(parts, view.now.getTime());
+  // A Done ticket's empty lists are facts, not a wait, and its screen card,
+  // which can only say it has no picture, is not drawn (P222).
+  const done = view.ticket?.status === 'Done';
   return (
     <>
       <section className="card" aria-labelledby="changes-title">
         <h3 id="changes-title" className="card-label">{t('changes_title')}</h3>
-        {files.length === 0 ? <p className="faint small">{t('changes_none')}</p>
+        {files.length === 0 ? <p className="faint small">{t(done ? 'changes_none_done' : 'changes_none')}</p>
           : <ul className="changes">{files.map((f) => (
             <li key={f.path}>
               {onFile ? <button type="button" className="link-button path" data-act="open_change" onClick={() => onFile(f.path, 'diff')}>{f.path}</button> : <span className="path">{f.path}</span>}
@@ -503,7 +506,7 @@ export function RightCards({ view, t, onFile }: { readonly view: SessionView; re
       </section>
       <section className="card" aria-labelledby="checks-title">
         <h3 id="checks-title" className="card-label">{t('checks_title')}</h3>
-        {checks.length === 0 ? <p className="faint small">{t('checks_none')}</p>
+        {checks.length === 0 ? <p className="faint small">{t(done ? 'checks_none_done' : 'checks_none')}</p>
           : <ul className="checks">{checks.map((c) => <CheckRow key={c.name} check={c} t={t} />)}</ul>}
         {steps.length === 0 ? null : (
           <>
@@ -519,7 +522,7 @@ export function RightCards({ view, t, onFile }: { readonly view: SessionView; re
           </>
         )}
       </section>
-      <section className="card" aria-labelledby="screen-title"><h3 id="screen-title" className="card-label">{t('screen_title')}</h3><p className="faint small">{t('screen_empty')}</p></section>
+      {done ? null : <section className="card" aria-labelledby="screen-title"><h3 id="screen-title" className="card-label">{t('screen_title')}</h3><p className="faint small">{t('screen_empty')}</p></section>}
     </>
   );
 }

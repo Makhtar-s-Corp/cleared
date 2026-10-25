@@ -34,8 +34,8 @@ test('the wins: a row per ticket type and agent, its runs, its passed tests and 
   assert.match(markup, /<table class="wins-table">/);
   assert.equal(markup.match(/<tr data-win=/g)?.length, 3);
   const text = shown(markup);
-  for (const expected of ['Which agent wins', 'When several agents work the same ticket, the variant kept is the cheapest whose own tests passed.',
-    'Ticket type', 'Agent', 'Ran', 'Tests passed', 'Kept', 'Bug', 'Codex', 'Claude Code', 'Other', 'Cursor'])
+  for (const expected of ['Which agent wins', 'When several agents work the same ticket, the variant kept is the one whose tests passed with the fewest tokens, or in the shortest time when tokens are not reported.',
+    'Type', 'Agent', 'Ran', 'Tests passed', 'Kept', 'Bug', 'Codex', 'Claude Code', 'Other', 'Cursor'])
     assert.ok(text.includes(expected), expected);
   assert.deepEqual(winRows(WINS, en).map((r) => [r.type, r.harness, r.runs, r.green, r.wins]), [
     ['Bug', 'Codex', '4', '4', '3'], ['Bug', 'Claude Code', '4', '3', '1'], ['Other', 'Cursor', '1', '0', '0'],
@@ -47,12 +47,12 @@ test('no pick ended yet: the panel says so, and draws no table', () => {
   const markup = render(en, 'en', { ...data(), wins: [] });
   assert.match(markup, /data-wins="empty"/);
   assert.doesNotMatch(markup, /<table class="wins-table">/);
-  assert.ok(shown(markup).includes('No harness pick has ended yet.'));
+  assert.ok(shown(markup).includes('No agent pick has ended yet.'));
 });
 
 test('in French, every word of the panel is the catalog\'s', () => {
   const text = shown(render(fr, 'fr', { ...data(), wins: WINS }));
-  for (const expected of ["Quel agent l'emporte", 'Type de ticket', 'Agent', 'Lancés', 'Tests réussis', 'Gardés', 'Bug', 'Autre', 'Codex', 'Cursor'])
+  for (const expected of ["Quel agent l'emporte", 'Type', 'Agent', 'Lancées', 'Réussies', 'Gardées', 'Bug', 'Autre', 'Codex', 'Cursor'])
     assert.ok(text.includes(expected), expected);
   assert.ok(shown(render(fr, 'fr', { ...data(), wins: [] })).includes("Aucun choix d'agent n'est encore terminé."));
   for (const key of Object.keys(loadCatalog('consumption', 'en')).filter((k) => k.startsWith('consumption_win') || k.startsWith('consumption_type_')))

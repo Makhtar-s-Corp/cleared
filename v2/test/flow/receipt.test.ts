@@ -40,7 +40,7 @@ test('the receipt in English: the captures linked, each test with its round and 
   assert.match(body, /Round 1: `npm test` failed/);
   assert.match(body, /Round 2: `npm test` passed/);
   assert.match(body, /1,234,567 tokens/);
-  assert.match(body, /\$0\.40 as the harness reported it \(API-equivalent\)/);
+  assert.match(body, /\$0\.40 as the agents reported it \(API-equivalent\)/);
   assert.match(body, /42 min from the first session to this pull request/);
   assert.doesNotMatch(body, /€|EUR/);
 });
@@ -65,7 +65,7 @@ test('no dollar amount without a real figure for every session; the tokens and t
     assert.match(body, language === 'en' ? /1,234,567 tokens/ : /jetons/);
   }
   // No token count either: said as not reported, never as zero.
-  assert.match(renderReceipt({ ...full, costUsd: null, tokens: null }, 'en'), /Cost: tokens not reported by the harness/);
+  assert.match(renderReceipt({ ...full, costUsd: null, tokens: null }, 'en'), /Cost: tokens not reported by the agents/);
   assert.doesNotMatch(renderReceipt({ ...full, costUsd: null, tokens: null }, 'en'), /\b0 tokens/);
 });
 
@@ -84,13 +84,13 @@ test('a capture not taken says why, by its code; with no link address the files 
   assert.match(none, /Captures: none taken/);
   const unlinked = renderReceipt({ ...full, linkBase: undefined }, 'en');
   assert.doesNotMatch(unlinked, /\]\(/);
-  assert.match(unlinked, /before, after, video of the flow \(20s\): kept by Cleared, no link address is set/);
+  assert.match(unlinked, /before, after, video of the flow \(20s\) kept by Cleared, without a link/);
 });
 
 test('no declared test command, or one declared and never run: said, not left blank', () => {
   assert.match(renderReceipt({ ...full, tests: [], testsDeclared: false }, 'en'), /Tests: the service declares no test command/);
   assert.match(renderReceipt({ ...full, tests: [{ round: 1, command: 'npm test', outcome: 'not_run' }] }, 'en'), /Round 1: `npm test` was not run/);
-  assert.match(renderReceipt({ ...full, tests: [{ round: 1, command: 'npm test', outcome: 'unclear' }] }, 'fr'), /Tour 1\u00a0: `npm test` a tourné dans un tube ou une liste/);
+  assert.match(renderReceipt({ ...full, tests: [{ round: 1, command: 'npm test', outcome: 'unclear' }] }, 'fr'), /Tour 1\u00a0: `npm test` a tourné dans une commande composée/);
 });
 
 test('the block holds only what its fields say: a command with a backtick cannot break out, a link base with a path or credentials is not used', () => {

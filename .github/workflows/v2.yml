@@ -106,7 +106,7 @@ jobs:
             app/test/consumption/wins-browser.test.ts
             app/test/ask/citations-browser.test.ts app/test/inbox/mobile-browser.test.ts
             app/test/session/production-browser.test.ts test/flow/production-capture.test.ts
-            app/test/session/plan-ask-browser.test.ts app/test/foundation/switch-work-browser.test.ts"
+            app/test/session/plan-ask-browser.test.ts app/test/polish/phone-fit-browser.test.ts app/test/foundation/switch-work-browser.test.ts"
           alone="app/test/foundation/budget-browser.test.ts"
           node --test --test-reporter=tap $files | tee "$RUNNER_TEMP/browser.tap" || true
           node --test --test-reporter=tap $alone | tee -a "$RUNNER_TEMP/browser.tap" || true

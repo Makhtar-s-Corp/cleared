@@ -48,7 +48,7 @@ test('each column names its agent, its tests and its tokens; plain variants name
 
 test('kept by the pick: the line says which variant, on which agent, by tokens or by time', () => {
   const tokens = shown(renderDetail(viewOf(pick({ chosen: 2, by: 'cleared-v2', at: FIXTURE_NOW.toISOString(), measure: 'tokens' })), en));
-  assert.match(tokens, /Variant 2 \(Codex\) kept by the harness pick at \d\d:\d\d: its tests passed with the fewest tokens\. The others were stopped\./);
+  assert.match(tokens, /Variant 2 \(Codex\) kept by the agent pick at \d\d:\d\d: its tests passed with the fewest tokens\. The others were stopped\./);
   const time = shown(renderDetail(viewOf(pick({ chosen: 2, by: 'cleared-v2', at: FIXTURE_NOW.toISOString(), measure: 'time' })), en));
   assert.match(time, /its tests passed in the shortest time\./);
   const french = shown(renderDetail(viewOf(pick({ chosen: 2, by: 'cleared-v2', at: FIXTURE_NOW.toISOString(), measure: 'tokens' }), 'fr'), fr));
@@ -58,6 +58,6 @@ test('kept by the pick: the line says which variant, on which agent, by tokens o
 
 test('a pick still open says how the variant is kept, and the owner can still choose', () => {
   const html = renderDetail(viewOf(pick(null)), en);
-  assert.ok(shown(html).includes('The variant kept is the cheapest whose tests passed, once all have ended. You can choose one before.'));
+  assert.ok(shown(html).includes('Once all have ended, the variant kept is the one whose tests passed with the fewest tokens. You can choose one before.'));
   assert.match(html, /data-act="variant_choose_1"/);
 });

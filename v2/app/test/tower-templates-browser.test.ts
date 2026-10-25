@@ -22,8 +22,8 @@ declare const window: any;
 declare const fetch: any;
 
 const WORDS = {
-  fr: { chip: 'Modèle', toggles: ['Bug', 'Revue', 'CI', 'Question'], bugTitle: 'Ce qui casse, en quelques mots', kept: 'Votre description est gardée, un modèle ne remplit qu\'une description vide.', created: /^LOCAL-\d+ créé/ },
-  en: { chip: 'Template', toggles: ['Bug', 'Review', 'CI', 'Question'], bugTitle: 'What breaks, in a few words', kept: 'Your description is kept: a template only fills an empty one.', created: /^LOCAL-\d+ created/ },
+  fr: { chip: 'Modèle', toggles: ['Bug', 'Revue', 'CI', 'Question'], bugTitle: 'Ce qui casse', kept: 'Votre description est gardée, un modèle ne remplit qu\'une description vide.', created: /^LOCAL-\d+ créé/ },
+  en: { chip: 'Template', toggles: ['Bug', 'Review', 'CI', 'Question'], bugTitle: 'What breaks', kept: 'Your description is kept: a template only fills an empty one.', created: /^LOCAL-\d+ created/ },
 } as const;
 
 type Viewport = { readonly width: number; readonly height: number };
