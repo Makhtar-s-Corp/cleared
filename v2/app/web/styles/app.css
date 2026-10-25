@@ -286,6 +286,33 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
   .sheet-body section { break-inside: avoid; }
 }
 
+/* the API access panel (shell/Access.tsx, C18): one column at every width, the value and the command in Geist Mono, an id and a command line */
+.dialog.sheet.access { width: min(640px, 100%); }
+.access .sheet-body { columns: auto; display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-3); }
+.access .sheet-body section { padding-top: 0; }
+.access .sheet-body section.access-fresh { padding: var(--space-3); }
+.access-lead, .access-fresh p { font-size: var(--text-md); line-height: 1.45; text-wrap: pretty; }
+.access-note { color: var(--text-muted); font-size: var(--text-sm); }
+.access-failed { color: var(--danger-text); font-size: var(--text-md); }
+.access-fresh { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius); background: var(--surface-muted); }
+.access-fresh h3, .access-form label { color: var(--text); font-size: var(--text-md); font-weight: var(--weight-strong); }
+.access-value-row { display: flex; gap: var(--space-2); }
+.access-value-row input { flex: 1; min-height: 36px; padding: 0 var(--space-2); border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-outline); color: var(--text); font-size: var(--text-md); }
+#access-value { font-family: var(--mono); font-size: var(--text-sm); }
+.access-command { margin: 0; padding: 10px 12px; border-radius: var(--radius); background: var(--sunken); overflow-x: auto; font-family: var(--mono); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.access .sheet-body li.access-row { display: grid; grid-template-columns: 1fr auto; column-gap: var(--space-3); padding: var(--space-2) 0; }
+.access-row .access-name { font-weight: var(--weight-strong); }
+.access-row .access-dates { grid-column: 1; color: var(--text-muted); font-size: var(--text-sm); }
+.access-row button { grid-column: 2; grid-row: 1 / span 2; align-self: center; min-height: 32px; padding: 0 var(--space-3); }
+.access-form { display: flex; flex-direction: column; gap: var(--space-1); }
+.access-form .access-value-row button, .access-value-row #access-copy { min-height: 36px; padding: 0 var(--space-3); }
+.access-form .primary { border-radius: var(--radius); background: var(--ink); color: var(--on-ink); font-weight: var(--weight-strong); }
+.access-form .primary:hover { opacity: .88; }
+@media (max-width: 767px) {
+  .access-value-row { flex-direction: column; }
+  .access-value-row input, .access-value-row button, .access-row button { min-height: 44px; }
+}
+
 /* menus (the person's, the notifications'): a popover that hangs from its button and keeps 16 px from the edges */
 .menu { z-index: 60; min-width: 200px; padding: var(--space-2); border-radius: 10px; background: var(--popover); color: var(--text); box-shadow: var(--e-menu); display: flex; flex-direction: column; gap: var(--space-2); font-size: var(--text-md); }
 .menu .menu-note { padding: var(--space-1) var(--space-2) 0; color: var(--text-muted); font-size: var(--text-sm); }

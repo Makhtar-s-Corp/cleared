@@ -2,7 +2,8 @@
 // workspace at the head with the button that folds it ([), the search that
 // opens the palette, the four screens with the inbox's count, the lead's
 // dot and their chords, the live sessions grouped by state, and at the foot
-// the quota gauge, the sample-data line, the person, the notifications and the theme. Open
+// the quota gauge, the sample-data line, the person (whose menu opens the API
+// access panel too), the notifications and the theme. Open
 // on a computer, a rail of icons on a tablet or when folded, a top bar and
 // a bottom bar on a phone (styles/app.css).
 import { Broadcast, Gauge, ListChecks, MagnifyingGlass, Moon, SidebarSimple, Sun, TerminalWindow, Tray, type Icon } from '@phosphor-icons/react';
@@ -50,6 +51,7 @@ export type SidebarProps = {
   readonly onSearch?: () => void;
   readonly onToggle?: () => void;
   readonly onSignOut?: () => void;
+  readonly onAccess?: () => void;                          // the API access panel (shell/Access.tsx)
   readonly onPick?: (href: string) => void;               // a screen or a session picked here: the focus stays on it
 };
 
@@ -179,6 +181,8 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
               </div>
               {/* Consumption, from the settings too: it left the sidebar's screens (P227). */}
               <a className="plain menu-link" href="/consumption" onClick={() => setMenu(false)}>{t('nav_consumption')}</a>
+              {/* The person's API tokens, for cleared run and scripts (C18). */}
+              <Button className="plain menu-access" id="access-open" onClick={() => { setMenu(false); props.onAccess?.(); }}>{t('access_open')}</Button>
               <Button className="plain" id="sign-out" onClick={props.onSignOut}>{t('sign_out')}</Button>
             </PopoverContent>
           </Popover>
