@@ -6365,5 +6365,5 @@ The choice is one condition in `#goOut` (`src/tickets/mirror.ts`).
 
 **Resources.** No Docker object, no port opened outside the tests (port 0 on loopback), no tunnel, no secret written; no Linear key asked for or used. One issue was made and closed on the example repository, with two comments, and nothing on any other.
 
-- Pull request: PR_NUMBER, against `v2`.
+- Pull request: 390, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-mirror-followups`.
