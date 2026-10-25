@@ -5172,4 +5172,5 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Resources.** No Docker object, no port opened outside the tests (port 0 on loopback), no tunnel, no secret, no real account: the Codex and Cursor of the tests are the scripted fake adapter under their names, and their containers are a fake docker CLI's.
 
+- Pull request: 341, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-harness-pick`.
