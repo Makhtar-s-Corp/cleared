@@ -30,6 +30,7 @@
   "state_open_todo": "Run chmod go-w {path}.",
   "state_readable": "Other accounts can read the state folder {path} (mode {mode}); the install makes it 700.",
   "state_readable_todo": "Run chmod 700 {path}.",
+  "after_labels": "Waits for Docker lists that honour the label filter.",
   "after_state": "Waits for the state folder.",
   "disk_ok": "{free} free on the state folder's disk.",
   "disk_low": "{free} free on the state folder's disk; the images and each ticket's checkout take several gigabytes.",

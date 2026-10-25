@@ -94,10 +94,13 @@ test('a Docker whose lists ignore the label filter fails: Cleared could act on w
   const made = install();
   made.docker.honourFilters = false;
   made.docker.containers.push({ id: 'f'.repeat(64), name: 'someone-elses', labels: {}, state: 'running' });
+  made.docker.images.push({ id: `sha256:${'e'.repeat(64)}`, name: 'someone-elses-image:1', labels: {} });
+  made.docker.networks.push({ id: 'd'.repeat(64), name: 'someone-elses-net', labels: {}, subnet: '10.200.0.0/24' });
   const lines = await run(made);
   assert.equal(one(lines, 'labels').level, 'fail');
   assert.ok(one(lines, 'labels').todo);
-  assert.ok(!JSON.stringify(lines).includes('someone-elses'), 'the other object is not named');
+  for (const id of ['images', 'pool']) assert.equal(one(lines, id).level, 'off', `${id} waits for lists that honour the filter`);
+  assert.ok(!JSON.stringify(lines).includes('someone-elses'), 'no other object is named');
 });
 
 test('a missing image is named, and the install that builds it is what to do', async () => {

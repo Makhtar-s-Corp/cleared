@@ -30,6 +30,7 @@
   "state_open_todo": "Lancez chmod go-w {path}.",
   "state_readable": "D'autres comptes peuvent lire le dossier d'état {path} (droits {mode})\u202f; l'installation le met en 700.",
   "state_readable_todo": "Lancez chmod 700 {path}.",
+  "after_labels": "Attend des listes de Docker qui respectent le filtre d'étiquette.",
   "after_state": "Attend le dossier d'état.",
   "disk_ok": "{free} libres sur le disque du dossier d'état.",
   "disk_low": "{free} libres sur le disque du dossier d'état\u202f; les images et la copie de travail de chaque ticket prennent plusieurs gigaoctets.",

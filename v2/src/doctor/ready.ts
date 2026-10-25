@@ -97,28 +97,35 @@ export async function readyChecks(input: { readonly env: NodeJS.ProcessEnv; read
   if (version === undefined) {
     for (const id of ['labels', 'images', 'pool'] as const) say(id, 'off', 'after_docker');
   } else {
+    let filtered = false;
     try {
       say('labels', 'ok', 'labels_ok', { count: (await probes.docker.containers()).length });
+      filtered = true;
     } catch (error) {
       if (error instanceof LabelRuleError) say('labels', 'fail', 'labels_fail', {}, 'labels_todo');
       else say('labels', 'fail', 'labels_error', { reason: reasonOf(error) }, 'labels_todo');
     }
-    try {
-      const missing: string[] = [];
-      for (const tag of IMAGES) if (!(await probes.docker.image(tag))) missing.push(tag);
-      if (missing.length === 0) say('images', 'ok', 'images_ok', { images: IMAGES.join(', ') });
-      else say('images', 'fail', 'images_fail', { images: missing.join(', ') }, 'images_todo');
-    } catch (error) {
-      say('images', 'fail', 'images_error', { reason: reasonOf(error) }, 'images_todo');
-    }
-    try {
-      const daemon = probes.daemonConfig();
-      const pools = (daemon === undefined ? undefined : poolsOfDaemon(daemon)) ?? [...DOCKER_DEFAULT_POOLS];
-      const labelled = await probes.docker.networkSubnets();
-      const { free } = poolUsage(pools, [...interfaceSubnets(probes.interfaces()), ...labelled.flatMap((network) => network.subnets)]);
-      say('pool', free >= FREE_SUBNETS ? 'ok' : 'fail', free >= FREE_SUBNETS ? 'pool_ok' : 'pool_fail', { free }, free >= FREE_SUBNETS ? undefined : 'pool_todo');
-    } catch (error) {
-      say('pool', 'fail', 'pool_error', { reason: reasonOf(error) }, 'pool_todo');
+    // Lists that ignore the filter would name what is not Cleared's: not run.
+    if (!filtered) {
+      for (const id of ['images', 'pool'] as const) say(id, 'off', 'after_labels');
+    } else {
+      try {
+        const missing: string[] = [];
+        for (const tag of IMAGES) if (!(await probes.docker.image(tag))) missing.push(tag);
+        if (missing.length === 0) say('images', 'ok', 'images_ok', { images: IMAGES.join(', ') });
+        else say('images', 'fail', 'images_fail', { images: missing.join(', ') }, 'images_todo');
+      } catch (error) {
+        say('images', 'fail', 'images_error', { reason: reasonOf(error) }, 'images_todo');
+      }
+      try {
+        const daemon = probes.daemonConfig();
+        const pools = (daemon === undefined ? undefined : poolsOfDaemon(daemon)) ?? [...DOCKER_DEFAULT_POOLS];
+        const labelled = await probes.docker.networkSubnets();
+        const { free } = poolUsage(pools, [...interfaceSubnets(probes.interfaces()), ...labelled.flatMap((network) => network.subnets)]);
+        say('pool', free >= FREE_SUBNETS ? 'ok' : 'fail', free >= FREE_SUBNETS ? 'pool_ok' : 'pool_fail', { free }, free >= FREE_SUBNETS ? undefined : 'pool_todo');
+      } catch (error) {
+        say('pool', 'fail', 'pool_error', { reason: reasonOf(error) }, 'pool_todo');
+      }
     }
   }
 
