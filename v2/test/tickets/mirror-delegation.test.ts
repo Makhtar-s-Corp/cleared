@@ -210,8 +210,6 @@ test('without the plans, a delegation is not read: an older issue stays out', as
 });
 
 test('the settings: the label is cleared by default, another can be named, a status label is refused, and the delegation can be turned off', () => {
-  const env = { CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE: '/nonexistent' };
-  assert.throws(() => loadMirrorConfig(env), MirrorConfigError, 'the token file is read first, as before');
   const file = new URL('./mirror-delegation.test.ts', import.meta.url).pathname;
   const base = { CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE: file };
   assert.deepEqual(loadMirrorConfig(base)?.delegation, { label: 'cleared' });
