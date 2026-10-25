@@ -2,16 +2,20 @@
 // service's first connection from what its base branch holds, made again
 // after a merge, and briefed to the sessions. Every test runs on a sample
 // repository made in a temporary folder: no push to any real repository.
+// Whether the page was written is read from its inode, never its clock (issue #360).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFileSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { realEffects } from '../../src/flow/effects.ts';
 import type { FlowEffects } from '../../src/flow/engine.ts';
 import type { Ticket } from '../../src/tickets/contract.ts';
+import { cleanText } from '../../src/session/clean.ts';
+import { updateProjectPage } from '../../src/workspace/project-page.ts';
 import { CONFIG, approved, quickAuthor, setup } from '../flow/support.ts';
-import { AGENTS_CONF, commit, plantedKey, remote, tempDir } from './git.ts';
+import { AGENTS_CONF, commit, gitIn, plantedKey, remote, tempDir, writeFiles } from './git.ts';
 
 const SCRIPT_VALUE = ['k3y', 'Hq7Lm2Vx9Bn4'].join('');
 const SUBJECT_VALUE = ['pw', 'Rt5Yu8Io1Pa6'].join('');
@@ -46,7 +50,7 @@ async function sample(files: Record<string, string> = FILES) {
   delete env.ORCH_LEDGER;
   const url = remote(files);
   const config = { ...CONFIG, projectDir: join(root, 'project'), repoUrl: url, workdirRoot: join(root, 'work') };
-  return { root, state, url, config, flow: realEffects(config, { env }) };
+  return { root, state, url, config, flow: realEffects(config, { env }), source: { dir: config.projectDir, base: config.base, name: 'guestbook', env } };
 }
 
 // What a merge does to the forge: a commit on the sample's base branch.
@@ -55,6 +59,32 @@ function merged(root: string, url: string, files: Record<string, string>, messag
   execFileSync('git', ['clone', '-q', '-b', 'main', url, dir], { stdio: 'ignore' });
   commit(dir, files, message);
   execFileSync('git', ['-C', dir, 'push', '-q', 'origin', 'main'], { stdio: 'ignore' });
+}
+
+// A merge on the forge whose commit's short sha, the 12 characters the page
+// names its base by, is one the cleaner takes for a phone number. Its dates
+// are fixed, so its sha is known before it is made: the message is the first
+// of a numbered series that gives such a sha.
+function phoneShaped(root: string, url: string): string {
+  const dir = join(root, 'forge-phone');
+  execFileSync('git', ['clone', '-q', '-b', 'main', url, dir], { stdio: 'ignore' });
+  writeFiles(dir, { 'src/call.js': 'export {};\n' });
+  gitIn(dir, ['add', '-A']);
+  const tree = gitIn(dir, ['write-tree']);
+  const parent = gitIn(dir, ['rev-parse', 'HEAD']);
+  const who = `${process.env.GIT_COMMITTER_NAME} <${process.env.GIT_COMMITTER_EMAIL}> 1700000000 +0000`;
+  const shaOf = (message: string) => {
+    const body = `tree ${tree}\nparent ${parent}\nauthor ${who}\ncommitter ${who}\n\n${message}\n`;
+    return createHash('sha1').update(`commit ${Buffer.byteLength(body)}\0${body}`).digest('hex');
+  };
+  const cleaned = (sha: string) => cleanText(`\`${sha.slice(0, 12)}\``, {}) !== `\`${sha.slice(0, 12)}\``;
+  let n = 0;
+  while (!cleaned(shaOf(`Add call.js ${n}`))) n++;
+  const env = { ...process.env, GIT_AUTHOR_DATE: '1700000000 +0000', GIT_COMMITTER_DATE: '1700000000 +0000' };
+  const sha = execFileSync('git', ['-C', dir, '-c', 'commit.gpgSign=false', 'commit-tree', tree, '-p', parent, '-m', `Add call.js ${n}`], { env, encoding: 'utf8' }).trim();
+  assert.equal(sha, shaOf(`Add call.js ${n}`), 'the commit is the one searched for');
+  execFileSync('git', ['-C', dir, 'push', '-q', 'origin', `${sha}:refs/heads/main`], { stdio: 'ignore' });
+  return sha;
 }
 
 // Every file under `dir`, to look for a leak anywhere in the state folder.
@@ -68,6 +98,10 @@ function everyText(dir: string): string {
 }
 
 const pageOf = (state: string) => join(state, 'pages', 'guestbook.md');
+// The page is written beside itself then renamed over the old one, so each
+// write gives it a new inode while the old one still exists: an unchanged
+// inode says no write happened, whatever the clock or the machine's load.
+const inodeOf = (state: string) => statSync(pageOf(state)).ino;
 const noSecret = (text: string) => {
   for (const leak of [SCRIPT_VALUE, SUBJECT_VALUE, `${ENV_VALUE}-direnv`, TOKEN, ENV_VALUE, plantedKey, 'hunter2', 'PRIVATE KEY', 'MIIEvQ', 'SESSION_SECRET', 'DB_PASSWORD'])
     assert.ok(!text.includes(leak), `"${leak}" is not in the page`);
@@ -110,20 +144,21 @@ test('the page is read from the base branch, not from the checkout: an untracked
 });
 
 test('a fetch that finds the base unmoved leaves the page as it is; one that finds it moved, even by a merge made on the forge itself, makes it again', async () => {
-  const { root, url, state, flow } = await sample();
+  const { root, url, state, flow, source } = await sample();
   await flow.refreshProject();
   const before = readFileSync(pageOf(state), 'utf8');
-  const at = statSync(pageOf(state)).mtimeMs;
+  const inode = inodeOf(state);
   await flow.refreshProject();
   assert.equal(readFileSync(pageOf(state), 'utf8'), before);
-  assert.equal(statSync(pageOf(state)).mtimeMs, at);
+  assert.equal(inodeOf(state), inode, 'the page was not written again');
+  assert.equal(await updateProjectPage(source), false, 'nothing to write');
   merged(root, url, { 'src/late.js': 'export {};\n' }, 'Add late.js');
   await flow.refreshProject();
   assert.match(readFileSync(pageOf(state), 'utf8'), /Add late\.js/);
 });
 
 test('after a merge the page is made again from the new base: the merge is among the recent decisions, the new file in the layout, and still no secret', async () => {
-  const { root, url, state, flow } = await sample();
+  const { root, url, state, flow, source } = await sample();
   await flow.refreshProject();
   merged(root, url, { 'src/sort.js': 'export {};\n' }, `Merge pull request #7 from cleared/LOCAL-1: sort entries newest first ${TOKEN}`);
   assert.ok(flow.updateProjectPages, 'the real effects make the pages again after a merge');
@@ -132,9 +167,27 @@ test('after a merge the page is made again from the new base: the merge is among
   assert.match(page, /sort entries newest first/);
   assert.match(page, /src\/sort\.js|sort\.js/);
   noSecret(page);
-  const at = statSync(pageOf(state)).mtimeMs;
+  const inode = inodeOf(state);
   await flow.updateProjectPages({ ticket: 'LOCAL-1', pr: 7 });
-  assert.equal(statSync(pageOf(state)).mtimeMs, at, 'a base that did not move leaves the page as it is');
+  assert.equal(readFileSync(pageOf(state), 'utf8'), page);
+  assert.equal(inodeOf(state), inode, 'a base that did not move leaves the page as it is');
+  assert.equal(await updateProjectPage(source), false, 'nothing to write');
+});
+
+test('a base whose short sha the cleaner would take for a phone number is named in the page as it is, and a fetch that finds it unmoved writes nothing (issue #360)', async () => {
+  const { root, url, state, flow, source } = await sample();
+  await flow.refreshProject();
+  const sha = phoneShaped(root, url);
+  await flow.refreshProject();
+  const page = readFileSync(pageOf(state), 'utf8');
+  assert.ok(page.includes(`at \`${sha.slice(0, 12)}\``), 'the page names the base it was made from');
+  assert.match(page, /Add call\.js/);
+  const inode = inodeOf(state);
+  await flow.refreshProject();
+  await flow.updateProjectPages?.({ ticket: 'LOCAL-1', pr: 7 });
+  assert.equal(readFileSync(pageOf(state), 'utf8'), page);
+  assert.equal(inodeOf(state), inode, 'the page was not written again');
+  assert.equal(await updateProjectPage(source), false, 'nothing to write');
 });
 
 test('on the guestbook example of this repository: its real scripts and README, and no secret', async () => {
