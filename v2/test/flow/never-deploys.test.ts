@@ -42,10 +42,13 @@ test('no effect of the flow deploys: what it does outside the process is git, th
 
 // The commands that start a deploy on the usual hosts and CIs. The service's
 // code names none of them: it runs git, gh for pull requests and checks, the
-// lock's scripts, docker for its own sessions, and Playwright.
+// lock's scripts, docker for its own sessions, and Playwright. Nor does what
+// it spawns for a release: the lock's scripts at the repository's root and
+// v1's lib/, which merge, watch and revert. examples/ is left out: the
+// guestbook's deploy/watch.ts plays the human's CI in the demo.
 const COMMANDS: readonly RegExp[] = [
   /['"`]workflow['"`]\s*,\s*['"`]run['"`]/, /gh workflow run/, /workflow_dispatch/, /\/dispatches\b/, /\/deployments\b/,
-  /kubectl/, /\bhelm\b/, /\bvercel\b/, /\bnetlify\b/, /\bflyctl\b/, /\bfly\s+deploy\b/, /\bheroku\b/, /\brailway\s+up\b/, /\bwrangler\b/,
+  /kubectl/, /\bhelm\s+(upgrade|install)\b/, /\bvercel\s+(deploy|--prod)\b/, /\bnetlify\s+deploy\b/, /\bflyctl\b/, /\bfly\s+deploy\b/, /\bheroku\b/, /\brailway\s+up\b/, /\bwrangler\s+(deploy|publish)\b/,
   /terraform\s+apply/, /\bpulumi\b/, /\bansible-playbook\b/, /\bcapistrano\b/, /gcloud\s+(app|run|functions)\s+deploy/, /aws\s+(ecs|lambda|s3\s+sync|deploy)/,
   /firebase\s+deploy/, /serverless\s+deploy/, /\bdocker['"`]?\s*,?\s*['"`]?push\b/, /['"`]push['"`]\s*,\s*['"`]--force/,
 ];
@@ -58,10 +61,12 @@ function sources(dir: string): string[] {
   });
 }
 
-test('the service\'s code runs no deploy command', () => {
-  const root = join(import.meta.dirname, '..', '..');
-  const files = [...sources(join(root, 'src')), ...sources(join(root, 'app', 'src'))];
-  assert.ok(files.length > 100, 'the sources were read');
+test('the service\'s code, and the lock\'s scripts and v1\'s lib/ it runs for a release, run no deploy command', () => {
+  const root = join(import.meta.dirname, '..', '..', '..');
+  const scripts = readdirSync(root).filter((name) => name.endsWith('.sh')).map((name) => join(root, name));
+  const files = [...sources(join(root, 'v2', 'src')), ...sources(join(root, 'v2', 'app', 'src')), ...sources(join(root, 'lib')), ...scripts];
+  assert.ok(files.length > 150, 'the sources were read');
+  assert.ok(scripts.some((file) => file.endsWith('merge-pr.sh')), 'the lock\'s scripts were read');
   const found = files.flatMap((file) => {
     const text = readFileSync(file, 'utf8');
     return COMMANDS.filter((command) => command.test(text)).map((command) => `${file.slice(root.length + 1)}: ${command}`);

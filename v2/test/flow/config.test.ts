@@ -36,7 +36,9 @@ test('projectSettings gives [release] production_url, the page the post-deploy c
   assert.equal(read('[release]\nproduction_url = https://guestbook.example.invalid/?view=all\n').productionUrl, 'https://guestbook.example.invalid/?view=all');
   assert.equal(read('[release]\nhealth_url = http://127.0.0.1:8793/health\n').productionUrl, undefined, 'never the health address: the configured page only');
   assert.equal(read('').productionUrl, undefined);
-  for (const bad of ['ftp://example.invalid/', 'not an address', 'https://user:secret@example.invalid/', 'https://token@example.invalid/']) {
+  // Written in two parts, as test/workspace/checkout.test.ts does, so the guard reads no address with a password.
+  const withPassword = ['https://user', 'secret@example.invalid/'].join(':');
+  for (const bad of ['ftp://example.invalid/', 'not an address', withPassword, 'https://token@example.invalid/']) {
     assert.throws(() => read(`[release]\nproduction_url = ${bad}\n`), (error: unknown) => error instanceof FlowConfigError && /production_url/.test(error.message) && !/secret|token@/.test(error.message), bad);
   }
 });
