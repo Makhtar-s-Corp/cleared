@@ -8,6 +8,7 @@ import { LEAD_TABLES } from '../../src/lead/store.ts';
 import { PLAN_TABLES } from '../../src/lead/plans/store.ts';
 import { LEVERS_TABLE } from '../../src/consumption/levers.ts';
 import { QUOTA_TABLES } from '../../src/consumption/quota.ts';
+import { MAP_TABLES } from '../../src/map/service.ts';
 import { SCHEDULE_TABLES } from '../../src/schedules/store.ts';
 import { INBOX_TABLE } from '../../src/inbox/store.ts';
 import lead from '../../src/modules/lead.ts';
@@ -17,8 +18,8 @@ import { fakeEffects } from '../flow/support.ts';
 import { leadAdapter, opening, until, type Generation } from './support.ts';
 
 test('the lead module declares its tables and the five lead routes; it provides no slot', () => {
-  // Lane 7 adds the plans' tables and routes to the module, lane 26 the schedules', the Consumption screen (O15) its levers', the quota reading (issue #270) its own.
-  assert.deepEqual(lead.tables, [...LEAD_TABLES, ...PLAN_TABLES, ...SCHEDULE_TABLES, LEVERS_TABLE, ...QUOTA_TABLES]);
+  // Lane 7 adds the plans' tables and routes to the module, lane 26 the schedules', the Consumption screen (O15) its levers', the quota reading (issue #270) its own, the service map (M6) its own.
+  assert.deepEqual(lead.tables, [...LEAD_TABLES, ...PLAN_TABLES, ...SCHEDULE_TABLES, LEVERS_TABLE, ...QUOTA_TABLES, ...MAP_TABLES]);
   assert.deepEqual(LEAD_TABLES.map((sql) => /CREATE (?:TABLE|INDEX) IF NOT EXISTS (\w+)/.exec(sql)?.[1]).filter((name) => name?.startsWith('lead_')),
     ['lead_generations', 'lead_messages', 'lead_commitments', 'lead_handovers', 'lead_queue']);
   assert.deepEqual(lead.routes.map((r) => `${r.method} ${r.path}`).filter((r) => r.includes('/api/lead')).sort(),

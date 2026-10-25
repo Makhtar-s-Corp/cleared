@@ -126,6 +126,8 @@ const PLACES: readonly Place[] = [
   { name: 'a resolved ticket', path: `/sessions/${RESOLVED_AUTHOR_ID}`, ready: '#s-left [data-ticket-cost]' },
   { name: 'plans', path: '/lead', ready: '[data-plan-action]' },
   { name: 'consumption', path: '/consumption', ready: '.consumption-grid' },
+  // Picked without scrolling the page, as the other places are read from its top: a scroll puts the head under the phone's top bar.
+  { name: 'the service map, a service picked', path: '/services', ready: '.services-impact [data-impact]', step: async (page) => { await page.locator('[data-service="filter-api"]').dispatchEvent('click'); } },
   { name: 'a question to the code', path: `/ask/${ASK_ID}`, ready: '#ask-title' },
   { name: 'account menu', path: '/', ready: '.person-menu', step: async (page) => { await page.click('#person'); } },
 ];

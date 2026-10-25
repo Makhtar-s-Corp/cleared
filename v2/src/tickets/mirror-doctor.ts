@@ -1,5 +1,5 @@
 // The GitHub mirror's doctor section (issue #400, docs/v2/milestone-4-plan.md
-// section 12), run by `node scripts/doctor.ts mirror`. It reads the mirror's
+// section 13), run by `node scripts/doctor.ts mirror`. It reads the mirror's
 // settings as the service does (loadMirrorConfig), the token file without
 // ever printing it, each repository of the workspace's services and its
 // status labels through GitHubTracker, and the mirror's last full pass from

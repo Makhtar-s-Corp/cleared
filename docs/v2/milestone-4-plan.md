@@ -493,22 +493,83 @@ The delegation's parts of `v2/src/tickets/mirror.ts`, `mirror-tracker.ts`, `mirr
 | Whether GitHub records a `labeled` and an `assigned` event for an issue created with them | closed by this lane's real run on the example repository: an issue opened with the label has its `labeled` event, an assignment its `assigned` event |
 | Whether Linear's history fills `addedLabelIds` and `toAssigneeId` as its schema says, and names the actor of a label put on at creation | the owner's real trial; until then a delegation no event names is read from the issue's creator |
 
-## 12. The GitHub mirror's doctor section (`v2-j4-mirror-doctor`, issue #400)
+## 12. The service map (`v2-j4-service-map`, issue #397)
 
-This section was written on 2026-10-25 by the author of issue #400 (Opus 5.5), before the lane's tests and code. Inputs: issue #400, [mirrors.md](mirrors.md) ("there is no `doctor` section for the mirrors yet"), the [decisions log](decisions-log.md) (the entries of lanes `v2-j4-issue-mirrors`, `v2-j4-mirror-followups` and `v2-j4-heartbeat`, and the ten ideas of 2026-10-25), the [requirements matrix](requirements-matrix.md) (B5.8b, P230, B4.6), and the code at `origin/v2` `d849c6e`. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), whose "one doctor" rule this lane applies. Section 10 is the week's figures (pull request 399) and section 11 the delegation (pull request 401, P244), merged while this lane ran. The lane of issue #397 runs beside this one, its branch with a section 11 and P245; this section and its id move at the merge if it lands first with the same. The branch is `v2-j4-mirror-doctor`: `v2/j4-mirror-doctor` cannot exist beside the local branch `v2`.
+This section was written on 2026-10-25 by the author of issue #397 (Opus 5.5), before the lane's tests and code. Sections 9 to 11 are the lanes that ran beside this one and merged first: the project page (issue #394, pull request 395), the week's figures (issue #396, pull request 399) and the delegation (issue #398, pull request 401). This section was written as section 11 and renumbered at the merge of 401. Inputs: issue #397, the [decisions log](decisions-log.md) (its latest entries, the ten ideas of 2026-10-25 among them: money only from a real source, fakes only), the [requirements matrix](requirements-matrix.md) (its rules, M0, M1, M5, M6, M10, P227), the [multi-repository complement](complement-multi-depots.md) (item 6), and the code at `origin/v2` `a6adcbd`. The brief named sections 9 and 10 of `milestone-2-plan.md`, which has eight, as earlier lanes noted; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md).
 
 ### 12.1 Context
 
-The GitHub mirror (pull requests 384 and 390) ran for real twice, each time from a one-off script quoted in its pull request. B4.6 asks that every adapter's real run be one `cleared doctor` runs, and `v2/scripts/doctor.ts` has no section for the mirror. An operator who sets `CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE` learns that something is wrong only from a line in the service's log, or from `tracker_stale` ten minutes later.
+A workspace is several services (M0, M1), and what links them is written in one place only: each service's `consumes` line in the workspace file, which the release train reads for its landing order and its compatibility check (M5, `release/order.ts`). Nothing reads the code: a call nobody declared, an event a service listens to, a table two services write, are seen by no one, and the lead plans a ticket across services from the names of the services alone. M6 asks for a map of the services (calls, events, databases, contracts) kept up to date, an impact analysis by the lead, and a diagram in the app.
 
 ### 12.2 What exists at the end, and how it is proven
 
-- `src/tickets/mirror-doctor.ts`: `githubMirrorChecks({ env, fetch, now })`, the checks of 12.3, each one passed, failed, a notice, or not run, its words in `src/tickets/messages/mirror-doctor.{en,fr}.json` over the shell's units of time, in `CLEARED_V2_APP_LANGUAGE` (French by default).
+- `src/map/scan.ts`: what one service's code says, a pure function over its files, its `.cleared/agents.conf` and its contract. `src/map/source.ts`: those files read from git's objects at `refs/remotes/origin/<base>` of the service's own checkout, as the recipes and the reader read them, never the working tree. `src/map/build.ts`: the map of the workspace from each service's facts and the workspace file. `src/map/impact.ts`: the impact of a change of one or more services, a pure function, and its text for the lead. `src/map/service.ts`: the scans' table, the refresh and its timer. `src/map/routes.ts`: `GET /api/service-map` and `POST /api/service-map/refresh`. `src/map/tools.ts`: the lead's tool `service_impact`.
+- The lead module (`modules/lead.ts`) owns the table, serves the two routes, starts the timer at the service's start and gives the lead its tool through the engine's extensions, beside the plans'.
+- The app has a screen at `/services`: the diagram, its text equivalent, and the impact of the service picked. It is reached from the tower's line of services, the palette's Go to and the chord G M.
+- Proven by `test/map/scan.test.ts` (each kind of fact, the traps of 12.3), `test/map/examples.test.ts` (the two example repositories, `examples/guestbook` and `examples/filter-api`, scanned as committed), `test/map/source.test.ts` (git repositories built in the test: the base read, not the working tree; a new commit on the base changes the map; a link, a large file, a binary file are not read), `test/map/build.test.ts`, `test/map/impact.test.ts` (the same order as `landingOrder`), `test/map/service.test.ts` (the table, a scan kept while the base has not moved, the timer), `test/map/routes.test.ts`, `test/map/tools.test.ts`, `test/lead/contract.test.ts` (the tool's line), `test/api/types.test.ts` (the two routes), and the app's `app/test/services/model.test.ts`, `app/web/test/services.test.tsx`, `app/test/services/services-browser.test.ts` and `app/test/a11y-browser.test.ts` (the screen, French and English, light and dark, 1440 and 390 pixels).
+
+### 12.3 What the map holds, and where each fact comes from
+
+| Fact | Read from | Kept |
+| --- | --- | --- |
+| A contract | the workspace file's `contract = <format>:<path>`, read with the fakes' own reader (`images/fake/fake.ts`, `readContract`) | its format, its path, its operations (`POST /check`) or its channels |
+| A call | declared: the consumer's `consumes` line; found: a path of the provider's OpenAPI contract in the consumer's code, on a line that is not a comment, right after an interpolation or a base address (`${base}/check`, `http://host:8795/check`) or on a line that calls `fetch`, `request`, `axios`, `got`, `http.` or `requests.` | the operations, whether it is declared, found or both, and at most five places (file and line) |
+| An event | the provider's events contract (AsyncAPI 2): its channels are published by it; a channel's name in quotes in another service's code is a subscription | the channels, the places |
+| A database | the engine: an image of `[session] services` in the service's agents.conf (`postgres:16`), or a client in its `package.json` (`pg`, `mysql2`, `better-sqlite3`, `mongodb`, `redis`...), or `node:sqlite`; the tables: `CREATE TABLE` in its code or its `.sql` files | the engine and the tables; a table another service's code reads or writes (`FROM`, `JOIN`, `INTO`, `UPDATE`) makes that database shared |
+
+What is read: the files of the service (of its folder, for a folder of a monorepo) at its base commit, with a code extension (`.ts`, `.tsx`, `.js`, `.mjs`, `.cjs`, `.jsx`, `.py`, `.go`, `.rb`, `.java`, `.kt`, `.rs`, `.php`, `.cs`, `.sql`), plain files of at most 256 KB, at most 2 000 files and 16 MB per service, without the tests (a `test`, `tests`, `__tests__`, `spec` or `fixtures` folder, a `.test.` or `.spec.` file), `node_modules`, `vendor`, `dist` and `build`. A service past a cap is mapped from what was read and says so.
+
+The traps, each with its test:
+
+- **A test's fake is not a call.** The guestbook's `test/helpers/fake-filter.ts` serves `/check`: the tests are not read.
+- **A route a service serves is not a call.** The guestbook serves `/health`, a path of the filter API's contract too: a path in a route table or a comparison is not a call, by the rule above.
+- **No value of a setting.** The map names an engine and a table, never a variable's value: `[session] env` (the guestbook's `DATABASE_URL=postgres://...`) is not read, and a test checks that no address reaches the map.
+- **What comes from a repository is an identifier or nothing.** The sessions write these repositories, and the map reaches the lead's prompt. An operation, a table, a channel and a file are kept only when they match a strict pattern (letters, digits and a few signs, a bounded length), cleaned as every lead answer is; anything else is dropped and counted. No free text of a repository (a comment, a description) is kept.
+
+### 12.4 Decisions this lane takes
+
+- **Declared and found, both shown.** A call declared and found is the normal case. Found only: the code calls a service the workspace file does not say it consumes, so the train's order and its compatibility check do not know it; the map and the impact say so. Declared only: the workspace says it, the code shows no call the map can read (a protobuf or JSON Schema contract, a call built another way); it stays a call. The train goes on reading `consumes` alone: the map informs, it does not change a release (question for the owner, default applied, in the log entry).
+- **Kept up to date by the base commit.** The map is stored with the base commit of each service it read (`service_maps`). A refresh fetches each service's checkout (as the recipes' refresh does) and builds the map again only when a base commit, a fetch's outcome or the workspace file moved: a call is read against the provider's contract, so a provider's new commit is read with its callers. It runs at the service's start, every `CLEARED_V2_MAP_MINUTES` (10 by default, 0 for never) and on the screen's Refresh. A fetch that fails keeps the last scan and says so on that service.
+- **The impact.** For each service changed: who calls it, directly and through others, with the operations; who listens to its channels; who shares its databases, with the tables; whether its contract makes a contract step first and which callers must change too, or the release card blocks (M5's rule, the same function's answer); and the landing order of the services changed and their callers, computed by `landingOrder` with the calls found added to `consumes`.
+- **The lead's tool.** `service_impact`, given the services a goal changes, answers that analysis as text, cut at 8 KB. Its line is added to `lead/contract.ts` (section 10 of milestone 1's plan: a tool added later is a line there and a handler in its owner's file). Its description asks the lead to call it before it proposes a plan that changes a service: the lead's rules are at their 5 KB budget (`test/lead/plans/module.test.ts`), so they are not changed.
+- **The API.** `GET /api/service-map` (the map, with the impact of each service) and `POST /api/service-map/refresh` (a known user), added to `api/types.ts` with their types: the screen's contract, as the lanes of P213, P215 and P218 added theirs.
+- **The diagram.** An SVG drawn by the app, no new dependency: services in columns from callers to the services they call, databases under them; a call a solid arrow, an event a dashed one, a database a dotted line, each also named in words, so colour never carries the meaning alone. The SVG is one image with its name; the text equivalent beside it lists every link, and picking a service (a button, by the keyboard too) shows its impact. A drawing at most 560 pixels wide shrinks to a narrow screen; a wider one keeps its size and scrolls in its own box, which the keyboard reaches.
+- **Its place.** Not a screen of the sidebar: the owner's decision of 11:14 (P227) keeps the sidebar to a few screens. It is reached from the tower's line of services, which only a workspace of several services shows, from the palette and from the chord G M (question for the owner, default applied, in the log entry).
+- **Words.** `app/messages/services.{en,fr}.json`; every time through `app/web/lib/time.ts` ("read 3 min ago", "lu il y a 3 min"). The lead's tool speaks English, as the lead's other tools do.
+- **Fixtures.** The app's fixtures serve the map of the two example repositories, scanned by the service's own code from `examples/`, so the screen shows what the service would.
+- **Matrix lines.** M6, and P245 for these choices (P240 to P243 are 395's and 399's, P244 is 401's).
+
+### 12.5 Out of scope
+
+Calls found through a protobuf or JSON Schema contract, or with no contract; the languages' own parsers (the scan reads text, line by line); a message broker's configuration (Kafka topics, queues) beyond the AsyncAPI contract; changing the train's order or its compatibility check from the map; guessing the links of a workspace being connected (M10, milestone 5); editing the map by hand.
+
+### 12.6 Files this lane owns
+
+`v2/src/map/`, `v2/test/map/`; the `service_impact` line of `lead/contract.ts` and its test; the map's table, routes, timer and tool in `modules/lead.ts`; the two routes and their types in `api/types.ts` and `test/api/types.test.ts`; the screen `app/web/screens/services/`, its catalogs, its fixture and its tests, and the lines of the shell that add a screen (`app/src/server.ts`, `app/src/catalog.ts`, `app/web/lib/{routes,router,catalogs}.ts`, `app/web/shell/{model,keys}.ts`, the shell's catalogs), the tower's link; the browser test's line in `.github/workflows/v2.yml`; a section of `v2/README.md`; its lines of the matrix and its log entry.
+
+### 12.7 Unknowns, and who closes them
+
+| Unknown on 2026-10-25 | Closed by |
+| --- | --- |
+| Whether the first piloted project's calls are found by the rule of 12.3 (its code may build its addresses another way) | the owner, on its map: a call declared and not found says it |
+| Whether the caps (2 000 files, 16 MB) fit the first piloted project's repositories | the map says a service past a cap; the caps are constants of `map/source.ts` |
+
+## 13. The GitHub mirror's doctor section (`v2-j4-mirror-doctor`, issue #400)
+
+This section was written on 2026-10-25 by the author of issue #400 (Opus 5.5), before the lane's tests and code. Inputs: issue #400, [mirrors.md](mirrors.md) ("there is no `doctor` section for the mirrors yet"), the [decisions log](decisions-log.md) (the entries of lanes `v2-j4-issue-mirrors`, `v2-j4-mirror-followups` and `v2-j4-heartbeat`, and the ten ideas of 2026-10-25), the [requirements matrix](requirements-matrix.md) (B5.8b, P230, B4.6), and the code at `origin/v2` `d849c6e`. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), whose "one doctor" rule this lane applies. Section 10 is the week's figures (pull request 399), section 11 the delegation (pull request 401, P244) and section 12 the service map (pull request 402, P245), merged while this lane ran; this section, first written as 12, is 13. The branch is `v2-j4-mirror-doctor`: `v2/j4-mirror-doctor` cannot exist beside the local branch `v2`.
+
+### 13.1 Context
+
+The GitHub mirror (pull requests 384 and 390) ran for real twice, each time from a one-off script quoted in its pull request. B4.6 asks that every adapter's real run be one `cleared doctor` runs, and `v2/scripts/doctor.ts` has no section for the mirror. An operator who sets `CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE` learns that something is wrong only from a line in the service's log, or from `tracker_stale` ten minutes later.
+
+### 13.2 What exists at the end, and how it is proven
+
+- `src/tickets/mirror-doctor.ts`: `githubMirrorChecks({ env, fetch, now })`, the checks of 13.3, each one passed, failed, a notice, or not run, its words in `src/tickets/messages/mirror-doctor.{en,fr}.json` over the shell's units of time, in `CLEARED_V2_APP_LANGUAGE` (French by default).
 - `node scripts/doctor.ts mirror` (`npm run doctor -- mirror`): the section, run only when named, as `cursor` and `codex` are. It never runs by default: it calls GitHub.
 - Two read-only methods of `GitHubTracker`, `repository()` (its `has_issues` and `permissions`) and `labels()` (its labels' names, every page), through the same requests and headers as the mirror's other calls; `TrackerError` carries GitHub's status code when GitHub answered.
 - Proven by `test/tickets/mirror-doctor.test.ts` (each check against the fake GitHub on loopback, in English and French, and the token never in a line), `test/tickets/mirror-doctor-catalog.test.ts`, `test/tickets/mirror-doctor-cli.test.ts` (the section run by `doctor.ts` against the fake: its exit code, and the token in no output on any path, only in the fake's `authorization` header), and one real run on the example repository `cleared-example-guestbook`, quoted in the pull request.
 
-### 12.3 The checks
+### 13.3 The checks
 
 1. **The settings.** `loadMirrorConfig(env)`, the service's own reading: no `CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE`, the section says the GitHub mirror is off and runs nothing, which is not a failure (D17: the app alone is enough). A setting the service refuses fails, with the service's own line, which never holds the token.
 2. **The token file.** Readable and not empty, read once and never printed, never in an address. Its kind and its mode are a notice: a link, or a file readable by the group or others, is said, with `chmod 600`.
@@ -516,7 +577,7 @@ The GitHub mirror (pull requests 384 and 390) ran for real twice, each time from
 4. **The status labels.** `GET /repos/{repo}/labels`, every page: one `status:<state>` label for each state a person picks on GitHub's page, in the names the service uses (`[tracker] *_state`, as the approval reads them), matched exactly, as the mirror reads them. That is four of the six: Todo is an open issue with no status label and Done is the issue closed, so neither needs one (the real run on the example repository, which has no `status:Todo`, showed a first version that asked for all six failing for nothing). The missing ones are named. The doctor creates none: it writes nothing on GitHub.
 5. **The last pass.** `mirror_trackers.read_at` for `github:<repo>`, from the service's ledger opened read-only: said as a time a person reads ("3 min ago"). None yet is a notice (the service has not run the mirror). Older than `CLEARED_V2_HEARTBEAT_TRACKER_MINUTES` (10 by default) fails, as the status's `tracker_stale` does.
 
-### 12.4 Decisions this lane takes
+### 13.4 Decisions this lane takes
 
 - **A missing label fails.** The mirror's own write creates a label GitHub does not have, but a person cannot move an issue on GitHub's page to a state whose label does not exist yet, so that half of the two-way mirror does not work. A question for the owner, default applied (the log entry).
 - **A token file others can read is a notice**, not a failure: the service accepts it today, and the doctor says what the service does. The heartbeat's address files are refused in that case; aligning the token files with them is a change of the service, not of its doctor (question for the owner, in the log entry).
@@ -524,15 +585,15 @@ The GitHub mirror (pull requests 384 and 390) ran for real twice, each time from
 - **Language.** The section's words in its catalogs, French and English; the time since the last pass through `app/web/lib/time.ts`.
 - **Matrix lines.** P246; B5.8b and P230 updated (`doctor mirror` in their proof).
 
-### 12.5 Out of scope
+### 13.5 Out of scope
 
 Linear (its real trial is the owner's, and a section for it would only run against a fake); creating the labels; a repair of anything; a screen of the app; running the section by default.
 
-### 12.6 Files this lane owns
+### 13.6 Files this lane owns
 
 `v2/src/tickets/mirror-doctor.ts`, `v2/src/tickets/messages/mirror-doctor.{en,fr}.json`, `repository()` and `labels()` in `v2/src/tickets/mirror-github.ts`, the `status` of `TrackerError` in `v2/src/tickets/mirror-tracker.ts`, the `mirror` section of `v2/scripts/doctor.ts`, the repository and labels routes of `v2/test/tickets/fakes/github.ts`, `v2/test/tickets/mirror-doctor*.test.ts`; `docs/v2/mirrors.md`, a sentence in `v2/README.md`'s paragraph on the mirrors; this section, its matrix lines and its log entry.
 
-### 12.7 Unknowns, and who closes them
+### 13.7 Unknowns, and who closes them
 
 | Unknown on 2026-10-25 | Closed by |
 | --- | --- |

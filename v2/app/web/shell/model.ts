@@ -46,11 +46,13 @@ export const SCREENS: readonly NavItem[] = [
   { screen: 'session', href: '/sessions', label: 'nav_sessions', go: 'sessions', chord: ['G', 'S'] },
   { screen: 'lead', href: '/lead', label: 'nav_plans', go: 'lead', chord: ['G', 'P'] },
   { screen: 'consumption', href: '/consumption', label: 'nav_consumption', go: 'consumption', chord: ['G', 'C'] },
+  { screen: 'services', href: '/services', label: 'nav_services', go: 'services', chord: ['G', 'M'] },
 ];
 
 // The sidebar's screens: the development's (the product owner's decision of 2026-10-25, 11:14, P227). Consumption
-// is reached by the quota gauge at the sidebar's foot, the palette, its chord and the account menu.
-export const NAV: readonly NavItem[] = SCREENS.filter((item) => item.screen !== 'consumption');
+// is reached by the quota gauge at the sidebar's foot, the palette, its chord and the account menu; the service map
+// (milestone 4, M6) by the tower's line of services, the palette and its chord.
+export const NAV: readonly NavItem[] = SCREENS.filter((item) => item.screen !== 'consumption' && item.screen !== 'services');
 
 export const hrefOf = (to: GoScreen): string => SCREENS.find((item) => item.go === to)?.href ?? '/';
 

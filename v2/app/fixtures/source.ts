@@ -48,6 +48,7 @@ import { askFixture, startedAsk } from './ask.ts';
 import { consumptionFixture } from './consumption.ts';
 import { RESOLVED_TICKET, resolvedStory } from './cost.ts';
 import { contractItem, knowledgeItem, requestItems } from './inbox.ts';
+import { serviceMapFixture } from './services.ts';
 import { RECIPES, schedulesFixture, ticketSteps, towerFixture } from './tower.ts';
 
 const BODY_LIMIT = 16 * 1024;
@@ -119,6 +120,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   };
   const asked = (item: NextInboxItem) => (item.kind === 'permission' || item.kind === 'question') && answered.has(`${item.sessionId}\n${item.requestId}`) ? { ...item, state: 'handled' as const } : item;
   const consumption = consumptionFixture(project, now, { week: options.week === true });
+  let serviceMap = serviceMapFixture(now());
   const batches = new BatchRunner({
     db: consumption.db, tickets: created, project, levers: consumption.levers, weekStopPercent: 85, now,
     flow: { launch: async (ticket, by) => { await created.move(ticket, created.states.progress, { kind: 'human', id: by }); }, subscribe: () => () => undefined },
@@ -215,6 +217,11 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
         const done = consumption.write(body as Record<string, never>, user);
         return sendJson(response, done.status, done.body);
       }
+    }
+    // The service map (M6): the example workspace's, read by the service's own code; a refresh builds it again.
+    if (collection === 'service-map') {
+      if (method === 'GET' && parts.length === 1) return sendJson(response, 200, serviceMap);
+      if (method === 'POST' && id === 'refresh' && parts.length === 2) return sendJson(response, 200, serviceMap = { ...serviceMap, readAt: now().toISOString() });
     }
     // The batches (requirement C6): the service's checks, and a pass before each read.
     if (collection === 'batches') {

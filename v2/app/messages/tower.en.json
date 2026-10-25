@@ -73,6 +73,7 @@
   "landed_title": "Landed today",
   "landed_empty": "Nothing landed yet today.",
   "services_title": "Services",
+  "services_map_open": "Service map",
   "service_live_one": "{n} live session",
   "service_live_other": "{n} live sessions",
   "service_landing": "landing {ticket}",

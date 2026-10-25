@@ -13,7 +13,7 @@ import inboxFr from '../../messages/inbox.fr.json';
 
 test('a screen\'s catalog over the shell\'s is made once for each language', () => {
   for (const language of ['en', 'fr'] as const) {
-    for (const screen of ['shell', 'tower', 'inbox', 'session', 'lead', 'ask', 'consumption'] as const) {
+    for (const screen of ['shell', 'tower', 'inbox', 'session', 'lead', 'ask', 'consumption', 'services'] as const) {
       assert.equal(screenCatalog(screen, language), screenCatalog(screen, language), `${screen} ${language}`);
       assert.equal(catalogOf(screen, language), catalogOf(screen, language), `${screen} ${language}`);
     }

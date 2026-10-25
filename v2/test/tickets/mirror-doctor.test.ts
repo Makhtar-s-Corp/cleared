@@ -1,5 +1,5 @@
 // The GitHub mirror's doctor section (issue #400, docs/v2/milestone-4-plan.md
-// section 12): the token file read and never printed, each repository
+// section 13): the token file read and never printed, each repository
 // reached, its status labels, and the mirror's last pass, against the fake
 // GitHub on loopback and a ledger in a temporary folder; English and French.
 import test, { after, before } from 'node:test';

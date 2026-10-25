@@ -6,7 +6,7 @@
 // No React and no DOM here, so the node tests read it.
 import type { ScreenName } from '../lib/routes.ts';
 
-export type GoScreen = 'tower' | 'inbox' | 'sessions' | 'lead' | 'consumption';
+export type GoScreen = 'tower' | 'inbox' | 'sessions' | 'lead' | 'consumption' | 'services';
 
 export type Action =
   | { readonly kind: 'palette' }
@@ -44,6 +44,7 @@ export const SHORTCUTS: readonly Shortcut[] = [
   { id: 'go_sessions', keys: ['G', 'S'], scope: 'global', label: 'key_go_sessions', action: { kind: 'go', to: 'sessions' } },
   { id: 'go_lead', keys: ['G', 'P'], scope: 'global', label: 'key_go_lead', action: { kind: 'go', to: 'lead' } },
   { id: 'go_consumption', keys: ['G', 'C'], scope: 'global', label: 'key_go_consumption', action: { kind: 'go', to: 'consumption' } },
+  { id: 'go_services', keys: ['G', 'M'], scope: 'global', label: 'key_go_services', action: { kind: 'go', to: 'services' } },
   { id: 'next', keys: ['J'], scope: 'list', label: 'key_next', action: { kind: 'next' } },
   { id: 'previous', keys: ['K'], scope: 'list', label: 'key_previous', action: { kind: 'previous' } },
   { id: 'open', keys: ['Enter'], scope: 'list', label: 'key_open', action: { kind: 'open' } },
@@ -78,7 +79,7 @@ export type KeyInput = { readonly key: string; readonly meta: boolean; readonly 
 export type KeyContext = { readonly screen: ScreenName; readonly focus: Focus; readonly overlay: boolean; readonly mac: boolean; readonly now: number };
 export type Chord = { readonly key: string; readonly at: number } | null;
 
-const CHORDS: Readonly<Record<string, GoScreen>> = { t: 'tower', i: 'inbox', s: 'sessions', p: 'lead', c: 'consumption' };
+const CHORDS: Readonly<Record<string, GoScreen>> = { t: 'tower', i: 'inbox', s: 'sessions', p: 'lead', c: 'consumption', m: 'services' };
 
 export function resolveKey(input: KeyInput, context: KeyContext, chord: Chord): { readonly action: Action | null; readonly chord: Chord } {
   const none = { action: null, chord: null } as const;
