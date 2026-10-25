@@ -5961,6 +5961,8 @@ With both fixes (`8dd564d`), the final code, all again: the committed test 10 co
 
 **Checks** (on `origin/v2` at `2b2314e`). `npm run typecheck` passes. `npm test` on the final code: 2134 Node tests, 2051 pass, 83 skipped (`CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_REAL_HARNESS` unset), 0 fail; 344 Vitest tests pass. `npm run guard -- --base origin/v2`: nothing refused (run without a private-term list, `CLEARED_REPO` unset).
 
+**The merge of 378** (lane `j3-capture-detect`, P226, at `origin/v2` `2165da3`). The log keeps 378's entry, then this one; the matrix keeps P226, then P228, every id once. 378 adds the capture choice to the session's left cards, not the takeover's state, and writes through the same cache, so both causes and both fixes stand. After the merge: `npm run typecheck` passes; `npm test` runs 2162 Node tests, 2076 pass, 86 skipped, 0 fail, and 349 Vitest tests pass; the CI's `browser` list once, with 378's new file (23 files and the budget), 72 of 72.
+
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read; the app on port 0 on loopback; no network beyond `npm ci` of the lock file, `git fetch` and GitHub (the CI's logs read with `gh`); no tunnel, no secret.
 
 - Pull request: PRNUM, against `v2`.
