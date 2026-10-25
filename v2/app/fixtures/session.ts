@@ -24,7 +24,7 @@
 // 32 adds the web terminal's routes and the editor's save (fixtureHuman).
 import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { changeFrame, sseFrame, TERMINAL_INPUT_MAX_BYTES, type ChangeKind, type InboxItem, type SessionDetail, type SessionFile, type SessionPlan, type SessionSummary, type TakenOver, type TerminalClosed, type TerminalMode, type Workspace } from '../../src/api/types.ts';
+import { changeFrame, sseFrame, TERMINAL_INPUT_MAX_BYTES, type Ask, type ChangeKind, type InboxItem, type SessionDetail, type SessionFile, type SessionPlan, type SessionSummary, type TakenOver, type TerminalClosed, type TerminalMode, type Workspace } from '../../src/api/types.ts';
 import { changedFiles } from '../../src/flow/files.ts';
 import { GIVEN_BACK } from '../../src/flow/takeover.ts';
 import { createCleaner } from '../../src/session/clean.ts';
@@ -35,6 +35,7 @@ import type { Ticket } from '../../src/tickets/contract.ts';
 import { ENDED, REPLAY_MAX, emptyModel, applyAll, stepCommit } from '../web/screens/session/model.ts';
 import type { PreviewAnswer, PreviewUpstream } from '../src/preview.ts';
 import { sendJson, type DataSource } from '../src/proxy.ts';
+import { startedAsk } from './ask.ts';
 import { FIXTURE_NOW, FIXTURE_PROJECT } from './tower.ts';
 
 export const AUTHOR_ID = 'fixture-author';
@@ -783,11 +784,13 @@ function readJson(request: IncomingMessage): Promise<unknown> {
 // what waits as the adapters do. The stream answers the events after
 // `?after=` and ends. The change stream (lane 34's GET /api/events) is
 // answered too: an event for each write, and for each changed() a test
-// calls (lane 36: the reviewer's start).
+// calls (lane 36: the reviewer's start). The reader's routes (decision 28)
+// answer the Plan tab's ask: it is recorded, starts and stays starting.
 export function sessionSource(fixture: SessionFixture, options: { readonly now?: () => Date } = {}): SessionSource {
   const calls: Call[] = [];
   const human = fixtureHuman();
   const now = options.now ?? (() => new Date());
+  const asks = new Map<string, Ask>();
   const players = new Map<string, Player>();
   const player = (id: string): Player => {
     let found = players.get(id);
@@ -822,6 +825,19 @@ export function sessionSource(fixture: SessionFixture, options: { readonly now?:
       return id === fixture.ticket.id ? sendJson(response, 200, fixture.ticket) : sendJson(response, 404, { error: 'no such ticket' });
     }
     if (method === 'GET' && collection === 'workspace' && parts.length === 1) return sendJson(response, 200, workspaceFixture(fixture.project));
+    if (collection === 'asks') {
+      if (method === 'POST' && parts.length === 1) {
+        const body = ((await readJson(request)) ?? {}) as { question?: unknown; service?: unknown; target?: unknown };
+        calls.push({ method, path: url.pathname, user, body });
+        const question = body.question;
+        if (typeof question !== 'string' || !question.trim() || question.length > 4000) return sendJson(response, 400, { error: 'a question is a non-empty text of at most 4000 characters' });
+        const ask = startedAsk({ ...body, question }, user, now().toISOString());
+        asks.set(ask.id, ask);
+        return sendJson(response, 200, ask);
+      }
+      const ask = method === 'GET' && parts.length === 2 && id ? asks.get(decodeURIComponent(id)) : undefined;
+      return ask ? sendJson(response, 200, ask) : sendJson(response, 404, { error: 'no such ask' });
+    }
     if (collection !== 'sessions') return sendJson(response, 404, { error: 'not in the fixtures' });
     if (method === 'GET' && parts.length === 1) return sendJson(response, 200, fixture.sessions.map((s) => (fixture.takenOver.has(s.id) ? { ...s, takenOver: fixture.takenOver.get(s.id) } : s)));
     const detail = id ? detailOf(fixture, id) : undefined;
