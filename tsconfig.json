@@ -10,6 +10,8 @@
     "moduleResolution": "nodenext",
     "types": ["node"],
     "typeRoots": ["./v2/node_modules/@types"],
+    // app/'s screenshots import playwright-core, a devDependency of app/: its types are v2's copy.
+    "paths": { "playwright-core": ["./v2/node_modules/playwright-core/index.d.ts"] },
     "strict": true,
     "noEmit": true,
     "allowJs": true,

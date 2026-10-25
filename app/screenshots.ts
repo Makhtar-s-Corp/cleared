@@ -1,7 +1,6 @@
 // Takes the pictures attached to the pull request: the tower and the porthole,
 // light and dark, at 1440, 768 and 390 px wide, from the demonstration data.
 //   npm install && node screenshots.ts [output folder]
-// @ts-ignore playwright-core is a devDependency of app/ that may not be installed here: the little used is typed below.
 import { chromium } from 'playwright-core';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -12,11 +11,6 @@ import { createActions } from './lib/actions.ts';
 import type { AddressInfo } from 'node:net';
 import type { Passkey } from './lib/credentials.ts';
 
-type Page = { goto(url: string): Promise<unknown>; waitForSelector(selector: string, options?: { timeout?: number }): Promise<unknown>; waitForTimeout(ms: number): Promise<void>;
-  screenshot(options: { path: string; fullPage?: boolean }): Promise<unknown>; click(selector: string): Promise<void> };
-type Context = { addInitScript(script: () => void): Promise<void>; addCookies(cookies: { name: string; value: string; url: string }[]): Promise<void>; newPage(): Promise<Page>; close(): Promise<void> };
-type Browser = { newContext(options: { viewport: { width: number; height: number }; deviceScaleFactor?: number }): Promise<Context>; close(): Promise<void> };
-type Chromium = { launch(options: { executablePath: string; args: string[] }): Promise<Browser> };
 
 const out = process.argv[2] ?? new URL('./screenshots', import.meta.url).pathname;
 mkdirSync(out, { recursive: true });
@@ -35,7 +29,7 @@ const session = /cleared_app=([^;]+)/.exec(signIn.headers.get('set-cookie')!)![1
 const cache = join(process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), '.cache', 'ms-playwright'));
 const bundled = existsSync(cache) ? readdirSync(cache).filter((d) => d.startsWith('chromium-')).map((d) => join(cache, d, 'chrome-linux64', 'chrome')).find(existsSync) : null;
 const executablePath = process.env.CHROME_PATH || bundled || '/usr/bin/google-chrome';
-const browser = await (chromium as Chromium).launch({ executablePath, args: ['--no-sandbox'] });
+const browser = await chromium.launch({ executablePath, args: ['--no-sandbox'] });
 
 for (const width of [1440, 768, 390]) {
   for (const theme of ['light', 'dark']) {

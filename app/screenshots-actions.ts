@@ -2,8 +2,8 @@
 // a virtual authenticator (the browser's own test facility) holds the passkey, and every
 // click goes through the same routes as on a phone. Nothing here bypasses the server.
 //   npm install && node screenshots-actions.ts [output folder]
-// @ts-ignore playwright-core is a devDependency of app/ that may not be installed here: the little used is typed below.
 import { chromium } from 'playwright-core';
+import type { Page } from 'playwright-core';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import net from 'node:net';
@@ -14,11 +14,6 @@ import { demoSource } from './sources/demo.ts';
 import type { AddressInfo } from 'node:net';
 import type { Passkey } from './lib/credentials.ts';
 
-type Page = { goto(url: string): Promise<unknown>; waitForSelector(selector: string, options?: { timeout?: number }): Promise<unknown>; waitForTimeout(ms: number): Promise<void>;
-  screenshot(options: { path: string }): Promise<unknown>; click(selector: string): Promise<void>; fill(selector: string, value: string): Promise<void> };
-type Context = { addCookies(cookies: { name: string; value: string; url: string }[]): Promise<void>; newPage(): Promise<Page>; newCDPSession(page: Page): Promise<{ send(method: string, params?: object): Promise<unknown> }> };
-type Browser = { newContext(options: { viewport: { width: number; height: number }; deviceScaleFactor: number; isMobile: boolean; hasTouch: boolean }): Promise<Context>; close(): Promise<void> };
-type Chromium = { launch(options: { executablePath: string; args: string[] }): Promise<Browser> };
 type Scene = { page: Page; shot: (name: string) => Promise<unknown>; registerPasskey: () => Promise<void>; open: (id: string) => Promise<void>; source: ReturnType<typeof demoSource>; origin: string };
 
 const out = process.argv[2] ?? new URL('./screenshots', import.meta.url).pathname;
@@ -38,7 +33,7 @@ async function scenario(graceMs: number, run: (scene: Scene) => Promise<void>) {
   const session = /cleared_app=([^;]+)/.exec(signIn.headers.get('set-cookie')!)![1]!;
   const cache = join(process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), '.cache', 'ms-playwright'));
   const bundled = existsSync(cache) ? readdirSync(cache).filter((d) => d.startsWith('chromium-')).map((d) => join(cache, d, 'chrome-linux64', 'chrome')).find(existsSync) : null;
-  const browser = await (chromium as Chromium).launch({ executablePath: process.env.CHROME_PATH || bundled || '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || bundled || '/usr/bin/google-chrome', args: ['--no-sandbox'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   await context.addCookies([{ name: 'cleared_app', value: session, url: origin }]);
   const page = await context.newPage();
