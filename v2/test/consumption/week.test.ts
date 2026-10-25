@@ -18,6 +18,10 @@ import type { Harness, Role } from '../../src/session/contract.ts';
 import type { AgUiEvent } from '../../src/session/events.ts';
 import { applyTables, openStore, type Store } from '../../src/store/db.ts';
 import { MemoryTicketStore, type Actor, type TicketId } from '../../src/tickets/contract.ts';
+import { ApprovalSigner } from '../../src/approval/signer.ts';
+import { MemoryUsers } from '../../src/modules/registry.ts';
+import { LocalTicketStore, TICKET_TABLES } from '../../src/tickets/local-store.ts';
+import { OWNER as OWNER_LOGIN, lockBox } from '../approval/harness.ts';
 
 const PROJECT = 'guestbook';
 const SERVICES = ['guestbook', 'filter-api'];
@@ -32,7 +36,7 @@ const IN_WEEK = '2026-10-21T08:00:00.000Z';
 const BEFORE = '2026-10-17T08:00:00.000Z';
 
 const SERVICE: Actor = { kind: 'agents', id: 'cleared-v2' };
-const MERGE: Actor = { kind: 'agents', id: 'cleared-agents' };          // the guarded merge, under the agents' account
+const MERGE: Actor = { kind: 'agents', id: 'cleared-agents' };          // a move by v1's tracker under the agents' account
 const MIRROR: Actor = { kind: 'agents', id: 'cleared-mirror' };
 const OWNER: Actor = { kind: 'human', id: 'u1' };
 
@@ -121,6 +125,34 @@ test('a ticket is merged when it is Done now and its last move to Done, in the w
   const first = week.merged.find((m) => m.id === flow);
   assert.deepEqual(first, { id: flow, title: 'Sign the guestbook', services: ['guestbook'], mergedAt: IN_WEEK, estimateMinutes: null, actualMinutes: null });
   assert.deepEqual(week.merged.find((m) => m.id === twice)?.services, ['guestbook'], 'a ticket that names no service is on the workspace\'s first');
+});
+
+test('on the real store: the flow\'s Done and the guarded merge\'s (v1\'s tracker under the service account, read as other) are merges; the mirror\'s and the owner\'s signed move are not', async () => {
+  const box = lockBox();
+  const store = openStore(':memory:');
+  applyTables(store.db, TICKET_TABLES);
+  const users = new MemoryUsers();
+  users.users.set('user-uuid-1', { id: 'user-uuid-1', name: OWNER_LOGIN });
+  let clock = at(IN_WEEK, -60);
+  const tickets = new LocalTicketStore(store.db, { stateDir: box.state, ownerId: OWNER_LOGIN, users, signer: ApprovalSigner.load(box.keyFile), publicKey: box.keys.publicKey, now: () => clock });
+  const made = async (title: string) => (await tickets.create({ title, project: PROJECT }, SERVICE)).id;
+  const flow = await made('Moved by the flow');
+  const guarded = await made('Merged by merge-pr');
+  const mirrored = await made('Closed on the tracker');
+  const byHand = await made('Moved by the owner');
+  clock = IN_WEEK;
+  await tickets.move(flow, tickets.states.done, SERVICE);
+  await tickets.move(mirrored, tickets.states.done, MIRROR);
+  await tickets.move(byHand, tickets.states.done, { kind: 'human', id: 'user-uuid-1' });
+  // merge-pr.ts moves the card through v1's local tracker, run by the service account: neither the agents' nor the owner's, so `shared`.
+  store.db.prepare("UPDATE tracker_tickets SET status = 'Done' WHERE id = ?").run(Number(guarded.slice('LOCAL-'.length)));
+  store.db.prepare("INSERT INTO tracker_history (ticket, status, actor_kind, actor_id, at) VALUES (?, 'Done', 'shared', 'cleared', ?)").run(Number(guarded.slice('LOCAL-'.length)), at(IN_WEEK, 5));
+  const history = await tickets.histories([guarded, byHand]);
+  assert.equal(history.get(guarded)?.at(-1)?.by.kind, 'other', 'the store reads the service account\'s row as other');
+  assert.equal(history.get(byHand)?.at(-1)?.by.kind, 'human', 'the owner\'s move is signed');
+
+  const week = await weekFigures(store.db, tickets, { project: PROJECT, services: SERVICES, now: NOW, timeZone: ZONE });
+  assert.deepEqual(week.merged.map((m) => m.id), [guarded, flow]);
 });
 
 test('the tokens and the agents\' time: every turn finished in the week, whatever its role; a turn across the week\'s start counts its part inside', async () => {
