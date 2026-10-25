@@ -13,7 +13,8 @@
 // at each generation, and lib/memory in a child process (lib/conf.ts copies
 // every CLEARED_* variable into ORCH_* when it is imported). The lead's
 // memory is the workspace's level; after it come the first line of each
-// other service's page, read in that service's level (decision 25, lane 19).
+// other service's page, read in that service's level (decision 25, lane 19),
+// or of the page Cleared generates for a service that commits none (issue #394).
 import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync, lstatSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -23,6 +24,7 @@ import { loadFlowConfig } from '../flow/config.ts';
 import { ensureExcluded, projectCheckout, ticketBranch, ticketCheckout } from '../workspace/checkout.ts';
 import { BriefingError, REFERENCE_LINE, ensureLevel, levelContext, type MemoryEntry } from '../workspace/briefing.ts';
 import { forgeEnvironments } from '../workspace/publish.ts';
+import { pageSummary, readProjectPage } from '../workspace/project-page.ts';
 import { LEAD_TICKET, capAnswer } from './contract.ts';
 import { LEAD_RULES } from './prompts.ts';
 import type { HandoverRecord } from './store.ts';
@@ -242,18 +244,29 @@ export function realLeadEffects(config: LeadEffectsConfig): LeadEffects {
         try { return loadFlowConfig(env)?.workspace?.services ?? []; } catch { return []; }
       })();
       const others = listed.filter((s) => resolve(s.dir) !== resolve(config.projectDir) && existsSync(s.dir));
+      // A service that commits no page has the line of the page Cleared
+      // generates for it (issue #394), the workspace's own service too.
+      const generated = (name: string) => {
+        const summary = pageSummary(readProjectPage(env, name) ?? '');
+        return summary ? serviceLine(name, summary) : null;
+      };
+      const own = listed.find((s) => resolve(s.dir) === resolve(config.projectDir));
+      const ownLine = own ? generated(own.name) : null;
       const pages = await Promise.all(others.map(async (s) => {
         try {
           const level = levelContext({ project: config.projectDir, env }, { kind: 'service', name: s.name, project: s.dir });
           ensureLevel(level);
           const page = await runLeadMemory(s.dir, { ...env, ...level.env }, { command: 'page', ticket: LEAD_TICKET });
-          return typeof page === 'string' ? serviceLine(s.name, page) : null;
-        } catch { return null; }
+          return (typeof page === 'string' ? serviceLine(s.name, page) : null) ?? generated(s.name);
+        } catch { return generated(s.name); }
       }));
-      const lines = serviceLines(pages.filter((line): line is string => line !== null));
-      const text = lines.join('\n');
-      const entries = await runLeadMemory(config.projectDir, env, { command: 'briefing', ticket: LEAD_TICKET, budget: MEMORY_BUDGET - Buffer.byteLength(text) });
+      const found = [ownLine, ...pages].filter((line): line is string => line !== null);
+      const listedLines = serviceLines(found);
+      const entries = await runLeadMemory(config.projectDir, env, { command: 'briefing', ticket: LEAD_TICKET, budget: MEMORY_BUDGET - Buffer.byteLength(listedLines.join('\n')) });
       if (!Array.isArray(entries)) throw new BriefingError('memory: the briefing is not a list of entries');
+      // The workspace's committed page is in its memory already.
+      const lines = ownLine && entries.some((entry: MemoryEntry) => entry.type === 'project') ? serviceLines(found.slice(1)) : listedLines;
+      const text = lines.join('\n');
       return lines.length ? [...entries as MemoryEntry[], { type: 'services', content: text }] : entries as MemoryEntry[];
     },
     async searchMemory(query) {
