@@ -5560,3 +5560,9 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 6. **Lines.** B5.5b, M7 and B5.9d updated; no new P line, since the two decisions are the owner's and the lines are the brief's.
 
 **Tests first.** `92cbc0b` committed the tests alone. There, three runner tests fail on `[]` (the start's options, the new test of the user source, the reload after a Take over); the policy test passes, as it guards what the change must not open; the doctor change typechecks.
+
+**Checks** (on `origin/v2` at `7304f41`, which had not moved when this was written). `npm run typecheck` passes. `npm test`: 2065 Node tests, 1995 pass, 70 skipped (the browser tests without `CLEARED_V2_PLAYWRIGHT`, and the gated real-harness test), 0 fail; 326 Vitest tests pass. `test/container/session-runtime.test.ts` gained its `CLAUDE_CONFIG_DIR` check after that run and passes 31 of 31 alone. `npm run guard -- --base origin/v2`: nothing refused. No browser test was run: nothing of the app changed. The `claude-code` section of the doctor was not run (item 5).
+
+**Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read, no network beyond `npm ci` of the lock file and `npm pack` of the SDK's tarball (read, not run), no tunnel, no port opened, no secret.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-skills-user`.
