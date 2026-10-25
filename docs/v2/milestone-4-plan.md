@@ -445,9 +445,57 @@ A week other than the last seven days (no week picker, no week before); a report
 | Whether the owner wants the calendar week (from Monday) rather than the last seven days | the owner (question in the log entry, the seven days applied) |
 | Whether a week with one agent that reports no dollars should still say the dollars of the others, marked partial | the owner (question in the log entry, no dollars applied, as P211 does) |
 
+## 11. Delegation from GitHub Issues and Linear (`v2-j4-delegation`, issue #398)
+
+Written on 2026-10-25 by the author of issue #398 (Opus 5.5), before the lane's tests and code. Sections 8 to 10 are the lanes of pull requests 393, 395 and 399, merged into `v2` before this one. Inputs: issue #398, the [decisions log](decisions-log.md) (the entries of lanes `v2-j4-issue-mirrors`, `v2-j4-mirror-followups` and `j3-chat-launch`, and the ten ideas of 2026-10-25), the matrix (C3, D17, D18, P230 to P232, P237), [mirrors.md](mirrors.md), and sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), since `milestone-2-plan.md` has no sections 9 and 10.
+
+### 11.1 Context
+
+C3 asks for work to be handed to Cleared from Linear and GitHub Issues, Slack later. The mirrors (pull requests 384 and 390) bring an issue created on a tracker into the app as a ticket, but only one created after the mirror's first pass, and the ticket then waits in Todo: a tracker never starts a session by itself (P232). No one on the tracker can say "Cleared, take this one", and the lead never hears of the issue.
+
+### 11.2 What exists at the end, and how it is proven
+
+- **A delegation, read by each tracker.** On GitHub, the label `cleared` on an open issue, or the issue assigned to the mirror's own account. On Linear, the same label on the issue, or the issue assigned to the key's own user, in a state that is neither completed nor canceled. Who delegated and when come from the issue's events (GitHub's `labeled` and `assigned`) or its history (Linear's `addedLabelIds` and `toAssigneeId`), read with the actor rules the state uses (P231, rule 5).
+- **The mirror takes it once.** A person's delegation made after the tracker's first pass is kept in `mirror_delegations`, once per issue and time:
+  - The issue becomes a ticket when it is not one yet, whatever its creation time.
+  - An issue in a state the app does not have (Linear's Backlog or Triage) comes in Todo, and the mirror moves the tracker to Todo.
+  - The ticket goes to the lead's plans as a one-item plan bound to it, proposed, waiting in the Inbox for the owner.
+  - The lead is told in its thread: who delegated, on which tracker, the ticket and the plan.
+  - A comment on the issue, in `CLEARED_V2_APP_LANGUAGE`, gives the ticket's id and says that the owner approves it in Cleared.
+- **What it does not take.** An agent's delegation (a bot, an integration, an actor the tracker does not name) does nothing. A ticket that is not in Todo, or whose plan item still runs, gets no new plan: the comment says it is already in hand.
+- **The start is the owner's.** The owner approves the plan in the Inbox, as any plan, and the runner starts the ticket with the owner as the one who approved it. A release still waits for the owner. A rejected plan leaves the ticket in Todo.
+- **Nothing is lost while the lead is off.** With no lead running, the delegation waits in its table, and is handed over at the first pass after the lead starts.
+- Proven by new cases in `test/tickets/mirror-github.test.ts` and `mirror-linear.test.ts` (the delegation each tracker reads, against its fake), `test/tickets/mirror-delegation.test.ts` (the pass: an older issue taken, a Backlog issue in Todo, an agent's label, a ticket in hand, once only, a lead not running, the settings), `test/tickets/delegation.test.ts` (the plan bound to the ticket, its approval starting it with no second ticket, the lead's line), `test/tickets/delegation-proof.test.ts` (C3's steps on both fakes, the real ticket store and the plan runner), `test/tickets/mirror-catalog.test.ts`, and a real run on the example repository `cleared-example-guestbook`, quoted in the pull request.
+
+### 11.3 Decisions this lane takes
+
+- **The owner approves, the tracker does not.** A person on GitHub or Linear is never the owner, and nothing a tracker writes can carry the owner's signature (D18, P232). So a delegation makes the ticket and the plan, and the start waits for the owner's gesture in the app. No tracker account is linked to a user of the app, as the chat command does with `CLEARED_V2_CHAT_USERS` (P212). A start at once for linked accounts is a question for the owner, in the log entry, with this default applied.
+- **The service writes the plan, not the model.** `PlanRunner.proposeTicket` stores a one-item plan whose item is bound to the existing ticket, so the runner's approval creates no second ticket (`#createTickets` skips a bound item), and the mirror exports no second issue. Its estimate is the runner's, from the ticket's `size:<s>` label (else `s`), and its lane is the fast lane when the ticket carries the Quick label, after the services' sensitivity (decision 24). The item's body is the ticket's, with no acceptance criterion required: it is the person's text, not the model's. The lead's tools, `lead/contract.ts` and `api/types.ts` do not change.
+- **One plan per ticket at a time.** The plan's goal is `delegation-<ticket>`: a second delegation while the first plan waits replaces it, as a second proposal for a goal does.
+- **The tracker's text is data.** The lead's line names the ticket, the tracker, the issue's key and who delegated it; the title is quoted, cleaned as every text of a plan is. The lead reads the rest with its `ticket` tool. The line is in English, as the plans' other lines are.
+- **The label.** `CLEARED_V2_DELEGATION_LABEL`, `cleared` by default, compared without case; a name that starts with `status:` is refused, so it cannot be read as a state. The delegation is read whenever a mirror runs; `CLEARED_V2_DELEGATION=off` turns it off.
+- **The mirror's own account.** The mirror never puts the label on or assigns an issue, except when it creates one from a ticket that carries the label: such a label, put on within a minute of the mirror's own write, is not a delegation. Any other delegation by the mirror's account is a person's, as for a state (the mirrors' log entry, decision 4).
+- **Polling.** The delegation is read in the mirror's pass: no webhook, no new listener.
+- **Matrix lines.** P244 (the delegation); C3 updated. P243 is the week's figures' (pull request 399, issue #396); the lane of issue #397 (M6) runs beside this one, so the id is checked again at each merge of `origin/v2`.
+
+### 11.4 Out of scope
+
+Slack (C3's "later"; the chat command is P212); a start without the owner's approval; linking a tracker's people to the app's users; removing the label or the assignee to take a delegation back (a person moves the issue instead, P232 rule 7); Linear's agent delegation (an issue delegated to an application user), which needs an OAuth application; a real Linear account.
+
+### 11.5 Files this lane owns
+
+The delegation's parts of `v2/src/tickets/mirror.ts`, `mirror-tracker.ts`, `mirror-github.ts` and `mirror-linear.ts`; `v2/src/tickets/delegation.ts`; the delegation's keys of `v2/src/tickets/messages/mirror.{en,fr}.json`; `PlanRunner.proposeTicket` in `v2/src/lead/plans/runner.ts`; the wiring in `v2/src/modules/tickets.ts`; the fakes and tests named above, and the pinned tables in `test/tickets/services.test.ts`; `docs/v2/mirrors.md`; this section, its matrix lines and its log entry.
+
+### 11.6 Unknowns, and who closes them
+
+| Unknown on 2026-10-25 | Closed by |
+| --- | --- |
+| Whether GitHub records a `labeled` and an `assigned` event for an issue created with them | closed by this lane's real run on the example repository: an issue opened with the label has its `labeled` event, an assignment its `assigned` event |
+| Whether Linear's history fills `addedLabelIds` and `toAssigneeId` as its schema says, and names the actor of a label put on at creation | the owner's real trial; until then a delegation no event names is read from the issue's creator |
+
 ## 12. The GitHub mirror's doctor section (`v2-j4-mirror-doctor`, issue #400)
 
-This section was written on 2026-10-25 by the author of issue #400 (Opus 5.5), before the lane's tests and code. Inputs: issue #400, [mirrors.md](mirrors.md) ("there is no `doctor` section for the mirrors yet"), the [decisions log](decisions-log.md) (the entries of lanes `v2-j4-issue-mirrors`, `v2-j4-mirror-followups` and `v2-j4-heartbeat`, and the ten ideas of 2026-10-25), the [requirements matrix](requirements-matrix.md) (B5.8b, P230, B4.6), and the code at `origin/v2` `d849c6e`. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), whose "one doctor" rule this lane applies. Section 10 is the week's figures (pull request 399). The lanes of issues #397 and #398 run beside this one: #397's branch holds section 11 and P245, and #398's branch wrote a section 10 and P243, which it renumbers when it merges `origin/v2`, likely to the next free ones; this section and its id move at the merge if one of them lands first with the same. The branch is `v2-j4-mirror-doctor`: `v2/j4-mirror-doctor` cannot exist beside the local branch `v2`.
+This section was written on 2026-10-25 by the author of issue #400 (Opus 5.5), before the lane's tests and code. Inputs: issue #400, [mirrors.md](mirrors.md) ("there is no `doctor` section for the mirrors yet"), the [decisions log](decisions-log.md) (the entries of lanes `v2-j4-issue-mirrors`, `v2-j4-mirror-followups` and `v2-j4-heartbeat`, and the ten ideas of 2026-10-25), the [requirements matrix](requirements-matrix.md) (B5.8b, P230, B4.6), and the code at `origin/v2` `d849c6e`. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), whose "one doctor" rule this lane applies. Section 10 is the week's figures (pull request 399) and section 11 the delegation (pull request 401, P244), merged while this lane ran. The lane of issue #397 runs beside this one, its branch with a section 11 and P245; this section and its id move at the merge if it lands first with the same. The branch is `v2-j4-mirror-doctor`: `v2/j4-mirror-doctor` cannot exist beside the local branch `v2`.
 
 ### 12.1 Context
 

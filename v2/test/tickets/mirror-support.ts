@@ -1,6 +1,7 @@
 // What the mirror's tests share: the real ticket store with the owner's
 // signing key, and a tracker kept in memory whose issues a test moves,
-// edits and comments as a person, an agent or the mirror itself.
+// edits, comments and hands over to Cleared (C3) as a person, an agent or
+// the mirror itself.
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -8,7 +9,7 @@ import { ApprovalSigner } from '../../src/approval/signer.ts';
 import { MemoryUsers } from '../../src/modules/registry.ts';
 import { applyTables } from '../../src/store/db.ts';
 import { LocalTicketStore, TICKET_TABLES } from '../../src/tickets/local-store.ts';
-import { MIRROR_TABLES, type Tracker, type TrackerChange, type TrackerComment, type TrackerEdit, type TrackerIssue } from '../../src/tickets/mirror.ts';
+import { MIRROR_TABLES, type Tracker, type TrackerChange, type TrackerComment, type TrackerDelegation, type TrackerEdit, type TrackerIssue } from '../../src/tickets/mirror.ts';
 import { OWNER, keyPair, scratch } from '../approval/harness.ts';
 
 export const OWNER_USER = 'user-uuid-1';
@@ -110,6 +111,20 @@ export class MemoryTracker implements Tracker {
     held.issue = { ...held.issue, ...fields, updatedAt: at, edits: [...held.issue.edits, ...edits] };
   }
 
+  // The issue handed over to Cleared now (the delegation label put on, or
+  // the issue assigned to the mirror's account), or taken back.
+  delegate(id: string, actor: Actor = 'person', who = actor === 'person' ? 'jane' : 'integration', how: TrackerDelegation['how'] = 'label'): string {
+    const held = this.#held(id);
+    const at = this.#clock.iso;
+    held.issue = { ...held.issue, updatedAt: at, delegation: { how, actor, who, at } };
+    return at;
+  }
+
+  undelegate(id: string): void {
+    const held = this.#held(id);
+    held.issue = { ...held.issue, updatedAt: this.#clock.iso, delegation: null };
+  }
+
   // A comment on the tracker by someone other than the mirror. It does not
   // change the issue's time: the mirror reads comments by their own.
   say(id: string, body: string, actor: Actor = 'person', who = actor === 'person' ? 'jane' : 'integration'): string {
@@ -129,6 +144,8 @@ export class MemoryTracker implements Tracker {
     this.#fail();
     const issue = this.open({ title: input.title, body: input.body, labels: [...input.labels], status: input.status });
     this.#change(issue.id, input.status, { actor: 'mirror', who: 'cleared-bot' });
+    // A ticket's own `cleared` label, put on by the mirror's account as GitHub would say it.
+    if (input.labels.some((l) => l.toLowerCase() === 'cleared')) this.delegate(issue.id, 'mirror', 'cleared-bot');
     return this.#held(issue.id).issue;
   }
 

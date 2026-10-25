@@ -7,10 +7,16 @@
 // bot or an app is an agent, anyone else a person. A change of the title is
 // its `renamed` event; GitHub's events say nothing of a change of the
 // description, so no one is named for it (P237). Comments are read for the
-// whole repository, by their own time. The doctor (tickets/mirror-doctor.ts)
-// reads the repository and its labels, and writes nothing.
+// whole repository, by their own time. An open issue with the delegation
+// label, or assigned to the token's own account, is handed over to Cleared
+// (C3, P244), by whoever the latest `labeled` or `assigned` event names, or
+// by the issue's author when no event does.
+// The doctor (tickets/mirror-doctor.ts) reads the repository and its
+// labels, and writes nothing.
 import { DEFAULT_STATES, type TicketStates } from './contract.ts';
-import { TrackerError, trackerFetch, type Tracker, type TrackerChange, type TrackerComment, type TrackerEdit, type TrackerIssue } from './mirror-tracker.ts';
+import {
+  DELEGATION_LABEL, TrackerError, trackerFetch, type Tracker, type TrackerChange, type TrackerComment, type TrackerDelegation, type TrackerEdit, type TrackerIssue,
+} from './mirror-tracker.ts';
 
 const PER_PAGE = 100;
 const STATUS = 'status:';
@@ -19,11 +25,11 @@ type Account = { readonly login?: string; readonly type?: string } | null;
 type Issue = {
   readonly number: number; readonly title: string; readonly body: string | null; readonly state: string; readonly state_reason?: string | null;
   readonly labels: readonly (string | { readonly name?: string })[]; readonly created_at: string; readonly updated_at: string;
-  readonly html_url: string; readonly pull_request?: unknown;
+  readonly html_url: string; readonly pull_request?: unknown; readonly user?: Account; readonly assignees?: readonly Account[];
 };
 type Event = {
   readonly event: string; readonly actor: Account; readonly created_at: string; readonly label?: { readonly name?: string };
-  readonly state_reason?: string | null; readonly performed_via_github_app?: unknown;
+  readonly state_reason?: string | null; readonly performed_via_github_app?: unknown; readonly assignee?: Account;
 };
 type IssueComment = {
   readonly id: number; readonly body: string | null; readonly user: Account; readonly created_at: string;
@@ -41,14 +47,19 @@ export class GitHubTracker implements Tracker {
   readonly #repo: string;
   readonly #states: TicketStates;
   readonly #fetch: typeof fetch;
+  readonly #delegation: string;
   #login: Promise<string> | undefined;
 
-  constructor(options: { readonly api: string; readonly token: string; readonly repo: string; readonly service?: string; readonly states?: TicketStates; readonly fetch?: typeof fetch }) {
+  constructor(options: {
+    readonly api: string; readonly token: string; readonly repo: string; readonly service?: string; readonly states?: TicketStates;
+    readonly delegationLabel?: string; readonly fetch?: typeof fetch;
+  }) {
     this.#api = options.api.replace(/\/+$/, '');
     this.#token = options.token;
     this.#repo = options.repo;
     this.#states = options.states ?? DEFAULT_STATES;
     this.#fetch = options.fetch ?? fetch;
+    this.#delegation = (options.delegationLabel ?? DELEGATION_LABEL).toLowerCase();
     this.name = `github:${options.repo}`;
     if (options.service !== undefined) this.service = options.service;
   }
@@ -144,12 +155,28 @@ export class GitHubTracker implements Tracker {
     return changes;
   }
 
-  #issueOf(issue: Issue, changes: readonly TrackerChange[], edits: readonly TrackerEdit[] = []): TrackerIssue {
+  // The latest hand-over that still holds: the label on, or the issue
+  // assigned to the token's account, on an open issue.
+  #delegationOf(issue: Issue, events: readonly Event[], me: string): TrackerDelegation | null {
+    if (issue.state !== 'open') return null;
+    const found: TrackerDelegation[] = [];
+    const latest = (how: TrackerDelegation['how'], matches: (event: Event) => boolean) => {
+      const event = [...events].reverse().find(matches);
+      const by = event ? this.#actorOf(event.actor, event.performed_via_github_app, me) : this.#actorOf(issue.user ?? null, undefined, me);
+      found.push({ how, ...by, at: event?.created_at ?? issue.created_at });
+    };
+    if (issue.labels.some((l) => labelName(l).toLowerCase() === this.#delegation))
+      latest('label', (e) => e.event === 'labeled' && (e.label?.name ?? '').toLowerCase() === this.#delegation);
+    if ((issue.assignees ?? []).some((a) => a?.login === me)) latest('assignee', (e) => e.event === 'assigned' && e.assignee?.login === me);
+    return found.sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0] ?? null;
+  }
+
+  #issueOf(issue: Issue, changes: readonly TrackerChange[], edits: readonly TrackerEdit[] = [], delegation: TrackerDelegation | null = null): TrackerIssue {
     const labels = issue.labels.map(labelName);
     return {
       id: String(issue.number), key: `${this.#repo}#${issue.number}`, url: issue.html_url, title: issue.title, body: issue.body ?? '',
       labels: labels.filter((l) => !l.startsWith(STATUS)), status: this.#statusOf(issue.state, issue.state_reason, labels),
-      createdAt: issue.created_at, updatedAt: issue.updated_at, changes, edits,
+      createdAt: issue.created_at, updatedAt: issue.updated_at, changes, edits, delegation,
     };
   }
 
@@ -160,7 +187,7 @@ export class GitHubTracker implements Tracker {
     for (const issue of issues) {
       if (issue.pull_request !== undefined) continue;
       const events = await this.#pages<Event>(`/repos/${this.#repo}/issues/${issue.number}/events`);
-      out.push(this.#issueOf(issue, this.#changes(issue, events, me), this.#edits(events, me)));
+      out.push(this.#issueOf(issue, this.#changes(issue, events, me), this.#edits(events, me), this.#delegationOf(issue, events, me)));
     }
     return out;
   }

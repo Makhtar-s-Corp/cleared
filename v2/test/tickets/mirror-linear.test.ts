@@ -139,3 +139,68 @@ test('a key Linear refuses, and a team it does not have, are TrackerErrors that 
   const other = new LinearTracker({ api, token: TOKEN, team: 'OPS' });
   await assert.rejects(other.changed(clock.iso), (error: unknown) => error instanceof TrackerError && /OPS/.test(error.message));
 });
+
+// ---- a delegation (C3, P244) ----------------------------------------------
+
+const delegationOf = async (since: string, id: string) => (await tracker.changed(since)).find((i) => i.id === id)?.delegation;
+const BOT = { bot: { id: 'bot-zap', name: 'Zapier' } };
+
+test('a delegation: the cleared label on an issue, read from its history, even in Backlog; gone with the label, or once Done or Canceled', async () => {
+  clock.tick(60);
+  const since = clock.iso;
+  const issue = fake.create(JANE, { title: 'Hand it over', state: 'Backlog' });
+  assert.equal(await delegationOf(since, issue.id), null);
+  clock.tick();
+  const at = clock.iso;
+  fake.label(issue.id, JANE, 'Cleared');
+  const read = (await tracker.changed(since)).find((i) => i.id === issue.id);
+  assert.deepEqual(read?.delegation, { how: 'label', actor: 'person', who: 'Jane', at });
+  assert.equal(read?.status, null, 'Backlog is a state the app does not have');
+  clock.tick();
+  fake.unlabel(issue.id, 'Cleared');
+  assert.equal(await delegationOf(since, issue.id), null);
+  clock.tick();
+  fake.label(issue.id, BOT, 'Cleared');
+  assert.deepEqual(await delegationOf(since, issue.id), { how: 'label', actor: 'agent', who: 'Zapier', at: clock.iso }, 'an integration\'s label is an agent\'s');
+  for (const state of ['Done', 'Canceled']) {
+    clock.tick();
+    fake.move(issue.id, JANE, state);
+    assert.equal(await delegationOf(since, issue.id), null, state);
+  }
+});
+
+test('a delegation: the issue assigned to the key\'s own user; assigned to anyone else, it is not one', async () => {
+  clock.tick(60);
+  const since = clock.iso;
+  const issue = fake.create(JANE, { title: 'Assigned', state: 'Todo' });
+  clock.tick();
+  fake.assign(issue.id, JANE, 'user-jane');
+  assert.equal(await delegationOf(since, issue.id), null);
+  clock.tick();
+  const at = clock.iso;
+  fake.assign(issue.id, JANE, MIRROR.id);
+  assert.deepEqual(await delegationOf(since, issue.id), { how: 'assignee', actor: 'person', who: 'Jane', at });
+  clock.tick();
+  fake.assign(issue.id, JANE, null);
+  assert.equal(await delegationOf(since, issue.id), null);
+});
+
+test('an issue created with the label, which no history entry names, is handed over by its creator at its creation', async () => {
+  clock.tick(60);
+  const since = clock.iso;
+  const issue = fake.create(JANE, { title: 'Born delegated', state: 'Backlog', labels: ['cleared'] });
+  assert.deepEqual(await delegationOf(since, issue.id), { how: 'label', actor: 'person', who: 'Jane', at: issue.createdAt });
+});
+
+test('another delegation label is read in its place', async () => {
+  clock.tick(60);
+  const since = clock.iso;
+  const issue = fake.create(JANE, { title: 'Another label', state: 'Todo' });
+  clock.tick();
+  fake.label(issue.id, JANE, 'cleared');
+  clock.tick();
+  fake.label(issue.id, JANE, 'agent');
+  const other = new LinearTracker({ api, token: TOKEN, team: 'ENG', delegationLabel: 'Agent' });
+  const read = (await other.changed(since)).find((i) => i.id === issue.id);
+  assert.deepEqual(read?.delegation, { how: 'label', actor: 'person', who: 'Jane', at: clock.iso });
+});
