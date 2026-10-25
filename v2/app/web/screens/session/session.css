@@ -489,3 +489,5 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 /* The outcome takes the focus to be read out (CloseTicket.tsx); a line of text, it draws no ring. */
 #close-done:focus { outline: 2px solid transparent; }
 #close-open { margin-top: 12px; }
+/* The receipt's captures switch on the ticket card (P226) reuses the Editor's switch, its buttons 44 px tall wherever the screen's controls are. */
+@media (max-width: 1100px) { .ticket-captures .mode button { min-height: 44px; } }

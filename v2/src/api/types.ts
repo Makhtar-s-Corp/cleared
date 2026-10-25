@@ -731,6 +731,13 @@ export type ProductionCheck = {
   readonly missing: 'unwatched' | 'no_browser' | 'failed' | null;
 };
 
+// The human's choice of the proof receipt's captures on a ticket (P226,
+// issue #368, flow/capture-choice.ts): `auto`, the rule decides from the
+// diff (captures only when it changes what a person sees); `on` and `off`
+// win over it. `by` and `at` are null while nobody chose.
+export type CaptureChoice = { readonly choice: 'auto' | 'on' | 'off'; readonly by: UserId | null; readonly at: string | null };
+export type CaptureChoiceBody = { readonly choice: CaptureChoice['choice'] };
+
 export type EditorLinks = { readonly mode: 'local' | 'ssh'; readonly links: readonly { readonly editor: EditorName; readonly url: string }[] };
 
 // Every route: its body (null for none) and its answer. `events` answers
@@ -828,6 +835,9 @@ export type ApiRoutes = {
   'GET /api/tickets/:id/cost': { readonly body: null; readonly response: TicketCost };
   // Milestone 3, the production page checked after a release landed (P218, issue #334, flow/proof-routes.ts).
   'GET /api/tickets/:id/production': { readonly body: null; readonly response: ProductionCheck[] };
+  // Milestone 3, whether the proof receipt takes captures: the human's choice on the ticket (P226, issue #368, flow/proof-routes.ts).
+  'GET /api/tickets/:id/captures': { readonly body: null; readonly response: CaptureChoice };
+  'POST /api/tickets/:id/captures': { readonly body: CaptureChoiceBody; readonly response: CaptureChoice };
 };
 
 export type ApiRoute = keyof ApiRoutes;
@@ -900,6 +910,8 @@ const routes = {
   'POST /api/consumption/levers': true,
   'GET /api/tickets/:id/cost': true,
   'GET /api/tickets/:id/production': true,
+  'GET /api/tickets/:id/captures': true,
+  'POST /api/tickets/:id/captures': true,
 } satisfies Record<ApiRoute, true>;
 export type { Consumption, HarnessConsumption, LeverChoices, LeversChange, Projection, Quota, TicketCost };
 export const API_ROUTES = Object.keys(routes) as ApiRoute[];
