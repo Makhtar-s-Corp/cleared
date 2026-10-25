@@ -43,6 +43,7 @@
 .row-answers { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: 0 var(--space-2); }
 .row-answer { min-height: 28px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--tab-fill); color: var(--text-secondary); font-size: var(--text-sm); cursor: pointer; white-space: nowrap; }
 .row-answer:hover { background: var(--selected); color: var(--text); }
+@media (pointer: coarse) { .row-answer { min-height: 44px; } }
 /* what no longer waits: folded under what does, lighter once opened */
 .group-toggle { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 28px; margin-left: calc(-1 * var(--space-1)); padding: 0 var(--space-1); border: 0; border-radius: var(--radius); background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .group-toggle:hover { background: var(--tab-fill); color: var(--text); }

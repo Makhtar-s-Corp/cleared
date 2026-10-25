@@ -479,6 +479,8 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 /* Touch: the file links and the step details' links are 44 px tall, the rows kept tight (lane 38's art director). */
 @media (pointer: coarse) {
   .link-button { display: inline-flex; align-items: center; min-height: 44px; margin-block: -10px; }
+  /* A touch screen at any width: the computer's 32 px buttons are 44 (P227, the art director). */
+  .btn, .composer .btn { min-height: 44px; }
 }
 
 /* Close, on the ticket card (issue #249) */

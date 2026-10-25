@@ -129,6 +129,7 @@
 @media (max-width: 1000px) {
   .consumption-grid { grid-template-columns: minmax(0, 1fr); }
 }
+@media (pointer: coarse) { .choice { min-height: 44px; } }
 @media (max-width: 767px) {
   .consumption { padding: 16px 16px 40px; }
   .consumption-head { flex-direction: column; align-items: flex-start; gap: 6px; }
