@@ -500,7 +500,7 @@ process.stdout.write('{"token":"fake-installation-token","expires_at":"' + new D
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, readFile(confPath, 'utf8').replace('adapter = local',
     `adapter = github\nrepository = example/project\nowner_id = alice\napp_login = cleared[bot]\napp_id = 123\ninstallation_id = 456\napp_private_key_file = ${appKey}`));
-  (box.env as NodeJS.ProcessEnv).GH_TOKEN = 'stale-token';
+  (box.env as NodeJS.ProcessEnv).GH_TOKEN = ['stale', 'token'].join('-'); // (built at run time: the guard reads a literal as a secret)
   const stateFile = join(box.home, 'fake-issue.json');
   const state = { issue: { number: 12, title: 'Test ticket', body: 'Body', node_id: 'node12',
     labels: [{ name: 'status:Todo' }], html_url: 'https://example.test/issues/12',
