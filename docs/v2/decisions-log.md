@@ -6879,5 +6879,5 @@ The three issues were then closed by hand as not planned. Nothing ran against Li
 
 **Resources.** No Docker object made or removed: the real run asked `docker version` and lists filtered on `cleared.dev=v2`; every test reached a fake docker. No Claude Code login read, no Slack, Cursor or Codex account. Network: `npm ci` of the lock file, `git fetch`, the clone of the example repository, and GitHub (two reads for the real run, the issue and the pull request). No port but the tests' own ephemeral loopback ones, no tunnel; the scratch file that held the `gh` login's token was deleted after the real run.
 
-- Pull request: PULL_REQUEST_NUMBER, against `v2`.
+- Pull request: 417, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-doctor`.
