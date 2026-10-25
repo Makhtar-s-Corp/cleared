@@ -53,5 +53,7 @@
   "map_problem_dropped": "Noms écartés\u00a0: {n}",
   "map_down": "La carte des services n'est pas disponible\u00a0: le service ne gère aucun espace de travail.",
   "map_read_failed": "Impossible de lire la carte des services. Réessayez dans un instant.",
-  "map_refresh_failed": "Impossible d'actualiser la carte. Réessayez dans un instant."
+  "map_refresh_failed": "Impossible d'actualiser la carte. Réessayez dans un instant.",
+  "map_connect": "Connecter des dépôts",
+  "map_connect_hint": "Pas encore d'espace de travail\u00a0? Choisissez ses dépôts dans l'assistant."
 }

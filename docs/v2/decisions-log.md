@@ -6914,3 +6914,109 @@ The three issues were then closed by hand as not planned. Nothing ran against Li
 
 - Pull request: 419, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-run`.
+
+## 2026-10-25: connecting a workspace from the assistant: the repositories picked and cloned, the links proposed, only the ticked lines written (the author's choices, lane `v2-j5-connect`, M10, P252, issue #414)
+
+**The need.** Issue #414, section 9 of [milestone-5-plan.md](milestone-5-plan.md) (matrix M10, decision 15). Today a workspace of several services is a file a person writes by hand (`CLEARED_V2_WORKSPACE`, `examples/workspace.conf`). The lane fills the assistant's workspace step, which the Services screen also opens:
+- the repositories the forge credential reaches, one or several picked;
+- for a monorepo, its folders proposed as folder services;
+- each repository cloned, the service map (P245) run on the clones, and the links proposed with the file and line that suggested each;
+- the workspace file written from what the person ticked, and nothing before.
+
+French and English, accessible, fakes only. As earlier lanes noted, the brief's section 6 (`PROMPT.md`) and sections 9 and 10 of `milestone-2-plan.md` are not in the repository. The conventions followed are those of section 3.1 of the milestone 5 plan.
+
+**The branch.** The brief asked for `v2/j5-connect`. Git refuses that name while a local branch `v2` exists, so the lane runs on `v2-j5-connect`, as the other milestone 5 lanes did.
+
+**Decision.**
+1. **The list** comes through the forge contract: `listRepositories()` of the GitHub adapter (P247), the first caller, as section 17 says. It runs `gh` with the `GH_TOKEN` the forge step set.
+   - Archived repositories are left out and counted.
+   - With no credential, the step says "connect GitHub first" and asks nothing of `gh`.
+   - A list that fails is "unreachable". `gh`'s words go to the service's log, never to the browser.
+   - No clone address reaches the browser.
+2. **What the browser sends is names.** It sends names of repositories on that list, at most 10, and names and ids of the proposal's lines. The service lists again before each proposal and each write, and every address cloned is the forge's, so no address typed in a browser is ever cloned (a `file://` path included).
+3. **The clones** go to `<state>/repositories/<owner>/<name>`, through `projectCheckout` (cloned when absent, fetched when present; a folder holding another repository is refused and left as it is).
+   - Each clone's git environment names `gh auth git-credential` as GitHub's credential helper, the line `gh auth setup-git` writes. `gh` reads `GH_TOKEN` itself, so the value is in no URL and no git setting.
+   - Nothing else in the Compose image gives git the credential: `lib/forge.ts` adds a helper in app mode only.
+   - Checked on this server with a dummy value and an empty `gh` configuration, nothing sent over the network: `gh auth git-credential get` for `github.com` answers one password line with `GH_TOKEN` set and none without it. The output was counted, never printed. A clone of a real private repository through it is the rehearsal's.
+4. **The guess** (`src/workspace/guess.ts`) reads the base branch from git's objects, as the map does, never the working tree. It reads the paths, plus the few files `wantedFiles` names.
+   - **Folders.** A monorepo's folders come from its `package.json` workspaces (or `pnpm-workspace.yaml`): a folder, or a folder's children with `/*`, each with a manifest of its own. An entry that leaves the repository is not read. Without workspaces, two top folders or more with a manifest of their own count (`package.json`, `go.mod`, `pyproject.toml`, `Cargo.toml` and the like), never `test`, `docs`, `examples`, `scripts` or the like.
+   - **Layout.** A monorepo is proposed as its folders, with the whole repository as the other choice of a pair of radio buttons.
+   - **Contracts.** A contract is a file under a known name (`openapi`, `swagger`, then `asyncapi` as events, `.yaml`, `.yml` or `.json`) at a known place of the service (its root, `contract/`, `contracts/`, `api/`, `openapi/`, `spec/`, `docs/`). It is read by the fakes' reader before it is proposed, and a file it cannot read is not proposed.
+   - **Names.** A service is named after its folder or its repository. A name already taken becomes `<repository>-<folder>` or `<owner>-<repository>`, then gets a number.
+5. **The links.** The map is built with the proposed contracts and no declared `consumes`. Each call it finds becomes a proposed `consumes` line with its operations and places. The map only reads a call against the other service's contract, so a contract file must be found for its callers' links to be.
+   - Events and shared databases are not proposed: the train reads `consumes` alone (question 3).
+   - The proposal records the clone and read as the machine's time.
+6. **Nothing is ticked for the person.** The services are kept unless unticked. Each contract line and each link starts unticked: decision 15 says the person ticks what is right (question 1).
+7. **The write** (`confirm`) works in this order:
+   - It makes the proposal again from the clones, without fetching, so it reads what the person saw.
+   - It refuses a tick the proposal does not hold, a link to a service left out, and a contract line of a service with none (`changed`).
+   - It renders the file, and `parseWorkspace` reads it back as the service would. A cycle of ticked links is refused as `cycle`, before anything is written.
+   - It makes the folder services' checkouts.
+   - It writes `<state>/workspace.conf` (mode 600, beside its name and renamed into place).
+   - It names that file as `CLEARED_V2_WORKSPACE` in the settings and sets it in the process.
+   - **The workspace's id** is `CLEARED_V2_PROJECT` when set (a different id would stop the service at its start), else an earlier file's id, so the rows of a first connect stay in the workspace, else the first service's name.
+   - **Hand-written keys** of an earlier file (`health_url`, `run`, `sensitivity`, `broker_*`, `forge`) are kept for a service of the same name.
+   - **`dir`** is written for every service, since the flow's default folder (`CLEARED_V2_STATE_DIR`) and the settings' state folder (`CLEARED_STATE_DIR`) are not always the same.
+8. **One checkout per folder service** (question 2). A repository service's checkout is its clone. Each folder service gets a clone of its own at `<state>/services/<name>/checkout`, made from the forge's address with the repository's clone as a reference (`--reference-if-able`, `--dissociate`). Two services never share a checkout, which the flow fetches on its own.
+9. **The environment wins.** When the environment sets `CLEARED_V2_WORKSPACE`, the step says so and refuses a proposal or a write (409), as the forge step does for `GH_TOKEN`. One proposal or write runs at a time (409 `busy`), since two would fetch into the same folders.
+10. **The screen** (`Workspace.tsx`, its own sheet `workspace.css`):
+    - one box per repository, a field to narrow the list past eight, private ones tagged;
+    - the proposal in groups: the layout of each monorepo, the services, the contracts found and the calls found, each call with "found at src/filter.ts, line 38";
+    - Write the workspace, then the result and "Cleared uses it from its next start";
+    - an earlier connect said with its day, and Connect again.
+
+    Once there is a proposal, the clone button steps back to an outlined "Propose again", so the page has one ink button.
+11. **The Services screen.** The lane adds a Connect link (`/setup/workspace`), drawn as the outlined button beside Refresh. It is also shown with the reason when no map can be read, which is what a server with no workspace shows (`ServicesFailed`). A person who is not the owner reaches the assistant's own "the setup is the owner's".
+12. **Route shapes** are in `src/workspace/types.ts` (section 3.1), read by the step and the screen.
+
+**Questions for the owner** (defaults applied):
+1. The proposed links and contracts start unticked (applied), so each line written is one the person ticked. Or they start ticked, a click less for a newcomer, at the cost of lines written that no one looked at.
+2. A folder service gets a checkout of its own (applied). Or the folder services of one repository share its clone, which saves disk but lets two fetches of the flow meet in one folder.
+3. Only calls are proposed as `consumes` (applied). An events listener and a shared database stay what the map shows, since the train's landing order reads `consumes` alone.
+
+**Open: the running service reads the workspace at its start (issue #420).** The flow's settings, the workspace included, are read once, when the service starts (`loadFlowConfig` in `flow/config.ts`), as the approval key is (P249's open point). A workspace the step writes is used from the service's next start, which the screen says. Proof step 9 needs it: lane `v2-j5-first-ticket` (or `v2-j5-compose`, with a restart the one command owns) closes it, with the approval key.
+
+**Open: the flow's own fetches of a private repository (issue #421).** The step's clones give git the credential through `gh` (decision 3). The flow's later fetches (`projectCheckout` from `flow/effects.ts` and `modules/lead.ts`) take git's environment from `lib/forge.ts`. Without a GitHub App, that environment names no helper that reads `GH_TOKEN`, and the Compose image runs no `gh auth setup-git`, so a fetch of a private repository there would be refused. Not changed here: those files are not this lane's. The rehearsal (lane `v2-j5-proof`) shows it, and the lane that owns `lib/forge.ts` or the image closes it, for instance with the same helper line.
+
+**Not done here.**
+- **No real run.** The plan's real run (section 9.5: listing and cloning the two example repositories with the `gh` login's credential) was not done, because the brief says fakes only. The step is proven against a fake `gh` on PATH over temporary bare repositories made from `examples/`. The real list and clone is the rehearsal's or the real run's.
+- **Out of scope.** The setup session per service (C4) stays section 13's.
+
+**Tests first.** `4c9010a3` committed the tests alone, with `src/workspace/types.ts` (the shapes the tests name). On it:
+- `test/workspace/guess.test.ts` and `test/workspace/connect.test.ts` could not load what they test;
+- the six new component cases failed;
+- the assistant's stub case was moved from the workspace step to the environment step's stub;
+- the assistant's browser test gained a fake `gh` (its workspace page now lists through `gh` once the forge step is done) and waits for the filled step.
+
+After the review, the screen had sent a repository kept whole after it was no longer picked, which the service refuses. The proposal and the write now send only the repositories they name, and the layout's radio buttons follow the choice at once. The browser test takes that path: a monorepo kept whole, then unpicked, then the two examples. Changes that came with the code: the i18n audit names `setup-workspace.workspace_services` ("Services") among the words French writes as English does, and French puts a no-break space before `:` and `?`, as the services catalog does.
+
+**Captures** (`docs/v2/workspace-connect/`): the proposal of the two examples, at 1440, 1280, 768 and 390 px, light and dark, in English, and at 1440 in French. Taken by `app/test/setup/workspace-browser.test.ts` with `CLEARED_V2_CAPTURES`, on loopback ports the kernel picked.
+
+**Checks.**
+Run on the merge of `origin/v2` at `4ec9ab52`, with pull request 413 merged.
+- `npm run typecheck` passes.
+- `npm test` with `CLEARED_V2_PLAYWRIGHT` set: 2642 Node tests, 2639 pass, 2 skipped and 1 fails, `app/test/notify/browser.test.ts`. It fails the same way on a clean checkout of `origin/v2` at `4ec9ab52` without this lane, run here: the notification button is never offered in this server's headless Chrome, as P249's entry says.
+- 372 Vitest tests pass.
+- The assistant's two browser tests (`setup-browser`, `workspace-browser`) pass in both languages, axe finding nothing.
+- An earlier run, before the merge and without browsers: 2642 Node tests, 2527 pass, 113 skipped and 2 failed: `test/wording.test.ts` (a placeholder `{items}` reads as a duration in milliseconds, so it became `{operations}`) and `app/test/polish/copy.test.ts` (the empty list of calls said two sentences, so the second became a note of its own).
+- `npm run guard -- --base origin/v2`: nothing refused.
+- The guard does not read `docs/v2/`, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
+
+**Resources.**
+- No Docker object, no Claude Code login read.
+- No GitHub, Slack, Cursor or Codex account used.
+- Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issue and the pull request, nothing else.
+- Ports: only the tests' own ephemeral loopback ones. No tunnel, no secret.
+
+**The merge of 417** (lane `v2-j5-doctor`, issue #415, at `origin/v2` `c463e52`). 417 took the id P251 for the doctor's ready section, so this lane's line is P252: the matrix, section 9 of the plan and this entry say so. The assistant's browser test now waits for both filled steps: the workspace step's list and the checks step's lines.
+
+**The merge of 419** (lane `v2-j5-run`, issue #416, at `origin/v2` `9e37404`). 419 keeps P253, so this lane's P252 stands; both log entries and matrix lines are kept.
+
+**The review of 418** (at `2de3d6b`, blocking). The file's guard read each line once joined, for `\r` and NUL only. A `\n` inside one value went through, so a folder of a repository named with a line break, which git allows, could add a section to `workspace.conf`. Two fixes:
+- `renderWorkspace` now checks every value on its own for `\r`, `\n` and NUL before it is written, and refuses as `invalid`. That covers the id, the workspace's name, each service's name, repository, address, base, path, dir, consumes, contract path and the keys kept by hand.
+- The guess never proposes a folder whose name holds a control character, whether a top folder or a workspaces entry.
+
+Tests first (`65ed443d`): a render case per value, a guess case, and a repository with such a folder whose file gets no extra section. The two open points above became issues #420 and #421.
+
+- Pull request: 418, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-connect`.

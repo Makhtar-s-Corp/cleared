@@ -53,5 +53,7 @@
   "map_problem_dropped": "Names left out: {n}",
   "map_down": "The service map is not available: the service runs no workspace.",
   "map_read_failed": "The service map could not be read. Try again in a moment.",
-  "map_refresh_failed": "The map could not be refreshed. Try again in a moment."
+  "map_refresh_failed": "The map could not be refreshed. Try again in a moment.",
+  "map_connect": "Connect repositories",
+  "map_connect_hint": "No workspace yet? Pick its repositories in the assistant."
 }

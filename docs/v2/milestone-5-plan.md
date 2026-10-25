@@ -238,7 +238,7 @@ Matrix line P253, pull request 419 (issue #416). Three choices of the author, as
 
 ## 9. Connect a workspace (`v2-j5-connect`)
 
-Matrix: M10 (several repositories, setup sessions, links guessed and proposed). Wave 2. Effort L.
+Matrix: M10 (several repositories, setup sessions, links guessed and proposed), and P252, the lane's own line, added when it delivered. Wave 2. Effort L.
 
 ### 9.1 Context
 

@@ -30,6 +30,7 @@ import { serviceSource } from '../../src/proxy.ts';
 import { SESSION_TABLES } from '../../src/session-cookie.ts';
 import { fakeDockerOnPath } from '../../../test/doctor/fake-docker-cli.ts';
 import { FakeForge } from '../../../test/setup/fakes/github.ts';
+import { fakeGh } from '../../../test/forge/fake-gh.ts';
 import { FAST, PASSWORD, startSetup } from '../../../test/setup/support.ts';
 import { startApp } from '../support.ts';
 
@@ -81,7 +82,9 @@ async function run(language: 'en' | 'fr'): Promise<void> {
   const docker = fakeDockerOnPath();
   const fake = new FakeForge({ [GOOD]: ['org/guestbook', 'org/filter-api'] });
   const api = await fake.listen();
-  const service = await startSetup({ env: { CLEARED_V2_FORGE_GITHUB_API: api }, container: echoContainer() });
+  // The workspace step lists through gh once the forge step is done: a fake on PATH, so no call reaches GitHub.
+  const gh = fakeGh({ repositories: [{ repo: 'org/guestbook', url: 'https://forge.invalid/org/guestbook.git', base: 'main', private: false, archived: false }], pulls: [] });
+  const service = await startSetup({ env: { CLEARED_V2_FORGE_GITHUB_API: api, PATH: gh.env.PATH as string }, container: echoContainer() });
   service.start();
   const code = SETUP_CODE_LINE.exec(service.lines.find((line) => SETUP_CODE_LINE.test(line)) ?? '')?.[1] ?? '';
   assert.ok(code, 'the service printed a code');
@@ -149,8 +152,10 @@ async function run(language: 'en' | 'fr'): Promise<void> {
 
     for (const id of ['workspace', 'environment', 'secrets', 'checks', 'first-ticket']) {
       await page.waitForURL(`${app.base}/setup/${id}`);
-      await page.locator(id === 'checks' ? '[data-check="docker"]' : `[data-step-stub="${id}"]`).waitFor();
-      if (id === 'workspace') await checked(page, 'a stub');
+      // The workspace and checks steps are filled (lanes v2-j5-connect and v2-j5-doctor, each with its own tests); the others are stubs.
+      const marker = id === 'workspace' ? '[data-workspace-step] [name="repository"]' : id === 'checks' ? '[data-check="docker"]' : `[data-step-stub="${id}"]`;
+      await page.locator(marker).first().waitFor();
+      if (id === 'environment') await checked(page, 'a stub');
       await page.click('[data-act="setup_skip"]');
     }
     await page.locator('[data-setup-finished]').waitFor();
