@@ -679,6 +679,21 @@ Usage: codex queue [OPTIONS] --thread <THREAD> --message <TEXT>
 
 Also run without pasting: `claude mcp --help`, `claude mcp serve --help`, `claude auth --help`, `codex resume --help`, `codex mcp --help`, `codex login --help`, `codex features list`, `codex debug --help`. `codex mcp-server --help` and `codex proto --help` print the top-level help: neither is a subcommand in 0.163.0.
 
+### The system prompt and the prompt cache (2026-10-25, issue #335, not verified by a run)
+
+Lane `j3-prompt-cache` (P219) gives `query()` `systemPrompt: { type: 'preset', preset: 'claude_code', append: <CLAUDE.md>, excludeDynamicSections: true, snapshot: true }`. Read in `sdk.d.ts` of `@anthropic-ai/claude-agent-sdk` 0.3.306, the version the image pins:
+
+- `excludeDynamicSections` takes the per-user sections out of the system prompt: the working directory, auto-memory and git status. The SDK gives them to the model again as the first user message. The SDK states the tradeoff: that context steers the model "marginally less" from a user message than from the system prompt.
+- `snapshot`, the default, records the system prompt on the first request and sends the record as is for the rest of the session.
+
+Neither was run against the real CLI: a run needs the session image and the service's login, and this lane used neither. These checks are the ones to run again:
+
+- the `claude-code` section of the doctor: the briefing's codeword (MAPLE);
+- a question about the working directory or the branch, answered from that first message;
+- a second session started with the same CLAUDE.md within 5 minutes, whose `cachedInputTokens` should then cover the briefing.
+
+`v2/src/session/adapters/claude-code/map.ts` turns a user frame into events only for its tool results. A context message the SDK might print therefore reaches neither the ledger nor the thread (`test/session/claude-code/map.test.ts`).
+
 ## Cursor harness (milestone 3, lane j3-cursor-harness)
 
 Written on 2026-10-23 with **no Cursor account and no Cursor program on this server**. Everything below is split in two: what the official pages say (read that day, not run) and what the tests prove against fakes. Nothing here was observed from a real Cursor run. The owner's trial list is at the end.
