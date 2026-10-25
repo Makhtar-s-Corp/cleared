@@ -1,6 +1,5 @@
 // Pictures of the three gestures on a phone, from the demonstration data, driven for real:
-// a virtual authenticator (the browser's own test facility) holds the passkey, and every
-// click goes through the same routes as on a phone. Nothing here bypasses the server.
+// every click goes through the same routes as on a phone. Nothing here bypasses the server.
 //   npm install && node screenshots-actions.ts [output folder]
 import { chromium } from 'playwright-core';
 import type { Page } from 'playwright-core';
@@ -12,9 +11,8 @@ import { appServer } from './server.ts';
 import { createActions } from './lib/actions.ts';
 import { demoSource } from './sources/demo.ts';
 import type { AddressInfo } from 'node:net';
-import type { Passkey } from './lib/credentials.ts';
 
-type Scene = { page: Page; shot: (name: string) => Promise<unknown>; registerPasskey: () => Promise<void>; open: (id: string) => Promise<void>; source: ReturnType<typeof demoSource>; origin: string };
+type Scene = { page: Page; shot: (name: string) => Promise<unknown>; open: (id: string) => Promise<void>; source: ReturnType<typeof demoSource>; origin: string };
 
 const out = process.argv[2] ?? new URL('./screenshots', import.meta.url).pathname;
 mkdirSync(out, { recursive: true });
@@ -25,8 +23,7 @@ async function scenario(graceMs: number, run: (scene: Scene) => Promise<void>) {
   const port = await freePort();
   const origin = `http://localhost:${port}`;
   const source = demoSource();
-  let keys: Passkey[] = [];
-  const actions = createActions({ source, origin, owner: 'alex', graceMs, readPasskeys: () => keys, writePasskeys: (list) => { keys = list; }, run: async () => ({ ok: true, author: 'alex', verified: true }) });
+  const actions = createActions({ source, origin, graceMs, run: async () => ({ ok: true, author: 'alex', verified: true }) });
   const server = appServer({ source, token, ranges: ['127.0.0.0/8', '::1/128'], pollMs: 500, heartbeatMs: 2000, actions, origin, owner: 'alex' });
   await new Promise<void>((r) => server.listen(port, '127.0.0.1', r));
   const signIn = await fetch(`http://127.0.0.1:${port}/session`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
@@ -37,24 +34,13 @@ async function scenario(graceMs: number, run: (scene: Scene) => Promise<void>) {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   await context.addCookies([{ name: 'cleared_app', value: session, url: origin }]);
   const page = await context.newPage();
-  const cdp = await context.newCDPSession(page);
-  await cdp.send('WebAuthn.enable');
-  await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
   const shot = (name: string) => page.screenshot({ path: join(out, `${name}.png`) });
-  const registerPasskey = async () => {
-    await page.goto(`${origin}/register#${actions.mintGrant().grant}`);
-    await page.click('#go');
-    await page.waitForSelector('#err.success');
-  };
   const open = async (id: string) => { await page.goto(`${origin}/`); await page.waitForSelector('.card'); await page.click(`.card[data-id="${id}"] button`); await page.waitForSelector('#ph-actions:not([hidden])'); await page.waitForTimeout(250); };
-  try { await run({ page, shot, registerPasskey, open, source, origin }); } finally { await browser.close(); server.close(); server.closeAllConnections(); }
+  try { await run({ page, shot, open, source, origin }); } finally { await browser.close(); server.close(); server.closeAllConnections(); }
 }
 
-// The grace delay as it really is (sixty seconds), the version change and the missing passkey.
-await scenario(60000, async ({ page, shot, registerPasskey, open, source }) => {
-  await open('EX-31');
-  await shot('gesture-no-passkey');
-  await registerPasskey();
+// The grace delay as it really is (sixty seconds) and the version change.
+await scenario(60000, async ({ page, shot, open, source }) => {
   await open('EX-31');
   await shot('gesture-clear-ready');
   await page.click('.act.ink');
@@ -71,8 +57,7 @@ await scenario(60000, async ({ page, shot, registerPasskey, open, source }) => {
 });
 
 // A short delay, so that the picture after the write can be taken.
-await scenario(3000, async ({ page, shot, registerPasskey, open }) => {
-  await registerPasskey();
+await scenario(3000, async ({ page, shot, open }) => {
   await open('EX-31');
   await page.click('.act.ink');
   await page.waitForSelector('.act-note', { timeout: 20000 });

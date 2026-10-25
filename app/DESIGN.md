@@ -142,7 +142,7 @@ Order, always:
 4. A small block of facts: who wrote and who reviewed, the size of the change with the link to the pull request (and "draft"), the checks, the time worked, the share of the week's usage when measured.
 5. Folded: the team's report, the squad, the black box.
 - The action panel stays at the bottom, with a hairline: "Send back" (outline) and "Clear to land" (solid ink) side by side, **one commit** in small mono under the label of the main button (all versions it clears stay in its accessible name and tooltip). At most 36 % of the height on a computer, 60 % on a phone; while the porthole has more below, the panel casts a soft shadow upward.
-- The click asks for a passkey, then a **grace bar** appears: a 4 px flat track with an ink fill that empties over 60 seconds, "Clearing in 42 s" and an ink "Undo". After the write the card says "Cleared by you at 14:02, landing" until the next snapshot. A question's options are outlined buttons above a text field. Without a passkey (or a secure address) the buttons are disabled and say why. Nothing pretends to act.
+- The click starts a **grace bar**: a 4 px flat track with an ink fill that empties over 60 seconds, "Clearing in 42 s" and an ink "Undo". After the write the card says "Cleared by you at 14:02, landing" until the next snapshot. A question's options are outlined buttons above a text field. Without a secure address the buttons are disabled and say why. Nothing pretends to act.
 
 ## 5. Layout
 

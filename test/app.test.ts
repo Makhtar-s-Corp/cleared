@@ -60,7 +60,7 @@ test('the read routes are GET only; the write routes are the listed POSTs, and n
 });
 
 test('the server code holds no way to write: no tracker, ledger or process write is imported or called', () => {
-  const files = ['app/server.ts', 'app/sources/live.ts', 'app/lib/events.ts', 'app/lib/session.ts', 'app/lib/actions.ts', 'app/lib/webauthn.ts'];
+  const files = ['app/server.ts', 'app/sources/live.ts', 'app/lib/events.ts', 'app/lib/session.ts', 'app/lib/actions.ts'];
   for (const f of files) {
     const code = readFileSync(join(import.meta.dirname, '..', f), 'utf8').replace(/\/\/.*$/gm, '');
     for (const forbidden of [/\.createTicket\(/, /\.moveTicket\(/, /\.comment\(/, /\.editComment\(/, /\bINSERT\b|\bUPDATE\b|\bDELETE\b|\bDROP\b/, /writeFile|appendFile|unlink|rmSync/, /runStart|runEnd|addEvent/, /spawn-lane|merge-pr|kill-lane/])
@@ -349,7 +349,7 @@ async function boardFixture(adapter = 'local', imageUrl: string | null = null) {
 }
 
 test('the app source has no tracker, forge, process or network dependency', () => {
-  for (const path of ['app/server.ts', 'app/sources/live.ts', 'app/lib/events.ts', 'app/lib/session.ts', 'app/lib/actions.ts', 'app/lib/webauthn.ts']) {
+  for (const path of ['app/server.ts', 'app/sources/live.ts', 'app/lib/events.ts', 'app/lib/session.ts', 'app/lib/actions.ts']) {
     const code = readFileSync(join(import.meta.dirname, '..', path), 'utf8').replace(/\/\/.*$/gm, '');
     assert.doesNotMatch(code, /tracker\/contract|tracker\/adapters|\bgh\b|fetch\(|execFile|spawn\(|https?\.request|createConnection/, path);
   }
