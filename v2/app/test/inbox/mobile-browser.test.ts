@@ -129,6 +129,9 @@ for (const language of LANGUAGES) {
       // Go is the gesture the card waits for: the wider of the two, as Approve is beside Send back.
       const width = (act: string) => page.locator(`#detail [data-act="${act}"]`).evaluate((button: any) => button.getBoundingClientRect().width);
       assert.ok(await width('plan_go') > await width('plan_change'), 'Go is wider than Change');
+      // The Go's answer held 400 ms, as a slow runner does: the cache already
+      // shows the plan handled, with no Go yet, while the write is on its way.
+      await page.route('**/sessions/*/plan/go', async (route: any) => { await new Promise((resolve) => setTimeout(resolve, 400)); await route.continue(); });
       await page.locator('#detail [data-act="plan_go"]').tap();
       await page.locator('#detail .d-done').waitFor();
       assert.match((await page.locator('#detail .d-done').innerText()).trim(), words.go);
