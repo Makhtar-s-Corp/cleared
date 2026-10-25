@@ -48,9 +48,12 @@ type Started = { url: string; child: ChildProcess; log: () => string };
 
 async function start(state: string): Promise<Started> {
   const port = await freePort();
-  const env: NodeJS.ProcessEnv = { ...process.env, CLEARED_STATE_DIR: state, CLEARED_V2_PORT: String(port), CLEARED_V2_HOST: '127.0.0.1' };
-  delete env.ORCH_LEDGER;
-  delete env.CLEARED_V2_PROJECT;
+  // As test/main.test.ts: no lead, no quota reading, no login, the home the temporary folder.
+  const env: NodeJS.ProcessEnv = {
+    ...process.env, HOME: state, CLEARED_STATE_DIR: state, CLEARED_V2_PORT: String(port), CLEARED_V2_HOST: '127.0.0.1',
+    CLEARED_V2_LEAD_ENABLED: 'off', CLEARED_V2_QUOTA_MINUTES: '0',
+  };
+  for (const key of ['ORCH_LEDGER', 'CLEARED_V2_PROJECT', 'CLEARED_V2_WORKSPACE', 'CLEARED_V2_STATE_DIR', 'CLEARED_V2_ADAPTER', 'CLEARED_CLAUDE_CREDENTIALS']) delete env[key];
   const child = spawn(process.execPath, [main], { env });
   let log = '';
   child.stdout?.on('data', (chunk) => { log += chunk; });
