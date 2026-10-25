@@ -7120,5 +7120,5 @@ Changes that came with the code:
 - Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issue and the pull request.
 - Ports: only the tests' own ephemeral loopback ones (`ss -ltn` read first). No tunnel, no secret.
 
-- Pull request: against `v2`.
+- Pull request: 427, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-images`.

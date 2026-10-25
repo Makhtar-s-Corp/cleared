@@ -293,7 +293,7 @@ None: Docker on this server, labelled.
 
 ### 10.6 Delivered
 
-Matrix line P254 (issue #422). What the author found and chose, as the decisions log of 2026-10-25 says. Section 2 says each session builds or pulls what its `.devcontainer` names: at `3c27792` no session read it, so this lane is the first to. The install command is a new key, `[session] install_command` of the service's `.cleared/agents.conf`, one simple command. The dependencies are installed outside `/workspace`, which the checkout's mount hides, with `/node_modules` linked to them. The real run of `doctor images` was not made: this server holds no session or egress image, and building them was not done here, so C15 and P254 stay `partial` until the rehearsal measures the start.
+Matrix line P254, pull request 427 (issue #422). What the author found and chose, as the decisions log of 2026-10-25 says. Section 2 says each session builds or pulls what its `.devcontainer` names: at `3c27792` no session read it, so this lane is the first to. The install command is a new key, `[session] install_command` of the service's `.cleared/agents.conf`, one simple command. The dependencies are installed outside `/workspace`, which the checkout's mount hides, with `/node_modules` linked to them. The real run of `doctor images` was not made: this server holds no session or egress image, and building them was not done here, so C15 and P254 stay `partial` until the rehearsal measures the start.
 
 ## 11. GitLab, the second forge (`v2-j5-gitlab`)
 
