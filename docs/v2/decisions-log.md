@@ -5319,5 +5319,5 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Resources.** No Docker object, no account, no real deploy, no tunnel, no secret. The tests listen on port 0 on loopback; the real Chromium opens only those fake pages.
 
-- Pull request: see below, against `v2`.
+- Pull request: 346, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-post-deploy`.
