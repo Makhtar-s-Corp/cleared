@@ -51,7 +51,7 @@ test('each template\'s sections, in both languages, from the catalogs', () => {
       const body = templateBody(template, t);
       assert.match(body, /^## /, `${template}: starts with its first section`);
       assert.ok(body.length < 1000, `${template}: short`);
-      assert.doesNotMatch(body, /—|⟦/, `${template}: no em dash, no missing key`);
+      assert.ok(!body.includes(String.fromCharCode(0x2014)) && !body.includes(String.fromCharCode(0x27e6)), `${template}: no em dash, no missing key`);
     }
   }
   assert.match(templateBody('bug', en), /## Steps to reproduce/);

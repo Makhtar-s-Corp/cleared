@@ -160,10 +160,14 @@
   /* A phone keeps the field and New ticket on one row (lane 38): a goal and the lead are the next block down and
      in the palette. */
   .ask-actions [data-lead] { display: none; }
-  .ask { flex-wrap: nowrap; }
-  .ask input { flex: 1 1 0; }
-  .ask-actions { flex: none; }
-  .ask:has(#ask-input:not(:placeholder-shown)), .ask:has(.ask-services) { flex-wrap: wrap; }
+  /* Template and Batch (P214) would leave the field a few letters: they take the next line, the field and
+     New ticket keep theirs, and what the bar opens comes under them. */
+  .ask { flex-wrap: wrap; }
+  .ask input { flex: 1 1 160px; }
+  .ask-actions { display: contents; }
+  .ask-actions .primary { order: 1; }
+  .ask-actions [data-bar] { order: 2; }
+  .ask-templates, .ask textarea, .ask-services, .ask-variants { order: 3; }
 }
 /* the rows, by the width of their own column */
 @container rows (max-width: 720px) {
@@ -205,3 +209,5 @@
 .ask:has(#ask-input:not(:placeholder-shown)) .ask-variants { display: flex; }
 .ask textarea + .ask-variants { border-top: 0; padding-top: 2px; }
 .ask-variants-label { color: var(--text-muted); font-size: var(--text-sm); margin-right: var(--space-1); }
+/* The ready-made tickets (P214): a row under the field while the chip has it open or one is picked. */
+.ask-templates { display: flex; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--hairline); }

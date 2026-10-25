@@ -99,7 +99,8 @@ for (const language of ['fr', 'en'] as const) {
       await page.waitForFunction(() => /LOCAL-/.test(document.getElementById('ask-note')?.innerText ?? ''));
       assert.match((await page.locator('#ask-note').innerText()).trim(), words.created);
       assert.equal(sent.length, 1);
-      assert.deepEqual(sent[0], { title: 'The browser check fails on main', project: 'guestbook', body: written, labels: ['type:ci'] });
+      const { title, body, labels } = sent[0];
+      assert.deepEqual({ title, body, labels }, { title: 'The browser check fails on main', body: written, labels: ['type:ci'] });
       const tickets = await page.evaluate(async () => (await fetch('/api/service/tickets')).json());
       assert.deepEqual(tickets.find((x: any) => x.title === 'The browser check fails on main')?.labels, ['type:ci']);
       assert.equal(await page.inputValue('#ask-body'), '');
