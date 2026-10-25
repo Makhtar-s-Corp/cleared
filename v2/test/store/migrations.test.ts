@@ -131,7 +131,7 @@ test('a milestone 2 ledger is migrated: versions recorded, a backup with the sam
 test('the v1 reader of the tracker tables (lib/tracker/adapters/local.mjs) still lists the tickets of a migrated ledger', withDir((dir) => {
   const path = fixtureLedger(dir);
   start(path);
-  const listed = JSON.parse(execFileSync(process.execPath, [new URL('./v1-list.mjs', import.meta.url).pathname, path], { encoding: 'utf8' })) as { id: string; title: string; status: string; project: string }[];
+  const listed = JSON.parse(execFileSync(process.execPath, [new URL('./v1-list.ts', import.meta.url).pathname, path], { encoding: 'utf8' })) as { id: string; title: string; status: string; project: string }[];
   // v1 names a local ticket by its number.
   assert.deepEqual(listed.map((t) => [t.id, t.title, t.status, t.project]), [
     ['1', 'Newest entry first', 'In Review', 'guestbook'],
