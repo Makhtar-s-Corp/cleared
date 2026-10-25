@@ -78,10 +78,10 @@ test('a running author is a lane: its ticket, its status, and how long it has ru
   assert.equal(lane.status, 'In Progress');
   assert.equal(lane.running, true);
   assert.equal(lane.startedAt, '2026-10-21T10:00:00.000Z');
-  assert.equal(lane.runningFor, '1h 30m');
+  assert.equal(lane.runningFor, '1h\u00a030m');
   assert.deepEqual(lane.sessions.map((s) => [s.sessionId, s.role, s.phase]), [[id, 'author', 'waiting_human']]);
   const fr = await serverOf(t, { language: 'fr' }).content('list_lanes') as { lanes: Lane[] };
-  assert.equal(fr.lanes[0]?.runningFor, '1 h 30');
+  assert.equal(fr.lanes[0]?.runningFor, '1\u00a0h\u00a030');
 });
 
 test('a file is held by the session that edited it or planned to, from the checkout\'s root; a folder finds the files under it', async () => {
@@ -109,7 +109,7 @@ test('a file is held by the session that edited it or planned to, from the check
   assert.deepEqual(prefix.files, [], 'a folder is matched whole, never a piece of a name');
   t.clock.now += 5 * 60_000;
   const later = await content('locked_files', { path: 'src/view.ts' }) as { files: Held[] };
-  assert.equal(later.files[0]?.heldFor, '5 min');
+  assert.equal(later.files[0]?.heldFor, '5\u00a0min');
 });
 
 test('the files stay held while the pull request waits, and are let go once the ticket is done', async () => {

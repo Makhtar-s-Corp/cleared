@@ -13,7 +13,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { createApiRoutes } from '../../src/api/routes.ts';
-import { MCP_PATH, MCP_TOKEN_FILE, lanesMcpRoutes, mcpTokenPath, privatePeer, readOrCreateMcpToken, type McpRouteDeps } from '../../src/mcp/http.ts';
+import { MCP_PATH, MCP_ACCESS_FILE, lanesMcpRoutes, mcpTokenPath, privatePeer, readOrCreateMcpToken, type McpRouteDeps } from '../../src/mcp/http.ts';
 import { createRedactor } from '../../src/mcp/redact.ts';
 import { PROOF_FILE, proofPath, readOrCreateProof } from '../../src/modules/users.ts';
 import { dispatch, type App, type Route } from '../../src/modules/registry.ts';
@@ -61,8 +61,8 @@ test('the route is POST /mcp, and the token is a file of its own beside the ledg
   assert.equal(MCP_PATH, '/mcp');
   const routes = lanesMcpRoutes({ engine: () => undefined, store: () => undefined, token: () => undefined, language: 'en', redactor: createRedactor({ env: {}, paths: [] }) });
   assert.deepEqual(routes.map((r) => `${r.method} ${r.path}`), ['POST /mcp']);
-  assert.equal(mcpTokenPath('/state/ledger.db'), `/state/${MCP_TOKEN_FILE}`);
-  assert.notEqual(MCP_TOKEN_FILE, PROOF_FILE);
+  assert.equal(mcpTokenPath('/state/ledger.db'), `/state/${MCP_ACCESS_FILE}`);
+  assert.notEqual(MCP_ACCESS_FILE, PROOF_FILE);
 });
 
 test('the token is made once, 64 hex characters that only this account reads, and is not the app\'s proof', () => {
