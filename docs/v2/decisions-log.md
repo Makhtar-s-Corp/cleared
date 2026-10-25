@@ -5822,3 +5822,13 @@ With the CPU slowed four times the budget is at its edge: what is left is the ne
 
 - Pull request: 372, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-tab-perf`.
+
+## 2026-10-25: the navigation, the session, the inbox and Consumption redrawn as one calm workbench (the author's choices, lane `j3-visual-redesign`, P227, issue #375)
+
+**Design direction** (written after Impeccable's `init`, `document` and `critique`, before the screens' sheets changed). The brief pins the world: the web and desktop apps of Codex and Devin, which `ui-overhaul-plan.md` section 3 already reads, with Linear and Raycast as second references; the tokens of `styles/app.css` stay, no gradient, no new feature. So this is the category's own look played straight, not a new world: no concept roll, no comp.
+1. **One framed surface per screen.** What the person works in is the one raised pane (the session's thread, the inbox's detail); what stands beside it lies on the page, its sections parted by a hairline, never a card beside a card or a card in a card.
+2. **A calm source list.** The sidebar is a list on its tinted ground: the search is a row of it, not a field; the screen shown is a raised row (the surface and its one-pixel ring), as a native source list draws it; a live session's title starts where a screen's name starts, its state's dot in the icons' column.
+3. **Amber is a dot.** In the inbox's list, the kind of what waits is said in words with one amber dot before it; the detail keeps its amber kind, the one place the eye goes.
+4. **A computer's controls on a computer.** With a mouse from 1024 px, buttons are 32 to 36 px, one line each (Approve's commit beside its label); touch screens and every width under 1024 keep 44 px (P217).
+5. **Consumption after the product owner's reference** (a capture validated for this screen, kept out of the repository, nothing of its names taken): the period, the title, the line under it, the dates at the right; a card per agent on the sunken ground with its figures on the left and its curve beside them; the limits, the cost and the levers as sections of the page; each lever's choices drawn as radio options, the picked one ringed in ink, not filled. What the reference shows and Cleared does not have (a stacked cost bar, a button to a principle, one radio group across levers) is not added.
+6. **Type and colour.** Sentence case everywhere, no letters spaced out (DESIGN.md section 3); the token scale only; red text for a limit that will be reached, its bar in the same red, not the brighter fill.
