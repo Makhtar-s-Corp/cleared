@@ -10,10 +10,10 @@
 // app/test/time.test.ts is its table, and web/test/durations.test.tsx reads
 // every screen for a duration in minutes above 59. The app's numbers go
 // through here too (fixed, count, decimal). Two dates do not: the tower's
-// next scheduled run names its weekday and the Lead's thread its day and
-// month through Date.toLocaleDateString in the page's language, Intl as
-// well, but outside this file.
-import type { Translate } from './i18n.ts';
+// next scheduled run names its weekday through Date.toLocaleDateString and
+// the Lead's thread its day and month through Intl.DateTimeFormat, in the
+// page's language, Intl as well, but outside this file.
+import { numberFormat, type Translate } from './i18n.ts';
 
 const HOUR = 60;
 const DAY = 24 * HOUR;
@@ -23,23 +23,23 @@ const pad = (n: number) => String(n).padStart(2, '0');
 // catalog's digits ("10 h 05" in French, "10h 5m" in English).
 // A translator without the shell's catalog (a test's) counts in English.
 const locale = (t: Translate) => (t('locale') === 'fr' ? 'fr' : 'en');
-const number = (n: number, t: Translate, digits = 1) => new Intl.NumberFormat(locale(t), { minimumIntegerDigits: digits, useGrouping: false }).format(n);
+const number = (n: number, t: Translate, digits = 1) => numberFormat(locale(t), { minimumIntegerDigits: digits, useGrouping: false }).format(n);
 
 // A number with fixed decimals in a language ("3,90" or "3.90"), never grouped inside a sentence.
 export const fixed = (value: number, digits: number, language: 'en' | 'fr'): string =>
-  new Intl.NumberFormat(language, { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false }).format(value);
+  numberFormat(language, { minimumFractionDigits: digits, maximumFractionDigits: digits, useGrouping: false }).format(value);
 
 // A count in a language, grouped as the language groups ("35 500" or "35,500").
-export const count = (value: number, language: 'en' | 'fr'): string => new Intl.NumberFormat(language).format(value);
+export const count = (value: number, language: 'en' | 'fr'): string => numberFormat(language).format(value);
 
 // A count grouped as the catalog's language groups it, for a screen that draws
 // it on its own ("+12 345" lines, an editor scope's "1,234"); a sentence of
 // the catalog gets the same from the translator.
-export const quantity = (value: number, t: Translate): string => new Intl.NumberFormat(locale(t)).format(value);
+export const quantity = (value: number, t: Translate): string => numberFormat(locale(t)).format(value);
 
 // A decimal number in the catalog's locale: "3,9" in French, "3.9" in English.
 export const decimal = (value: number, t: Translate, min: number, max: number): string =>
-  new Intl.NumberFormat(locale(t), { minimumFractionDigits: min, maximumFractionDigits: max, useGrouping: false }).format(value);
+  numberFormat(locale(t), { minimumFractionDigits: min, maximumFractionDigits: max, useGrouping: false }).format(value);
 
 // 42 min, 1 h, 10 h 30, 1 j, 2 j 4 h: rounded to the minute, never negative.
 // Past a day the minutes are dropped.
@@ -73,6 +73,17 @@ export function lasted(ms: number, t: Translate): string {
   return seconds < 60 ? t('time_seconds', { n: number(seconds, t) }) : duration(Math.floor(seconds / 60), t);
 }
 
+// "hier", "yesterday": Intl's word, built once per language.
+const yesterdays = new Map<string, string>();
+const yesterday = (language: string): string => {
+  let word = yesterdays.get(language);
+  if (word === undefined) {
+    word = new Intl.RelativeTimeFormat(language, { numeric: 'auto' }).format(-1, 'day');
+    yesterdays.set(language, word);
+  }
+  return word;
+};
+
 const dayStart = (at: Date) => new Date(at.getFullYear(), at.getMonth(), at.getDate()).getTime();
 
 // When something happened, relative to now: minutes under an hour, hours
@@ -84,7 +95,7 @@ export function ago(at: string, now: Date, t: Translate): string {
   if (minutes < HOUR) return t('time_ago', { time: t('time_minutes', { n: number(minutes, t) }) });
   const days = Math.round((dayStart(now) - dayStart(new Date(at))) / (DAY * 60_000));
   if (days <= 0) return t('time_ago', { time: t('time_hours', { h: number(Math.floor(minutes / HOUR), t) }) });
-  if (days === 1) return new Intl.RelativeTimeFormat(locale(t), { numeric: 'auto' }).format(-1, 'day');
+  if (days === 1) return yesterday(locale(t));
   return t('time_ago', { time: t('time_days', { d: number(days, t) }) });
 }
 

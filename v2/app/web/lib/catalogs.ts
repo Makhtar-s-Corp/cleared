@@ -31,14 +31,26 @@ const FILES: Readonly<Record<CatalogScreen, Readonly<Record<Language, Catalog>>>
   consumption: { en: consumptionEn, fr: consumptionFr },
 };
 
+// Each made once per language: a switch to a screen makes its translator
+// again, and the catalogs hold hundreds of keys (lane j3-tab-perf).
+const merged = new Map<string, Catalog>();
+const once = (key: string, make: () => Catalog): Catalog => {
+  let catalog = merged.get(key);
+  if (!catalog) {
+    catalog = make();
+    merged.set(key, catalog);
+  }
+  return catalog;
+};
+
 export function catalogOf(screen: CatalogScreen, language: Language): Catalog {
   const files = FILES[screen];
-  return language === 'en' ? files.en : { ...files.en, ...files[language] };
+  return language === 'en' ? files.en : once(`${screen} ${language}`, () => ({ ...files.en, ...files[language] }));
 }
 
 // A screen's catalog over the shell's, as the shell gives it to the screen.
 export function screenCatalog(screen: CatalogScreen, language: Language): Catalog {
-  return { ...catalogOf('shell', language), ...catalogOf(screen, language) };
+  return once(`shell+${screen} ${language}`, () => ({ ...catalogOf('shell', language), ...catalogOf(screen, language) }));
 }
 
 export const isLanguage = (value: string | undefined): value is Language => value === 'en' || value === 'fr';

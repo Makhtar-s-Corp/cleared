@@ -16,7 +16,7 @@
 // screen keeps its scroll, has its title, turns on its own sheets
 // (lib/sheets.ts) and fails alone (lib/boundary.tsx).
 import { RouterProvider, useRouterState, type AnyRouter } from '@tanstack/react-router';
-import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType } from 'react';
+import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useInsertionEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType } from 'react';
 import type { LeadState, NextInboxItem, SessionSummary } from '../../../src/api/types.ts';
 import { json, serviceApi } from '@/lib/api.ts';
 import { ScreenBoundary } from '@/lib/boundary.tsx';
@@ -301,8 +301,11 @@ function Shell({ shared }: { readonly shared: Shared }) {
   const shownRow = place.session ? rows.find((row) => row.id === place.session) : undefined;
   const here = shownRow ? t('top_session', { ticket: shownRow.ticket, title: shownRow.title }) : t(titleKey(place.screen));
 
-  useScrollKept(place.path);
-  useLayoutEffect(() => {
+  // The screen's sheets on before any layout effect, the screen's own
+  // included (a child's run before the shell's): what they measure, and the
+  // layout the scroll below forces, is the next screen's as it will be
+  // painted, not laid out again in the same frame (lane j3-tab-perf).
+  useInsertionEffect(() => {
     showSheets(place.screen);
     document.body.dataset.screen = place.screen;
   }, [place.screen]);
@@ -314,16 +317,19 @@ function Shell({ shared }: { readonly shared: Shared }) {
   // screen reader: focus at the start of the new screen (the main region,
   // which draws no ring), and its name said. A move started in the
   // sidebar keeps the focus on the item pressed, as a native app's list
-  // of places does (lane 34's art director). Not on the first draw.
-  const [said, say] = useState('');
+  // of places does (lane 34's art director). Not on the first draw. The
+  // name is written into the live region, not drawn again by the shell.
+  const said = useRef<HTMLParagraphElement | null>(null);
   const moved = useRef(false);
   const fromSidebar = useRef(false);
   useLayoutEffect(() => {
     if (!moved.current) { moved.current = true; return; }
     if (!fromSidebar.current) document.getElementById('screen')?.focus({ preventScroll: true });
     fromSidebar.current = false;
-    say(document.title);
+    if (said.current) said.current.textContent = document.title;
   }, [place.path]);
+  // Last of the switch's changes to the page, since it forces a layout.
+  useScrollKept(place.path);
 
   const flipTheme = useCallback(() => {
     const next: Theme = currentTheme() === 'dark' ? 'light' : 'dark';
@@ -421,7 +427,7 @@ function Shell({ shared }: { readonly shared: Shared }) {
             {/* The sample data says so on every screen of a computer; a phone's top bar says it (Sidebar.tsx). */}
             {start.source === 'fixtures' ? <div className="top-actions"><p className="source-pill" id="source-pill">{t('source_fixtures')}</p></div> : null}
           </header>
-          <p className="sr-only" role="status" aria-live="polite" id="screen-said">{said}</p>
+          <p className="sr-only" role="status" aria-live="polite" id="screen-said" ref={said} />
           <main id="screen" className="screen" tabIndex={-1}>
             {place.session ? null : <Fragment key={place.screen === 'ask' ? place.path : place.screen}>{host(place.screen, place.path)}</Fragment>}
             {drawn.current.map((id) => (
