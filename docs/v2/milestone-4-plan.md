@@ -429,7 +429,7 @@ C3 asks for work to be handed to Cleared from Linear and GitHub Issues, Slack la
 - **The label.** `CLEARED_V2_DELEGATION_LABEL`, `cleared` by default, compared without case; a name that starts with `status:` is refused, so it cannot be read as a state. The delegation is read whenever a mirror runs; `CLEARED_V2_DELEGATION=off` turns it off.
 - **The mirror's own account.** The mirror never puts the label on or assigns an issue, except when it creates one from a ticket that carries the label: such a label, put on within a minute of the mirror's own write, is not a delegation. Any other delegation by the mirror's account is a person's, as for a state (the mirrors' log entry, decision 4).
 - **Polling.** The delegation is read in the mirror's pass: no webhook, no new listener.
-- **Matrix lines.** P243 (the delegation); C3 updated. Lanes `v2-j4-weekly-figures` (#396) and `v2-j4-service-map` (#397) run beside this one: the id is checked again at each merge of `origin/v2`.
+- **Matrix lines.** P243 (the delegation); C3 updated. The lanes of issues #396 (C17) and #397 (M6) run beside this one: the id is checked again at each merge of `origin/v2`.
 
 ### 10.4 Out of scope
 
