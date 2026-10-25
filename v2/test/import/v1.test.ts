@@ -32,9 +32,9 @@ test('without a size label, the size comes from the lines its merged pull reques
     { id: 'LOCAL-1', runs: [{ started: at(0), ended: at(5), lines: 15, pr: 3 }], measures: [measure(30, { pr: 3 })] },
     { id: 'LOCAL-2', runs: [{ started: at(0), ended: at(5), lines: 900, pr: 2 }, { started: at(6), ended: at(9), lines: 101, pr: 4 }], measures: [measure(30, { pr: 4 })] },
     // A tracker that is not the ledger's: no label to read, the lines still say it.
-    { id: 'ABC-12', runs: [{ started: at(0), ended: at(5), lines: 401, pr: 5 }], measures: [measure(30, { pr: 5 })] },
+    { id: 'TRK-12', runs: [{ started: at(0), ended: at(5), lines: 401, pr: 5 }], measures: [measure(30, { pr: 5 })] },
   ]);
-  assert.deepEqual(readV1(ledger).samples.map((s) => [s.ticket, s.size, s.lines]), [['ABC-12', 'l', 401], ['LOCAL-1', 'xs', 15], ['LOCAL-2', 'm', 101]]);
+  assert.deepEqual(readV1(ledger).samples.map((s) => [s.ticket, s.size, s.lines]), [['LOCAL-1', 'xs', 15], ['LOCAL-2', 'm', 101], ['TRK-12', 'l', 401]]);
 });
 
 test('the size thresholds: 20 lines or fewer xs, 100 or fewer s, 400 or fewer m, more l', () => {
