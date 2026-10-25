@@ -5321,3 +5321,7 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 - Pull request: 346, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-post-deploy`.
+
+## 2026-10-25: the non-blocking follow-ups of P216 (pull request 344) filed as issues
+
+**Decision.** The non-blocking follow-ups of P216 (#344) are open as issues #347 to #353, label `v2`: the Host header check of `POST /mcp` (#347), the language and the cleaner read at the start (#348), the stop when the ledger is not found (#349), a test of the MCP token (#350), safe durations on an invalid date (#351), one read of the history per call (#352), and the refusal of a peer outside the tailnet (#353). None blocks the merge of 344.
