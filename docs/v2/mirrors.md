@@ -1,6 +1,6 @@
 # Cleared v2: the GitHub Issues and Linear mirrors
 
-The app holds the tickets. A mirror keeps a copy of them on GitHub Issues, on Linear, or on both, and brings back what people change there. With no mirror set up, the app alone is enough (D17). The code is `v2/src/tickets/mirror.ts`, `mirror-github.ts` and `mirror-linear.ts` (milestone 4, issue #381, matrix P230 to P232; the comments, the edits and the live redraw, issue #386, P237).
+The app holds the tickets. A mirror keeps a copy of them on GitHub Issues, on Linear, or on both, and brings back what people change there. With no mirror set up, the app alone is enough (D17). The code is `v2/src/tickets/mirror.ts`, `mirror-github.ts` and `mirror-linear.ts` (milestone 4, issue #381, matrix P230 to P232; the comments, the edits and the live redraw, issue #386, P237; the delegation, issue #398, C3 and P244, with `v2/src/tickets/delegation.ts`).
 
 ## Settings
 
@@ -13,6 +13,8 @@ The service reads them at start, from its environment. A token is read from a fi
 | `CLEARED_V2_MIRROR_LINEAR_TEAM` | none | The Linear team's key, such as `ENG`. Needed with the Linear token. |
 | `CLEARED_V2_MIRROR_POLL_SECONDS` | `60` | Time between two passes, 15 at least. |
 | `CLEARED_V2_MIRROR_GITHUB_API`, `CLEARED_V2_MIRROR_LINEAR_API` | GitHub's and Linear's | Another address must be on loopback: these are for the tests' fakes. |
+| `CLEARED_V2_DELEGATION` | `on` | `off` stops reading delegations (below). |
+| `CLEARED_V2_DELEGATION_LABEL` | `cleared` | The label that hands an issue over to Cleared, compared without case. A name that starts with `status:` is refused. |
 | `CLEARED_V2_APP_LANGUAGE` | `fr` | The language of what the mirror writes on a tracker and on a ticket, the first line of a mirrored comment included. |
 
 Give the mirror an account of its own, a bot or an application, as v1 already asked of the agents (`[merge] separate_identity`). With a token of a person's own account, that person's moves on the tracker still count as theirs, unless they make a move the mirror made less than a minute before.
@@ -48,7 +50,7 @@ Not mirrored: a comment edited or deleted after it was mirrored, a comment's ima
    - It never approves. Moving an issue to `Ready to Ship` is not the owner's approval, which is given in the app only, so it is not applied. The tracker is put back to the app's state, and a comment on the issue says why.
    - It never moves a ticket the owner approved, or one whose release is landing. The answer is the same: put back, with a comment.
    - It never edits the title or the description of a ticket the owner approved, until it is released. The tracker's text is put back to the app's, with one comment.
-   - It never starts a session by itself. A ticket moved to `Todo` on the tracker waits in the app's Todo until someone starts it in the app. A ticket of a plan the owner approved goes on as that plan says: the plan's runner may start it again once it is back in Todo, as it does after a move in the app.
+   - It never starts a session by itself. A ticket moved to `Todo` on the tracker waits in the app's Todo until someone starts it in the app. A ticket of a plan the owner approved goes on as that plan says: the plan's runner may start it again once it is back in Todo, as it does after a move in the app. A delegation (below) does not change this: it proposes a plan, and the owner approves it in the app.
 7. **A tracker in a state the app does not have.** Closed as not planned, Canceled, Backlog: a person may have put it there, so an agent's change in the app is not written over it. The owner's change is. The app's state does not change either, since it has no such state.
 8. **A ticket the flow is working on.** A person's move on the tracker wins here too. The flow first sets the ticket aside, as the app's Set aside does: its sessions stop and nothing of it waits in the Inbox. Then the person's state is written. The note on the ticket names who moved it and where.
 9. **The title and the description.** Each follows rules 1 to 4 on its own, its text in place of the state, against the text both sides last agreed on. Who made a change:
@@ -59,6 +61,28 @@ Not mirrored: a comment edited or deleted after it was mirrored, a comment's ima
    An empty title is never written in the app. An edit does not stop or tell a session that works on the ticket: it reads the text it was given when it started.
 
 Times are compared as each side stamps them: the app with this server's clock, the tracker with its own. A gap between the two clocks bigger than the time between two people's changes can change who wins.
+
+## Handing an issue over to Cleared
+
+A person delegates an issue to Cleared on the tracker (C3):
+
+- on GitHub, with the label `cleared` on an open issue, or by assigning the issue to the mirror's account;
+- on Linear, with the label `cleared` on the issue, or by assigning it to the user of the mirror's key, in any state but a completed or a canceled one.
+
+At its next pass, the mirror:
+
+1. Makes the issue a ticket, if it is not one yet, however old the issue is. An issue in a state the app does not have (Linear's Backlog or Triage) comes in `Todo`, and the mirror moves the tracker to `Todo`.
+2. Hands the ticket to the lead's plans. They propose a plan of one item, bound to that ticket, which waits in the Inbox for the owner like any plan. The lead is told in its thread who handed it over, on which tracker, and which ticket and plan. The issue's text reaches the lead only through the ticket, which its tool reads.
+3. Writes a comment on the issue that gives the ticket and the plan, and says that nothing starts before the owner's approval.
+
+When the owner approves the plan, its runner starts the ticket with the owner as the one who approved it; the release still waits for the owner. A rejected plan leaves the ticket in `Todo`.
+
+- **Who counts.** Who put the label on or made the assignment is read from the issue's events (GitHub's `labeled` and `assigned`) or its history (Linear's `addedLabelIds` and `toAssigneeId`), or is the issue's author when no event names it. A bot, an integration or an actor the tracker does not name delegates nothing. The mirror's own account counts as a person, except for the label it puts on an issue it creates from a ticket that has the label.
+- **Once.** Each delegation, an issue and the time it was made, is taken once (`mirror_delegations`). Taking the label off and putting it on again is a new one. A delegation made before the mirror's first pass on that tracker is left alone.
+- **A ticket already in hand.** A ticket past `Todo`, run by a session, or an item of a plan that runs gets no new plan; the comment on the issue says so. A second delegation while the ticket's plan still waits replaces that plan.
+- **No lead running.** The delegation waits in its table and is handed over at the first pass after the lead starts.
+
+Taking a delegation back by removing the label or the assignee does nothing: move the issue instead (rule 8). A start without the owner's approval, and Linear's own delegation of an issue to an application user, are not done.
 
 ## What it writes in the app
 
@@ -74,13 +98,13 @@ Every minute by default, the mirror reads each tracker's issues changed since it
 
 Comments are read by their own time, apart from the issues: on GitHub, the repository's issue comments; on Linear, the team's.
 
-The tables are in the service's ledger: `mirror_trackers` (each tracker's first pass and last read), `mirror_links` (a ticket's issue and the agreed state), `mirror_applied`, `mirror_writes` (the mirror's own writes, kept a day); and for the comments and the text, `mirror_followed` (when the mirror began following a link's comments and text), `mirror_fields` (the agreed title and description), `mirror_edits` and `mirror_comments` (each comment's two ids, the mirror's own comments on a tracker included). A link made before this code, by version 384, is followed from the first pass after the upgrade: older comments are not copied, and both sides' texts count as agreed as the app holds them.
+The tables are in the service's ledger: `mirror_trackers` (each tracker's first pass and last read), `mirror_links` (a ticket's issue and the agreed state), `mirror_applied`, `mirror_writes` (the mirror's own writes, kept a day); and for the comments and the text, `mirror_followed` (when the mirror began following a link's comments and text), `mirror_fields` (the agreed title and description), `mirror_edits` and `mirror_comments` (each comment's two ids, the mirror's own comments on a tracker included); and `mirror_delegations` (each delegation, its ticket and what the plans made of it). A link made before this code, by version 384, is followed from the first pass after the upgrade: older comments are not copied, and both sides' texts count as agreed as the app holds them.
 
 ## What is proven, and what is left
 
-- Tests: `v2/test/tickets/mirror-rule.test.ts` (the rule), `mirror.test.ts` (the pass on the real ticket store), `mirror-github.test.ts` and `mirror-linear.test.ts` (each tracker against a fake of its API), and `mirror-proof.test.ts` (milestone 4's proof, the mirrors' steps, and a comment and an edit each way, on both).
-- GitHub ran for real twice, on the example repository: the pull requests of issues #381 and #386 quote the runs.
-- Linear has run against a fake only. A real trial needs a Linear account and a key, and that trial is the owner's to run. Until it has run, three things are unknown: how Linear shows an OAuth application acting as itself (`actor=app`) in an issue's history; whether a comment of an integration carries its `botActor`; and whether the history's `toTitle` and `updatedDescription` are filled as its schema says. A change no one is named for reads as an agent's.
+- Tests: `v2/test/tickets/mirror-rule.test.ts` (the rule), `mirror.test.ts` (the pass on the real ticket store), `mirror-github.test.ts` and `mirror-linear.test.ts` (each tracker against a fake of its API), and `mirror-proof.test.ts` (milestone 4's proof, the mirrors' steps, and a comment and an edit each way, on both). The delegation: `mirror-delegation.test.ts` (the pass), `delegation.test.ts` (the plan bound to the ticket and its approval) and `delegation-proof.test.ts` (C3's steps on both fakes).
+- GitHub ran for real three times, on the example repository: the pull requests of issues #381, #386 and #398 quote the runs. The last one found that GitHub records a `labeled` event for an issue opened with the label, and that its list of issues can show a new issue only after a pass or two; the next pass reads it.
+- Linear has run against a fake only. A real trial needs a Linear account and a key, and that trial is the owner's to run. Until it has run, four things are unknown: how Linear shows an OAuth application acting as itself (`actor=app`) in an issue's history; whether a comment of an integration carries its `botActor`; whether the history's `toTitle` and `updatedDescription` are filled as its schema says; and whether its `addedLabelIds` and `toAssigneeId` are, for a delegation. A change no one is named for reads as an agent's; a delegation no history entry names is read as the issue's creator's.
 - The real GitHub run was a one-off script; there is no `doctor` section for the mirrors yet.
 - The app shows no comment yet: a comment that came from a tracker is read by the lead (its last five) and by v1's tools.
 - The lead's tool names every comment that no person signed `cleared`. A comment from a tracker therefore reaches the lead as `cleared: jane, on GitHub: ...`. On a public repository, anyone can write that text, and it reaches the lead under Cleared's name.

@@ -2,27 +2,32 @@
 // loopback, port 0. It answers the mirror's named operations only, checks
 // that each query asks for the fields it answers with, and never needs a
 // real key: each token is an account of the fake. A comment does not change
-// its issue's time here: the mirror reads comments by their own.
+// its issue's time here: the mirror reads comments by their own. A label
+// put on and an assignment are history entries (`addedLabelIds`,
+// `toAssigneeId`), as Linear's schema names them (a delegation, C3, P244).
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
-type State = { id: string; name: string };
+type State = { id: string; name: string; type: string };
+type Label = { id: string; name: string };
 type Named = { id: string; name: string };
 type HistoryEntry = {
   createdAt: string; actor: Named | null; botActor: Named | null; toState: State | null;
   fromTitle: string | null; toTitle: string | null; updatedDescription: boolean | null;
+  addedLabelIds: string[] | null; toAssigneeId: string | null;
 };
 type Comment = { id: string; body: string; createdAt: string; updatedAt: string; user: Named | null; botActor: Named | null; issueId: string };
 type Issue = {
   id: string; identifier: string; url: string; title: string; description: string | null;
   createdAt: string; updatedAt: string; stateId: string; teamId: string; history: HistoryEntry[]; comments: Comment[];
+  labels: Label[]; assigneeId: string | null; creator: Named | null;
 };
 export type FakeLinearActor = { readonly user: { id: string; name: string } } | { readonly bot: { id: string; name: string } };
 
 // The fields each operation must ask for, so that a query that drops one fails here.
 const ASKS: Record<string, readonly string[]> = {
   MirrorSetup: ['viewer', 'teams', 'states', 'name'],
-  MirrorIssues: ['issues', 'identifier', 'url', 'description', 'createdAt', 'updatedAt', 'state', 'history', 'actor', 'botActor', 'toState', 'fromTitle', 'toTitle', 'updatedDescription', 'pageInfo', 'hasNextPage', 'endCursor'],
+  MirrorIssues: ['issues', 'identifier', 'url', 'description', 'createdAt', 'updatedAt', 'state', 'type', 'history', 'actor', 'botActor', 'toState', 'fromTitle', 'toTitle', 'updatedDescription', 'addedLabelIds', 'toAssigneeId', 'labels', 'assignee', 'creator', 'pageInfo', 'hasNextPage', 'endCursor'],
   MirrorCreate: ['issueCreate', 'success', 'identifier', 'url', 'state', 'history'],
   MirrorMove: ['issueUpdate', 'success'],
   MirrorEdit: ['issueUpdate', 'success'],
@@ -33,8 +38,11 @@ const ASKS: Record<string, readonly string[]> = {
 export class FakeLinear {
   readonly operations: { name: string; auth: string | undefined }[] = [];
   readonly team = { id: 'team-1', key: 'ENG' };
-  readonly states: State[] = ['Backlog', 'Todo', 'In Progress', 'In Review', 'Needs Approval', 'Ready to Ship', 'Done', 'Canceled']
-    .map((name, i) => ({ id: `state-${i}`, name }));
+  readonly states: State[] = ([
+    ['Backlog', 'backlog'], ['Todo', 'unstarted'], ['In Progress', 'started'], ['In Review', 'started'], ['Needs Approval', 'started'],
+    ['Ready to Ship', 'started'], ['Done', 'completed'], ['Canceled', 'canceled'],
+  ] as const).map(([name, type], i) => ({ id: `state-${i}`, name, type }));
+  readonly labels: Label[] = [];
   readonly issues = new Map<string, Issue>();
   #server: Server | undefined;
   #accounts = new Map<string, { id: string; name: string }>();
@@ -63,21 +71,31 @@ export class FakeLinear {
     return state;
   }
 
-  #entry(by: FakeLinearActor, toState: State | null, edit: Partial<Pick<HistoryEntry, 'fromTitle' | 'toTitle' | 'updatedDescription'>> = {}): HistoryEntry {
+  #entry(by: FakeLinearActor, toState: State | null, edit: Partial<Pick<HistoryEntry, 'fromTitle' | 'toTitle' | 'updatedDescription' | 'addedLabelIds' | 'toAssigneeId'>> = {}): HistoryEntry {
     return {
       createdAt: this.#clock(), actor: 'user' in by ? by.user : null, botActor: 'bot' in by ? by.bot : null, toState,
-      fromTitle: null, toTitle: null, updatedDescription: null, ...edit,
+      fromTitle: null, toTitle: null, updatedDescription: null, addedLabelIds: null, toAssigneeId: null, ...edit,
     };
   }
 
-  // An issue created on Linear by a person or an integration.
-  create(by: FakeLinearActor, input: { title: string; description?: string; state: string }): Issue {
+  // The team's label of that name, made on first use.
+  #label(name: string): Label {
+    const found = this.labels.find((l) => l.name === name);
+    if (found) return found;
+    const made = { id: `label-${this.labels.length + 1}`, name };
+    this.labels.push(made);
+    return made;
+  }
+
+  // An issue created on Linear by a person or an integration; labels put on
+  // at its creation leave no history entry.
+  create(by: FakeLinearActor, input: { title: string; description?: string; state: string; labels?: string[] }): Issue {
     const at = this.#clock();
     const number = this.#next++;
     const issue: Issue = {
       id: `issue-${number}`, identifier: `${this.team.key}-${number}`, url: `https://linear.app/example/issue/${this.team.key}-${number}`,
       title: input.title, description: input.description ?? null, createdAt: at, updatedAt: at, stateId: this.#state(input.state).id, teamId: this.team.id,
-      history: [], comments: [],
+      history: [], comments: [], labels: (input.labels ?? []).map((name) => this.#label(name)), assigneeId: null, creator: 'user' in by ? by.user : null,
     };
     this.issues.set(issue.id, issue);
     return issue;
@@ -89,6 +107,32 @@ export class FakeLinear {
     issue.stateId = this.#state(state).id;
     issue.updatedAt = this.#clock();
     issue.history.push(this.#entry(by, this.#state(state)));
+  }
+
+  label(id: string, by: FakeLinearActor, name: string): void {
+    const issue = this.issues.get(id);
+    if (!issue) throw new Error(`no issue ${id}`);
+    const label = this.#label(name);
+    if (issue.labels.some((l) => l.id === label.id)) return;
+    issue.labels.push(label);
+    issue.updatedAt = this.#clock();
+    issue.history.push(this.#entry(by, null, { addedLabelIds: [label.id] }));
+  }
+
+  unlabel(id: string, name: string): void {
+    const issue = this.issues.get(id);
+    if (!issue) throw new Error(`no issue ${id}`);
+    issue.labels = issue.labels.filter((l) => l.name !== name);
+    issue.updatedAt = this.#clock();
+  }
+
+  // The issue assigned to a user, or to no one.
+  assign(id: string, by: FakeLinearActor, user: string | null): void {
+    const issue = this.issues.get(id);
+    if (!issue) throw new Error(`no issue ${id}`);
+    issue.assigneeId = user;
+    issue.updatedAt = this.#clock();
+    issue.history.push(this.#entry(by, null, { toAssigneeId: user }));
   }
 
   // A change of the title or the description: one history entry that says both.
@@ -125,6 +169,7 @@ export class FakeLinear {
     return {
       id: issue.id, identifier: issue.identifier, url: issue.url, title: issue.title, description: issue.description,
       createdAt: issue.createdAt, updatedAt: issue.updatedAt, state: this.states.find((s) => s.id === issue.stateId),
+      labels: { nodes: issue.labels }, assignee: issue.assigneeId ? { id: issue.assigneeId } : null, creator: issue.creator,
       // Linear lists an issue's history newest first.
       history: { nodes: [...issue.history].reverse() },
     };

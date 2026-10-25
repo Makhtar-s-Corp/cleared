@@ -8,5 +8,8 @@
   "comment_in": "{who}, on {tracker}:",
   "comment_out_owner": "{who}, in Cleared:",
   "comment_out_user": "A user of Cleared:",
-  "comment_out_service": "Cleared:"
+  "comment_out_service": "Cleared:",
+  "delegated": "{who} handed this issue over to Cleared: it is {ticket}. Plan {plan} waits for the owner's approval in Cleared, and no work starts before it.",
+  "delegated_in_plan": "{who} handed this issue over to Cleared, but {ticket} is already in plan {plan}: no new plan is made.",
+  "delegated_in_state": "{who} handed this issue over to Cleared, but {ticket} is already in “{state}”: no new plan is made."
 }

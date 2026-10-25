@@ -7,7 +7,9 @@
 // Milestone 4 (issue #381, P230): the mirrors on GitHub Issues and Linear
 // (tickets/mirror.ts), started with the service when their settings name a
 // token file, and stopped with it; each ticket it writes is said on the
-// app's change stream (issue #386, P237).
+// app's change stream (issue #386, P237). A delegation on a tracker (C3,
+// P244) is handed to the lead module's plans, which propose its ticket to
+// the owner.
 import type { DatabaseSync } from 'node:sqlite';
 import { changeHub } from '../api/events.ts';
 import { approvalEnvironment } from '../approval/service.ts';
@@ -16,7 +18,9 @@ import type { FlowEngine } from '../flow/engine.ts';
 import { runtime } from '../flow/runtime.ts';
 import { TICKET_TABLES, WORKSPACE_TABLES, recordWorkspace } from '../tickets/local-store.ts';
 import type { TicketId } from '../tickets/contract.ts';
-import { MIRROR_TABLES, MirrorConfigError, createMirror, loadMirrorConfig, type Mirror } from '../tickets/mirror.ts';
+import { delegateTo } from '../tickets/delegation.ts';
+import { MIRROR_TABLES, MirrorConfigError, createMirror, loadMirrorConfig, type Mirror, type MirrorDelegate } from '../tickets/mirror.ts';
+import { leadRuntime, plansOf } from './lead.ts';
 import type { Module, Registry } from './registry.ts';
 
 // Writes the configured workspace's rows; nothing when the service is not
@@ -35,6 +39,14 @@ export function sayTicketChange(engine: () => FlowEngine | undefined): (ticket: 
     const running = engine();
     if (running) changeHub(running).say('ticket', ticket);
   };
+}
+
+// The lead's plans, built with the lead on first use: none while the
+// service runs no lead, and the mirror then asks again at its next pass.
+export function delegationOf(registry: Registry): MirrorDelegate {
+  return delegateTo({
+    plans: () => plansOf(registry), lead: () => leadRuntime.lead(registry), tickets: registry.ticketStore, flow: () => runtime.engine(registry),
+  });
 }
 
 let ledger: DatabaseSync | undefined;
@@ -63,6 +75,7 @@ export function startMirror(registry: Registry, db: DatabaseSync, env: NodeJS.Pr
     services: workspaceOf(flow).services.map((s) => ({ name: s.name, repo: s.repo })),
     flow: () => runtime.engine(registry),
     changed: sayTicketChange(() => runtime.engine(registry)),
+    delegate: delegationOf(registry),
   });
   made?.start(config.pollMs);
   return made;

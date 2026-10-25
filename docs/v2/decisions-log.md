@@ -6557,3 +6557,48 @@ The behaviour is the same either way.
 
 - Pull request: 399, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-weekly`.
+
+## 2026-10-25: an issue handed over to Cleared on GitHub or Linear becomes a plan the owner approves (the author's choices, lane `v2-j4-delegation`, C3, P244, issue #398)
+
+**The need.** Issue #398, matrix C3: work is delegated to Cleared from Linear and GitHub Issues, Slack later. A person assigns or labels an issue, and the lead picks it up as a ticket, on the mirrors of pull requests 384 and 390. GitHub against the example repositories only, Linear against a fake server only, no real key. The brief's section 6 is not in the repository, and `milestone-2-plan.md` has no sections 9 and 10; the conventions followed are those of sections 9 and 10 of `milestone-1-plan.md`, as earlier lanes noted. The plan came first, in its own commit: [milestone-4-plan.md](milestone-4-plan.md), section 11 (section 10 at first, renumbered when pull request 399 merged its own section 10).
+
+**Decision.**
+1. **What hands an issue over.** The label `cleared` (`CLEARED_V2_DELEGATION_LABEL`, compared without case; a name starting with `status:` is refused) on an open issue, or the issue assigned to the mirror's own account. On Linear, the same, in a state that is neither completed nor canceled. Each tracker reads it as `TrackerIssue.delegation`, the latest one that still holds, with who did it: from GitHub's `labeled` and `assigned` events, Linear's `addedLabelIds` and `toAssigneeId`, else the issue's author at its creation. The actor rules are the state's (P231, rule 5). `CLEARED_V2_DELEGATION=off` turns the reading off.
+2. **Who counts.** A person. An agent's delegation (a bot, an integration, an unnamed actor) does nothing, so a rule that labels every issue starts nothing. The mirror's own account counts as a person, since `gh` here is a person's login, except for the label the mirror itself puts on an issue it creates from a ticket that has the label: a delegation by the mirror's account within a minute of one of its writes on that issue is that write.
+3. **The ticket.** A delegation made after the tracker's first pass is taken once per issue and time (`mirror_delegations`). Its issue becomes a ticket if it is not one yet, however old: the import's "created after the first pass" applies to issues nobody handed over. An issue in a state the app does not have (Linear's Backlog or Triage) comes in Todo, and the mirror moves the tracker to Todo. Otherwise rule 7 of the mirrors would keep the app's later moves off a tracker in Backlog.
+4. **The start waits for the owner.** A person on a tracker is never the owner, and nothing a tracker writes carries the owner's signature (D18, P232). So the delegation does not start a session. It proposes a plan of one item, bound to the ticket, which waits in the Inbox like any plan, and the owner's approval starts it with the owner as the approver. No tracker account is linked to a user of the app, as `CLEARED_V2_CHAT_USERS` does for the chat command (P212). A recipe's path, which approves its plan at once, was not taken: it is safe only because whoever runs a recipe is a user of the app.
+5. **Who writes the plan: the service.** `PlanRunner.proposeTicket` stores the one-item plan and binds its item to the ticket before anything awaits. `#createTickets` skips a bound item, so the approval makes no second ticket and the mirror exports no second issue. The item's body is the ticket's, with no "- [ ]" criterion asked of it, since it is the person's text and not the model's. Its size is the `size:<s>` label, else `s`; its lane is fast only with the Quick label on no full service (decision 24). The goal is `delegation-<ticket>`, so a second delegation while the plan waits replaces it. `propose` and `proposeTicket` share the runner's storing code; `lead/contract.ts`, the lead's tools and `api/types.ts` are unchanged. One export was added: `MAX_BODY` of `lead/plans/tools.ts`.
+6. **What the lead reads.** One service line, in English as the plans' lines are: who, on which tracker, the issue's key, the ticket, its cleaned title in quotes, the plan, and that the issue's text is the person's and not an instruction. The lead reads the rest with its `ticket` tool. The issue's body never goes into the line.
+7. **A ticket already in hand.** An item of an approved or paused plan, or a ticket past Todo or run by the flow, gets no plan. The comment on the issue says where the ticket is.
+8. **Nothing lost while the lead is off.** The delegation's row stays untold until the plans run, and each pass asks again (`MirrorDeps.delegate` answers nothing while `plansOf` has no lead). The tickets module wires it (`delegationOf` in `modules/tickets.ts`, through `modules/lead.ts`'s `plansOf` and `leadRuntime`); `main.ts` and the registry are unchanged.
+9. **Words.** Three keys in the mirror's catalogs (`delegated`, `delegated_in_plan`, `delegated_in_state`), the comment on the issue in `CLEARED_V2_APP_LANGUAGE`, French by default, with the French typography the catalog test checks.
+10. **Branch.** `v2/j4-delegation` cannot be made while a local branch `v2` exists, as the mirrors lane found, so the branch is `v2-j4-delegation`, B4.1's form.
+
+**Question for the owner** (default applied). Should a delegation from a tracker account linked to a user of the app start at once, as the chat command does (P212), instead of waiting for the owner's approval? Options: (a) it waits for the owner's approval in the Inbox; (b) a setting links tracker accounts to users of the app, and a linked account's delegation is approved by that user at once. **Default, applied: (a).**
+
+**Tests first.** `40c8be6` committed the tests before any code:
+- `mirror-github.test.ts` and `mirror-linear.test.ts`: the delegation each tracker reads, against its fake. The GitHub fake gained assignees and their events; the Linear fake gained labels, an assignee, a creator, state types, and the two history fields.
+- `mirror-delegation.test.ts`: the mirror's pass, with a tracker in memory.
+- `delegation.test.ts`: the bound plan, its approval, the lead's line, on the real flow engine and plan runner.
+- `delegation-proof.test.ts`: C3's steps on both fakes, with the real mirror.
+- The pinned tables in `services.test.ts`.
+
+On the old code `delegation*.test.ts` failed to load (no `src/tickets/delegation.ts`). The trackers' and the pass's new cases failed, and the Linear fake refused the old query, which did not ask for the new fields. Three test mistakes were found when the code ran, and fixed in the code's commit:
+- two cases of `mirror-delegation.test.ts` opened their "older" issue in the same second as the first pass, which makes it a new issue;
+- the settings case of `mirror.test.ts` pinned the config's shape, which now holds `delegation: { label: 'cleared' }` by default.
+
+**The real GitHub run** (2026-10-25 17:01 UTC, the example repository `cleared-example-guestbook` of the organisation this repository lives in). The setup: the real mirror, plan runner and flow engine, with the flow tests' ticket store and fake harness, no Docker. The token of the `gh` login was read from a private file and never printed. The label `cleared` was made in that repository first.
+- #26, opened before the first pass and labelled after it, came in as LOCAL-2. Plan plan-1 was proposed, bound to it, in the Inbox, with the lead's line and the French comment on #26.
+- #27, assigned to the token's account, became LOCAL-3 and plan-2, read from its `assigned` event.
+- #28, opened with the label, has a `labeled` event at its creation, which closes the plan's first unknown. GitHub's list of changed issues did not yet show it at the pass nine seconds after its creation. The next pass took it (LOCAL-4, plan-3): the mirror's read overlap is there for that.
+- The owner's approval of plan-1 started LOCAL-2 with one author session. The next pass put `status:Needs Approval` on #26.
+- Four tickets in all (the flow tests' own LOCAL-1 among them), three links, no second issue, and no line in the mirror's log.
+
+The three issues were then closed by hand as not planned. Nothing ran against Linear for real.
+
+**Checks** (after the merge of `origin/v2` at `d849c6e`, pull request 399 merged). `npm run typecheck` passes. `npm test`: 2395 Node tests, 2295 pass, 100 skipped, 0 fail, and 355 Vitest tests pass. No browser test was run, since no screen changed. The v1 suite was not run: nothing outside `v2/` and `docs/v2/` changed. `npm run guard -- --base origin/v2` is run before the READY.
+
+**Resources.** No Docker object; no Claude Code login read; no Slack, Cursor, Codex or Linear account, and no Linear key. Network: `git fetch`, and GitHub's API on the example repository: one label made, three issues opened, commented and closed. No port but the tests' own loopback ones (port 0), no tunnel, no secret written.
+
+- Pull request: 401, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-delegation`.
