@@ -6,6 +6,9 @@
 import { LEVERS_TABLE, LeverError, LeverStore, type LeverReader, type LeversChange } from '../../src/consumption/levers.ts';
 import { QUOTA_TABLES } from '../../src/consumption/quota.ts';
 import { consumption, leverChoices, type Consumption, type LeverChoices } from '../../src/consumption/usage.ts';
+import { VariantStore } from '../../src/flow/variants.ts';
+import type { TestOutcome, TicketType } from '../../src/api/types.ts';
+import type { Harness } from '../../src/session/contract.ts';
 import { applyTables, openStore } from '../../src/store/db.ts';
 
 const DAY = 24 * 3_600_000;
@@ -49,6 +52,7 @@ export function consumptionFixture(project: string, now: () => Date) {
   // Claude Code's from the hourly reading (issue #270), at the same time.
   store.db.prepare("INSERT INTO quota_readings (project, harness, source, at, ok, \"window\", used_percent, resets_at) VALUES (?, 'claude-code', 'claude-code /api/oauth/usage', ?, 1, 'seven_day', 41, ?)")
     .run(project, new Date(start.getTime() - 20 * 60_000).toISOString(), new Date(start.getTime() + 3.5 * DAY).toISOString());
+  picks(store.db, project);
   const levers = new LeverStore(store.db, project);
   return {
     // The ledger and the levers the fixtures' batches read (requirement C6): the same lanes and windows as the screen.
@@ -78,3 +82,21 @@ export function consumptionFixture(project: string, now: () => Date) {
 }
 
 export type ConsumptionFixture = ReturnType<typeof consumptionFixture>;
+
+// Three harness picks that ended (issue #329), with invented tickets and
+// figures: two bugs, Codex kept once and Claude Code once, and a ticket of
+// no type where Cursor did not run its tests.
+type Ran = { readonly harness: Harness; readonly tests: TestOutcome; readonly tokens: number | null; readonly kept?: boolean };
+function picks(db: Parameters<typeof applyTables>[0], project: string): void {
+  const variants = new VariantStore(db);
+  const run = (ticket: string, kind: TicketType, ran: readonly Ran[]) => {
+    const rows = variants.create(ticket, project, { harnesses: ran.map((r) => r.harness), kind });
+    rows.forEach((row, i) => {
+      const r = ran[i] as Ran;
+      variants.update(row.id, { state: r.kept ? 'chosen' : 'dropped', session: `fx-pick-${ticket}-${i + 1}`, files: ['src/entries.ts'], tests: r.tests, tokens: r.tokens, workMs: 20 * 60_000, won: r.kept === true });
+    });
+  };
+  run('LOCAL-130', 'bug', [{ harness: 'claude-code', tests: 'passed', tokens: 31_200 }, { harness: 'codex', tests: 'passed', tokens: 12_400, kept: true }]);
+  run('LOCAL-131', 'bug', [{ harness: 'claude-code', tests: 'passed', tokens: 18_900, kept: true }, { harness: 'codex', tests: 'failed', tokens: 9_700 }]);
+  run('LOCAL-132', 'other', [{ harness: 'claude-code', tests: 'passed', tokens: 22_000, kept: true }, { harness: 'cursor', tests: 'not_run', tokens: null }]);
+}

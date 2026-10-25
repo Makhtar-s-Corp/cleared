@@ -225,7 +225,7 @@ export function variantsItem(now: Date = FIXTURE_NOW): VariantsItem {
   const variant = (position: number, state: TicketVariant['state'], files: string[], diff: string, costUsd: number | null, minutes: number | null, note: string | null): TicketVariant => {
     const lines = diff.split('\n');
     return {
-      position, state, session: `fixture-175-v${position}`, files, diff, cut: false, costUsd, minutes, note,
+      position, state, session: `fixture-175-v${position}`, files, diff, cut: false, costUsd, minutes, note, harness: 'claude-code', tests: null, tokens: null,
       added: lines.filter((l) => l.startsWith('+') && !l.startsWith('+++')).length, removed: lines.filter((l) => l.startsWith('-') && !l.startsWith('---')).length,
     };
   };
