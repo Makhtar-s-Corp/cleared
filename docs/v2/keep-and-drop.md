@@ -85,14 +85,14 @@ This is the verdict on every top-level and second-level path that `git ls-files`
 | `app/.gitignore` | keep | Ignores `node_modules/`. | - | proposed |
 | `app/DESIGN.md` | keep | Named in the decisions as kept. | - | decided |
 | `app/human-write.mjs` | keep | Short-lived writer of the human's gestures to the tracker; unaffected by the login change. | - | proposed |
-| `app/lib/` | adapt | M4 removes `webauthn.mjs` and `grant-socket.mjs` (passkeys). Edited in place: `actions.mjs`, `notifications.mjs` and `credentials.mjs` lose their passkey parts for a password login; `session.mjs` and `access.mjs` change with the login. | M4 | decided |
-| `app/main.mjs` | adapt | Starts the server; the `cleared app passkey` subcommand goes. | - | decided |
+| `app/lib/` | adapt | M4 removes `webauthn.mjs` and `grant-socket.mjs` (passkeys). Edited in place: `actions.mjs`, `notifications.mjs` and `credentials.mjs` lose their passkey parts for a password login; `session.mjs` and `access.mjs` change with the login. Done by issue #389: the two files are removed and the signed-in session confirms the gestures, as in v2; the v1 app keeps its access token, so `session.ts` and `access.ts` did not change. | M4 | decided |
+| `app/main.mjs` | adapt | Starts the server; the `cleared app passkey` subcommand goes. Done by issue #389: it now says that passkeys are gone and starts nothing. | - | decided |
 | `app/package.json` | keep | No runtime dependency; `playwright-core` for screenshots only. | - | proposed |
 | `app/package-lock.json` | keep | Lock file for `app/package.json`. | - | proposed |
-| `app/public/` | adapt | M4 removes `register.html` and `register.js` (passkey registration). Edited in place: `login.*`, `actions.js` and `notify.js`, for the password login. Unchanged: fonts, icons, `style.css`, `sw.js`, `manifest.webmanifest`. | M4 | decided |
+| `app/public/` | adapt | M4 removes `register.html` and `register.js` (passkey registration). Edited in place: `login.*`, `actions.js` and `notify.js`, for the password login. Done by issue #389: the two files are removed, and the three scripts confirm with the session. Unchanged: fonts, icons, `style.css`, `sw.js`, `manifest.webmanifest`. | M4 | decided |
 | `app/reference/` | keep | Design references `tower.html` and `porthole-phone.html`. | - | proposed |
 | `app/screenshots/` | keep | Reference pictures (63 tracked files), not code. Pictures of passkey gestures (for example `gesture-no-passkey.png`) go out of date and are retaken. | - | proposed |
-| `app/screenshots-actions.mjs` | adapt | Drives the gestures with a virtual passkey authenticator; switches to the password login. | - | decided |
+| `app/screenshots-actions.mjs` | adapt | Drives the gestures with a virtual passkey authenticator; switches to the password login. Done by issue #389: no authenticator, the session confirms. | - | decided |
 | `app/screenshots.mjs` | keep | Screenshots from the demonstration data. | - | proposed |
 | `app/server.mjs` | adapt | The app server is kept; its sign-in and passkey routes change to a password login. | - | decided |
 | `app/sources/` | keep | `live.mjs` reads the snapshot and ledger; `demo.mjs` holds demonstration data. | - | decided |
@@ -198,7 +198,7 @@ A test of a kept area that drives a dropped script is `adapt`: the cases stay an
 | Path | Verdict | Reason | Milestone | Basis |
 | --- | --- | --- | --- | --- |
 | `test/app-actions.test.mjs` | adapt | App write routes; the passkey ceremony cases change to the password login. | - | decided |
-| `test/app-authenticator.mjs` | drop | Software passkey authenticator for the tests. | M4 | decided |
+| `test/app-authenticator.mjs` | drop | Software passkey authenticator for the tests. Removed by issue #389. | M4 | decided |
 | `test/app-box.mjs` | keep | Scratch project and writer process for the writer tests. | - | proposed |
 | `test/app-notify.test.mjs` | adapt | Web notifications kept; the passkey challenge for subscribing changes. | - | decided |
 | `test/app-owner-view.test.mjs` | adapt | Owner view kept; references `flow-lanes.sh` and `push-lane.sh`. | - | decided |
