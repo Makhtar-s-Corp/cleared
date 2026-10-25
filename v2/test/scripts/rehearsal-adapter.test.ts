@@ -15,6 +15,7 @@ import { AdapterSettingError, adapterSetting, createRehearsalAdapter, factoriesF
 import type { HostTool, StartInput } from '../../src/session/contract.ts';
 import { openStore, type Store } from '../../src/store/db.ts';
 import type { AgUiEvent } from '../../src/session/events.ts';
+import { GENERATED_ID } from '../../src/session/clean.ts';
 
 const temp = () => mkdtempSync(join(tmpdir(), 'cleared-rehearsal-test-'));
 
@@ -169,6 +170,31 @@ test('a lead act can play an event as the adapter would map it: the status of a 
   const played = events(store, lead.id);
   assert.deepEqual(played.find((e) => e.type === 'STATE_DELTA' && JSON.stringify(e).includes('new login')), cut);
   assert.ok(!played.some((e) => e.type === 'CUSTOM' && e.name === 'cleared.host_call'), 'no host call is made for it');
+});
+
+test('the ids the lead writes pass the cleaner whole, so the question it asks is the one an answer names', async () => {
+  // In CI a session id ending "a0134749174e" held a phone number's shape: the
+  // question's id "<session>-turn-1-1" was stored as "[removed: phone number]",
+  // and the answer naming it was refused (run 40172850057, first attempt).
+  const store = openStore(':memory:');
+  const calls: Call[] = [];
+  const adapter = createRehearsalAdapter({ log: store.events, script: SCRIPT });
+  const lead = await adapter.start(input('lead', hostTools(calls)));
+  await lead.send({ text: 'The owner gives a goal (goal id: goal-7).', by: 'u1' });
+  const asked = events(store, lead.id).find((e) => e.type === 'CUSTOM' && e.name === 'cleared.question') as { value: { requestId: string } } | undefined;
+  assert.ok(asked);
+  await lead.answer(asked.value.requestId, { decision: { kind: 'answer', answers: { 'Pages or one list?': 'One list' } }, by: 'u1' } as never);
+  await lead.send({ text: 'When the first ticket lands, tell me how long it took.', by: 'u1' });
+  const ids = events(store, lead.id).flatMap((e): string[] => {
+    if (e.type === 'CUSTOM' && e.name === 'cleared.question') return [(e.value as { requestId: string }).requestId];
+    if (e.type === 'TOOL_CALL_START') return [e.toolCallId];
+    if (e.type === 'TEXT_MESSAGE_START' && e.role === 'assistant') return [e.messageId];
+    if (e.type === 'RUN_STARTED' || e.type === 'RUN_FINISHED') return [e.runId];
+    return [];
+  });
+  assert.equal(ids.length, 1 + 2 + 2 + 4, 'a question, two calls, two replies, two turns started and finished');
+  for (const id of ids) assert.match(id, GENERATED_ID);
+  assert.equal(calls.length, 2);
 });
 
 // ------------------------------------------------------- authors, reviewers
