@@ -125,8 +125,11 @@ Cleared watches the application's health after a merge it performs. Either `heal
 | `auto_rollback` | Revert the exact merge after repeated failures. | Default: false |
 | `reopen_state` | Configured non-approval tracker status to use after a rollback. | Required before any rollback; no default |
 | `migration_paths` | Comma-separated file or directory paths that disable automatic rollback when touched. | Optional; no default |
+| `production_url` | The page Cleared v2 opens and captures once a release it merged after the human's approval is deployed and its watch ended healthy (see below). HTTP(S), without credentials. | Optional; no default |
 
 Automatic rollback requires a git credential that can push a normal commit to the base branch: with a GitHub App in [`[forge]`](#forge), the app's installation, which then needs Contents: write and, if a rule blocks direct pushes, to be allowed to bypass it. A branch protection rule that blocks direct pushes also blocks this rollback; Cleared reports that failure and never force pushes. CI runs on the revert push, but its result does not gate the push. Database migrations are never reversed: declare every migration path, and use `--force-with-migrations` only after assessing database compatibility. Manual rollback uses `cleared rollback TICKET` from the configured human Unix account. The CLI shows the ticket, merge commit and files before confirmation. `--yes` skips the confirmation prompt, but never the broker's peer-UID check. Tracker comments cannot authorize rollback.
+
+Cleared never deploys: the deploy after a merge is yours or your CI's. With `production_url` set, the Cleared v2 service checks what was deployed: when a release it merged after your approval ends its watch healthy, it opens that page in a headless Chromium (Playwright), takes one screenshot, and attaches it to the ticket's card, with a comment on the ticket. The page is only read: no click, no form, and every request other than a GET or HEAD of the page's own origin is refused. Without a health check, nothing says when the deploy is done, so the page is not opened and the card says why. The address is shown without its query.
 
 ## `[fast_lane]`
 

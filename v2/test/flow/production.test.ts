@@ -143,7 +143,7 @@ test('a project with no health check: nothing tells Cleared the deploy is done, 
     await tickAfter(t, 60_000);
     assert.ok(t.flowEvents.some((e) => e.type === 'release_landed' && e.health === 'unwatched'));
     assert.deepEqual(captured, []);
-    assert.deepEqual((await t.engine.productionChecks(t.ticket.id)).map((c) => [c.service, c.file, c.missing]), [['guestbook', null, 'unwatched']]);
+    assert.deepEqual((await t.engine.productionChecks(t.ticket.id))?.map((c) => [c.service, c.file, c.missing]), [['guestbook', null, 'unwatched']]);
     assert.match((await comments(t)).at(-1) ?? '', /no health check.*cannot tell when the deploy is done/);
   } finally {
     done();
@@ -173,7 +173,7 @@ test('a capture that throws, or hangs past the cap, is filed as failed: the tick
     healthy(thrown.t, mergedAt + 300_000);
     await tickAfter(thrown.t, 300_000);
     const checks = await thrown.t.engine.productionChecks(thrown.t.ticket.id);
-    assert.deepEqual(checks.map((c) => [c.file, c.missing]), [[null, 'failed']]);
+    assert.deepEqual(checks?.map((c) => [c.file, c.missing]), [[null, 'failed']]);
     assert.doesNotMatch(JSON.stringify(checks) + (await comments(thrown.t)).join('\n'), /token|crashed/);
     assert.equal((await thrown.t.tickets.get(thrown.t.ticket.id))?.status, 'Done');
   } finally {
@@ -185,7 +185,7 @@ test('a capture that throws, or hangs past the cap, is filed as failed: the tick
     const mergedAt = await merged(hung.t);
     healthy(hung.t, mergedAt + 300_000);
     await tickAfter(hung.t, 300_000);
-    assert.deepEqual((await hung.t.engine.productionChecks(hung.t.ticket.id)).map((c) => c.missing), ['failed']);
+    assert.deepEqual((await hung.t.engine.productionChecks(hung.t.ticket.id))?.map((c) => c.missing), ['failed']);
   } finally {
     hung.done();
   }

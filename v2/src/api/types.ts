@@ -697,6 +697,23 @@ export type SessionFile = { readonly path: string; readonly text: string; readon
 // the checkout is on; `ssh`: it reaches it over SSH (CLEARED_V2_EDITOR_SSH_HOST).
 export const EDITORS = ['vscode', 'cursor'] as const;
 export type EditorName = (typeof EDITORS)[number];
+// The production page of a service, checked once a release of the ticket
+// the human approved was deployed (by the human or their CI) and its watch
+// ended healthy (P218, issue #334). `url` is the configured address without
+// its query; `file`, the capture GET /api/tickets/:id/proof/:service/:file
+// serves; `missing`, why there is none: `unwatched`, the project has no
+// health check, so nothing says the deploy is done and no page is opened;
+// `no_browser`, no Playwright on the server; `failed`, the page did not
+// open or the capture ran past its cap. Cleared never deploys.
+export type ProductionCheck = {
+  readonly service: string;
+  readonly pr: number;
+  readonly url: string;
+  readonly at: string;
+  readonly file: 'production.png' | null;
+  readonly missing: 'unwatched' | 'no_browser' | 'failed' | null;
+};
+
 export type EditorLinks = { readonly mode: 'local' | 'ssh'; readonly links: readonly { readonly editor: EditorName; readonly url: string }[] };
 
 // Every route: its body (null for none) and its answer. `events` answers
@@ -792,6 +809,8 @@ export type ApiRoutes = {
   'POST /api/consumption/levers': { readonly body: LeversChange; readonly response: LeverChoices };
   // Milestone 3, the cost of a ticket from the ledger (P211, issue #327).
   'GET /api/tickets/:id/cost': { readonly body: null; readonly response: TicketCost };
+  // Milestone 3, the production page checked after a release landed (P218, issue #334, flow/proof-routes.ts).
+  'GET /api/tickets/:id/production': { readonly body: null; readonly response: ProductionCheck[] };
 };
 
 export type ApiRoute = keyof ApiRoutes;
@@ -863,6 +882,7 @@ const routes = {
   'GET /api/consumption': true,
   'POST /api/consumption/levers': true,
   'GET /api/tickets/:id/cost': true,
+  'GET /api/tickets/:id/production': true,
 } satisfies Record<ApiRoute, true>;
 export type { Consumption, HarnessConsumption, LeverChoices, LeversChange, Projection, Quota, TicketCost };
 export const API_ROUTES = Object.keys(routes) as ApiRoute[];

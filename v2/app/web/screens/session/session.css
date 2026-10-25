@@ -24,6 +24,7 @@
 .desc { font-size: var(--text-md); color: var(--text-secondary); } .desc + .desc { margin-top: 8px; }
 /* A resolved ticket's cost (P211): a fact a line, none cut, no separator left at a line's end. */
 .ticket-cost .fact { display: block; } .desc + .ticket-cost { margin-top: 8px; }
+.ticket-production .fact { display: block; } .desc + .ticket-production, .ticket-cost + .ticket-production { margin-top: 8px; }
 .card-label { margin-bottom: 8px; font-size: var(--text-md); font-weight: var(--weight-strong); }
 .sub-label { margin-top: 14px; padding-top: 12px; border-top: 1px solid var(--hairline); color: var(--text-secondary); font-weight: var(--weight-strong); }
 .criteria, .checks, .steps, .changes { list-style: none; margin: 0; padding: 0; }

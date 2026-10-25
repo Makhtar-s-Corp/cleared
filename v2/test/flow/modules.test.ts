@@ -57,7 +57,7 @@ test('the modules assemble with the other lanes\' stubs: no route declared twice
   const store = openStore(':memory:');
   applyTables(store.db, [...sessions.tables, ...inbox.tables]);
   const app = assemble({ sessions, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox, lead: emptyModule, notify: emptyModule, knowledge: emptyModule }, { store });
-  assert.equal(routeKeys(app).length, 38);   // 20, lane 31's five terminal routes and the save, set aside (lane j2-proof-clean-base), the variants' two (issue #271), and Resume from here (issue #272), Close (issue #249), and Open in an editor (C19), and Hand over (B6.3), and the batches' three (requirement C6), and the proof receipt's captures (P210), and the chat's command (P212)
+  assert.equal(routeKeys(app).length, 39);   // 20, lane 31's five terminal routes and the save, set aside (lane j2-proof-clean-base), the variants' two (issue #271), and Resume from here (issue #272), Close (issue #249), and Open in an editor (C19), and Hand over (B6.3), and the batches' three (requirement C6), and the proof receipt's captures (P210), and the chat's command (P212), and the production page's checks (P218)
   assert.deepEqual(Object.keys(app.registry.sessionAdapters), ['claude-code', 'cursor', 'codex']);
   assert.ok(!app.routes.some((r) => r.path === '/api/tickets/:id/approve'), 'the approval route is lane 8\'s');
 });

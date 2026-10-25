@@ -424,14 +424,14 @@ test('a Close closes the pull request of each service of the train, each on its 
 
 test('a landed train: the production page of each service that configures one is captured once the last watch is healthy (P218)', async () => {
   const root = mkdtempSync(join(tmpdir(), 'cleared-v2-train-production-'));
-  const captured: { url: string; dir: string; at: number }[] = [];
+  const captured: { url: string; dir: string }[] = [];
   const PAGES: Record<string, string> = { guestbook: 'https://guestbook.example.invalid/', 'filter-api': 'https://filter.example.invalid/status' };
   try {
     const { t, ticket, approve } = await train({
       workdirRoot: root,
       extra: {
         async settings(svc) { return { verdict: 'no blocking issues', safeCommands: [], hosts: [], services: [], scripts: [], productionUrl: PAGES[svc?.name ?? 'guestbook'] as string }; },
-        async captureProduction(input) { captured.push({ ...input, at: t.clock.now }); return { file: 'production.png' }; },
+        async captureProduction(input) { captured.push(input); return { file: 'production.png' }; },
       },
     });
     await approve();
@@ -440,7 +440,7 @@ test('a landed train: the production page of each service that configures one is
     t.clock.now = providerHealthy;
     await tick(t, 30_000);
     await tick(t, 30_000);
-    assert.deepEqual(captured, [], 'nothing before the train has landed');
+    assert.equal(captured.length, 0, 'nothing before the train has landed');
     const consumerHealthy = t.clock.now + 400_000;
     healthy(t, ticket.id, consumerHealthy);
     t.clock.now = consumerHealthy;
@@ -450,7 +450,7 @@ test('a landed train: the production page of each service that configures one is
       [PAGES['filter-api'], join(root, '.proof', ticket.id, 'filter-api')],
       [PAGES.guestbook, join(root, '.proof', ticket.id, 'guestbook')],
     ]);
-    assert.deepEqual((await t.engine.productionChecks(ticket.id)).map((c) => [c.service, c.url, c.file]), [
+    assert.deepEqual((await t.engine.productionChecks(ticket.id))?.map((c) => [c.service, c.url, c.file]), [
       ['guestbook', 'https://guestbook.example.invalid/', 'production.png'],
       ['filter-api', 'https://filter.example.invalid/status', 'production.png'],
     ], 'in the workspace\'s order');

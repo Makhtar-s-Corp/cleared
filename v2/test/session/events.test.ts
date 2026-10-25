@@ -44,6 +44,8 @@ test('the measured steps and the custom names are the plan\'s', () => {
     'cleared.handed_over',
     // Milestone 3: the proof receipt's captures (P210, issue #326).
     'cleared.proof_captured',
+    // Milestone 3: the production page checked after a release landed (P218, issue #334).
+    'cleared.production_checked',
   ]);
 });
 

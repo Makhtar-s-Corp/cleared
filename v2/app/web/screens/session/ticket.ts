@@ -8,7 +8,7 @@
 // Take over. The right column says what the ticket's sessions changed,
 // checked and spent, and the Editor holds the ticket's diff, which the
 // author made and the reviewer reads. Pure, so the tests run it under Node.
-import type { SessionPlan, SessionSummary, TicketCost } from '../../../../src/api/types.ts';
+import type { ProductionCheck, SessionPlan, SessionSummary, TicketCost } from '../../../../src/api/types.ts';
 import type { ChangedFile, TimedEdit } from '../../components/editor/model.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { lasted, quantity } from '../../lib/time.ts';
@@ -151,6 +151,25 @@ export function editsOf(parts: readonly TicketPart[]): TimedEdit[] {
 // the agents' time over the ticket's, and the dollars only when every
 // session reported them; none before the cost is read or when no turn
 // finished. Never euros.
+// A resolved ticket's production page (P218): when each service's was
+// captured, with the capture's address through the app, or why it was not.
+// The service is named when the ticket has several.
+export type ProductionFact = { readonly text: string; readonly href?: string };
+export function productionFacts(checks: readonly ProductionCheck[] | null | undefined, ticket: string, t: Translate): ProductionFact[] {
+  if (!checks || checks.length === 0) return [];
+  const several = checks.length > 1;
+  return checks.flatMap((check): ProductionFact[] => {
+    if (check.file) {
+      const href = `/api/service/tickets/${encodeURIComponent(ticket)}/proof/${encodeURIComponent(check.service)}/${check.file}`;
+      const text = several ? t('production_captured_service', { service: check.service, time: clock(check.at) }) : t('production_captured', { time: clock(check.at) });
+      return [{ text }, { text: t('production_open'), href }];
+    }
+    const why = t(check.missing === 'unwatched' ? 'production_unwatched' : check.missing === 'no_browser' ? 'production_no_browser' : 'production_failed');
+    return [{ text: several ? t('production_service', { service: check.service, why }) : capitalised(why) }];
+  });
+}
+const capitalised = (text: string): string => text.charAt(0).toUpperCase() + text.slice(1);
+
 export function ticketCostFacts(cost: TicketCost | null | undefined, language: 'en' | 'fr', t: Translate): string[] {
   if (!cost || cost.tokens === null) return [];
   const facts = [t('ticket_cost_use', { count: quantity(cost.tokens, t) }), t('ticket_cost_time', { work: lasted(cost.workMs, t), elapsed: lasted(cost.elapsedMs, t) })];

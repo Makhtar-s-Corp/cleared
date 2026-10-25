@@ -19,13 +19,20 @@
 // captured and the receipt says so. A capture never throws: what it could
 // not take is named by a code, never by an error's text, since the text of
 // a browser's error can hold an address or a token.
+//
+// The production page (P218, captureProduction) is opened the same way,
+// once a release the human approved is deployed and its watch ended
+// healthy: one screenshot of the address the project configures, read and
+// never acted on. Its pages may send GET and HEAD requests to its own
+// origin only, so a script or a form of the live page changes nothing there.
 import { mkdirSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { SERVICE_PROOF_HEADER } from '../api/types.ts';
+import { SERVICE_PROOF_HEADER, type ProductionCheck } from '../api/types.ts';
 import type { PreviewTarget } from '../container/preview.ts';
 
 export const PROOF_FILES = { before: 'before.png', after: 'after.png', video: 'flow.webm' } as const;
+export const PRODUCTION_FILE = 'production.png';
 export const FLOW_MS = 20_000;
 const STEP_MS = 1000;
 const PAGE_TIMEOUT_MS = 15_000;
@@ -52,6 +59,7 @@ export interface ProofPage {
 }
 export interface ProofRequest {
   url(): string;
+  method?(): string;
   headers(): Record<string, string>;
 }
 export interface ProofRoute {
@@ -113,10 +121,12 @@ export async function playwrightBrowser(env: NodeJS.ProcessEnv = process.env): P
   }
 }
 
-// A context whose pages reach `target` only, with its headers there.
-async function confine(context: ProofContext, target: ProofTarget): Promise<void> {
+// A context whose pages reach `target` only, with its headers there;
+// `reads`: with GET and HEAD requests only.
+async function confine(context: ProofContext, target: ProofTarget, reads = false): Promise<void> {
   await context.route('**/*', async (route, request) => {
     if (!request.url().startsWith(target.url)) return route.abort();
+    if (reads && !['GET', 'HEAD'].includes(request.method?.() ?? '')) return route.abort();
     return route.continue(target.headers ? { headers: { ...request.headers(), ...target.headers } } : undefined);
   });
   await context.routeWebSocket(/.*/, (socket) => socket.close());
@@ -211,4 +221,43 @@ export async function captureProof(input: {
     await quietly(() => browser.close());
   }
   return { ...out, missing };
+}
+
+// What the production page's capture took: its file, or why it has none.
+export type ProductionCapture = { readonly file: typeof PRODUCTION_FILE } | { readonly missing: 'no_browser' | 'failed' };
+
+// One screenshot of the production page at `url`, its requests kept to
+// reads of the page's own origin. Never throws; closes the browser.
+export async function captureProduction(input: { readonly browser: ProofBrowser | undefined; readonly url: string; readonly dir: string }): Promise<ProductionCapture> {
+  const { browser, url, dir } = input;
+  if (!browser) return { missing: 'no_browser' };
+  let context: ProofContext | undefined;
+  try {
+    mkdirSync(dir, { recursive: true });
+    context = await browser.newContext({ viewport: VIEWPORT, serviceWorkers: 'block' });
+    await confine(context, { url: `${new URL(url).origin}/` }, true);
+    const page = await context.newPage();
+    await page.goto(url, { waitUntil: 'load', timeout: PAGE_TIMEOUT_MS });
+    await page.screenshot({ path: join(dir, PRODUCTION_FILE), fullPage: true });
+    return { file: PRODUCTION_FILE };
+  } catch {
+    return { missing: 'failed' };
+  } finally {
+    const open = context;
+    if (open) await quietly(() => open.close());
+    await quietly(() => browser.close());
+  }
+}
+
+// What the ticket says of a check, in the service's words (its comments are English).
+export function productionComment(check: ProductionCheck): string {
+  const page = `The production page of ${check.service} (${check.url})`;
+  const landed = `after pull request #${check.pr} landed healthy`;
+  const own = 'Cleared did not deploy it: the deploy is yours or your CI\'s.';
+  switch (check.missing) {
+    case null: return `${page} was captured ${landed}; the capture is on the ticket's card. ${own}`;
+    case 'unwatched': return `The production page of ${check.service} was not opened after pull request #${check.pr} landed: the project has no health check, so Cleared cannot tell when the deploy is done. Set [release] health_url or health_command to have it captured.`;
+    case 'no_browser': return `${page} was not captured ${landed}: no browser is installed on the server (CLEARED_V2_PLAYWRIGHT in v2/README.md).`;
+    case 'failed': return `${page} could not be captured ${landed}. ${own}`;
+  }
 }

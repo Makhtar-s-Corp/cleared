@@ -5,7 +5,7 @@
 // the JSON of a typed value in it, read back with readToolInput and
 // readToolOutput. Nothing here depends on @ag-ui/core at run time; a test
 // checks every type name against its EventType.
-import type { ChangesReport, HumanEdit, SessionPlan, TerminalMode } from '../api/types.ts';
+import type { ChangesReport, HumanEdit, ProductionCheck, SessionPlan, TerminalMode } from '../api/types.ts';
 import type { Decision, Harness, SessionId, StopReason, ToolKind, UserId } from './contract.ts';
 import type { Verdict } from './policy.ts';
 
@@ -72,6 +72,10 @@ export const CUSTOM_NAMES = [
   // Milestone 3 (P210, issue #326): the proof receipt's captures of a
   // service, journaled by the flow on the author's session when it is done.
   'cleared.proof_captured',
+  // Milestone 3 (P218, issue #334): the production page of a service,
+  // checked once the release landed healthy, journaled by the flow on the
+  // session the release was approved on.
+  'cleared.production_checked',
 ] as const;
 export type CustomName = (typeof CUSTOM_NAMES)[number];
 
@@ -211,6 +215,10 @@ export type CustomValue = {
     readonly before?: string; readonly after?: string; readonly video?: string; readonly videoMs?: number;
     readonly missing: readonly { readonly part: 'before' | 'after' | 'video'; readonly reason: 'no_browser' | 'no_before' | 'no_after' | 'failed' }[];
   };
+  // The production page's check (api/types.ts ProductionCheck): the address
+  // without its query, the capture's name in the ticket's proof folder or why
+  // there is none.
+  'cleared.production_checked': ProductionCheck;
 };
 
 type Base = { readonly timestamp?: number };
