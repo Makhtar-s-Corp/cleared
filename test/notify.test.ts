@@ -750,12 +750,12 @@ test('a real wake dispatches: the first one takes note, the next one tells ntfy 
   const { spawn } = await import('node:child_process');
   const box = sandbox();
   const posts: { url: string | undefined; auth: string | undefined; body: string }[] = [];
-  const server = createServer((request, response) => { let body = ''; request.on('data', (c) => { body += c; }); request.on('end', () => { posts.push({ url: request.url, auth: request.headers.authorization, body }); response.writeHead(200).end('{}'); }); });
+  const server = createServer((request, response) => { let body = ''; request.on('data', (c) => { body += c; }); request.on('end', () => { posts.push({ url: request.url, auth: request.headers.authorization, body }); response.writeHead(200).end('{}'); }); }) as Omit<ReturnType<typeof createServer>, 'address'> & { address(): AddressInfo };
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   t.after(() => server.close());
   const secrets = join(scratch('cleared-notify-secrets-'), 'notify');
   mkdirSync(secrets, { mode: 0o700 });
-  writeFileSync(join(secrets, 'credentials.json'), JSON.stringify({ ntfy: { server: `http://127.0.0.1:${(server.address() as AddressInfo).port}`, topic: 'cleared-test', token: 'tk_abcdefgh12345' } }), { mode: 0o600 });
+  writeFileSync(join(secrets, 'credentials.json'), JSON.stringify({ ntfy: { server: `http://127.0.0.1:${server.address().port}`, topic: 'cleared-test', token: 'tk_abcdefgh12345' } }), { mode: 0o600 });
   appendFileSync(join(box.home, 'agents.conf'), `\n[notify]\nadapters = ntfy\nsecrets_dir = ${secrets}\n`);
   const wake = () => new Promise<{ code: number | null; stderr: string }>((resolve) => {
     const child = spawn(join(box.home, 'wake.ts'), [], { env: { ...box.env, ...LINK_ENV } });

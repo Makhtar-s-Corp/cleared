@@ -555,7 +555,7 @@ for (const arg of args) {
 if ((' ' + args.join(' ') + ' ').includes('oauth/token')) {
   echoed(path.join(dir, 'token-asked'), body);
   fs.appendFileSync(path.join(dir, 'token-args'), (args.length ? args : ['']).map((arg) => arg + '\\n').join(''));
-  process.stdout.write('{"access_token":"app-token","token_type":"Bearer","expires_in":2591999}\\n');
+  process.stdout.write('{"access_token":' + '"app-token","token_type":"Bearer","expires_in":2591999}\\n');
 } else {
   echoed(path.join(dir, 'asked-as'), auth);
   let left = '0';

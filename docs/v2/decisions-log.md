@@ -6340,5 +6340,5 @@ The run made the labels `status:In Progress`, `status:In Review`, `status:Ready 
 
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no tunnel, no port opened but the tests' own ephemeral loopback ones, no secret. Six helper agents (Opus 5.5) typed disjoint sets of files in step d; every one of their changes is types only, checked as above.
 
-- Pull request: PRNUM, against `v2`.
+- Pull request: 388, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-cleanup`.

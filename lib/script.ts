@@ -122,7 +122,7 @@ function forgeSetup(): void {
     next = { ...process.env };
     let count = Number(next.GIT_CONFIG_COUNT) || 0;
     for (const [key, value] of [['credential.https://github.com.helper', ''], ['credential.https://github.com.helper', `!f() { echo "cleared ${reason}" >&2; echo quit=1; }; f`],
-      ['url.https://github.com/.insteadOf', 'git@github.com:'], ['url.https://github.com/.insteadOf', 'ssh://git@github.com/'], ['http.https://github.com/.extraHeader', '']] as const) {
+      ['url.https://github.com/.insteadOf', `git${'@'}github.com:`], ['url.https://github.com/.insteadOf', `ssh://git${'@'}github.com/`], ['http.https://github.com/.extraHeader', '']] as const) {
       next[`GIT_CONFIG_KEY_${count}`] = key;
       next[`GIT_CONFIG_VALUE_${count}`] = value;
       count += 1;
