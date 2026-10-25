@@ -112,7 +112,7 @@ A slash command `@cleared <task>` posted to `POST /hooks/chat` creates a ticket 
 
 | Variable | Default | Notes |
 | --- | --- | --- |
-| `CLEARED_V2_CHAT_SECRET_FILE` | none | A file holding the chat's signing secret (16 characters or more). Unset, the route answers `404`. A file that cannot be read, a bad user list or a bad origin is said at start and leaves the route off. |
+| `CLEARED_V2_CHAT_SECRET_FILE` | none | A file holding the chat's signing secret (16 characters or more). Unset, the route answers `404`. A file that cannot be read, a bad user list or a bad origin is said once (at start when the flow is configured, else at the first command) and leaves the route off. |
 | `CLEARED_V2_CHAT_USERS` | none | `<chat user id>=<user id>,...`: who may launch, as which user of the service. Anyone else is told the account is not linked. |
 | `CLEARED_V2_CHAT_REPLY_ORIGINS` | `https://hooks.slack.com` | The origins a command's `response_url` may have. Another one is refused with `400` before any ticket. |
 
