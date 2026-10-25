@@ -155,7 +155,8 @@ export function proofPath(ledger: string): string {
   return join(dirname(ledger), PROOF_FILE);
 }
 
-export function readOrCreateProof(path: string): string {
+// `what` names the file in a refusal: the app's proof, or the lanes' MCP token (mcp/http.ts), made the same way.
+export function readOrCreateProof(path: string, what = 'the app\'s proof'): string {
   let fd: number;
   try {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
@@ -163,20 +164,20 @@ export function readOrCreateProof(path: string): string {
     try { writeSync(fd, `${randomBytes(32).toString('hex')}\n`); }
     finally { closeSync(fd); }
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new ProofError(`cannot make the app's proof at ${path}: ${(error as Error).message}`);
+    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new ProofError(`cannot make ${what} at ${path}: ${(error as Error).message}`);
   }
   try {
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch (error) {
-    throw new ProofError(`cannot read the app's proof at ${path}: ${(error as Error).message}`);
+    throw new ProofError(`cannot read ${what} at ${path}: ${(error as Error).message}`);
   }
   try {
     const stat = fstatSync(fd);
-    if (!stat.isFile()) throw new ProofError(`the app's proof at ${path} is not a regular file`);
-    if (stat.uid !== process.getuid?.()) throw new ProofError(`the app's proof at ${path} belongs to another account`);
-    if ((stat.mode & 0o077) !== 0) throw new ProofError(`the app's proof at ${path} can be read by others: chmod 600 it`);
+    if (!stat.isFile()) throw new ProofError(`${what} at ${path} is not a regular file`);
+    if (stat.uid !== process.getuid?.()) throw new ProofError(`${what} at ${path} belongs to another account`);
+    if ((stat.mode & 0o077) !== 0) throw new ProofError(`${what} at ${path} can be read by others: chmod 600 it`);
     const proof = readFileSync(fd, 'utf8').trim();
-    if (!/^[0-9a-f]{64}$/.test(proof)) throw new ProofError(`the app's proof at ${path} is not 64 hex characters`);
+    if (!/^[0-9a-f]{64}$/.test(proof)) throw new ProofError(`${what} at ${path} is not 64 hex characters`);
     return proof;
   } finally {
     closeSync(fd);
