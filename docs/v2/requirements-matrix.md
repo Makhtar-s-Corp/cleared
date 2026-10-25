@@ -36,7 +36,7 @@ Every requirement of the brief (the orchestrator's prompt and the owner's decisi
 | B4.11 | Questions to the owner grouped in one message, at most one a day except when blocked | always | process | the reports sent | done |
 | B4.12 | The milestone report holds captures of what runs, the demo step by step, what stays open and the milestone's cost; no em dash in a report | always | process | the milestone 1 report | done |
 | B2.1 | Kept from v1: the heartbeat and `cleared status` | 4 | | | later (milestone 4, with the v1 conversion; `keep-and-drop.md` holds the verdict) |
-| B2.2 | Kept from v1: the fast lane (rules on the real diff) | 2 then 4 | 172 (the `Quick` label and the Haiku author) | `test/lead/plans/runner.test.ts`; the real-diff rules and the approval while the checks run: milestone 4 (first plan, decision 15) | partial |
+| B2.2 | Kept from v1: the fast lane (rules on the real diff) | 2 then 4 | 172 (the `Quick` label and the Haiku author); 362 (lane j3-fast-lane: v1's rules on the real diff after each author session and at the published head, the fallback to the full circuit for good, the card's lane, the approval while the checks run) | `test/lead/plans/runner.test.ts`; `test/flow/fast-lane.test.ts`, `test/flow/fast-lane-effect.test.ts`, `app/web/test/inbox/fast-lane.test.tsx` | done (not carried over, named in the log entry of 2026-10-25: the merge that skips the unrelated checks, which needs v1's lane record, v1's light reviewer, targeted tests and one capture) |
 | B4.5 | Interface lanes: the visual loop at the four widths, light and dark, then the art-director pass | always | 135, 148, 154, 162, 171, 174, 178, 184 | each interface pull request's captures and pass | done |
 | B4.6 | Tests first; each defect test fails on the old code; a fake harness proves nothing about the real one: every adapter has a real run on the server, documented, run by `cleared doctor`; the whole suite in CI; no skipped test without an issue | always | 120, 143, 169, 193 (the workspace's real run) | CI; `doctor claude-code`, `doctor host-tools`, `doctor lead`, `doctor workspace`; issue 146 for the one skipped test | done |
 | B4.7 | Ask the owner only for the big decisions, grouped, with 2 to 4 options and a recommendation; decide the rest and log it | always | process | the plans' question sections; [decisions-log.md](decisions-log.md) | done |
@@ -390,6 +390,6 @@ Rule 2, read on 2026-10-25 at `0baaf81`, then read again at `origin/v2` `292ec62
 
 **Later milestone, named in the line (not a blocker of the milestone 2 merge)**
 
-- B2.2, B5.9d and D17: milestone 4 (B5.9d by the owner's decision of 2026-10-25, option C: the v1 passkey code stays until then).
+- B5.9d and D17: milestone 4 (B5.9d by the owner's decision of 2026-10-25, option C: the v1 passkey code stays until then; B2.2 is `done`, pull request 362).
 - B5.11b: milestone 4, the kept v1 JavaScript (`lib/notify/contract.mjs` among it), converted with v1.
 - D11: milestone 4, v1's bash scripts; `merge-pr.sh` and `ask-validation.sh`, which v2's release requests still reach through the v1 release broker, move to Node first.
