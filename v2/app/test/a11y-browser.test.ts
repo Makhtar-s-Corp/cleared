@@ -10,7 +10,8 @@
 //   - the keyboard: Close opens its reason field and moves the focus there,
 //     Keep brings it back to Close, and the outcome takes the focus once
 //     the ticket is closed, on the session's page and in the inbox, where
-//     the inbox's live line says it.
+//     the inbox's live line says it; the inbox's Send back moves it to its
+//     question's Keep, and Keep back to Send back.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/a11y-browser.test.ts
 import test from 'node:test';
@@ -204,9 +205,14 @@ for (const language of LANGUAGES) {
         assert.equal(await focused(page), '#close-done', 'the outcome takes the focus');
         assert.match((await page.locator('#close-done').innerText()).trim(), CLOSED[language]);
 
-        // The inbox: a release's Close.
+        // The inbox: a release's Send back asks once, then its Close.
         await page.goto(`${base}/inbox#release-158`);
         await drawn(page, '#detail [data-act="close"]');
+        await page.focus('#detail [data-act="send_back"]');
+        await page.keyboard.press('Enter');
+        assert.equal(await focused(page), '[data-act="keep"]', 'Send back moves the focus to its question\'s first answer, Keep');
+        await page.keyboard.press('Enter');
+        assert.equal(await focused(page), '[data-act="send_back"]', 'Keep brings the focus back to Send back');
         await page.focus('#detail [data-act="close"]');
         await page.keyboard.press('Enter');
         assert.equal(await focused(page), '#close-message', 'Close moves the focus to the reason');
