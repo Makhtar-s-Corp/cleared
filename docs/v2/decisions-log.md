@@ -5454,5 +5454,5 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 
 **Resources.** No Docker object, no account, no network beyond `npm ci` of the lock file, no tunnel, no secret: the tokens are made at run time; the services listen on port 0 or a free port, on loopback only.
 
-- Pull request: PR_NUMBER, against `v2`.
+- Pull request: 357, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-mcp-access-sec`.
