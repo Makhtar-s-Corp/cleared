@@ -8,7 +8,7 @@ import type { Message } from '@ag-ui/client';
 import type { LeadMessage, LeadState, LeadStreamFrame, NextInboxItem, Plan } from '../../../../src/api/types.ts';
 import { batched, ThreadAgent, type Publish } from '../../copilot/agent.ts';
 import type { ScreenContext } from '../../lib/screen.ts';
-import { followLead, mergeMessages, mergePlan, NO_LEAD, trainLines, type StreamLike, type TrainLine } from './model.ts';
+import { followLead, frameChanges, mergeMessages, mergePlan, NO_LEAD, trainLines, type StreamLike, type TrainLine } from './model.ts';
 
 // trains: the release trains, read from the inbox by the screen (readTrains,
 // lane 22) once the thread is there and at each tick; none until then.
@@ -22,7 +22,7 @@ export type LeadAgentOptions = {
   readonly api: ScreenContext['api'];
   readonly open: (url: string) => StreamLike;
   readonly later: (run: () => void, ms: number) => void;
-  readonly onFrame?: (frame: LeadStreamFrame) => void;                     // the shell recounts the inbox
+  readonly onFrame?: (frame: LeadStreamFrame, before: LeadThread) => void;  // the shell recounts the inbox
 };
 
 // The thread's lines as AG-UI messages: the owner's, the lead's, the service's.
@@ -51,10 +51,14 @@ export class LeadAgent extends ThreadAgent<LeadThread> {
     this.publish?.(this.thread, messagesOf(this.thread));
   }
 
-  // The trains as the inbox says them now; a failed read keeps the last ones.
+  // The trains as the inbox says them now; a failed read keeps the last
+  // ones, and the same trains do not draw the thread again.
   async readTrains(): Promise<void> {
     const items = await this.options.api<NextInboxItem[]>('/inbox').catch(() => undefined);
-    if (items) this.update((thread) => ({ ...thread, trains: trainLines(items) }));
+    if (!items) return;
+    const trains = trainLines(items);
+    if (this.thread && JSON.stringify(trains) === JSON.stringify(this.thread.trains)) return;
+    this.update((thread) => ({ ...thread, trains }));
   }
 
   protected override follow(publish: Publish<LeadThread>): () => void {
@@ -80,12 +84,12 @@ export class LeadAgent extends ThreadAgent<LeadThread> {
         later: this.options.later,
         onFrame: (frame) => {
           const before = this.thread;
-          if (!before || stopped) return;
+          if (!before || stopped || !frameChanges(frame, before)) return;
           this.thread = frame.kind === 'message' ? { ...before, messages: mergeMessages(before.messages, [frame.message]) }
             : frame.kind === 'state' ? { ...before, lead: frame.state }
             : { ...before, plans: mergePlan(before.plans, frame.plan) };
           soon();
-          this.options.onFrame?.(frame);
+          this.options.onFrame?.(frame, before);
         },
       }).stop;
     })();
