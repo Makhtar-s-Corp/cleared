@@ -3,17 +3,19 @@
 // after it; the dollars only where the agent reported them; and three levers
 // that call real actions of the service. model.ts holds the rules and the
 // words; this file draws them, reads the figures again every minute and
-// after each lever, and says a refusal in the catalog's words.
+// after each lever, and says a refusal in the catalog's words. The week's
+// figures (C17) are read on their own, so a failed read of them leaves the
+// rest of the screen as it is.
 import { ArrowRight, ArrowsClockwise, Gauge, Pause, Play, Stack, Timer } from '@phosphor-icons/react';
 import { useCallback, useEffect, useState } from 'react';
-import type { Consumption, HarnessConsumption, LeversChange, Quota } from '../../../../src/api/types.ts';
+import type { Consumption, HarnessConsumption, LeversChange, Quota, WeekFigures } from '../../../../src/api/types.ts';
 import { Toggle } from '@/components/ui/toggle.tsx';
 import { useScreen } from '@/lib/context.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { useLive } from '@/lib/query.tsx';
 import {
   REFRESH_MS, averagePerDay, browserZone, chartOf, costView, dayInitial, dayLong, harnessMaker, harnessName, headline, leverFailure, leverViews, measuredAt, percentText,
-  periodText, projectionLines, quotaOf, readConsumption, readingLines, readFailure, resetIn, setLevers, tokensText, verdictOf, winRows, type LeverId, type LeverView,
+  periodText, projectionLines, quotaOf, readConsumption, readingLines, readFailure, readWeek, resetIn, setLevers, tokensText, verdictOf, weekView, winRows, type LeverId, type LeverView,
 } from './model.ts';
 import './consumption.css';
 
@@ -155,9 +157,79 @@ function Wins({ data, t, language }: { readonly data: Consumption; readonly t: T
   );
 }
 
-export function ConsumptionView({ data, t, language, now, busy = false, note = '', onLever }: {
+// The week's figures (C17): what the last seven days merged and what it
+// took, then each merged ticket against its estimate, then per service.
+function Week({ week, failed, t, language }: { readonly week: WeekFigures | undefined; readonly failed: boolean; readonly t: Translate; readonly language: Language }) {
+  if (!week) {
+    if (!failed) return null;
+    return (
+      <section className="panel week" aria-labelledby="week-title" data-week="failed">
+        <h2 id="week-title">{t('consumption_week_title')}</h2>
+        <p className="week-failed" role="status">{t('consumption_week_failed')}</p>
+      </section>
+    );
+  }
+  const view = weekView(week, language, t);
+  return (
+    <section className="panel week" aria-labelledby="week-title" data-week="shown">
+      <h2 id="week-title">{t('consumption_week_title')}</h2>
+      <p className="week-sub">{t('consumption_week_sub')}</p>
+      <ul className="week-facts">
+        <li data-week-fact="merged">{view.merged}</li>
+        {view.tokens ? <li data-week-fact="tokens">{view.tokens}</li> : null}
+        {view.time ? <li data-week-fact="time">{view.time}</li> : null}
+        {view.idle ? <li data-week-fact="idle">{view.idle}</li> : null}
+      </ul>
+      {view.dollars ? <p className="week-dollars" data-week-dollars="shown">{view.dollars}</p> : null}
+      {view.noDollars ? <p className="week-dollars week-no-dollars" data-week-dollars="none">{view.noDollars}</p> : null}
+      {view.tickets.length > 0 ? (
+        <ol className="week-tickets" aria-label={t('consumption_week_tickets_label')}>
+          {view.tickets.map((ticket) => (
+            <li key={ticket.id} data-week-ticket={ticket.id}>
+              <p className="week-ticket-head"><span className="id">{ticket.id}</span><span className="week-ticket-title">{ticket.title}</span></p>
+              <p className="week-ticket-meta"><span>{ticket.services}</span><span className="sep" aria-hidden="true">·</span><span>{ticket.estimate}</span></p>
+            </li>
+          ))}
+        </ol>
+      ) : null}
+      {view.estimates ? <p className="week-estimates">{view.estimates}</p> : null}
+      {view.rows.length > 0 ? (
+        <>
+          <h3 className="week-services">{t('consumption_week_services')}</h3>
+          <div className="week-scroll">
+            <table className="week-table">
+              <thead>
+                <tr>
+                  <th scope="col">{t('consumption_week_service')}</th>
+                  <th scope="col" className="n">{t('consumption_week_col_merged')}</th>
+                  <th scope="col" className="n">{t('consumption_week_col_tokens')}</th>
+                  <th scope="col" className="n">{t('consumption_week_col_time')}</th>
+                  <th scope="col" className="n">{t('consumption_week_col_dollars')}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {view.rows.map((row) => (
+                  <tr key={row.key} data-week-service={row.key}>
+                    <td>{row.name}</td>
+                    <td className="n num">{row.merged}</td>
+                    <td className="n num">{row.tokens}</td>
+                    <td className="n num">{row.time}</td>
+                    <td className="n num dollars">{row.dollars}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
+      ) : null}
+    </section>
+  );
+}
+
+export function ConsumptionView({ data, t, language, now, busy = false, note = '', onLever, week, weekFailed = false }: {
   readonly data: Consumption; readonly t: Translate; readonly language: Language; readonly now: Date;
   readonly busy?: boolean; readonly note?: string; readonly onLever?: (change: LeversChange) => void;
+  readonly week?: WeekFigures; readonly weekFailed?: boolean;
 }) {
   const summary = headline(data, language, t);
   const cost = costView(data, language, t);
@@ -174,6 +246,7 @@ export function ConsumptionView({ data, t, language, now, busy = false, note = '
       </header>
       <div className="consumption-grid">
         <div className="main-col">
+          <Week week={week} failed={weekFailed} t={t} language={language} />
           <div className="harnesses" role="list" aria-label={t('consumption_harnesses_label')}>
             {data.harnesses.map((h) => <div role="listitem" key={h.harness}><HarnessCard h={h} data={data} t={t} language={language} /></div>)}
           </div>
@@ -231,6 +304,8 @@ export default function ConsumptionPage() {
   const [zone] = useState(browserZone);
   const [data, setData] = useState<Consumption | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  const [week, setWeek] = useState<WeekFigures | undefined>(undefined);
+  const [weekFailed, setWeekFailed] = useState(false);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
 
@@ -242,13 +317,22 @@ export default function ConsumptionPage() {
       setFailed(t(readFailure(error)));
     }
   }, [api, zone, t]);
+  // The week on its own: a failed read keeps the figures it read last.
+  const loadWeek = useCallback(async () => {
+    try {
+      setWeek(await readWeek(api, zone));
+      setWeekFailed(false);
+    } catch {
+      setWeekFailed(true);
+    }
+  }, [api, zone]);
 
-  useEffect(() => { void load(); }, [load]);
-  useLive(() => { void load(); });
+  useEffect(() => { void load(); void loadWeek(); }, [load, loadWeek]);
+  useLive(() => { void load(); void loadWeek(); });
   useEffect(() => {
-    const timer = setInterval(() => void load(), REFRESH_MS);
+    const timer = setInterval(() => { void load(); void loadWeek(); }, REFRESH_MS);
     return () => clearInterval(timer);
-  }, [load]);
+  }, [load, loadWeek]);
 
   const change = async (next: LeversChange) => {
     setBusy(true);
@@ -264,5 +348,6 @@ export default function ConsumptionPage() {
   };
 
   if (!data) return failed !== null ? <div className="consumption"><p className="empty error">{failed}</p></div> : <div className="consumption" aria-busy="true" />;
-  return <ConsumptionView data={data} t={t} language={language} now={context.now()} busy={busy} note={note} onLever={(next) => void change(next)} />;
+  return <ConsumptionView data={data} t={t} language={language} now={context.now()} busy={busy} note={note} onLever={(next) => void change(next)}
+    {...(week ? { week } : {})} weekFailed={weekFailed && !week} />;
 }

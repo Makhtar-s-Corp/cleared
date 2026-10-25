@@ -2,16 +2,17 @@
 // used over the last seven days, where its quota is heading before the next
 // reset and after it, the dollars only where the harness reported them, and
 // three levers that call real actions of the service (the author model of
-// the next sessions, the sessions run at once, the pause of the schedules).
+// the next sessions, the sessions run at once, the pause of the schedules);
+// and the week's figures (C17): what merged, what it took, per service.
 // The model and the wording are pure, so the tests run them under Node;
 // Consumption.tsx draws the screen and reads it again as time passes.
 //
 // Every number and date is said through Intl in the page's language and
 // every duration through lib/time.ts, never as raw milliseconds or ISO text.
-import type { Consumption, HarnessConsumption, HarnessWins, LeverChoices, LeversChange, Projection, Quota } from '../../../../src/api/types.ts';
+import type { Consumption, HarnessConsumption, HarnessWins, LeverChoices, LeversChange, Projection, Quota, WeekFigures } from '../../../../src/api/types.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
-import { duration } from '../../lib/time.ts';
+import { count, duration, lasted } from '../../lib/time.ts';
 
 type Api = ScreenContext['api'];
 type Language = 'en' | 'fr';
@@ -26,6 +27,7 @@ export function browserZone(): string {
 export const consumptionPath = (zone: string): string => `/consumption?tz=${encodeURIComponent(zone)}`;
 
 export const readConsumption = (api: Api, zone: string): Promise<Consumption> => api<Consumption>(consumptionPath(zone));
+export const readWeek = (api: Api, zone: string): Promise<WeekFigures> => api<WeekFigures>(`/consumption/week?tz=${encodeURIComponent(zone)}`);
 export const setLevers = (api: Api, change: LeversChange): Promise<LeverChoices> => api<LeverChoices>('/consumption/levers', { method: 'POST', body: change });
 
 // A lever the service refused says why (its own words are English and
@@ -196,6 +198,59 @@ export function costView(data: Consumption, language: Language, t: Translate): C
     partial: h.costTurns.reported < h.costTurns.turns ? t('consumption_cost_partial', { reported: h.costTurns.reported, turns: h.costTurns.turns }) : null,
   }));
   return { rows, total: dollars(reported.reduce((sum, h) => sum + (h.costUsd as number), 0), language) };
+}
+
+// ------------------------------------------------------- the week's figures
+
+export type WeekTicketLine = { readonly id: string; readonly title: string; readonly services: string; readonly estimate: string };
+export type WeekRow = { readonly key: string; readonly name: string; readonly merged: string; readonly tokens: string; readonly time: string; readonly dollars: string };
+export type WeekView = {
+  readonly merged: string;
+  readonly tokens: string | null;                  // null when no agent finished a turn
+  readonly time: string | null;
+  readonly idle: string | null;                    // said instead of the two above
+  readonly dollars: string | null;                 // the reported dollars, or
+  readonly noDollars: string | null;               // why there are none
+  readonly tickets: readonly WeekTicketLine[];
+  readonly estimates: string | null;               // null when nothing merged
+  readonly rows: readonly WeekRow[];
+};
+
+// The week's figures as the panel says them: the counts through Intl, the
+// durations through lib/time.ts, the dollars only as the agents reported
+// them, and an estimate in minutes only.
+export function weekView(week: WeekFigures, language: Language, t: Translate): WeekView {
+  const n = week.merged.length;
+  const worked = week.spend.turns > 0;
+  const est = week.estimates;
+  const line = (m: WeekFigures['merged'][number]): string => {
+    if (m.estimateMinutes === null) return t('consumption_week_no_estimate');
+    if (m.actualMinutes === null) return t('consumption_week_estimate_only', { estimate: duration(m.estimateMinutes, t) });
+    return t('consumption_week_estimate', { estimate: duration(m.estimateMinutes, t), actual: duration(m.actualMinutes, t) });
+  };
+  const estimates = n === 0 ? null
+    : est.tickets === 0 ? t('consumption_week_estimates_none')
+      : t(est.tickets === 1 && n === 1 ? 'consumption_week_estimates_one' : 'consumption_week_estimates', {
+        estimate: duration(est.estimatedMinutes, t), actual: duration(est.actualMinutes, t), n: count(est.tickets, language), total: count(n, language),
+      });
+  return {
+    merged: n === 0 ? t('consumption_week_merged_none') : n === 1 ? t('consumption_week_merged_one') : t('consumption_week_merged', { n: count(n, language) }),
+    tokens: worked ? t('consumption_week_tokens', { n: tokensText(week.spend.tokens ?? 0, language) }) : null,
+    time: worked ? t('consumption_week_work', { time: lasted(week.spend.workMs, t) }) : null,
+    idle: worked ? null : t('consumption_week_idle'),
+    dollars: worked && week.spend.costUsd !== null ? t('consumption_week_dollars', { amount: dollars(week.spend.costUsd, language) }) : null,
+    noDollars: worked && week.spend.costUsd === null ? t('consumption_week_no_dollars') : null,
+    tickets: week.merged.map((m) => ({ id: m.id, title: m.title, services: m.services.join(', '), estimate: line(m) })),
+    estimates,
+    rows: week.services.map((row) => ({
+      key: row.service ?? 'workspace',
+      name: row.service ?? t('consumption_week_workspace'),
+      merged: count(row.merged, language),
+      tokens: tokensText(row.tokens ?? 0, language),
+      time: lasted(row.workMs, t),
+      dollars: row.turns === 0 ? dollars(0, language) : row.costUsd === null ? t('consumption_week_not_reported') : dollars(row.costUsd, language),
+    })),
+  };
 }
 
 // ---------------------------------------------------------------- the levers

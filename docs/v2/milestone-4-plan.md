@@ -345,7 +345,7 @@ A week other than the last seven days (no week picker, no week before); a report
 
 ### 9.6 Files this lane owns
 
-`v2/src/consumption/week.ts`, the `since` of `v2/src/consumption/ticket-cost.ts`, the route in `v2/src/consumption/routes.ts`, the ticket store and services given to it in `v2/src/modules/lead.ts`, the route and its type in `v2/src/api/types.ts` (and the pinned count of `test/api/types.test.ts`); the panel in `v2/app/web/screens/consumption/` and its keys in `v2/app/messages/consumption.*.json`; `v2/app/fixtures/week.ts` and its route in `v2/app/fixtures/source.ts`; the tests above, the browser test in `.github/workflows/v2.yml`'s list; `docs/v2/weekly/`; its matrix lines and its log entry.
+`v2/src/consumption/week.ts`, the `since` of `v2/src/consumption/ticket-cost.ts`, the route in `v2/src/consumption/routes.ts`, the ticket store and services given to it in `v2/src/modules/lead.ts`, the route and its type in `v2/src/api/types.ts` (and the pinned count of `test/api/types.test.ts`); the panel in `v2/app/web/screens/consumption/` and its keys in `v2/app/messages/consumption.*.json`; `v2/app/fixtures/week.ts` and its route in `v2/app/fixtures/source.ts`; the tests above, the browser test in `.github/workflows/v2.yml`'s list; `docs/v2/weekly/`; a section of `v2/README.md`; its matrix lines and its log entry.
 
 ### 9.7 Unknowns, and who closes them
 

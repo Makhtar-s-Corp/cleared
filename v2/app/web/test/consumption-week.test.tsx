@@ -23,7 +23,8 @@ const data = () => fixture.read('Europe/Paris');
 const week = (): Promise<WeekFigures> => fixture.week('Europe/Paris');
 const render = (t: Translate, language: 'en' | 'fr', figures: WeekFigures | undefined, weekFailed = false) =>
   html(<ConsumptionView data={data()} t={t} language={language} now={FIXTURE_NOW} {...(figures ? { week: figures } : {})} weekFailed={weekFailed} />);
-const shown = (markup: string) => visibleText(markup).join('\n');
+// The catalogs keep a number and its unit together with non-breaking spaces; the words are compared with plain ones.
+const shown = (markup: string) => visibleText(markup).join('\n').replace(/[\u00a0\u202f]/g, ' ');
 
 test('the fixtures\' week, read by the service\'s own weekFigures(): three merged, the mirror\'s close left out, the same tokens as the agents\' cards', async () => {
   const figures = await week();
