@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createDecipheriv, createECDH, createHmac, createPublicKey, randomBytes, verify } from 'node:crypto';
+import { createDecipheriv, createECDH, createHmac, createPublicKey, verify } from 'node:crypto';
 import { chmodSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { spawn, spawnSync } from 'node:child_process';
 import type { AddressInfo } from 'node:net';
@@ -82,18 +82,22 @@ test('the VAPID header is an ES256 token for the push service, signed by the ser
 });
 
 test('a VAPID key whose private scalar starts with a zero byte is kept on 32 bytes and still signs', () => {
-  const ecdh = createECDH('prime256v1');
-  for (;;) { try { ecdh.setPrivateKey(Buffer.concat([Buffer.alloc(1), randomBytes(31)])); break; } catch { /* not a valid scalar, draw again */ } }
-  assert.equal(ecdh.getPrivateKey().length, 31, 'Node drops the leading zero: the case is exercised');
-  const keys = vapidKeysFrom(ecdh);
-  assert.equal(Buffer.from(keys.privateKey, 'base64url').length, 32);
-  const raw = Buffer.from(keys.publicKey, 'base64url');
-  const key = createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: b64u(raw.subarray(1, 33)), y: b64u(raw.subarray(33)) }, format: 'jwk' });
-  // Kept on 32 bytes, or kept short by an earlier version: both sign.
-  for (const privateKey of [keys.privateKey, b64u(ecdh.getPrivateKey())]) {
-    const [, token] = /^vapid t=([^,]+),/.exec(vapidHeader(endpoint, { ...keys, privateKey }, 'mailto:ops@example.org'))!;
-    const [head, claims, signature] = token!.split('.');
-    assert.ok(verify('sha256', Buffer.from(`${head}.${claims}`), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature!, 'base64url')));
+  // Fixed scalars, one and two leading zero bytes: a random draw after a zero byte gave a second one
+  // about once in 256, so Node kept 30 bytes where the test expected 31 (issue #411).
+  for (const zeros of [1, 2]) {
+    const ecdh = createECDH('prime256v1');
+    ecdh.setPrivateKey(Buffer.concat([Buffer.alloc(zeros), Buffer.alloc(32 - zeros, 0x42)]));
+    assert.equal(ecdh.getPrivateKey().length, 32 - zeros, 'Node drops the leading zeros: the case is exercised');
+    const keys = vapidKeysFrom(ecdh);
+    assert.equal(Buffer.from(keys.privateKey, 'base64url').length, 32);
+    const raw = Buffer.from(keys.publicKey, 'base64url');
+    const key = createPublicKey({ key: { kty: 'EC', crv: 'P-256', x: b64u(raw.subarray(1, 33)), y: b64u(raw.subarray(33)) }, format: 'jwk' });
+    // Kept on 32 bytes, or kept short by an earlier version: both sign.
+    for (const privateKey of [keys.privateKey, b64u(ecdh.getPrivateKey())]) {
+      const [, token] = /^vapid t=([^,]+),/.exec(vapidHeader(endpoint, { ...keys, privateKey }, 'mailto:ops@example.org'))!;
+      const [head, claims, signature] = token!.split('.');
+      assert.ok(verify('sha256', Buffer.from(`${head}.${claims}`), { key, dsaEncoding: 'ieee-p1363' }, Buffer.from(signature!, 'base64url')), `${zeros} leading zero bytes`);
+    }
   }
 });
 
