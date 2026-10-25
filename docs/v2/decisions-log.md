@@ -5803,5 +5803,5 @@ With the CPU slowed four times the budget is at its edge: what is left is the ne
 
 **Resources.** No Docker object, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no port but the tests' loopback port 0, no secret.
 
-- Pull request: against `v2`.
+- Pull request: 372, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-tab-perf`.
