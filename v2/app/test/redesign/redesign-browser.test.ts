@@ -188,7 +188,9 @@ test('Consumption from the palette and from the account menu', { skip }, async (
   await signedIn(1440, async (page, base) => {
     await page.locator('#tower-body .tower').waitFor();
     await page.keyboard.press('Control+k');
+    await page.locator('#palette input').waitFor();
     await page.keyboard.type('Consumption');
+    await page.locator('#palette [cmdk-item][data-selected="true"]', { hasText: 'Consumption' }).waitFor();
     await page.keyboard.press('Enter');
     await page.waitForURL(`${base}/consumption`);
     await page.locator('.nav-item[data-nav="tower"]').click();

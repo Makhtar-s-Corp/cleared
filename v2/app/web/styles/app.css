@@ -180,6 +180,25 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .state-dot[data-state="ended"] { background: var(--dashed); }
 .side-foot { display: flex; flex-direction: column; gap: var(--space-2); margin: 0 calc(-1 * var(--space-2)); padding: var(--space-2) var(--space-2) 0; border-top: 1px solid var(--hairline); }
 .side-foot-row { display: flex; align-items: center; gap: 2px; }
+/* The week's quota (the product owner's decision of 2026-10-25, 11:14, P227): a link to Consumption, its bar in the
+   Consumption screen's colours, the progress colour, or the danger text's for a quota reached before its reset. */
+.quota-gauge { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2); border-radius: var(--radius); color: var(--text-secondary); font-size: var(--text-sm); }
+.quota-gauge:hover { background: var(--tab-fill); text-decoration: none; }
+.quota-gauge[aria-current="page"] { background: var(--surface); box-shadow: var(--e-outline); }
+.quota-gauge-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.quota-gauge-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.quota-gauge-percent { flex: none; color: var(--text); font-weight: var(--weight-strong); }
+.quota-gauge[data-verdict="hit"] .quota-gauge-percent { color: var(--danger-text); }
+.quota-gauge-bar { appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 4px; border: 0; border-radius: 999px; background: var(--hairline); overflow: hidden; }
+.quota-gauge-bar::-webkit-progress-bar { background: var(--hairline); }
+.quota-gauge-bar::-webkit-progress-value { background: var(--stage-progress); border-radius: 999px; }
+.quota-gauge-bar::-moz-progress-bar { background: var(--stage-progress); border-radius: 999px; }
+.quota-gauge[data-verdict="hit"] .quota-gauge-bar::-webkit-progress-value { background: var(--danger-text); }
+.quota-gauge[data-verdict="hit"] .quota-gauge-bar::-moz-progress-bar { background: var(--danger-text); }
+.quota-gauge-reset { color: var(--text-faint); white-space: nowrap; }
+/* The account menu's link to Consumption, drawn as its buttons are. */
+.menu .menu-link { display: flex; align-items: center; color: var(--text); }
+.menu .menu-link:hover { text-decoration: none; }
 .lead-status { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); color: var(--text-muted); font-size: var(--text-sm); }
 .app[data-sidebar="rail"] .lead-status { display: none; }
 .side-foot .source-pill { display: none; }
@@ -204,6 +223,8 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .app[data-sidebar="rail"] .side-foot { margin-top: auto; align-items: center; width: calc(100% + 2 * var(--space-2)); }
 .app[data-sidebar="rail"] .side-foot-row { flex-direction: column; }
 .app[data-sidebar="rail"] .person { flex: none; justify-content: center; padding: 0; width: 32px; }
+.app[data-sidebar="rail"] .quota-gauge { justify-content: center; width: 40px; min-height: 32px; padding: 0 var(--space-1); }
+.app[data-sidebar="rail"] :is(.quota-gauge-head, .quota-gauge-reset) { display: none; }
 .app[data-sidebar="open"] .side-foot { margin-top: auto; }
 /* Tooltips: the name and the chord at once, beside the icon (the native title waits a second): every
    item of the rail, and the icon-only buttons of the open sidebar. */
@@ -359,6 +380,8 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
   .lead-status { display: none; }
   .source-pill { padding: 2px var(--space-2); }
   .side-foot-row .theme { display: none; }
+  .quota-gauge { display: none; }
+  .menu .menu-link { min-height: 44px; }
   .source-pill .long { display: none; }
   .icon { width: 44px; height: 44px; }
   .person { flex: none; justify-content: center; width: 44px; height: 44px; padding: 0; }

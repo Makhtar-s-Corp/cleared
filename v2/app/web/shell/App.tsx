@@ -26,12 +26,13 @@ import { browserStore, rememberLanguage } from '@/lib/language.ts';
 import { Screen } from '@/lib/context.tsx';
 import { ChangeStream, type SourceLike } from '@/lib/events.ts';
 import { translator } from '@/lib/i18n.ts';
-import { CacheContext, useReader } from '@/lib/query.tsx';
+import { CacheContext, sameFields, useReader } from '@/lib/query.tsx';
 import { SCREEN_NAMES, createAppRouter, interceptLinks, loadScreen, loadedScreen } from '@/lib/router.tsx';
 import { KeptView } from '@/lib/stack.tsx';
 import { placeOf, pushStack, stackOrder, titleKey, type Place, type ScreenName } from '@/lib/routes.ts';
 import { ApiError, type Me, type ScreenContext } from '@/lib/screen.ts';
 import { showSheets } from '@/lib/sheets.ts';
+import { REFRESH_MS, browserZone, readConsumption } from '@/screens/consumption/model.ts';
 import { towerModel, type NeedCard } from '@/screens/tower/model.ts';
 import type { Ticket } from '../../../src/tickets/contract.ts';
 import { isMac } from './Kbd.tsx';
@@ -42,6 +43,7 @@ import {
 } from './model.ts';
 import { GESTURES, paletteItems, type PaletteItem } from './palette.ts';
 import { ShortcutSheet, pressTab, useShortcuts, walkRows } from './Shortcuts.tsx';
+import { weeklyQuota, type WeeklyQuota } from './quota.ts';
 import { Sidebar } from './Sidebar.tsx';
 
 export type ShellStart = {
@@ -275,6 +277,25 @@ function Shell({ shared }: { readonly shared: Shared }) {
     return shellReader.live(() => void recount());
   }, [shellReader, recount]);
 
+  // The week's quota for the sidebar's gauge (P227): read once the person is known, then each minute, as the
+  // Consumption screen reads it; a read that fails keeps what the gauge shows, and says nothing measured before it.
+  const zone = useMemo(() => browserZone(), []);
+  const [quota, setQuota] = useState<WeeklyQuota | null>(null);
+  useEffect(() => {
+    if (!raw) return;
+    let stopped = false;
+    const read = () => {
+      readConsumption(raw, zone).then((data) => {
+        if (stopped) return;
+        const next = weeklyQuota(data);
+        setQuota((held) => (held && sameFields(held, next) ? held : next));
+      }, () => { if (!stopped) setQuota((held) => held ?? { kind: 'none' }); });
+    };
+    read();
+    const timer = setInterval(read, REFRESH_MS);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [raw, zone]);
+
   const signOut = useCallback(async () => {
     try { if (me) await json('/logout', { method: 'POST', headers: { 'x-csrf-token': me.csrf } }); }
     finally {
@@ -418,7 +439,7 @@ function Shell({ shared }: { readonly shared: Shared }) {
       <div className="app" data-sidebar={mode} inert={overlay !== null}>
         <a className="skip" href="#screen">{t('skip_to_content')}</a>
         <Sidebar t={t} mode={mode} screen={place.screen} session={place.session} project={start.project} userName={start.userName} source={start.source} me={me}
-          waiting={waiting} lead={leadDot(lead)} groups={groups} theme={theme} onTheme={flipTheme} language={language} onLanguage={pickLanguage}
+          waiting={waiting} lead={leadDot(lead)} groups={groups} quota={quota} zone={zone} theme={theme} onTheme={flipTheme} language={language} onLanguage={pickLanguage}
           onSearch={openPalette} onToggle={toggleSidebar} onSignOut={onSignOut} onPick={onPick} />
         <div className="main">
           {/* The bar names the screen: the page's banner, so nothing on it lies outside a landmark. */}

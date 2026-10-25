@@ -13,7 +13,7 @@ import type { ScreenName } from '../lib/routes.ts';
 import type { Translate } from '../lib/i18n.ts';
 import { needId, needTitle, type NeedCard } from '../screens/tower/model.ts';
 import { duration } from '../lib/time.ts';
-import { NAV, type SessionRow, type Theme } from './model.ts';
+import { SCREENS, type SessionRow, type Theme } from './model.ts';
 
 export type PaletteGroup = 'waiting' | 'actions' | 'goto' | 'sessions' | 'general';
 
@@ -85,7 +85,7 @@ export function paletteItems({ screen, needs, sessions, gestures, theme, t }: Pa
   const actions = GESTURES.filter((g) => g.screen === screen && gestures.includes(g.id)).map((g): PaletteItem => ({
     id: `gesture-${g.id}`, group: 'actions', label: t(g.label), keywords: [], run: { kind: 'gesture', id: g.id },
   }));
-  const goto = NAV.map((item): PaletteItem => ({
+  const goto = SCREENS.map((item): PaletteItem => ({
     id: `goto-${item.go}`, group: 'goto', label: t(item.label), keywords: [], shortcut: item.chord, run: { kind: 'navigate', href: item.href },
   }));
   const rows = sessions.map((row): PaletteItem => ({
