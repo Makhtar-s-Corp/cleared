@@ -4,6 +4,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, s
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { loadConf, parseConf, ORCH_HOME } from '../lib/conf.mjs';
 import { route } from '../lib/route.mjs';
 import { openLedger } from '../lib/ledger.mjs';
@@ -21,15 +22,15 @@ export const scratch = (prefix) => {
   return dir;
 };
 // A copy of this tool for the tests that run its installer: the listening ports are the test's own (its fake ss), not the
-// host's kernel tables, so the copy's lib/ports.sh reads an empty /proc (ports_proc, set where that file is sourced).
+// host's kernel tables, so the copy's lib/ports.ts reads an empty /proc (its HOST, where the installer takes it).
 export function toolCopy(home) {
   const tool = join(home, 'copy-of-tool');
   mkdirSync(tool, { recursive: true });
   execFileSync('sh', ['-c', 'tar --exclude=.git --exclude=node_modules -cf - . | tar -xf - -C "$1"', '_', tool], { cwd: ORCH_HOME });
   const proc = join(home, 'proc');
   mkdirSync(proc, { recursive: true });
-  const ports = join(tool, 'lib', 'ports.sh');
-  writeFileSync(ports, readFileSync(ports, 'utf8').replace('\nports_proc=/proc\n', `\nports_proc=${proc}\n`));
+  const ports = join(tool, 'lib', 'ports.ts');
+  writeFileSync(ports, readFileSync(ports, 'utf8').replace("export const HOST: PortsHost = { proc: '/proc',", `export const HOST: PortsHost = { proc: ${JSON.stringify(proc)},`));
   return tool;
 }
 // (the dependencies a lane is handed are read-only: made writable again before they go)
@@ -85,7 +86,7 @@ export function sandbox({ policy = 'fallback', maxLanes = 3 } = {}) {
   const home = scratch('orch-home-');
   const state = join(home, 'state');
   const repo = join(home, 'repo');
-  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'merge-pr.ts'), join(ORCH_HOME, 'ask-validation.ts'), join(ORCH_HOME, 'package.json'), home]);
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'wake.ts'), join(ORCH_HOME, 'merge-pr.ts'), join(ORCH_HOME, 'ask-validation.ts'), join(ORCH_HOME, 'package.json'), home]);
   execFileSync('mkdir', ['-p', repo, join(home, 'lanes')]);
   execFileSync('cp', ['-r', join(ORCH_HOME, 'prompts'), home]);
   // tracker and GitHub as files the test writes: what they "say now".
@@ -218,4 +219,20 @@ export function recordReview(box, { ticket, pr, commit, answer, at = new Date().
   mkdirSync(join(box.state, 'reports'), { recursive: true });
   writeFileSync(join(box.state, 'reports', `${runId}.md`), `---\ncommit: ${commit}\noutcome: done\nended_at: ${at}\n---\n## Report\n${answer}\n`);
   return runId;
+}
+
+// A function of the tool's Node modules (lib/script.ts, lib/queues.ts…) of the copy at `home`, called in a process of
+// its own with that environment, as the bash tests sourced lib/common.sh to call one. `expression` names the module m:
+// what it gives is printed (false is exit code 1), and a ScriptExit is its exit code.
+export function toolCall(home, module, expression, env = process.env) {
+  const code = `const m = await import(${JSON.stringify(pathToFileURL(join(home, module)).href)});
+try {
+  const out = await (${expression});
+  if (out === false) process.exitCode = 1;
+  else if (out !== undefined && out !== null && out !== true) process.stdout.write(String(out) + '\\n');
+} catch (error) {
+  if (error?.constructor?.name !== 'ScriptExit') throw error;
+  process.exitCode = error.code;
+}`;
+  return spawnSync(process.execPath, ['--no-warnings', '--input-type=module', '-e', code], { env, encoding: 'utf8' });
 }

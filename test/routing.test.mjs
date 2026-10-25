@@ -109,7 +109,7 @@ test('the core\'s scripts name no model and no provider', () => {
   const names = new Set();
   for (const [alias, model] of Object.entries(conf.models)) { names.add(alias); names.add(model.model); names.add(model.adapter); }
   for (const word of ['gpt', 'opus', 'sonnet', 'haiku', 'fable', 'gemini']) names.add(word);
-  const files = ['lib/common.sh', 'lib/route.mjs', 'lib/conf.mjs'];
+  const files = ['lib/script.ts', 'lib/route.mjs', 'lib/conf.mjs'];
   for (const file of files) {
     const code = readFileSync(join(ORCH_HOME, file), 'utf8').split('\n').filter((line) => !/^\s*(#|\/\/)/.test(line)).join('\n');
     for (const name of names) {

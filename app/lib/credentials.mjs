@@ -2,7 +2,7 @@
 // gesture. They live in one private directory, outside the project and the
 // Cleared checkout, owned by the app's service account and closed to every
 // other account (mode 0700, files 0600). The agents' account must never be
-// able to read them: serve/install.sh probes that, and every read below
+// able to read them: serve/install.ts probes that, and every read below
 // refuses anything looser than that.
 import { chmodSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';

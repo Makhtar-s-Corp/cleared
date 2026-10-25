@@ -451,5 +451,5 @@ test('no shell script declares a checkout safe, and those a human command reache
   const project = /\bgit\s+-C\s+"\$\{?(?:ORCH_REPO|CLEARED_REPO|project|repo)\}?"/;
   const flagged = [...reached].filter((name) => project.test(withoutComments(readFileSync(join(ORCH_HOME, name), 'utf8'))));
   const security = readFileSync(join(ORCH_HOME, 'docs', 'security.md'), 'utf8');
-  for (const name of [...flagged, 'serve/install.sh']) assert.ok(security.includes(name), `docs/security.md names ${name}`);
+  for (const name of flagged) assert.ok(security.includes(name), `docs/security.md names ${name}`);
 });

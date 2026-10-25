@@ -113,7 +113,7 @@ async function handle(input, uid) {
     event(ticket, null, uid, true, 'status read', release?.merge_sha || null, operation);
     return { ok: true, release: release || null, problem: agentName ? null : 'release lock is not a security boundary: agents run as the service account' };
   }
-  if (!agentName && !allowSharedUid) return reject('Release lock requires [security] agent_user; create a separate agent account and run serve/install.sh, or explicitly set [security] allow_shared_uid = true to accept the shared-UID risk');
+  if (!agentName && !allowSharedUid) return reject('Release lock requires [security] agent_user; create a separate agent account and run serve/install.ts, or explicitly set [security] allow_shared_uid = true to accept the shared-UID risk');
   if (busy) { event(ticket, validPr ? pr : null, uid, false, 'Another release operation is running', commit, operation);
     return { ok: false, code: 5, reason: 'Another release operation is running', commit }; }
   if (validPr) commit = currentHead(pr);

@@ -90,7 +90,7 @@ test('the guard reads project lists at the committed base and keeps generic chec
   const guard = (text, extra = {}) => {
     const file = join(box.home, 'out.txt');
     writeFileSync(file, text);
-    return spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', box.home, file], { env: { ...box.env, ...extra }, encoding: 'utf8' });
+    return spawnSync(join(box.home, 'lib', 'tracker', 'guard.ts'), [file], { env: { ...box.env, ...extra }, encoding: 'utf8' });
   };
   const term = 'Le contrat avec Zorglub Industries est signé.\n';
   const commit = (message) => { box.git('add', '-A'); box.git('commit', '-q', '-m', message); };
@@ -150,7 +150,7 @@ test('the guard reads project lists at the committed base and keeps generic chec
   const fromCopy = (text) => {
     const file = join(tool, 'out.txt');
     writeFileSync(file, text);
-    return spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', copy, file], { env: { ...box.env, ORCH_CONF: join(copy, 'agents.conf'), ORCH_GUARD_TOOL_REF: 'origin/main' }, encoding: 'utf8' });
+    return spawnSync(join(copy, 'lib', 'tracker', 'guard.ts'), [file], { env: { ...box.env, ORCH_CONF: join(copy, 'agents.conf'), ORCH_GUARD_TOOL_REF: 'origin/main' }, encoding: 'utf8' });
   };
   assert.match(fromCopy(term).stderr, /private term/);
   writeFileSync(join(copy, 'lib', 'guard', 'codex-guard.mjs'), 'process.exit(0);\n');
@@ -158,7 +158,7 @@ test('the guard reads project lists at the committed base and keeps generic chec
   assert.equal(edited.status, 1, 'the guard that runs is the one of the branch the tool follows');
   assert.match(edited.stderr, /private term/);
   // When that branch does not carry the guard, the files of the checkout are what runs: said each time, not silent.
-  const elsewhere = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', copy, join(tool, 'out.txt')], { env: { ...box.env, ORCH_CONF: join(copy, 'agents.conf'), ORCH_GUARD_TOOL_REF: 'origin/absent' }, encoding: 'utf8' });
+  const elsewhere = spawnSync(join(copy, 'lib', 'tracker', 'guard.ts'), [join(tool, 'out.txt')], { env: { ...box.env, ORCH_CONF: join(copy, 'agents.conf'), ORCH_GUARD_TOOL_REF: 'origin/absent' }, encoding: 'utf8' });
   assert.match(elsewhere.stderr, /the guard runs from the files of this checkout/);
   // Where the lists are read is not a setting: a settings file that names a branch of a lane as the base changes nothing.
   box.git('checkout', '-q', '-b', 'dev/X-9');
@@ -170,7 +170,7 @@ test('the guard reads project lists at the committed base and keeps generic chec
   box.git('update-ref', 'refs/remotes/origin/main', 'main');
   box.git('symbolic-ref', 'refs/remotes/origin/HEAD', 'refs/remotes/origin/main');
   writeFileSync(join(box.home, 'out.txt'), term);
-  const viaSettings = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', box.home, join(box.home, 'out.txt')], { env: { ...noRef, ORCH_CONF: join(box.home, 'lane.conf') }, encoding: 'utf8' });
+  const viaSettings = spawnSync(join(box.home, 'lib', 'tracker', 'guard.ts'), [join(box.home, 'out.txt')], { env: { ...noRef, ORCH_CONF: join(box.home, 'lane.conf') }, encoding: 'utf8' });
   assert.equal(viaSettings.status, 1, viaSettings.stderr);
   assert.match(viaSettings.stderr, /private term/);
   // « None », however it is written, is none.

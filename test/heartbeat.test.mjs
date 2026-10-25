@@ -37,7 +37,7 @@ test('real wake exits call the success and failure URLs once each', async (t) =>
   const port = server.address().port;
   appendFileSync(join(box.home, 'agents.conf'), `\n[heartbeat]\nping_url = http://127.0.0.1:${port}/ping\nfail_url = http://127.0.0.1:${port}/fail\n`);
   const wake = (env = {}) => new Promise((resolve) => {
-    const child = spawn(join(box.home, 'wake.sh'), [], { env: { ...box.env, ...env } });
+    const child = spawn(join(box.home, 'wake.ts'), [], { env: { ...box.env, ...env } });
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.stdout.resume();
@@ -80,7 +80,7 @@ test('status JSON uses exit 2 and a stable error object when configuration is un
 test('an invalid heartbeat setting is visible in the ledger and service log', () => {
   const box = sandbox();
   appendFileSync(join(box.home, 'agents.conf'), '\n[heartbeat]\ntimeout_secs = 0\n');
-  const result = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  const result = spawnSync(join(box.home, 'wake.ts'), [], { env: box.env, encoding: 'utf8' });
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stderr, /timeout_secs/);
   const db = openLedger(join(box.state, 'ledger.db'));
@@ -90,7 +90,7 @@ test('an invalid heartbeat setting is visible in the ledger and service log', ()
 
 test('the status reaper refuses a process without a verified sudo human', () => {
   const box = sandbox();
-  assert.equal(spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync(join(box.home, 'wake.ts'), [], { env: box.env, encoding: 'utf8' }).status, 0);
   const result = spawnSync(process.execPath, [join(box.home, 'lib', 'heartbeat.mjs'), 'status', '--reap', '--json'],
     { env: { ...box.env, SUDO_UID: '1001', SUDO_USER: 'alice' }, encoding: 'utf8' });
   assert.equal(result.status, 2);
@@ -99,7 +99,7 @@ test('the status reaper refuses a process without a verified sudo human', () => 
 
 test('the reaper refuses a state directory from another project', () => {
   const box = sandbox();
-  assert.equal(spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync(join(box.home, 'wake.ts'), [], { env: box.env, encoding: 'utf8' }).status, 0);
   const result = spawnSync(process.execPath, [join(box.home, 'lib', 'heartbeat.mjs'), 'status', '--reap'],
     { env: { ...box.env, CLEARED_REPO: scratch('cleared-heartbeat-other-project-') }, encoding: 'utf8' });
   assert.equal(result.status, 2);
@@ -108,7 +108,7 @@ test('the reaper refuses a state directory from another project', () => {
 
 test('the reaper refuses a service UID altered in writable state', () => {
   const box = sandbox();
-  assert.equal(spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync(join(box.home, 'wake.ts'), [], { env: box.env, encoding: 'utf8' }).status, 0);
   const db = openLedger(join(box.state, 'ledger.db'));
   db.prepare("UPDATE heartbeat_state SET value = '999999' WHERE key = 'wake_uid'").run();
   db.close();

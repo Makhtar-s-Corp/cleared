@@ -7,7 +7,7 @@ import { basename, dirname, join } from 'node:path';
 import { loadConf, parseConf, ORCH_HOME } from '../lib/conf.mjs';
 import { route } from '../lib/route.mjs';
 import { openLedger, runStart, runEnd, addEvent, costEur } from '../lib/ledger.mjs';
-import { conf, scratch, fixtureProject, sandbox, laneWithRemote, reviewedPull, recordReview, task, first } from './support.mjs';
+import { conf, scratch, fixtureProject, sandbox, laneWithRemote, reviewedPull, recordReview, task, first, toolCall } from './support.mjs';
 
 
 
@@ -363,7 +363,7 @@ test('a ticket asked for with two pull requests is closed when both are live, no
   assert.equal(db.prepare("select count(*) n from events where kind = 'ticket_left_open'").get().n, 0, 'another pull request still open is no surprise: nothing to tell');
   db.close();
   // Nobody has to remember it: the wake asks again, and gives up on nothing in silence.
-  const wake = (extra = {}) => spawnSync(join(unknown.box.home, 'wake.sh'), [], { env: { ...unknown.env, ...extra }, encoding: 'utf8' });
+  const wake = (extra = {}) => spawnSync(join(unknown.box.home, 'wake.ts'), [], { env: { ...unknown.env, ...extra }, encoding: 'utf8' });
   const record = () => JSON.parse(readFileSync(join(unknown.box.state, 'validations', 'X-5.json'), 'utf8'));
   const other8 = (state) => writeFileSync(join(unknown.box.home, 'pr-view-8.json'), JSON.stringify({ number: 8, state, headRefOid: 'abc' }));
   const trackerSays = (code) => writeFileSync(join(unknown.box.home, 'tracker-moved'), code);
@@ -382,7 +382,7 @@ test('a ticket asked for with two pull requests is closed when both are live, no
   still('tracker does not answer');
   // While a go-live holds the lock, the wake does not write the same record.
   trackerSays('0');
-  const held = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(unknown.box.state, 'merge.lock'), join(unknown.box.home, 'wake.sh')], { env: unknown.env, encoding: 'utf8' });
+  const held = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(unknown.box.state, 'merge.lock'), join(unknown.box.home, 'wake.ts')], { env: unknown.env, encoding: 'utf8' });
   assert.equal(held.status, 0, held.stderr);
   still('a go-live is being done');
   assert.equal(wake().status, 0);
@@ -431,7 +431,7 @@ test('only the version a reviewer read goes live: a commit of the lane on top of
 
 test('a go-live that only waits is kept and done by the wake, with every check again; one that is not green, or behind on code, is refused', () => {
   const pull = reviewedPull(['ops/cleared/wake.sh']);
-  const wake = () => spawnSync(join(pull.box.home, 'wake.sh'), [], { env: pull.env, encoding: 'utf8' });
+  const wake = () => spawnSync(join(pull.box.home, 'wake.ts'), [], { env: pull.env, encoding: 'utf8' });
   const queued = () => { try { return readdirSync(join(pull.box.state, 'merge-queue')).filter((name) => name.endsWith('.json')); } catch { return []; } };
   // Its checks still run: not refused, kept.
   pull.publish({ statusCheckRollup: [{ status: 'IN_PROGRESS' }, { conclusion: 'SUCCESS' }] });
@@ -463,7 +463,7 @@ test('a go-live that only waits is kept and done by the wake, with every check a
   pull.publish({ statusCheckRollup: [{ status: 'IN_PROGRESS' }, { conclusion: 'SUCCESS' }] });
   // Green, but the host is busy with a CI: still kept.
   pull.publish();
-  assert.equal(spawnSync(join(pull.box.home, 'wake.sh'), [], { env: { ...pull.env, FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request"}]' }, encoding: 'utf8' }).status, 0);
+  assert.equal(spawnSync(join(pull.box.home, 'wake.ts'), [], { env: { ...pull.env, FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request"}]' }, encoding: 'utf8' }).status, 0);
   assert.deepEqual(queued(), ['7.json']);
   // The host is free: the wake does it, with no session of the lead.
   assert.equal(wake().status, 0);
@@ -493,11 +493,13 @@ test('a queued release survives a broker restart or missing socket', () => {
   writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), announcement: '' }));
   const env = { ...pull.env };
   delete env.ORCH_BROKER_SECRET;
-  const retry = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; open_queued_merges', '_', ORCH_HOME], { env, encoding: 'utf8' });
+  const queues = (home) => toolCall(home, 'lib/queues.ts', 'm.openQueuedMerges(process.env.ORCH_STATE_DIR)', env);
+  const refusals = () => { const db = openLedger(join(pull.box.state, 'ledger.db')); const rows = db.prepare("select detail from events where kind = 'merge_refused' order by rowid").all().map((row) => row.detail); db.close(); return rows; };
+  const retry = queues(ORCH_HOME);
   assert.equal(retry.status, 0, retry.stderr);
   assert.equal(JSON.parse(readFileSync(entry, 'utf8')).pr, 7);
   writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: '2020-01-01T00:00:00Z', announcement: '' }));
-  const expired = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; open_queued_merges', '_', ORCH_HOME], { env, encoding: 'utf8' });
+  const expired = queues(ORCH_HOME);
   assert.equal(expired.status, 0, expired.stderr);
   assert.equal(existsSync(entry), false);
   assert.deepEqual(pull.ledgerKinds(), ['merge_refused']);
@@ -505,17 +507,17 @@ test('a queued release survives a broker restart or missing socket', () => {
   // not retried until the queue deadline.
   writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), announcement: '' }));
   writeFileSync(join(pull.box.home, 'release-request.mjs'), '#!/bin/sh\nprintf "release broker definitive refusal\\npermanent merge refusal\\n" >&2\nexit 1\n', { mode: 0o755 });
-  const refused = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; ORCH_HOME="$2"; ledger() { printf "%s\\n" "$*" >> "$ORCH_STATE_DIR/test-events"; }; open_queued_merges', '_', ORCH_HOME, pull.box.home], { env, encoding: 'utf8' });
+  const refused = queues(pull.box.home);
   assert.equal(refused.status, 0, refused.stderr);
   assert.equal(existsSync(entry), false);
-  assert.match(readFileSync(join(pull.box.state, 'test-events'), 'utf8'), /--kind merge_refused.*permanent merge refusal/);
+  assert.match(refusals().at(-1), /permanent merge refusal/);
   // A temporary failure keeps its request, then the configured attempt cap
   // removes and reports it instead of retrying for ever.
   const confPath = join(pull.box.home, 'agents.conf');
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('queue_hours = 24', 'queue_hours = 24\nqueue_max_attempts = 2'));
   writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), announcement: '' }));
   writeFileSync(join(pull.box.home, 'release-request.mjs'), '#!/bin/sh\necho client crashed >&2\nexit 1\n', { mode: 0o755 });
-  const transient = () => spawnSync('bash', ['-c', '. "$1/lib/common.sh"; ORCH_HOME="$2"; ledger() { printf "%s\\n" "$*" >> "$ORCH_STATE_DIR/test-events"; }; open_queued_merges', '_', ORCH_HOME, pull.box.home], { env, encoding: 'utf8' });
+  const transient = () => queues(pull.box.home);
   assert.equal(transient().status, 0);
   assert.equal(JSON.parse(readFileSync(entry, 'utf8')).attempts, 1);
   writeFileSync(entry, JSON.stringify({ pr: 7, ticket: 'X-5', at: new Date().toISOString().replace(/\.\d+Z$/, 'Z'), announcement: '' }));
@@ -524,7 +526,7 @@ test('a queued release survives a broker restart or missing socket', () => {
   assert.equal(JSON.parse(readFileSync(entry, 'utf8')).attempts, 1);
   assert.equal(transient().status, 0);
   assert.equal(existsSync(entry), false);
-  assert.match(readFileSync(join(pull.box.state, 'test-events'), 'utf8'), /--kind merge_refused.*2 failed attempts.*temporary GitHub failure/);
+  assert.match(refusals().at(-1), /2 failed attempts.*temporary GitHub failure/);
 });
 
 
@@ -650,7 +652,7 @@ test('[Linear adapter] a script never puts a ticket in the status that is the us
   const by = (actorId, app, at, updatedAt = at) => ({ createdAt: at, updatedAt, actorId, actor: { id: actorId, app }, botActor: null, toState: { name: 'Go MEP' } });
   assert.match(readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8'), /^owner_id =\s*$/m);
   const configured = asApp([by('the-user', false, '2026-01-02T11:00:00Z')]);
-  const ownerCheck = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; conf_get tracker owner_id', '_', ORCH_HOME], { env: { ...process.env, ORCH_REPO: repoRoot, ORCH_CONF: join(dir, 'agents.conf') }, encoding: 'utf8' });
+  const ownerCheck = toolCall(ORCH_HOME, 'lib/script.ts', "m.confGet('tracker', 'owner_id')", { ...process.env, ORCH_REPO: repoRoot, ORCH_CONF: join(dir, 'agents.conf') });
   assert.equal(ownerCheck.stdout.trim(), 'the-user', ownerCheck.stderr);
   assert.equal(configured.status, 0, configured.stderr);
   assert.equal(asApp([by('app-user', true, '2026-01-02T11:00:00Z')]).status, 6, 'the application of the agents, though it is the one that asks');

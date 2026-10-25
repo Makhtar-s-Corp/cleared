@@ -7,7 +7,7 @@ import { basename, dirname, join } from 'node:path';
 import { loadConf, parseConf, ORCH_HOME } from '../lib/conf.mjs';
 import { route } from '../lib/route.mjs';
 import { openLedger, runStart, runEnd, addEvent, costEur } from '../lib/ledger.mjs';
-import { conf, scratch, fixtureProject, sandbox } from './support.mjs';
+import { conf, scratch, fixtureProject, sandbox, toolCall } from './support.mjs';
 
 test('the pre-check of the project lead: what the user and the outside world did is an event, what agents wrote is not', async () => {
   const { changes, checksOf } = await import('../lib/wake.mjs');
@@ -98,9 +98,9 @@ test('while GitHub is down, what its pull requests seem to do is no event and is
 });
 
 
-test('wake.sh during an outage of GitHub: the outage in the ledger with its start and its end, and its pull requests read again once it is over', () => {
+test('wake.ts during an outage of GitHub: the outage in the ledger with its start and its end, and its pull requests read again once it is over', () => {
   const box = sandbox();
-  const wake = (extra = {}) => spawnSync(join(box.home, 'wake.sh'), [], { env: { ...box.env, ...extra }, encoding: 'utf8' });
+  const wake = (extra = {}) => spawnSync(join(box.home, 'wake.ts'), [], { env: { ...box.env, ...extra }, encoding: 'utf8' });
   const events = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare('select kind, at, value, detail from events order by rowid').all().filter((row) => !row.kind.startsWith('heartbeat_')).map((row) => ({ ...row })); db.close(); return rows; };
   const status = (actions) => writeFileSync(join(box.home, 'github-status.json'), JSON.stringify({ components: [{ name: 'Git Operations', status: 'operational' }, { name: 'Actions', status: actions }, { name: 'Webhooks', status: 'degraded_performance' }] }));
   const pull = (checks) => [{ number: 7, title: 'Une PR', headRefName: 'b', isDraft: false, state: 'OPEN', updatedAt: new Date().toISOString(), statusCheckRollup: [{ conclusion: checks }] }];
@@ -147,7 +147,7 @@ test('the catalog says a key in French when French has it, and falls back to Eng
 test('a source that does not answer: the wake reads nothing, moves nothing, and fails', () => {
   const box = sandbox();
   writeFileSync(join(box.home, 'tracker.ts'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
-  const run = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+  const run = spawnSync(join(box.home, 'wake.ts'), [], { env: box.env, encoding: 'utf8' });
   assert.equal(run.status, 1);
   assert.match(run.stderr, /tracker did not answer/);
   assert.throws(() => readFileSync(join(box.state, 'wake', 'state.json')));
@@ -189,12 +189,12 @@ test('a state file that cannot be read makes the wake start over as a first one,
 });
 
 
-test('wake.sh itself starts over as a first wake on a state file it cannot read, instead of failing every minute', () => {
+test('wake.ts itself starts over as a first wake on a state file it cannot read, instead of failing every minute', () => {
   for (const broken of ['{}', '{"at":"not a date","seen":[],"pulls":{}}', 'not json at all']) {
     const box = sandbox();
     execFileSync('mkdir', ['-p', join(box.state, 'wake')]);
     writeFileSync(join(box.state, 'wake', 'state.json'), broken);
-    const run = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
+    const run = spawnSync(join(box.home, 'wake.ts'), [], { env: box.env, encoding: 'utf8' });
     assert.equal(run.status, 0, `${broken}: ${run.stderr}`);
     assert.ok(!Number.isNaN(Date.parse(JSON.parse(readFileSync(join(box.state, 'wake', 'state.json'), 'utf8')).at)), broken);
   }
@@ -327,7 +327,7 @@ test('the reports the hourly limit holds back are kept, and leave later in one g
   // A second one waits too; the next wake that may write groups them in one comment on the ticket of the reports.
   writeFileSync(join(box.state, 'tracker-outbox', 'X-2--other.md'), 'Compte rendu de X-2.\n');
   writeFileSync(join(box.state, 'tracker-outbox', 'notes.txt'), 'not a report\n');
-  const flush = (extra = {}) => spawnSync('bash', ['-c', `. "${join(box.home, 'lib', 'common.sh')}"; flush_outbox`], { env: { ...box.env, ...extra }, encoding: 'utf8' });
+  const flush = (extra = {}) => toolCall(box.home, 'lib/queues.ts', 'm.flushOutbox(process.env.ORCH_STATE_DIR)', { ...box.env, ...extra });
   // A wake killed while it was sending left some aside: they are taken back, not forgotten.
   mkdirSync(join(box.state, 'tracker-outbox', 'sending.killed'));
   writeFileSync(join(box.state, 'tracker-outbox', 'sending.killed', 'X-3--left.md'), 'Compte rendu de X-3.\n');

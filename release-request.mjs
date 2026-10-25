@@ -12,7 +12,7 @@ const path = process.env.CLEARED_RELEASE_SOCKET || loadConfForCommand().sections
 try {
   const socket = lstatSync(path);
   if (!socket.isSocket() || socket.uid !== statSync(stateDir()).uid) throw new Error('socket is not owned by the service account');
-} catch (error) { console.error(`release broker is not running or its socket is unsafe; run serve/install.sh (${error.message})`); process.exit(69); }
+} catch (error) { console.error(`release broker is not running or its socket is unsafe; run serve/install.ts (${error.message})`); process.exit(69); }
 let announcement = '';
 if (operation === 'request_release') for await (const chunk of process.stdin) announcement += chunk;
 const request = { operation, ticket };

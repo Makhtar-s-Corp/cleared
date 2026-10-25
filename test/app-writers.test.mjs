@@ -174,7 +174,7 @@ test('human credentials: a private directory and files outside the project, owne
 });
 
 // A real second account: the agents' Unix account must not read the credentials, the passkeys or the access token.
-// Needs a passwordless sudo to that account (CLEARED_TEST_AGENT_USER); serve/install.sh runs the same probes on the server.
+// Needs a passwordless sudo to that account (CLEARED_TEST_AGENT_USER); serve/install.ts runs the same probes on the server.
 const agentUser = process.env.CLEARED_TEST_AGENT_USER;
 test('the agents\' account cannot read the human credentials, the passkeys or the access token', { skip: agentUser ? false : 'set CLEARED_TEST_AGENT_USER (a second account reachable with sudo -n) to run it' }, () => {
   const b = box('github');

@@ -1,4 +1,4 @@
-# systemd user unit, installed by serve/install.sh: the Cleared app (Cockpit).
+# systemd user unit, installed by serve/install.ts: the Cleared app (Cockpit).
 # It listens on the Tailscale address only, refuses any peer outside the
 # allowed ranges, and wants an access token kept outside the repository. It
 # also holds the human's own tracker accesses ([app] human_credentials_dir) to

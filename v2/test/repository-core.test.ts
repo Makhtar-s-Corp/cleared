@@ -24,7 +24,7 @@ const SHELL_SHEBANG = new RegExp(`^${SHEBANG}\\s*(?:/usr/bin/env\\s+(?:-S\\s+)?|
 const SHELL_PROGRAM = String.raw`(['"\x60])(?:/(?:usr/)?bin/)?(?:ba|da|z|k)?sh\1`;
 const SOURCE = /\.(ts|tsx|m?js)$/;
 
-test('the repository tracks no shell script outside examples/', { todo: 'steps b and c of docs/v2/milestone-4-plan.md' }, () => {
+test('the repository tracks no shell script outside examples/', () => {
   assert.deepEqual(tracked.filter((file) => /\.(sh|bash|zsh)$/.test(file)), []);
   assert.deepEqual(tracked.filter((file) => SHELL_SHEBANG.test(text(file) ?? '')), []);
 });

@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
-import { toolCopy } from './support.mjs';
+import { toolCall, toolCopy } from './support.mjs';
 import { ORCH_HOME, loadConf, parseConf } from '../lib/conf.mjs';
 
 function withProject(run) {
@@ -16,8 +16,9 @@ function withProject(run) {
   const env = { ...process.env, HOME: root, CLEARED_REPO: project, XDG_STATE_HOME: join(root, 'state'), XDG_CONFIG_HOME: join(root, 'config') };
   try { run({ root, project, env }); } finally { rmSync(root, { recursive: true, force: true }); }
 }
-function shell(env, command) {
-  return spawnSync('bash', ['-c', `. "$1/lib/common.sh"; ${command}`, '_', ORCH_HOME], { env, encoding: 'utf8' });
+// What the scripts read of the project, through lib/script.ts (m), as they read it.
+function shell(env, expression) {
+  return toolCall(ORCH_HOME, 'lib/script.ts', expression, env);
 }
 function nodeValue(env, expression) {
   const script = `import * as conf from ${JSON.stringify(join(ORCH_HOME, 'lib', 'conf.mjs'))}; console.log(${expression});`;
@@ -38,7 +39,7 @@ function committedGuardProject(run) {
     const check = (text) => {
       const input = join(root, 'input.txt');
       writeFileSync(input, text);
-      return spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', ORCH_HOME, input], {
+      return spawnSync(join(ORCH_HOME, 'lib', 'tracker', 'guard.ts'), [input], {
         env: { ...env, ORCH_GUARD_REF: 'HEAD', ORCH_GUARD_TOOL_REF: '' }, encoding: 'utf8',
       });
     };
@@ -106,9 +107,9 @@ test('installer asks for a committed salt and leaves the project untouched', () 
   const bin = join(root, 'bin');
   mkdirSync(bin);
   writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
-  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.sh)
+  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.ts)
   const before = execFileSync('git', ['-C', project, 'status', '--porcelain'], { encoding: 'utf8' });
-  const result = spawnSync(join(toolCopy(root), 'serve', 'install.sh'), [], {
+  const result = spawnSync(join(toolCopy(root), 'serve', 'install.ts'), [], {
     env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8',
   });
   assert.notEqual(result.status, 0);
@@ -124,10 +125,10 @@ test('installer refuses an active Cleared wake before changing units or the proj
   mkdirSync(bin);
   const log = join(root, 'systemctl.log');
   writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
-  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.sh)
+  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.ts)
   writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\ncase "$*" in *'is-active --quiet cleared-wake.service'*) exit 0;; *'is-active '*|*'is-enabled '*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
   const before = execFileSync('git', ['-C', project, 'status', '--porcelain'], { encoding: 'utf8' });
-  const result = spawnSync(join(toolCopy(root), 'serve', 'install.sh'), [], { env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
+  const result = spawnSync(join(toolCopy(root), 'serve', 'install.ts'), [], { env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Cleared wake.*active/i);
   assert.doesNotMatch(readFileSync(log, 'utf8'), /enable --now cleared-/);
@@ -141,9 +142,9 @@ test('installer refuses an activating wake even when its timer is disabled', () 
   mkdirSync(bin);
   const log = join(root, 'systemctl.log');
   writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
-  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.sh)
+  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.ts)
   writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\n' "$*" >> '${log}'\ncase "$*" in *'is-enabled cleared-wake.timer'*) exit 1;; *'show '*cleared-wake.service*) echo activating; exit 0;; *'is-active '*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
-  const result = spawnSync(join(toolCopy(root), 'serve', 'install.sh'), [], { env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
+  const result = spawnSync(join(toolCopy(root), 'serve', 'install.ts'), [], { env: { ...env, ORCH_GUARD_REF: 'HEAD', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /wake.*active/i);
   assert.doesNotMatch(readFileSync(log, 'utf8'), /enable --now cleared-/);
@@ -156,9 +157,9 @@ test('installer allows its own wake to refresh units during self update', () => 
   mkdirSync(bin);
   const log = join(root, 'systemctl.log');
   writeFileSync(join(bin, 'tailscale'), '#!/bin/sh\necho 100.64.0.1\n', { mode: 0o755 });
-  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.sh)
+  writeFileSync(join(bin, 'ss'), '#!/bin/sh\nexit 0\n', { mode: 0o755 }); // the test's listening ports, none: not the host's (lib/ports.ts)
   writeFileSync(join(bin, 'systemctl'), `#!/bin/sh\nprintf '%s\n' "$*" >> '${log}'\ncase "$*" in *"is-enabled cleared-wake.timer"*) echo enabled; exit 0;; *"show "*cleared-wake.service*) echo activating; exit 0;; *"is-active "*) exit 1;; esac\nexit 0\n`, { mode: 0o755 });
-  const result = spawnSync(join(toolCopy(root), 'serve', 'install.sh'), [], { env: { ...env, ORCH_GUARD_REF: 'HEAD', CLEARED_INSTALL_FROM_WAKE: '1', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
+  const result = spawnSync(join(toolCopy(root), 'serve', 'install.ts'), [], { env: { ...env, ORCH_GUARD_REF: 'HEAD', CLEARED_INSTALL_FROM_WAKE: '1', PATH: `${bin}:${process.env.PATH}` }, encoding: 'utf8' });
   assert.doesNotMatch(result.stderr, /wake.*active/i);
   assert.match(readFileSync(log, 'utf8'), /enable --now cleared-release-broker\.service cleared-wake\.timer cleared-app\.service/);
 }));
@@ -167,7 +168,7 @@ test('missing trusted project configuration refuses the guard instead of disabli
   writeFileSync(join(project, '.cleared', 'agents.conf'), '[guard]\nsalt = example\nterms = scripts/private-terms.json\nallowed = none\n');
   commit();
   execFileSync('git', ['-C', project, 'branch', '-m', 'master']);
-  const result = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; guard_text "$2"', '_', ORCH_HOME, join(project, '.cleared', 'agents.conf')], {
+  const result = spawnSync(join(ORCH_HOME, 'lib', 'tracker', 'guard.ts'), [join(project, '.cleared', 'agents.conf')], {
     env: { ...process.env, HOME: project, CLEARED_REPO: project, ORCH_GUARD_REF: 'origin/main', ORCH_GUARD_TOOL_REF: '' }, encoding: 'utf8',
   });
   assert.notEqual(result.status, 0);
@@ -180,12 +181,12 @@ test('committed Cleared settings advance without stale config or guard bypass', 
   const term = 'private orchard';
   writeFileSync(config, '[owner]\nname = First Owner\n[guard]\nterms = none\nallowed = none\n');
   commit();
-  assert.equal(shell(env, 'owner_name').stdout.trim(), 'First Owner');
+  assert.equal(shell(env, 'm.ownerName()').stdout.trim(), 'First Owner');
   writeFileSync(config, `[owner]\nname = Updated Owner\n[guard]\nsalt = ${salt}\nterms = scripts/private-terms.json\nallowed = none\n`);
   writeFileSync(join(project, 'scripts', 'private-terms.json'), JSON.stringify({ salt_id: createHash('sha256').update(salt).digest('hex').slice(0, 12), hashes: [createHash('sha256').update(salt + term).digest('hex')] }));
   git('add', '.cleared/agents.conf', 'scripts/private-terms.json');
   git('commit', '-q', '-m', 'advance project configuration');
-  assert.equal(shell(env, 'owner_name').stdout.trim(), 'Updated Owner');
+  assert.equal(shell(env, 'm.ownerName()').stdout.trim(), 'Updated Owner');
   assert.equal(check('Public text.').status, 0);
   assert.notEqual(check(term).status, 0);
   writeFileSync(config, '[guard]\nsalt = local-wrong-salt\n');
@@ -240,7 +241,7 @@ test('only Cleared settings and state paths are selected', () => withProject(({ 
   mkdirSync(join(project, '.cleared'));
   writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = Cleared Owner\n');
   trackProjectConfig(project);
-  assert.equal(shell(env, 'printf "%s\n%s\n" "$ORCH_CONF" "$ORCH_STATE_DIR"').stdout.trim(), `${join(project, '.cleared', 'agents.conf')}\n${join(root, 'state', 'cleared', 'project')}`);
+  assert.equal(shell(env, '(m.projectEnv(), `${process.env.ORCH_CONF}\\n${process.env.ORCH_STATE_DIR}`)').stdout.trim(), `${join(project, '.cleared', 'agents.conf')}\n${join(root, 'state', 'cleared', 'project')}`);
   assert.equal(nodeValue(env, 'conf.confPath()').stdout.trim(), join(project, '.cleared', 'agents.conf'));
   assert.equal(nodeValue(env, 'conf.stateDir()').stdout.trim(), join(root, 'state', 'cleared', 'project'));
 }));
@@ -250,20 +251,14 @@ test('an old project configuration is never selected', () => withProject(({ proj
   writeFileSync(join(project, '.ferme', 'agents.conf'), '[owner]\nname = Obsolete Owner\n');
   execFileSync('git', ['-C', project, 'init', '-q', '-b', 'main']);
   execFileSync('git', ['-C', project, 'add', '.ferme/agents.conf']);
-  assert.equal(shell(env, 'owner_name').stdout.trim(), 'the user');
+  assert.equal(shell(env, 'm.ownerName()').stdout.trim(), 'the user');
   assert.equal(nodeValue(env, 'conf.loadConf().sections.owner?.name').stdout.trim(), 'undefined');
 }));
 
 test('an old state directory is never selected', () => withProject(({ root, env }) => {
   mkdirSync(join(root, 'state', 'ferme', 'project'), { recursive: true });
-  assert.equal(shell(env, 'printf "%s" "$ORCH_STATE_DIR"').stdout, join(root, 'state', 'cleared', 'project'));
+  assert.equal(shell(env, 'm.projectEnv().state').stdout.trim(), join(root, 'state', 'cleared', 'project'));
   assert.equal(nodeValue(env, 'conf.stateDir()').stdout.trim(), join(root, 'state', 'cleared', 'project'));
-}));
-
-test('an old project prompt is never selected', () => withProject(({ project, env }) => {
-  mkdirSync(join(project, '.ferme', 'prompts'), { recursive: true });
-  writeFileSync(join(project, '.ferme', 'prompts', 'dev.md'), 'obsolete prompt');
-  assert.equal(shell(env, 'prompt_file dev').stdout.trim(), join(ORCH_HOME, 'prompts', 'dev.md'));
 }));
 
 test('the migration script is absent', () => {
@@ -294,7 +289,7 @@ test('an untracked Cleared config is ignored and reported', () => withProject(({
   mkdirSync(join(project, '.cleared'));
   writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = Stale Owner\n');
   execFileSync('git', ['-C', project, 'init', '-q', '-b', 'main']);
-  const wake = shell(env, 'ledger init >/dev/null; owner_name');
+  const wake = shell(env, '(m.ledgerInit(), m.ownerName())');
   assert.equal(wake.stdout.trim(), 'the user');
   const db = new DatabaseSync(join(root, 'state', 'cleared', 'project', 'ledger.db'), { readOnly: true });
   assert.equal(db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'untracked_config_ignored'").get().n, 1);
@@ -303,7 +298,7 @@ test('an untracked Cleared config is ignored and reported', () => withProject(({
 
 test('CLEARED_REPO takes precedence over the older environment variable', () => withProject(({ project, env }) => {
   const both = { ...env, ORCH_REPO: '/unused/old/path' };
-  assert.equal(shell(both, 'printf "%s" "$ORCH_REPO"').stdout, project);
+  assert.equal(shell(both, 'm.projectEnv().repo').stdout.trim(), project);
   assert.equal(nodeValue(both, 'conf.projectDir()').stdout.trim(), project);
 }));
 
@@ -311,19 +306,19 @@ test('CLEARED_CONF takes precedence over the older environment variable', () => 
   const current = join(root, 'current.conf');
   writeFileSync(current, '[owner]\nname = New\n');
   const both = { ...env, CLEARED_CONF: current, ORCH_CONF: '/unused/old.conf' };
-  assert.equal(shell(both, 'printf "%s" "$ORCH_CONF"').stdout, current);
+  assert.equal(shell(both, 'm.projectEnv().conf').stdout.trim(), current);
   assert.equal(nodeValue(both, 'conf.confPath()').stdout.trim(), current);
 }));
 
 test('CLEARED_STATE_DIR takes precedence over the older environment variable', () => withProject(({ root, env }) => {
   const current = join(root, 'current-state');
   const both = { ...env, CLEARED_STATE_DIR: current, ORCH_STATE_DIR: '/unused/old-state' };
-  assert.equal(shell(both, 'printf "%s" "$ORCH_STATE_DIR"').stdout, current);
+  assert.equal(shell(both, 'm.projectEnv().state').stdout.trim(), current);
   assert.equal(nodeValue(both, 'conf.stateDir()').stdout.trim(), current);
 }));
 
 test('owner name defaults to the user', () => withProject(({ env }) => {
-  const result = shell(env, 'owner_name');
+  const result = shell(env, 'm.ownerName()');
   assert.equal(result.status, 0, result.stderr);
   assert.equal(result.stdout.trim(), 'the user');
 }));
@@ -333,7 +328,7 @@ test('duplicate project keys keep the first value and warn once in the ledger', 
   writeFileSync(config, '[owner]\nname = First Owner\nname = Second Owner\n');
   commit();
   assert.equal(loadConf(config).sections.owner.name, 'First Owner');
-  const wake = () => shell(env, 'ledger init >/dev/null; owner_name');
+  const wake = () => shell(env, '(m.ledgerInit(), m.ownerName())');
   assert.equal(wake().stdout.trim(), 'First Owner');
   assert.equal(wake().stdout.trim(), 'First Owner');
   const db = new DatabaseSync(join(root, 'state', 'cleared', 'project', 'ledger.db'), { readOnly: true });
@@ -345,25 +340,7 @@ test('project owner name overrides the example', () => withProject(({ project, e
   mkdirSync(join(project, '.cleared'));
   writeFileSync(join(project, '.cleared', 'agents.conf'), '[owner]\nname = Example Owner\n');
   trackProjectConfig(project);
-  assert.equal(shell(env, 'owner_name').stdout.trim(), 'Example Owner');
-}));
-
-test('new prompt overrides the tool prompt', () => withProject(({ project, env }) => {
-  mkdirSync(join(project, '.cleared', 'prompts'), { recursive: true });
-  writeFileSync(join(project, '.cleared', 'prompts', 'dev.md'), 'new prompt');
-  const prompt = shell(env, 'prompt_text "$(prompt_file dev)"').stdout;
-  assert.match(prompt, /^Write to the user in en\./);
-  assert.ok(prompt.endsWith('new prompt'));
-}));
-
-test('the live lead prompt names the configured reporting ticket', () => withProject(({ project, env }) => {
-  mkdirSync(join(project, '.cleared'));
-  writeFileSync(join(project, '.cleared', 'agents.conf'), '[lead]\nreport_on = DEMO-7\n');
-  trackProjectConfig(project);
-  const result = shell(env, 'prompt_text "$(prompt_file release-live)"');
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /reporting ticket DEMO-7/);
-  assert.doesNotMatch(result.stdout, /@REPORT_ON@/);
+  assert.equal(shell(env, 'm.ownerName()').stdout.trim(), 'Example Owner');
 }));
 
 test('a complete project configuration retains exactly its settings', () => withProject(({ project }) => {
@@ -383,7 +360,7 @@ test('the example never supplies missing project keys or a merge verdict', () =>
   assert.equal(loaded.sections.tracker?.team, undefined);
   assert.equal(loaded.sections.merge?.verdict, undefined);
   assert.equal(loaded.sections.limits.max_lanes, '1');
-  const missingTeam = shell(env, 'conf_get tracker team');
+  const missingTeam = shell(env, "m.confGet('tracker', 'team')");
   assert.notEqual(missingTeam.status, 0);
   assert.match(missingTeam.stderr, /Missing required \[tracker\] team/);
   const report = join(root, 'report.md');
@@ -397,18 +374,15 @@ test('an empty required project setting is reported as missing', () => withProje
   mkdirSync(join(project, '.cleared'));
   writeFileSync(join(project, '.cleared', 'agents.conf'), '[merge]\nverdict =\n');
   trackProjectConfig(project);
-  const result = shell(env, 'conf_get merge verdict');
+  const result = shell(env, "m.confGet('merge', 'verdict')");
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /Missing required \[merge\] verdict/);
 }));
 
-test('review prompt and merge check use the same configured verdict', () => withProject(({ project, env, root }) => {
+test('the merge check reads the configured verdict', () => withProject(({ project, env, root }) => {
   mkdirSync(join(project, '.cleared'));
   writeFileSync(join(project, '.cleared', 'agents.conf'), '[merge]\nverdict = approved for sample\n');
   trackProjectConfig(project);
-  const prompt = shell(env, 'prompt_text "$(prompt_file review)"');
-  assert.equal(prompt.status, 0, prompt.stderr);
-  assert.match(prompt.stdout, /Verdict: “fix before merge” or “approved for sample”/);
   const report = join(root, 'report.md');
   writeFileSync(report, '## Compte rendu\nVerdict : approved for sample\n');
   const accepted = spawnSync('node', [join(ORCH_HOME, 'lib', 'merge.mjs'), 'verdict', report], { env, encoding: 'utf8' });

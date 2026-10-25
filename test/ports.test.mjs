@@ -1,4 +1,4 @@
-// The ports of the installation (lib/ports.sh, serve/install.sh; issue #112): never 80 or 443, never a port
+// The ports of the installation (lib/ports.ts, serve/install.ts; issue #112): never 80 or 443, never a port
 // something else listens on, checked before anything is written. On 2026-10-17 `tailscale serve` on its
 // default port held 443 on the Tailscale address, and after a reboot the machine's public proxy could not
 // bind 0.0.0.0:443: production was down for six hours.
@@ -13,7 +13,7 @@ import { scratch } from './support.mjs';
 const uid = process.getuid();
 const cgroup = (unit, user = uid) => `0::/user.slice/user-${user}.slice/user@${user}.service/app.slice/${unit}\n`;
 
-// The helper, sourced as install.sh sources it, with the listeners and the kernel's tables of the test.
+// The checks, run as serve/install.ts runs them, with the listeners and the kernel's tables of the test.
 // `serve` is what the fake `tailscale serve status --json` prints (null: no tailscale; false: it is refused).
 function ports({ listeners = '', ssFails = false, noSs = false, proc = null, serve = null } = {}) {
   const dir = scratch('orch-ports-');
@@ -31,11 +31,11 @@ function ports({ listeners = '', ssFails = false, noSs = false, proc = null, ser
   // The units directory, where the drop-ins of cleared-wake.service and cleared-app.service are read.
   const units = join(dir, 'units');
   mkdirSync(units);
-  const call = (fn, ...args) => spawnSync('bash', ['-c', `set -euo pipefail; . "$1/lib/ports.sh"; ports_ss=$2; ports_proc=$3; ports_tailscale=$4; shift 4; "$@"`, '_',
-    ORCH_HOME, noSs ? join(dir, 'no-such-ss') : ss, procDir, tailscale, fn, ...args], { encoding: 'utf8' });
-  // dashboard port, app port, [app] port, [app] public_origin, link base, Tailscale address, units directory, legacy link base
-  const check = ({ dashboard = '8787', app = '8788', confPort = '8788', origin = '', link = '', bind = '100.64.0.1', legacy = '' } = {}) =>
-    call('ports_install_check', dashboard, app, confPort, origin, link, bind, units, legacy);
+  const call = (fn, ...args) => spawnSync(process.execPath, [join(ORCH_HOME, 'lib', 'ports.ts'), '--ss', noSs ? join(dir, 'no-such-ss') : ss, '--proc', procDir, '--tailscale', tailscale,
+    fn, ...args], { encoding: 'utf8' });
+  // app port, [app] port, [app] public_origin, link base, Tailscale address, units directory, legacy link base
+  const check = ({ app = '8788', confPort = '8788', origin = '', link = '', bind = '100.64.0.1', legacy = '' } = {}) =>
+    call('install-check', app, confPort, origin, link, bind, units, legacy);
   // dropIn('cleared-wake.service', 'notify.conf', text): a drop-in of the test.
   const dropIn = (unit, file, text) => {
     mkdirSync(join(units, `${unit}.d`), { recursive: true });
@@ -59,13 +59,13 @@ test('a port something else listens on is refused, whatever the address, naming 
   assert.match(held.stderr, /sudo ss -ltnp "sport = :8788"/);
   assert.match(held.stderr, /run this again with CLEARED_APP_PORT=<a free port>/);
   // A wildcard holder stops a bind of the Tailscale address on that port, and a holder of one address stops a later wildcard bind.
-  for (const address of ['0.0.0.0:8787', '[::]:8787', '*:8787', '100.64.0.1%tailscale0:8787', '127.0.0.1:8787']) {
+  for (const address of ['0.0.0.0:8788', '[::]:8788', '*:8788', '100.64.0.1%tailscale0:8788', '127.0.0.1:8788']) {
     const run = ports({ listeners: listen(address) }).check();
     assert.equal(run.status, 1, address);
-    assert.match(run.stderr, /the dashboard port \(CLEARED_DASHBOARD_PORT\) is 8787/, address);
+    assert.match(run.stderr, /the app port \(CLEARED_APP_PORT\) is 8788/, address);
   }
   // A process of this account is named, with its unit when it has one.
-  const box = ports({ listeners: listen('100.64.0.1:8787', 'users:(("python3",pid=4242,fd=3))') });
+  const box = ports({ listeners: listen('100.64.0.1:8788', 'users:(("python3",pid=4242,fd=3))') });
   mkdirSync(join(box.procDir, '4242'));
   writeFileSync(join(box.procDir, '4242', 'cgroup'), cgroup('other-site.service'));
   const named = box.check();
@@ -73,10 +73,10 @@ test('a port something else listens on is refused, whatever the address, naming 
   assert.match(named.stderr, /held by python3 \(pid 4242, unit other-site\.service\)/);
 });
 
-test('80 and 443 are refused outright: as the ports of the dashboard and the app, of [app] public_origin, of the link, of [app] port', () => {
+test('80 and 443 are refused outright: as the port of the app, of [app] public_origin, of the link, of [app] port', () => {
   const free = ports();
   for (const [what, args, said] of [
-    ['dashboard 80', { dashboard: '80' }, /the dashboard port \(CLEARED_DASHBOARD_PORT\) is 80: the installation never binds or publishes ports 80 and 443/],
+    ['app 80', { app: '80', confPort: '' }, /the app port \(CLEARED_APP_PORT\) is 80: the installation never binds or publishes ports 80 and 443/],
     ['app 443', { app: '443', confPort: '' }, /the app port \(CLEARED_APP_PORT\) is 443: the installation never/],
     ['[app] port 443', { confPort: '443' }, /\[app\] port .* is 443/],
     ['https origin, no port: 443', { origin: 'https://box.tail1234.ts.net' }, /the port of \[app\] public_origin \(https:\/\/box\.tail1234\.ts\.net\) is 443/],
@@ -91,28 +91,28 @@ test('80 and 443 are refused outright: as the ports of the dashboard and the app
   // What to do instead is said: an explicit HTTPS port that is not 443.
   assert.match(free.check({ origin: 'https://box.tail1234.ts.net' }).stderr, /tailscale serve --bg --https=8443 http:\/\/127\.0\.0\.1:8788.*public_origin = https:\/\/<machine>\.<tailnet>\.ts\.net:8443/);
   // Not even when the port is free and nothing else is wrong; and no variable of the installer lets them through.
-  const install = readFileSync(join(ORCH_HOME, 'serve', 'install.sh'), 'utf8') + readFileSync(join(ORCH_HOME, 'lib', 'ports.sh'), 'utf8');
+  const install = readFileSync(join(ORCH_HOME, 'serve', 'install.ts'), 'utf8') + readFileSync(join(ORCH_HOME, 'lib', 'ports.ts'), 'utf8');
   assert.doesNotMatch(install, /CLEARED_[A-Z_]*(ALLOW|SKIP|FORCE)[A-Z_]*PORT|PORT[A-Z_]*(ALLOW|SKIP|FORCE)/);
   // The explicit HTTPS port of the docs is accepted, as is an origin on the app's own machine.
   assert.equal(free.check({ origin: 'https://box.tail1234.ts.net:8443', link: 'https://box.tail1234.ts.net:8443' }).status, 0);
   assert.equal(free.check({ origin: 'http://localhost:8788' }).status, 0, 'an http origin is the app itself, on its own port');
   // Ports that are not ports, and one port for two things, are refused too.
-  for (const args of [{ app: '0' }, { app: '65536' }, { app: 'x' }, { dashboard: '8788' }, { origin: 'https://box.tail1234.ts.net:8788' }]) assert.equal(free.check(args).status, 1, JSON.stringify(args));
+  for (const args of [{ app: '0' }, { app: '65536' }, { app: 'x' }, { origin: 'https://box.tail1234.ts.net:8788' }]) assert.equal(free.check(args).status, 1, JSON.stringify(args));
 });
 
-test('a re-run accepts the ports this installation\'s own units hold, each its own, and nothing else', () => {
+test('a re-run accepts the port this installation\'s own app unit holds, and nothing else', () => {
   const listeners = listen('100.64.0.1:8787', 'users:(("node",pid=4242,fd=20))') + listen('127.0.0.1:8788', 'users:(("node",pid=4343,fd=21))');
   const box = ports({ listeners });
-  for (const [pid, unit] of [['4242', 'cleared-dashboard.service'], ['4343', 'cleared-app.service']]) {
+  for (const [pid, unit] of [['4242', 'cleared-wake.service'], ['4343', 'cleared-app.service']]) {
     mkdirSync(join(box.procDir, pid));
     writeFileSync(join(box.procDir, pid, 'cgroup'), cgroup(unit));
   }
   const again = box.check({ origin: 'https://box.tail1234.ts.net:8443' });
   assert.equal(again.status, 0, again.stderr);
-  // The dashboard's unit does not make the app's port free (the two moved, or something else took it).
-  const swapped = box.check({ dashboard: '8788', app: '8787', confPort: '' });
-  assert.equal(swapped.status, 1);
-  assert.match(swapped.stderr, /8788 is already held by node \(pid 4343, unit cleared-app\.service\)/);
+  // Another unit of this installation does not make the app's port free (the app moved, or something else took it).
+  const moved = box.check({ app: '8787', confPort: '' });
+  assert.equal(moved.status, 1);
+  assert.match(moved.stderr, /8787 is already held by node \(pid 4242, unit cleared-wake\.service\)/);
   // The same unit name under another account's systemd is not this installation.
   writeFileSync(join(box.procDir, '4343', 'cgroup'), cgroup('cleared-app.service', uid + 1));
   assert.equal(box.check().status, 1);
@@ -133,30 +133,30 @@ test('without ss, the kernel\'s tables are read: a holder of another account is 
   const box = ports({ noSs: true });
   mkdirSync(join(box.procDir, 'net'));
   const header = '  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode\n';
-  // 127.0.0.1:8788 (0x2254) of uid 1001, and 100.64.0.1:8787 (0x2253) of this account, socket 777; a connection (01) on 443 is not a listener.
+  // 127.0.0.1:8787 (0x2253) of uid 1001, and 100.64.0.1:8788 (0x2254) of this account, socket 777; a connection (01) on 443 is not a listener.
   writeFileSync(join(box.procDir, 'net', 'tcp'), header
-    + `   0: 0100007F:2254 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1001        0 555 1 0 100 0 0 10 0\n`
-    + `   1: 01004064:2253 00000000:0000 0A 00000000:00000000 00:00000000 00000000  ${uid}        0 777 1 0 100 0 0 10 0\n`
+    + `   0: 0100007F:2253 00000000:0000 0A 00000000:00000000 00:00000000 00000000  1001        0 555 1 0 100 0 0 10 0\n`
+    + `   1: 01004064:2254 00000000:0000 0A 00000000:00000000 00:00000000 00000000  ${uid}        0 777 1 0 100 0 0 10 0\n`
     + `   2: 01004064:01BB 0A000001:C350 01 00000000:00000000 00:00000000 00000000  ${uid}        0 778 1 0 100 0 0 10 0\n`);
   mkdirSync(join(box.procDir, '4242', 'fd'), { recursive: true });
   symlinkSync('socket:[777]', join(box.procDir, '4242', 'fd', '20'));
-  writeFileSync(join(box.procDir, '4242', 'cgroup'), cgroup('cleared-dashboard.service'));
-  const listed = box.call('ports_listeners');
+  writeFileSync(join(box.procDir, '4242', 'cgroup'), cgroup('cleared-app.service'));
+  const listed = box.call('listeners');
   assert.equal(listed.status, 0, listed.stderr);
-  assert.equal(listed.stdout, '127.0.0.1 8788 - 1001 555 -\n100.64.0.1 8787 - ' + uid + ' 777 -\n');
-  const run = box.check();
+  assert.equal(listed.stdout, '127.0.0.1 8787 - 1001 555 -\n100.64.0.1 8788 - ' + uid + ' 777 -\n');
+  assert.equal(box.check().status, 0, 'the app\'s own socket is accepted');
+  const run = box.check({ app: '8787', confPort: '' });
   assert.equal(run.status, 1);
-  assert.match(run.stderr, /127\.0\.0\.1:8788 is already held by a process of .*\(uid 1001\)/);
-  assert.doesNotMatch(run.stderr, /8787/, 'the dashboard\'s own socket is accepted');
+  assert.match(run.stderr, /127\.0\.0\.1:8787 is already held by a process of .*\(uid 1001\)/);
   assert.equal(box.check({ app: '8790', confPort: '' }).status, 0);
 });
 
 test('the tailscale serve command the installer prints publishes on the checked port of public_origin, never on the default one', () => {
   const { call } = ports();
-  assert.equal(call('ports_serve_hint', 'https://box.tail1234.ts.net:8443', '127.0.0.1', '8788').stdout, 'tailscale serve --bg --https=8443 http://127.0.0.1:8788\n');
-  assert.equal(call('ports_serve_hint', '', '100.64.0.1', '8788').stdout, '');
-  assert.equal(call('ports_serve_hint', 'http://localhost:8788', '127.0.0.1', '8788').stdout, '');
-  const install = readFileSync(join(ORCH_HOME, 'serve', 'install.sh'), 'utf8');
+  assert.equal(call('serve-hint', 'https://box.tail1234.ts.net:8443', '127.0.0.1', '8788').stdout, 'tailscale serve --bg --https=8443 http://127.0.0.1:8788\n');
+  assert.equal(call('serve-hint', '', '100.64.0.1', '8788').stdout, '');
+  assert.equal(call('serve-hint', 'http://localhost:8788', '127.0.0.1', '8788').stdout, '');
+  const install = readFileSync(join(ORCH_HOME, 'serve', 'install.ts'), 'utf8');
   assert.doesNotMatch(install, /tailscale serve --bg [0-9]/, 'no serve on the default HTTPS port');
 });
 
@@ -171,7 +171,7 @@ function installer({ app = 'bind = 127.0.0.1\nport = 8788\n', listeners = '', se
   // The kernel's tables of this machine are not the test's: the copy reads an empty /proc (the fake ss is the listeners).
   const proc = join(home, 'proc');
   mkdirSync(proc);
-  writeFileSync(join(tool, 'lib', 'ports.sh'), readFileSync(join(tool, 'lib', 'ports.sh'), 'utf8').replace('\nports_proc=/proc\n', `\nports_proc=${proc}\n`));
+  writeFileSync(join(tool, 'lib', 'ports.ts'), readFileSync(join(tool, 'lib', 'ports.ts'), 'utf8').replace("export const HOST: PortsHost = { proc: '/proc',", `export const HOST: PortsHost = { proc: ${JSON.stringify(proc)},`));
   writeFileSync(join(bin, 'tailscale'), `#!/usr/bin/env bash\ncase "$*" in 'serve status --json') cat '${join(home, 'serve-status')}' ;; *) echo 100.64.0.1 ;; esac\n`, { mode: 0o755 });
   writeFileSync(join(home, 'serve-status'), serve);
   writeFileSync(join(bin, 'sleep'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
@@ -185,7 +185,7 @@ function installer({ app = 'bind = 127.0.0.1\nport = 8788\n', listeners = '', se
   git('commit', '-q', '-m', 'init');
   const env = { PATH: `${bin}:${process.env.PATH}`, HOME: home, XDG_CONFIG_HOME: join(home, 'config'), XDG_STATE_HOME: join(home, 'state'),
     ORCH_GUARD_REF: 'HEAD', CLEARED_SKIP_HARNESS_PROBE: '1', CLEARED_REPO: project };
-  const install = (extra = {}) => spawnSync(join(tool, 'serve', 'install.sh'), [], { env: { ...env, ...extra }, encoding: 'utf8' });
+  const install = (extra = {}) => spawnSync(join(tool, 'serve', 'install.ts'), [], { env: { ...env, ...extra }, encoding: 'utf8' });
   // Everything the installer writes: the project's name, the state, the units, and what systemd was asked.
   const written = () => ({
     config: existsSync(join(home, 'config')) ? readdirSync(join(home, 'config'), { recursive: true }) : [],
@@ -207,7 +207,7 @@ test('the installer writes nothing when a port check fails: a held port, 443 as 
   const run = held.install();
   assert.notEqual(run.status, 0);
   assert.match(run.stderr, /the app port \(CLEARED_APP_PORT\) is 8788, and 0\.0\.0\.0:8788 is already held/);
-  assert.match(run.stderr, /install\.sh: a port check failed \(above\): nothing was written, no unit was touched/);
+  assert.match(run.stderr, /install\.ts: a port check failed \(above\): nothing was written, no unit was touched/);
   assert.deepEqual(held.written(), held.nothing);
 
   const proxy = installer();
@@ -248,7 +248,7 @@ test('ss that prints nothing means nothing listens only when the kernel\'s table
   const quiet = ports({ listeners: '' });
   mkdirSync(join(quiet.procDir, 'net'));
   writeFileSync(join(quiet.procDir, 'net', 'tcp'), header + row('01'));
-  const listed = quiet.call('ports_listeners');
+  const listed = quiet.call('listeners');
   assert.equal(listed.status, 0, listed.stderr);
   assert.equal(listed.stdout, '');
   assert.equal(quiet.check().status, 0);
@@ -288,9 +288,9 @@ test('the warning about a tailscale serve on 80 or 443 names the right remedy fo
   run = warned(listen('192.168.1.5:443') + listen('[2001:db8::1]:80') + listen('[fd7a:115c:a1e0::1]:8443'));
   assert.equal(run.status, 0, run.stderr);
   assert.equal(run.stderr, '');
-  assert.equal(call('ports_tailnet', '[fd7a:115c:a1e0:0:1::1]').status, 0);
-  assert.equal(call('ports_tailnet', '100.128.0.1').status, 1, 'just outside 100.64.0.0/10');
-  assert.equal(call('ports_tailnet', '[fd7a:115c:a1e1::1]').status, 1);
+  assert.equal(call('tailnet', '[fd7a:115c:a1e0:0:1::1]').status, 0);
+  assert.equal(call('tailnet', '100.128.0.1').status, 1, 'just outside 100.64.0.0/10');
+  assert.equal(call('tailnet', '[fd7a:115c:a1e1::1]').status, 1);
 });
 
 test('the docs say to publish on 8443 or 10000, never on 443, and the installer says the same', () => {
@@ -342,7 +342,7 @@ test('a re-run accepts the port of public_origin when tailscaled holds it: named
   const served = ports({ listeners: rootHeld, serve: SERVED_8443 }).check({ origin: ORIGIN });
   assert.equal(served.status, 0, served.stderr);
   assert.match(served.stderr, /note: 100\.64\.0\.1:8443 is held by a process of another account, which this account cannot name without root; 'tailscale serve status' lists port 8443, so it is taken as tailscale serve/);
-  assert.equal(ports({ listeners: rootHeld, serve: SERVED_8443 }).call('ports_serve_hint', 'HTTPS://box.tail1234.ts.net:8443', '127.0.0.1', '8788').stdout,
+  assert.equal(ports({ listeners: rootHeld, serve: SERVED_8443 }).call('serve-hint', 'HTTPS://box.tail1234.ts.net:8443', '127.0.0.1', '8788').stdout,
     'tailscale serve --bg --https=8443 http://127.0.0.1:8788\n', 'the scheme is read in any case');
 });
 

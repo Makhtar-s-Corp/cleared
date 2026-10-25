@@ -41,7 +41,7 @@
 import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
-import { confGet, confSoft, die, gh, ghShown, git, githubDown, hasText, ledgerEvent, ledgerInit, ledgerRows, lockFile, main, nowUtc, ORCH_HOME, onlyBaseMerges, projectEnv, readJson, say, ScriptExit, scratchDir, shownLeft, tracker, userMessage, writeWhole } from './lib/script.ts';
+import { confGet, confSoft, die, gh, ghShown, git, githubDown, hasText, idsOf, ledgerEvent, ledgerInit, ledgerRows, lockFile, main, nowUtc, ORCH_HOME, onlyBaseMerges, projectEnv, readJson, say, ScriptExit, scratchDir, shownLeft, tracker, userMessage, writeWhole } from './lib/script.ts';
 
 const USAGE = 'usage: merge-pr.ts <pull request> <ticket> [<announcement file|->] [--dry-run]';
 
@@ -79,28 +79,12 @@ function hostState(): { free: boolean; down: string | null } {
   return { free: runs.length === 0 && !deploying, down: null };
 }
 
-// The ids of what Cleared's commands posted themselves, as `jq -r '.id //
-// empty'` read them: one a line, up to the first line that is not JSON.
-function agentIds(state: string): string {
-  let text = '';
-  try { text = readFileSync(join(state, 'tracker-comments.jsonl'), 'utf8'); } catch { return ''; }
-  const ids: string[] = [];
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    let entry: { id?: unknown };
-    try { entry = JSON.parse(line) as { id?: unknown }; } catch { break; }
-    const id = jqOr(entry?.id);
-    if (id !== null && id !== undefined && id !== false) ids.push(String(id));
-  }
-  return ids.map((id) => `${id}\n`).join('');
-}
-
 await main(() => {
   const { state } = projectEnv();
   const name = basename(process.argv[1] ?? 'merge-pr.ts');
   function refuse(text: string): never { say(`${name}: ${text}`); throw new ScriptExit(6); }
   if (!confSoft('security', 'agent_user') && confSoft('security', 'allow_shared_uid') !== 'true') {
-    refuse('release lock requires [security] agent_user; create a separate agent account and run serve/install.sh, or explicitly set [security] allow_shared_uid = true');
+    refuse('release lock requires [security] agent_user; create a separate agent account and run serve/install.ts, or explicitly set [security] allow_shared_uid = true');
   }
   // Only the service account's broker may enter the merge implementation.
   // The secret lives in service-owned state; a harness cannot read it.
@@ -263,7 +247,7 @@ await main(() => {
             const commentsFile = join(work.path, 'comments.json');
             writeFileSync(commentsFile, `${JSON.stringify(comments.length === 0 ? null : all)}\n`);
             const idsFile = join(work.path, 'agent-ids.txt');
-            writeFileSync(idsFile, agentIds(state));
+            writeFileSync(idsFile, idsOf([join(state, 'tracker-comments.jsonl')]));
             const opened = String(jqOr(pull.createdAt, ''));
             const line = node('lib/merge.mjs', ['line', commentsFile, idsFile, ticket, opened, ...(needs === 'guarded' ? [pr] : [])]);
             if (line.status === 0) agreed = 'line';

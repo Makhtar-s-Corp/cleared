@@ -102,7 +102,39 @@ export function projectEnv(): ProjectEnv {
   const state = env.CLEARED_STATE_DIR || env.ORCH_STATE_DIR || join(env.XDG_STATE_HOME || join(homedir(), '.local', 'state'), 'cleared', basename(repo));
   Object.assign(env, { ORCH_HOME, ORCH_REPO: repo, ORCH_CONF: conf, ORCH_STATE_DIR: state, CLEARED_REPO: repo, CLEARED_CONF: conf, CLEARED_STATE_DIR: state });
   project = { home: ORCH_HOME, repo, conf, state };
+  forgeSetup();
   return project;
+}
+
+// The forge's git settings, given to every command these start, as
+// lib/common.sh's forge_setup exported them: with an app (or one that cannot
+// work), git's credential helper and settings, the app's identity, no debug
+// switch, and no ambient GitHub token left for anything started from here.
+// Nothing changes with the ambient credential.
+function forgeSetup(): void {
+  let next: NodeJS.ProcessEnv;
+  try {
+    next = forgeEnv();
+  } catch (error) {
+    // lib/forge.mjs could not even say what to do: git gets a helper and an
+    // SSH command that only refuse, with the reason; gh stops the same way.
+    const reason = `forge credential: [forge] could not be applied, lib/forge.mjs failed (${(error instanceof Error ? error.message : String(error)).split('\n')[0]!.replace(/[^\w ._:/()[\]=,+-]/g, '').slice(0, 200)}); forge calls stop, the ambient credential is not used`;
+    next = { ...process.env };
+    let count = Number(next.GIT_CONFIG_COUNT) || 0;
+    for (const [key, value] of [['credential.https://github.com.helper', ''], ['credential.https://github.com.helper', `!f() { echo "cleared ${reason}" >&2; echo quit=1; }; f`],
+      ['url.https://github.com/.insteadOf', 'git@github.com:'], ['url.https://github.com/.insteadOf', 'ssh://git@github.com/'], ['http.https://github.com/.extraHeader', '']] as const) {
+      next[`GIT_CONFIG_KEY_${count}`] = key;
+      next[`GIT_CONFIG_VALUE_${count}`] = value;
+      count += 1;
+    }
+    Object.assign(next, { GIT_CONFIG_COUNT: String(count), GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: `f() { echo "cleared ${reason}" >&2; exit 1; }; f` });
+  }
+  const changed = Object.keys(next).some((name) => next[name] !== process.env[name]) || Object.keys(process.env).some((name) => !(name in next));
+  if (!changed) return;
+  for (const name of Object.keys(process.env)) if (!(name in next)) delete process.env[name];
+  Object.assign(process.env, next);
+  delete process.env.GH_TOKEN;
+  delete process.env.GITHUB_TOKEN;
 }
 
 // One value of a settings file, as lib/common.sh's conf_get_from read it:
@@ -213,12 +245,10 @@ export function ghShown(args: readonly string[]): Run {
 }
 
 // git on the project's checkout, with the forge's settings (lib/forge.mjs
-// forgeEnv) as every git of the bash scripts had them.
-let gitEnv: NodeJS.ProcessEnv | undefined;
-export function git(args: readonly string[], options: { readonly cwd?: string } = {}): Run {
+// forgeEnv, set by projectEnv) as every git of the bash scripts had them.
+export function git(args: readonly string[], options: { readonly cwd?: string; readonly input?: string } = {}): Run {
   const { repo } = projectEnv();
-  gitEnv ??= forgeEnv();
-  return done(spawnSync('git', ['-C', options.cwd ?? repo, ...args /* git-env: the service account on its own checkout, as the bash scripts ran it, with the forge's settings */], { env: gitEnv, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }));
+  return done(spawnSync('git', ['-C', options.cwd ?? repo, ...args /* git-env: the service account on its own checkout, as the bash scripts ran it, with the forge's settings */], { env: process.env, encoding: 'utf8', input: options.input ?? '', stdio: ['pipe', 'pipe', 'pipe'], maxBuffer: 64 * 1024 * 1024 }));
 }
 
 // A Node command of the tool (lib/release.mjs, lib/merge.mjs…), run as the
@@ -345,6 +375,25 @@ export function scratchDir(prefix = 'cleared-'): { readonly path: string; remove
 }
 
 export const hasText = (text: string): boolean => /[^\s]/.test(text);
+
+// The ids of what Cleared's commands posted themselves, as `cat <files> |
+// jq -r '.id // empty'` read them: one a line, up to the first line that is
+// not JSON.
+export function idsOf(files: readonly string[]): string {
+  const ids: string[] = [];
+  for (const file of files) {
+    let text = '';
+    try { text = readFileSync(file, 'utf8'); } catch { continue; }
+    for (const line of text.split('\n')) {
+      if (!line.trim()) continue;
+      let entry: { id?: unknown };
+      try { entry = JSON.parse(line) as { id?: unknown }; } catch { return ids.map((id) => `${id}\n`).join(''); }
+      const id = entry?.id;
+      if (id !== null && id !== undefined && id !== false) ids.push(String(id));
+    }
+  }
+  return ids.map((id) => `${id}\n`).join('');
+}
 
 // ---- The guard -------------------------------------------------------------
 

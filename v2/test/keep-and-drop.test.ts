@@ -31,11 +31,6 @@ function removed(): string[] {
 
 // Still tracked, with why (each one is a step of the plan, or a question).
 const STILL: ReadonlyMap<string, string> = new Map([
-  // Step c: the rest of the kept bash.
-  ['wake.sh', 'step c'],
-  ['lib/ports.sh', 'step c'],
-  ['serve/install.sh', 'step c'],
-  ['lib/common.sh', 'step c'],
   // Question 1 of the plan, default (a): the passkey files stay with the v1 app (B5.9d).
   ['app/lib/webauthn.mjs', 'passkeys'],
   ['app/lib/grant-socket.mjs', 'passkeys'],

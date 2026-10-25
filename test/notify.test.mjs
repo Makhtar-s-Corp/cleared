@@ -333,27 +333,37 @@ test('a title of many kilobytes is cut before the patterns run: it returns in ti
   assert.equal(sanitize('w '.repeat(300) + 'TAILWORD', 2000).includes('TAILWORD'), false, 'past 500 characters is not read');
 });
 
-test('the deadline of the dispatcher is capped at 50 seconds, below the 60 that wake.sh allows', () => {
+test('the deadline of the dispatcher is capped at 50 seconds, below the 60 that wake.ts allows', () => {
   assert.equal(notifySettings({ sections: {} }, { CLEARED_NOTIFY_DEADLINE_SECONDS: '50' }).deadlineMs, 50000);
   assert.throws(() => notifySettings({ sections: {} }, { CLEARED_NOTIFY_DEADLINE_SECONDS: '51' }), /DEADLINE_SECONDS/);
 });
 
-test('the dispatcher does not inherit the wake lock (fd 8): a child that outlives the kill cannot hold it', () => {
-  const wakeSh = readFileSync(join(ORCH_HOME, 'wake.sh'), 'utf8');
-  const dispatch = wakeSh.split('\n').filter((line) => line.includes('notify.mjs" dispatch'));
+test('the dispatcher does not inherit the wake lock: a child that outlives the kill cannot hold it', () => {
+  const wake = readFileSync(join(ORCH_HOME, 'wake.ts'), 'utf8');
+  const dispatch = wake.split('\n').filter((line) => line.includes("'notify.mjs'), 'dispatch'"));
   assert.equal(dispatch.length, 1, 'one dispatcher call');
-  assert.match(dispatch[0], /dispatch > \/dev\/null 8>&- \|\| true$/, 'fd 8 closed for the dispatcher, as talk.sh does');
-  // The same redirection, at run time: a child started that way has no fd 8 while the lock's fd is open.
-  const probe = spawnSync('bash', ['-c', 'exec 8>/dev/null; if [ -e /proc/$$/fd/8 ]; then timeout 5 sh -c \'if [ -e /proc/$$/fd/8 ]; then exit 1; fi\' 8>&-; echo "rc=$?"; fi'], { encoding: 'utf8' });
-  assert.equal(probe.stdout.trim(), 'rc=0', 'the child sees no fd 8');
+  assert.match(dispatch[0], /spawnSync\('timeout', \['-k', '5', '60', /, 'stopped after 60 seconds, killed 5 seconds later');
+  // The lock is a descriptor of the wake that flock(1) took, and Node opens it close-on-exec: a child started while
+  // the wake holds it, and still running once the wake let it go, does not keep it.
+  const dir = scratch('cleared-wake-lock-');
+  const probe = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    const { lockFile } = await import(${JSON.stringify(new URL('../lib/script.ts', import.meta.url).href)});
+    const { spawn, spawnSync } = await import('node:child_process');
+    const held = lockFile(${JSON.stringify(join(dir, 'lock'))}, 0);
+    const busy = spawnSync('flock', ['-n', ${JSON.stringify(join(dir, 'lock'))}, 'true']).status;
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)'], { stdio: 'ignore' });
+    held.release();
+    const free = spawnSync('flock', ['-n', ${JSON.stringify(join(dir, 'lock'))}, 'true']).status;
+    child.kill();
+    process.stdout.write(busy + ' ' + free);`], { encoding: 'utf8' });
+  assert.equal(probe.stdout.trim(), '1 0', `${probe.stderr}: held by the wake, and free once it lets go though its child still runs`);
 });
 
-test('serve/install.sh warns when CLEARED_NOTIFY_LINK_BASE is not set, and is silent when it is', () => {
-  const line = readFileSync(join(ORCH_HOME, 'serve', 'install.sh'), 'utf8').split('\n').find((l) => l.includes('WARNING: CLEARED_NOTIFY_LINK_BASE is not set'));
+test('serve/install.ts warns when CLEARED_NOTIFY_LINK_BASE is not set, and is silent when it is', () => {
+  const install = readFileSync(join(ORCH_HOME, 'serve', 'install.ts'), 'utf8');
+  const line = install.split('\n').find((l) => l.includes('WARNING: CLEARED_NOTIFY_LINK_BASE is not set'));
   assert.ok(line, 'the check is in the installer');
-  const run = (env) => spawnSync('bash', ['-c', line], { encoding: 'utf8', env: { PATH: process.env.PATH, ...env } });
-  assert.match(run({}).stderr, /WARNING: CLEARED_NOTIFY_LINK_BASE is not set/);
-  assert.equal(run({ CLEARED_NOTIFY_LINK_BASE: 'https://cockpit.example.ts.net' }).stderr, '');
+  assert.match(line, /^\s*if \(!process\.env\.CLEARED_NOTIFY_LINK_BASE\) say\('WARNING: CLEARED_NOTIFY_LINK_BASE is not set/, 'said only when the shell has no link');
 });
 
 test('each kind reads as a product sentence, in English and in French; health names a known code only', () => {
@@ -732,7 +742,7 @@ test('a real wake dispatches: the first one takes note, the next one tells ntfy 
   writeFileSync(join(secrets, 'credentials.json'), JSON.stringify({ ntfy: { server: `http://127.0.0.1:${server.address().port}`, topic: 'cleared-test', token: 'tk_abcdefgh12345' } }), { mode: 0o600 });
   appendFileSync(join(box.home, 'agents.conf'), `\n[notify]\nadapters = ntfy\nsecrets_dir = ${secrets}\n`);
   const wake = () => new Promise((resolve) => {
-    const child = spawn(join(box.home, 'wake.sh'), [], { env: { ...box.env, ...LINK_ENV } });
+    const child = spawn(join(box.home, 'wake.ts'), [], { env: { ...box.env, ...LINK_ENV } });
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.stdout.resume();

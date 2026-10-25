@@ -11,7 +11,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, w
 import { join } from 'node:path';
 import { ORCH_HOME } from '../lib/conf.mjs';
 import { openLedger } from '../lib/ledger.mjs';
-import { foreignTest, scratch } from './support.mjs';
+import { foreignTest, scratch, toolCall } from './support.mjs';
 
 const REAL_GIT = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 const HOOKS = ['post-index-change', 'reference-transaction', 'post-checkout', 'post-merge', 'pre-auto-gc', 'post-rewrite', 'pre-commit', 'pre-push'];
@@ -276,8 +276,8 @@ test('a refused checkout is not recorded as an untracked config', () => {
 
 foreignTest('the scripts\' shared setup says git refused the checkout and records no untracked config', () => {
   const p = plantedRepo();
-  const run = spawnSync('bash', ['-c', `. ${JSON.stringify(join(ORCH_HOME, 'lib', 'common.sh'))}; echo "conf=$ORCH_CONF ignored=\${CLEARED_IGNORED_UNTRACKED_CONF:-}"`],
-    { encoding: 'utf8', env: childEnv({ CLEARED_REPO: p.repo, ...OWNER }) });
+  const run = toolCall(ORCH_HOME, 'lib/script.ts', "(m.projectEnv(), `conf=${process.env.ORCH_CONF} ignored=${process.env.CLEARED_IGNORED_UNTRACKED_CONF ?? ''}`)",
+    childEnv({ CLEARED_REPO: p.repo, ...OWNER }));
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /ignored=$/m);
   assert.match(run.stderr, new RegExp(`^cleared: git refused or could not read ${p.repo.replace(/[.*+?^${}()|[\]\\/]/g, '\\$&')}: fatal: detected dubious ownership`, 'm'));
