@@ -6212,5 +6212,5 @@ P227's test of the gauge on a phone still checks that nothing of the top bar ove
 
 **What was read.** `docs/v2/milestone-2-plan.md` ends at its section 8. The sections 9 and 10 read were the milestone 1 plan's (waves, conventions that keep lanes apart) and the interface overhaul plan's (questions for the owner: the phone's bar of four, the default kept; out of scope).
 
-- Pull request: PRNUM, against `v2`.
+- Pull request: 383, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-mobile-title`.
