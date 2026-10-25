@@ -7100,7 +7100,7 @@ French and English, accessible, against a fake GitLab only. As earlier lanes not
 - the workspace file still refused `forge = gitlab`, and `lib/forge.ts` still refused `adapter = gitlab`;
 - the lock's six GitLab cases failed, run on that commit in a scratch worktree: `merge-pr.ts` stopped on `unknown [forge] adapter "gitlab"`, then could not read pull request #7.
 
-The two agreement cases came after the review of the code (an advisor's read): with `ask-validation.ts` as it was, the ask stopped on "pull request #7 could not be read", seen by running the new case on the old file.
+The two agreement cases came later, from a second read of the lock's path: with `ask-validation.ts` as it was, the ask stopped on "pull request #7 could not be read", seen by running the new case on the old file.
 
 **Files outside the lane's list**, each for GitLab's path, GitHub's left as it was:
 - `lib/forge.ts`: `adapter = gitlab` accepted, with no GitHub App key.
