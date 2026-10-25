@@ -5757,3 +5757,10 @@ The 120 PNG captures of `docs/v2/ui-polish/` (P222, 366) weighed 11.3 MB. They w
 
 - Pull request: against `v2`, branch `amdiakhate/j3-png`.
 - Author: the night driver, approved by the product owner on 2026-10-25.
+
+## 2026-10-25: a milestone 3 report for the product owner
+
+`docs/v2/milestone-3-report.md`, in French, next to the plans of milestones 1 and 2: what the ten ideas (P210 to P219) and the passes after them (P221, P222, B2.2, B5.5b, issues #347 to #353 and #360) bring, how each change is checked, what keeps running, and what waits for the owner (the open or partial lines B6.1q, B5.10g, D21, D13, B5.1c, O6, P69, B6.3p, P71, B3.10, P7, P47, P51). It adds no matrix line: it is a summary of lines already there, and three lanes were picking the next free ids at the time. Every id it cites was checked against the matrix; the test counts come from the last checks in this log (2108 Node, 339 Vitest, 0 fail). The 4.0 MB of the captures is the size after PR 369.
+
+- Pull request: 370, against `v2`.
+- Author: the night driver.
