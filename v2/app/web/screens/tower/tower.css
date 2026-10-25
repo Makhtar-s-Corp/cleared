@@ -211,5 +211,9 @@
 .ask:has(#ask-input:not(:placeholder-shown)) .ask-variants { display: flex; }
 .ask textarea + .ask-variants { border-top: 0; padding-top: 2px; }
 .ask-variants-label { color: var(--text-muted); font-size: var(--text-sm); margin-right: var(--space-1); }
-/* The ready-made tickets (P214): a row under the field while the chip has it open or one is picked. */
+/* The ready-made tickets (P214): a row under the field while the chip has it open or one is picked; the
+   description it fills follows with no rule of its own, as the authors follow the description. */
+.ask-templates + textarea { border-top: 0; padding-top: 2px; }
+/* A chip whose row or form is open says so, in the hover's fill, never the ink of New ticket. */
+.ask-actions .chip-button[aria-expanded="true"] { background: var(--tab-fill); }
 .ask-templates { display: flex; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--hairline); }

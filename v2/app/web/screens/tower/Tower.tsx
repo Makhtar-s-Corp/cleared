@@ -75,6 +75,7 @@ export function Bar({ t, title, body, services = [], picked = [], variants = 1, 
       </div>
       {templates ? (
         <div className="ask-templates" id="ask-templates" role="group" aria-label={t('bar_templates_label')}>
+          <span className="ask-variants-label" aria-hidden="true">{t('bar_template')}</span>
           {TICKET_TEMPLATES.map((id) => (
             <Toggle key={id} className="svc-toggle" pressed={template === id} onPressedChange={() => onTemplate?.(id)} data-template={id}>
               {template === id ? <Check size={12} aria-hidden="true" /> : null}{t(`template_${id}`)}
@@ -439,13 +440,14 @@ export default function Tower() {
     }
   };
 
-  // A ready-made ticket: its sections in an empty or untouched description, the title to write next.
+  // A ready-made ticket: its sections in an empty or untouched description, the title to write next. Only the
+  // first pick takes the focus to the title, so the keys can still go from one template to the next.
   const choose = (id: TicketTemplate) => {
     const pick = pickTemplate({ template, body }, id, t);
     setTemplate(pick.template);
     setBody(pick.body);
     setNote(pick.kept ? { text: t('template_kept'), kind: 'ok' } : null);
-    document.getElementById('ask-input')?.focus();
+    if (template === null && pick.template !== null) document.getElementById('ask-input')?.focus();
   };
   // The chip shows the row, or hides it with the template picked, its untouched sections with it.
   const toggleTemplates = () => {
