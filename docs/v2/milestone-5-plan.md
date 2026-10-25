@@ -230,7 +230,7 @@ None: tickets run on the fake harness; a real session is the proof's.
 
 ## 9. Connect a workspace (`v2-j5-connect`)
 
-Matrix: M10 (several repositories, setup sessions, links guessed and proposed). Wave 2. Effort L.
+Matrix: M10 (several repositories, setup sessions, links guessed and proposed), and P251, the lane's own line, added when it delivered. Wave 2. Effort L.
 
 ### 9.1 Context
 
