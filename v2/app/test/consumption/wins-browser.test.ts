@@ -18,6 +18,7 @@ const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
 const SHOTS = process.env.CLEARED_V2_SHOTS;
 declare const document: any;
+declare const window: any;
 
 async function withBrowser(options: { language: 'en' | 'fr' }, run: (page: any) => Promise<void>): Promise<void> {
   const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }), extra: { language: options.language } });
@@ -27,6 +28,14 @@ async function withBrowser(options: { language: 'en' | 'fr' }, run: (page: any) 
   try {
     await app.directory.add('owner', PASSWORD);
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, locale: options.language === 'fr' ? 'fr-FR' : 'en-US', timezoneId: 'Europe/Paris' });
+    // The page's answer to a width's media queries held 500 ms, as a slow
+    // runner's is: the style moves at once, the shell's sidebar mode after.
+    await context.addInitScript(() => {
+      const add = (window as any).MediaQueryList.prototype.addEventListener;
+      (window as any).MediaQueryList.prototype.addEventListener = function (this: unknown, type: string, listener: (event: unknown) => void, ...rest: unknown[]) {
+        return add.call(this, type, type === 'change' ? (event: unknown) => setTimeout(() => listener(event), 500) : listener, ...rest);
+      };
+    });
     const page = await context.newPage();
     await page.clock.install({ time: FIXTURE_NOW });
     const errors: string[] = [];
