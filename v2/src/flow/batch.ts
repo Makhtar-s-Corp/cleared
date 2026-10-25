@@ -86,10 +86,12 @@ type StoredItem = { readonly batch: string; readonly position: number; readonly 
 const errorName = (error: unknown) => (error instanceof Error ? error.name : typeof error);
 const isText = (value: unknown): value is string => typeof value === 'string';
 
-// The tickets of a batch, checked whole before any of them exists.
-export function validateBatch(tickets: unknown): BatchTicket[] {
+// The tickets of a batch, checked whole before any of them exists. `min`:
+// 1 for the chat's command (flow/chat.ts), whose one ticket waits for the
+// same lanes and stop; the route keeps 2.
+export function validateBatch(tickets: unknown, min = BATCH_MIN): BatchTicket[] {
   if (!Array.isArray(tickets)) throw new BatchError('invalid', 'tickets is a list of tickets');
-  if (tickets.length < BATCH_MIN || tickets.length > BATCH_MAX) throw new BatchError('invalid', `a batch holds ${BATCH_MIN} to ${BATCH_MAX} tickets, not ${tickets.length}`);
+  if (tickets.length < min || tickets.length > BATCH_MAX) throw new BatchError('invalid', `a batch holds ${min} to ${BATCH_MAX} tickets, not ${tickets.length}`);
   return tickets.map((entry: unknown, index) => {
     const n = index + 1;
     if (typeof entry !== 'object' || entry === null || Array.isArray(entry)) throw new BatchError('invalid', `ticket ${n} is not an object`);
@@ -170,8 +172,8 @@ export class BatchRunner {
   // ---- the person's gestures -----------------------------------------------------
 
   // Creates the batch's tickets in order, then starts what the lanes and the stop allow.
-  async create(input: { readonly tickets: unknown }, by: UserId): Promise<Batch> {
-    const tickets = validateBatch(input.tickets);
+  async create(input: { readonly tickets: unknown }, by: UserId, options: { readonly min?: number } = {}): Promise<Batch> {
+    const tickets = validateBatch(input.tickets, options.min);
     const seq = Number((this.#db.prepare('SELECT MAX(seq) AS n FROM batches').get() as Row).n ?? 0) + 1;
     const id = `batch-${seq}`;
     const at = this.#now().toISOString();
