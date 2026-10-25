@@ -2,14 +2,14 @@
 // project's settings must hold for the lock to read the service's approvals.
 //   node src/cli/setup.ts --owner <app user name> [--key <file>]    (npm run setup -- --owner demo)
 // The private key is written once, mode 0600, never over a key that exists,
-// and is never printed. The public key is printed to commit as [tracker]
+// and is never printed (setup/approval-key.ts, which the browser setup
+// assistant's owner step shares). The public key is printed to commit as [tracker]
 // human_public_key. The other keys depend on this machine and are for the
 // service's own settings file (CLEARED_CONF), not for the project's.
-import { closeSync, constants, linkSync, mkdirSync, openSync, rmSync, writeSync } from 'node:fs';
 import { userInfo } from 'node:os';
-import { dirname, join } from 'node:path';
+import { join } from 'node:path';
 import { stateDirectory } from '../approval/service.ts';
-import { generateKeyPair } from '../approval/signer.ts';
+import { ApprovalKeyError, makeApprovalKey } from '../setup/approval-key.ts';
 import { LedgerPathError } from '../store/db.ts';
 
 const USAGE = 'usage: cleared-v2 setup --owner <name of the app user who approves> [--key <file>]';
@@ -42,31 +42,20 @@ if (!key) {
   }
 }
 
-const pair = generateKeyPair();
-// Written beside the final name and linked into place, which fails if a file
-// is there: a key that exists is never replaced, and a crash leaves no half key.
-const part = `${key}.part`;
-let problem: string | undefined;
+// The key's writing is the assistant's owner step's too (setup/approval-key.ts).
+let publicKey: string;
 try {
-  mkdirSync(dirname(key), { recursive: true, mode: 0o700 });
-  const fd = openSync(part, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-  try { writeSync(fd, pair.privatePem); } finally { closeSync(fd); }
-  linkSync(part, key);
+  publicKey = makeApprovalKey(key, { keep: false }).publicKey;
 } catch (error) {
-  const code = (error as NodeJS.ErrnoException).code;
-  problem = code === 'EEXIST' ? `a key already exists at ${key}: it is never overwritten. Remove it yourself to make another, and commit the new public key`
-    : `cannot write the key at ${key}: ${code ?? (error as Error).message}`;
-} finally {
-  rmSync(part, { force: true });
+  if (error instanceof ApprovalKeyError) fail(error.message, 1);
+  throw error;
 }
-if (problem) fail(problem, 1);
-
 console.log(`cleared-v2: the approval key is at ${key} (mode 600, read by the service only).
 
 Put this in the project's .cleared/agents.conf and commit it (the public key is not a secret):
 
 [tracker]
-human_public_key = ${pair.publicKey}
+human_public_key = ${publicKey}
 
 Put this in the settings file the service and the lock read on this machine (CLEARED_CONF), which is not committed:
 

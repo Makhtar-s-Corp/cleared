@@ -114,7 +114,7 @@ Matrix line P248, pull request 410. Two decisions of section 3 changed, as the d
 
 ## 5. The browser setup assistant (`v2-j5-assistant`)
 
-Matrix: B6.5. Wave 1. Effort L.
+Matrix: B6.5, and P249, the lane's own line, added when it delivered. Wave 1. Effort L.
 
 ### 5.1 Context
 

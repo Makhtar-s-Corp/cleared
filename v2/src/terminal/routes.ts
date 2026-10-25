@@ -25,7 +25,7 @@ import type { Registry, Route, RouteContext } from '../modules/registry.ts';
 import { sameProof } from '../modules/users.ts';
 import type { SessionId, UserId } from '../session/contract.ts';
 import type { HumanSide } from './human.ts';
-import { TerminalError } from './terminals.ts';
+import { TerminalError, type Terminals } from './terminals.ts';
 
 // The identities that never get a terminal: the flow's own and the lead's.
 export const NOT_HUMAN: ReadonlySet<string> = new Set(['cleared', 'lead']);
@@ -150,36 +150,41 @@ export function terminalRoutes(deps: TerminalRouteDeps): Route[] {
     },
     {
       method: 'GET', path: '/api/sessions/:id/terminal/stream',
-      handle: route(async (human, _user, id, context) => {
-        const url = new URL(context.request.url ?? '/', 'http://service');
-        const after = Number(header(context.request, 'last-event-id') ?? url.searchParams.get('after') ?? 0);
-        const { response } = context;
-        let leave = () => {};
-        const ended = new Promise<void>((resolve) => { leave = resolve; });
-        const frames: string[] = [];
-        const write = (frame: string) => { if (!response.writableEnded) response.write(frame); };
-        const unsubscribe = human.terminals.stream(id, Number.isFinite(after) ? after : 0, (event) => {
-          if (event.kind === 'data') {
-            const frame = `id: ${event.chunk.seq}\nevent: data\ndata: ${JSON.stringify(event.chunk satisfies TerminalChunk)}\n\n`;
-            if (response.headersSent) write(frame); else frames.push(frame);
-          } else {
-            write(`event: closed\ndata: ${JSON.stringify(event.closed satisfies TerminalClosed)}\n\n`);
-            leave();
-          }
-        });
-        if (!unsubscribe) throw new HttpError(409, 'no terminal is open for this session');
-        response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' });
-        for (const frame of frames.splice(0)) write(frame);
-        const keepalive = setInterval(() => write(': keepalive\n\n'), KEEPALIVE_MS);
-        context.request.on('close', leave);
-        try {
-          await ended;
-        } finally {
-          clearInterval(keepalive);
-          unsubscribe();
-          response.end();
-        }
-      }),
+      handle: route(async (human, _user, id, context) => streamTerminal(context, human.terminals, id)),
     },
   ];
+}
+
+// A terminal's stream as server-sent events: what it kept after
+// Last-Event-ID (or ?after=), then what comes, then its close. The session's
+// terminal and the setup assistant's (setup/steps/model.ts) share it.
+export async function streamTerminal(context: RouteContext, terminals: Terminals, id: string): Promise<void> {
+  const url = new URL(context.request.url ?? '/', 'http://service');
+  const after = Number(header(context.request, 'last-event-id') ?? url.searchParams.get('after') ?? 0);
+  const { response } = context;
+  let leave = () => {};
+  const ended = new Promise<void>((resolve) => { leave = resolve; });
+  const frames: string[] = [];
+  const write = (frame: string) => { if (!response.writableEnded) response.write(frame); };
+  const unsubscribe = terminals.stream(id, Number.isFinite(after) ? after : 0, (event) => {
+    if (event.kind === 'data') {
+      const frame = `id: ${event.chunk.seq}\nevent: data\ndata: ${JSON.stringify(event.chunk satisfies TerminalChunk)}\n\n`;
+      if (response.headersSent) write(frame); else frames.push(frame);
+    } else {
+      write(`event: closed\ndata: ${JSON.stringify(event.closed satisfies TerminalClosed)}\n\n`);
+      leave();
+    }
+  });
+  if (!unsubscribe) throw new HttpError(409, 'no terminal is open for this session');
+  response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-store', connection: 'keep-alive', 'x-accel-buffering': 'no' });
+  for (const frame of frames.splice(0)) write(frame);
+  const keepalive = setInterval(() => write(': keepalive\n\n'), KEEPALIVE_MS);
+  context.request.on('close', leave);
+  try {
+    await ended;
+  } finally {
+    clearInterval(keepalive);
+    unsubscribe();
+    response.end();
+  }
 }

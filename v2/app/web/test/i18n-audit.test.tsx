@@ -22,7 +22,7 @@ import assert from 'node:assert/strict';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { LANGUAGES, MESSAGES_DIR, SCREENS, type Language, type Screen } from '../../src/catalog.ts';
+import { CATALOGS, LANGUAGES, MESSAGES_DIR, SCREENS, SETUP_CATALOGS, type CatalogName, type Language } from '../../src/catalog.ts';
 import { scan, type Finding, type Scan } from './audit/scan.ts';
 
 const WEB = fileURLToPath(new URL('..', import.meta.url));
@@ -38,10 +38,12 @@ function walk(dir: string): string[] {
 const files = walk(WEB).map((path) => relative(WEB, path).split(sep).join('/')).sort();
 const scans = new Map<string, Scan>(files.map((file) => [file, scan(file, readFileSync(join(WEB, file), 'utf8'))] as const));
 
+// A screen's catalog, or one of the setup assistant's (setup and setup-<step>, lane v2-j5-assistant).
+type Screen = CatalogName;
 const read = (screen: Screen, language: Language): Record<string, string> => JSON.parse(readFileSync(join(MESSAGES_DIR, `${screen}.${language}.json`), 'utf8')) as Record<string, string>;
 const RAW: Record<Language, Record<Screen, Record<string, string>>> = {
-  en: Object.fromEntries(SCREENS.map((screen) => [screen, read(screen, 'en')])) as Record<Screen, Record<string, string>> as never,
-  fr: Object.fromEntries(SCREENS.map((screen) => [screen, read(screen, 'fr')])) as Record<Screen, Record<string, string>> as never,
+  en: Object.fromEntries(CATALOGS.map((screen) => [screen, read(screen, 'en')])) as Record<Screen, Record<string, string>> as never,
+  fr: Object.fromEntries(CATALOGS.map((screen) => [screen, read(screen, 'fr')])) as Record<Screen, Record<string, string>> as never,
 };
 
 // ---- the justified exceptions ------------------------------------------------------
@@ -94,6 +96,9 @@ const SAME_IN_BOTH: ReadonlyMap<string, string> = new Map(Object.entries({
   // A word French spells as English does (Session, Plan, Question, Ticket, Terminal, Service, Notifications, Shell, Tokens, Agent, Bug, Auto).
   shared_word: 'session.captures_auto tower.template_bug tower.template_question shell.title_session shell.nav_sessions shell.title_lead shell.nav_plans shell.notify_label shell.palette_sessions tower.plans_title tower.services_title tower.kind_question tower.kind_plan session.ticket_label session.verb_think session.index_title session.tabs_plan session.tabs_terminal session.terminal_switch_shell session.ticket_step_service inbox.kind_question inbox.eyebrow_question inbox.facts_sessions inbox.facts_session inbox.kind_plan inbox.facts_tickets inbox.services_label inbox.plan_step_service lead.services_label lead.plan_step_service consumption.consumption_wins_agent consumption.consumption_wins_type consumption.consumption_type_bug consumption.consumption_type_question consumption.consumption_week_service consumption.consumption_week_col_dollars services.map_services_title',
   // A template whose only words are shared ones, or a unit or a key cap both languages write alike.
+  // The setup assistant's: GitHub's own names of a fine-grained token's permissions and accesses, as GitHub's page shows them in English
+  // (the step says so), a command typed as it is, and a template whose only word French writes as English does.
+  setup_names: 'setup.setup_step_forge setup.setup_step_model setup-forge.forge_permission_metadata setup-forge.forge_permission_contents setup-forge.forge_permission_pull_requests setup-forge.forge_permission_commit_statuses setup-forge.forge_permission_workflows setup-forge.forge_permission_issues setup-forge.forge_access_read setup-forge.forge_access_write setup-model.model_command_text setup-model.terminal_switch_shell setup-model.terminal_switch_harness setup.setup_time_both',
   shared_template: 'shell.time_minutes shell.key_cap_ctrl tower.need_question tower.need_plan inbox.list_plan_one inbox.list_plan_other inbox.tickets_one inbox.tickets_other inbox.train_ticket services.map_service_commit',
 }).flatMap(([why, ids]) => ids.split(' ').map((id) => [id, why] as const)));
 
@@ -107,6 +112,8 @@ const screenOf = (file: string): Screen | undefined => {
   const match = /^screens\/([a-z]+)\//.exec(file);
   return match && (SCREENS as readonly string[]).includes(match[1] as string) ? (match[1] as Screen) : undefined;
 };
+// The setup assistant's files draw with the shell's catalog, the assistant's and every step's (screens/setup/model.ts).
+const SETUP_CONTEXT: readonly Screen[] = ['shell', ...SETUP_CATALOGS];
 
 // The shortcut sheet lists the keys of every screen, and says each in the catalog of the screen it opens on.
 const SHEET_FILES: ReadonlySet<string> = new Set(['shell/keys.ts', 'shell/Shortcuts.tsx']);
@@ -125,6 +132,7 @@ for (const file of files) {
 function contexts(file: string, seen = new Set<string>()): Screen[][] {
   const own = screenOf(file);
   if (own) return [['shell', own]];
+  if (file.startsWith('screens/setup/')) return [[...SETUP_CONTEXT]];
   if (SHEET_FILES.has(file)) return [['shell', ...SCREENS.filter((screen) => screen !== 'shell')]];
   // The shell draws its own files (the sidebar, the palette) with the tower's catalog over its own (App.tsx, towerT).
   if (file.startsWith('shell/')) return [['shell', 'tower']];
@@ -240,7 +248,7 @@ test('a key only a run can tell is justified, and its justification is still tru
 
 test('a French sentence is not the English one, but for the words and names both languages share', () => {
   const same: string[] = [];
-  for (const screen of SCREENS) {
+  for (const screen of CATALOGS) {
     for (const [key, en] of Object.entries(RAW.en[screen])) {
       const fr = RAW.fr[screen][key];
       if (fr === en && /\p{L}{3}/u.test(en.replace(/\{[a-z_]+\}/g, '')) && !SAME_IN_BOTH.has(`${screen}.${key}`)) same.push(`${screen}.fr.json ${key} = "${en}"`);

@@ -46,12 +46,15 @@ for (const [name, marker] of Object.entries(PACKAGES)) {
     }
   });
 
-  test(`${name} is behind a dynamic import of the session screen, and of no other screen`, () => {
+  // The setup assistant's model step opens the web terminal too (milestone-5-plan.md, decision 7, lane v2-j5-assistant).
+  const owners = name === 'xterm' ? ['session', 'setup'] : ['session'];
+  test(`${name} is behind a dynamic import of the ${owners.join(' and ')} screen${owners.length > 1 ? 's' : ''}, and of no other screen`, () => {
     const behind = (start: string) => [...closure(start)].flatMap((key) => manifest[key]?.dynamicImports ?? [])
       .flatMap((key) => [...closure(key)]).some((key) => marker.test(read((manifest[key] as Chunk).file)));
-    const session = screens.find((key) => key.startsWith('screens/session/')) as string;
-    assert.ok(behind(session), `the session screen reaches ${name} by a dynamic import`);
-    for (const other of screens.filter((key) => key !== session)) assert.ok(!behind(other), `${other} does not reach ${name}`);
+    const reaching = screens.filter((key) => owners.some((owner) => key.startsWith(`screens/${owner}/`)));
+    assert.equal(reaching.length, owners.length);
+    for (const screen of reaching) assert.ok(behind(screen), `${screen} reaches ${name} by a dynamic import`);
+    for (const other of screens.filter((key) => !reaching.includes(key))) assert.ok(!behind(other), `${other} does not reach ${name}`);
   });
 }
 
