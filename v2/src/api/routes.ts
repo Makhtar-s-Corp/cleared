@@ -14,6 +14,7 @@ import { workspaceOf } from '../flow/config.ts';
 import { CLOSE_REASON_MAX, FlowError, type FlowEngine } from '../flow/engine.ts';
 import type { Decision, UserId } from '../session/contract.ts';
 import { TicketError } from '../tickets/contract.ts';
+import { typeLabelProblem } from '../tickets/templates.ts';
 import { publicWorkspace } from '../workspace/config.ts';
 import { changeHub, streamChanges } from './events.ts';
 import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, sseFrame, type CreateTicketBody } from './types.ts';
@@ -177,6 +178,8 @@ export function createApiRoutes(deps: ApiDeps): Route[] {
         const labels = body.labels;
         if (labels !== undefined && (!Array.isArray(labels) || labels.some((l) => typeof l !== 'string' || l.length > 100)))
           throw new HttpError(400, 'labels is a list of short texts');
+        const typeProblem = labels === undefined ? null : typeLabelProblem(labels as string[]);
+        if (typeProblem) throw new HttpError(400, typeProblem);
         if (project !== engine.config.project) throw new HttpError(400, `this service runs project ${engine.config.project}, not ${project}`);
         const services = serviceNames(body.services, engine);
         // 2 to 4 authors at once (issue #271), refused before the ticket exists.

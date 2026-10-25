@@ -163,5 +163,20 @@
   "batch_hold_seven_day": "Waiting: the seven-day window is at {percent} % (the stop is at {stop} %).",
   "batch_hold_five_hour": "Waiting: the five-hour window is at {percent} % (the stop is at {stop} %).",
   "batch_item_queued": "Waiting for its turn",
-  "batch_item_error": "Did not start: {note}"
+  "batch_item_error": "Did not start: {note}",
+  "bar_template": "Template",
+  "bar_templates_label": "Ready-made tickets",
+  "template_kept": "Your description is kept: a template only fills an empty one.",
+  "template_bug": "Bug",
+  "template_bug_title": "What breaks, in a few words",
+  "template_bug_body": "## What happens\n\n## Steps to reproduce\n\n## What should happen\n\n## Acceptance criteria\n- A test that fails before the fix passes after it.",
+  "template_review": "Review",
+  "template_review_title": "What to review, in a few words",
+  "template_review_body": "## What to review\nA pull request, a branch or files.\n\n## What to look for\n\n## Expected\nEach finding with its file, its line and its severity. The ones within reach fixed on this branch, each with a test.",
+  "template_ci": "CI",
+  "template_ci_title": "The failing check, in a few words",
+  "template_ci_body": "## The failing check\nIts name and the link to the run.\n\n## The error\nThe lines of the log that show it.\n\n## Acceptance criteria\n- The check passes.\n- No test skipped or removed to get there.",
+  "template_question": "Question",
+  "template_question_title": "The question, in one line",
+  "template_question_body": "## The question\n\n## Where to look\nservice:path:line, or the files concerned.\n\n## Expected\nThe answer written where the next reader will look for it (the README, a doc or a comment beside the code), citing the code it reads."
 }

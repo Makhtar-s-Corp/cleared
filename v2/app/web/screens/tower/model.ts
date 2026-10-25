@@ -429,14 +429,18 @@ export function leadHref(kind: 'goal' | 'lead', title: string, body = ''): strin
 // What the bar sends to create a ticket: the title, the description only
 // when one was written, the services picked only when some were (the
 // service takes a non-empty list or nothing), and the variants only when
-// more than one author is asked for (issue #271).
-export function newTicket(title: string, body: string, project: string, services: readonly string[] = [], variants = 1): CreateTicketBody {
+// more than one author is asked for (issue #271), and the labels only when
+// a ready-made ticket gave some (P214).
+export function newTicket(title: string, body: string, project: string, services: readonly string[] = [], variants = 1, labels: readonly string[] = []): CreateTicketBody {
   const text = body.trim();
-  return { title: title.trim(), project, ...(text ? { body: text } : {}), ...(services.length ? { services: [...services] } : {}), ...(variants > 1 ? { variants } : {}) };
+  return {
+    title: title.trim(), project, ...(text ? { body: text } : {}), ...(labels.length ? { labels: [...labels] } : {}),
+    ...(services.length ? { services: [...services] } : {}), ...(variants > 1 ? { variants } : {}),
+  };
 }
 
-export function createTicket(api: ScreenContext['api'], input: { readonly title: string; readonly body: string; readonly project: string; readonly services?: readonly string[]; readonly variants?: number }): Promise<Ticket> {
-  return api<Ticket>('/tickets', { method: 'POST', body: newTicket(input.title, input.body, input.project, input.services, input.variants) });
+export function createTicket(api: ScreenContext['api'], input: { readonly title: string; readonly body: string; readonly project: string; readonly services?: readonly string[]; readonly variants?: number; readonly labels?: readonly string[] }): Promise<Ticket> {
+  return api<Ticket>('/tickets', { method: 'POST', body: newTicket(input.title, input.body, input.project, input.services, input.variants, input.labels) });
 }
 
 // A batch of tickets (requirement C6): the form's lines, one title each,
