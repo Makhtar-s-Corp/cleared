@@ -145,7 +145,7 @@ The forge step's real check needs a GitHub token: the lane runs it once on the e
 
 ## 6. The forge as an adapter, GitHub first (`v2-j5-forge`)
 
-Matrix: M10 (the forge as an adapter per service). Wave 1. Effort M.
+Matrix: M10 (the forge as an adapter per service), and P247, the lane's own line, added when it delivered. Wave 1. Effort M.
 
 ### 6.1 Context
 
