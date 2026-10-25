@@ -32,6 +32,11 @@ export type Policy = {
   // An author whose session plan waits for its Go (milestone 2, decision 22):
   // it reads and runs the checks, and writes nothing but its HANDOVER.md.
   readonly planning?: boolean;
+  // The daily skill ticket's one file under .claude/ (milestone 2 decision
+  // 27, O12): its path relative to the workdir, set by the flow only for a
+  // ticket the knowledge module made. An edit of exactly that file is
+  // allowed; nothing else under .claude/ is.
+  readonly skillFile?: string;
   // The reviewer's one command that runs code (issue #268): the service's
   // declared test command, its words. A reviewer runs it and its reads,
   // nothing else that runs or writes; none declared, it runs no code.
@@ -654,6 +659,7 @@ function allowedEdit(request: ToolRequest, policy: Policy, context: PolicyContex
   const path = request.input.file_path ?? request.input.notebook_path;
   if (typeof path !== 'string' || !inside(policy.workdir, path)) return undefined;
   const parts = relative(policy.workdir, path).split('/');
+  if (policy.skillFile !== undefined && request.tool !== 'NotebookEdit' && parts.join('/') === policy.skillFile) return allow('edit.skill');
   // Generated (CLAUDE.md), locked (.claude/, .cursor/, where the Cursor
   // harness's permissions are written, and .codex/, a project's own Codex
   // configuration) or run by git on the host (.git/).

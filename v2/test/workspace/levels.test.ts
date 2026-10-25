@@ -9,6 +9,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { REFERENCE_LINE, levelContext, levelDirectory, readLeveledBriefing, renderBriefing } from '../../src/workspace/briefing.ts';
+import { DECISION_HEADINGS } from '../../src/knowledge/proposals.ts';
 import { LESSON_HEADINGS, captureHandover, lessonsOf } from '../../src/workspace/handover.ts';
 import { projectCheckout, ticketCheckout } from '../../src/workspace/checkout.ts';
 import { AGENTS_CONF, remote, tempDir } from './git.ts';
@@ -221,4 +222,17 @@ test('the briefing of several services tells the author where each lessons headi
   assert.match(text, /memory of the contract of filter-api/);
   const none = renderBriefing({ projectPage: '', decisions: [], glossary: [], lessons: [], lastHandover: null }, { lessons: { service: 'guestbook', contract: null } });
   assert.ok(!none.includes(`\`${LESSON_HEADINGS.contract}\``), 'no contract heading when no contract would take it');
+});
+
+test('the briefing of several services names the decisions headings as it names the lessons headings (C2)', () => {
+  const empty = { projectPage: '', decisions: [], glossary: [], lessons: [], lastHandover: null };
+  const text = renderBriefing(empty, { lessons: { service: 'filter-api', contract: 'filter-api' } });
+  for (const heading of Object.values(DECISION_HEADINGS)) assert.ok(text.includes(`\`${heading}\``), heading);
+  assert.match(text, /`## Decisions for the service`[^\n]*memory of the service filter-api/);
+  assert.match(text, /`## Decisions for the contract`[^\n]*memory of the contract of filter-api/);
+  const own = renderBriefing(empty, { lessons: { service: null, contract: null } });
+  assert.match(own, /`## Decisions for the service`[^\n]*the workspace's memory, which is this service's/);
+  assert.ok(!own.includes(`\`${DECISION_HEADINGS.contract}\``), 'no contract heading when no contract would take it');
+  assert.equal(renderBriefing(empty), renderBriefing(empty, {}), 'a workspace of one service is briefed as milestone 1 did');
+  assert.ok(!renderBriefing(empty).includes('Decisions for'), 'and names no decisions heading');
 });

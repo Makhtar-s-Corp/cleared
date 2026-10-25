@@ -32,6 +32,8 @@ export const SECTIONS = ['Project', 'Decisions linked to this ticket', 'Glossary
 // The handover's optional lessons sections, each filed in its level
 // (decision 25; workspace/handover.ts files them).
 export const LESSON_HEADINGS = { workspace: '## Lessons for the workspace', service: '## Lessons for the service', contract: '## Lessons for the contract' } as const;
+// Its optional decisions sections, filed at the same levels (knowledge/proposals.ts).
+export const DECISION_HEADINGS = { workspace: '## Decisions for the workspace', service: '## Decisions for the service', contract: '## Decisions for the contract' } as const;
 
 export type MemoryEntry = { readonly type: string; readonly content: string };
 
@@ -305,8 +307,9 @@ export function renderBriefing(briefing: Briefing, options: RenderOptions = {}):
     + `At the end of the session, even if the task failed or stopped, write \`HANDOVER.md\` at the root of this checkout with these exact headings, in this order: ${headings}. Never commit it: Cleared stores it in the project's memory after the session.\n\n`;
   const targets = options.lessons;
   if (targets) {
-    text += `After those headings, you may add lessons for later sessions under \`${LESSON_HEADINGS.workspace}\` (filed in the workspace's memory), \`${LESSON_HEADINGS.service}\` (filed in ${targets.service ? `the memory of the service ${targets.service}` : "the workspace's memory, which is this service's"})`
-      + `${targets.contract ? `, or \`${LESSON_HEADINGS.contract}\` (filed in the memory of the contract of ${targets.contract})` : ''}. Each is filed as a proposal: it is briefed only once approved.\n\n`;
+    const filed = (headings: typeof LESSON_HEADINGS | typeof DECISION_HEADINGS) => `\`${headings.workspace}\` (filed in the workspace's memory), \`${headings.service}\` (filed in ${targets.service ? `the memory of the service ${targets.service}` : "the workspace's memory, which is this service's"})`
+      + `${targets.contract ? `, or \`${headings.contract}\` (filed in the memory of the contract of ${targets.contract})` : ''}`;
+    text += `After those headings, you may add lessons for later sessions under ${filed(LESSON_HEADINGS)}, and decisions the owner should know of under ${filed(DECISION_HEADINGS)}. Each is filed as a proposal: it is briefed only once approved.\n\n`;
   }
   text += `${REFERENCE_LINE}\n`;
   SECTIONS.forEach((name, i) => {

@@ -116,3 +116,14 @@ export class KnowledgeStore {
     }
   }
 }
+
+// The service a ticket is the skill ticket of, or undefined for any other
+// ticket and when the knowledge tables do not exist (the module not started).
+export function skillTicketService(db: DatabaseSync, ticket: TicketId): string | undefined {
+  try {
+    const row = db.prepare('SELECT service FROM knowledge_skill_tickets WHERE ticket = ?').get(ticket) as Row | undefined;
+    return row ? String(row.service) : undefined;
+  } catch {
+    return undefined;
+  }
+}
