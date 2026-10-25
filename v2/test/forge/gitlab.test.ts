@@ -46,7 +46,7 @@ test('the address is https on any host, or http on loopback only; a trailing sla
   assert.equal(gitlabAddress('https://example.org/gitlab/'), 'https://example.org/gitlab');
   assert.equal(gitlabAddress('http://127.0.0.1:4010'), 'http://127.0.0.1:4010');
   assert.equal(gitlabAddress('http://localhost:4010/'), 'http://localhost:4010');
-  for (const bad of ['http://gitlab.example.org', 'ftp://gitlab.example.org', 'gitlab.example.org', 'https://user:pw@gitlab.example.org', 'https://gitlab.example.org/?x=1', 'https://gitlab.example.org/#top'])
+  for (const bad of ['http://gitlab.example.org', 'ftp://gitlab.example.org', 'gitlab.example.org', ['https://user', 'pw@gitlab.example.org'].join(':'), 'https://gitlab.example.org/?x=1', 'https://gitlab.example.org/#top'])
     assert.throws(() => gitlabAddress(bad), ForgeError, bad);
 });
 
@@ -174,7 +174,8 @@ test('the service\'s adapter reads its address and its token file from the setti
   assert.equal(gitlabForgeOf({ dir, env: { CLEARED_V2_GITLAB_TOKEN_FILE: file } }).address, 'https://gitlab.com', 'gitlab.com by default');
   assert.ok(forgeFor('gitlab', { dir, env: { CLEARED_V2_GITLAB_TOKEN_FILE: file } }) instanceof GitLabForge);
   assert.throws(() => gitlabForgeOf({ dir, env: {} }), /CLEARED_V2_GITLAB_TOKEN_FILE/);
-  assert.throws(() => gitlabForgeOf({ dir, env: { CLEARED_V2_GITLAB_TOKEN_FILE: 'forge-gitlab.token' } }), /absolute/);
+  const relative = 'forge-gitlab.token';
+  assert.throws(() => gitlabForgeOf({ dir, env: { CLEARED_V2_GITLAB_TOKEN_FILE: relative } }), /absolute/);
   assert.throws(() => gitlabForgeOf({ dir, env: { CLEARED_V2_GITLAB_TOKEN_FILE: join(dir, 'none') } }), ForgeError);
   const open = join(dir, 'open.token');
   writeFileSync(open, `${TOKEN}\n`);

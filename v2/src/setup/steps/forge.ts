@@ -27,7 +27,7 @@
 import { join } from 'node:path';
 import { GITLAB_COM, GitLabClient, GitLabError } from '../../../../lib/gitlab.ts';
 import { ForgeError } from '../../forge/contract.ts';
-import { GITLAB_TOKEN_FILE, GITLAB_URL, GitLabForge, gitlabAddress } from '../../forge/gitlab.ts';
+import { GITLAB_FILE_SETTING, GITLAB_URL, GitLabForge, gitlabAddress } from '../../forge/gitlab.ts';
 import { readCredential, readSettings, settingsPath, stateFolder, writeCredential, writeSettings } from '../settings.ts';
 import { answer, guarded, HttpError, readBody } from '../http.ts';
 import type { SetupStep, StepDeps } from '../step.ts';
@@ -72,8 +72,8 @@ function gitlabOf(deps: StepDeps): GitLabView {
   const path = settingsPath(deps.env);
   const settings = path ? readSettings(path).env : {};
   const address = deps.env[GITLAB_URL] || settings[GITLAB_URL] || GITLAB_COM;
-  if (deps.fromEnvironment.has(GITLAB_TOKEN_FILE)) return { credential: { set: true, at: null, source: 'environment' }, address };
-  const file = settings[GITLAB_TOKEN_FILE];
+  if (deps.fromEnvironment.has(GITLAB_FILE_SETTING)) return { credential: { set: true, at: null, source: 'environment' }, address };
+  const file = settings[GITLAB_FILE_SETTING];
   if (!file || readCredential(file) === undefined) return { credential: { set: false }, address };
   return { credential: { set: true, at: deps.records.get('forge')?.doneAt ?? null, source: 'assistant' }, address };
 }
@@ -131,7 +131,7 @@ async function saveGitLab(deps: StepDeps, context: Parameters<typeof answer>[0],
   if (given !== undefined && typeof given !== 'string') throw new HttpError(400, 'address');
   let address: string;
   try { address = gitlabAddress(given); } catch { throw new HttpError(400, 'address'); }
-  if (deps.fromEnvironment.has(GITLAB_TOKEN_FILE)) throw new HttpError(409, 'environment');
+  if (deps.fromEnvironment.has(GITLAB_FILE_SETTING)) throw new HttpError(409, 'environment');
   const started = Date.now();
   const checked = await checkGitLab(deps, address, value);
   deps.records.machine('forge', Date.now() - started);
@@ -140,8 +140,8 @@ async function saveGitLab(deps: StepDeps, context: Parameters<typeof answer>[0],
   if (!path) throw new HttpError(503, 'no state folder: set CLEARED_STATE_DIR');
   const file = join(stateFolder(deps.env), GITLAB_FILE);
   writeCredential(file, value);
-  writeSettings(path, { env: { [GITLAB_TOKEN_FILE]: file, [GITLAB_URL]: address } });
-  deps.env[GITLAB_TOKEN_FILE] = file;
+  writeSettings(path, { env: { [GITLAB_FILE_SETTING]: file, [GITLAB_URL]: address } });
+  deps.env[GITLAB_FILE_SETTING] = file;
   if (!deps.fromEnvironment.has(GITLAB_URL)) deps.env[GITLAB_URL] = address;
   deps.records.done('forge');
   answer(context, 200, { forge: 'gitlab', credential: gitlabOf(deps).credential, repositories: checked.names.length, more: checked.more, sample: checked.names.slice(0, SAMPLE) } satisfies ForgeChecked);

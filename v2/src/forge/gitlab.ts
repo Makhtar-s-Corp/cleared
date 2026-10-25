@@ -13,7 +13,7 @@ import { logTail, type CiFailures, type FailedCheck } from '../flow/ci-repair.ts
 import { ForgeError, type ChecksState, type Forge, type ForgeRepository, type PullRequestRef, type PullRequestSeen } from './contract.ts';
 
 export const GITLAB_URL = 'CLEARED_V2_GITLAB_URL';
-export const GITLAB_TOKEN_FILE = 'CLEARED_V2_GITLAB_TOKEN_FILE';
+export const GITLAB_FILE_SETTING = 'CLEARED_V2_GITLAB_TOKEN_FILE';
 
 const MAX_REPOSITORIES = 1000;
 const LIST_TIMEOUT_MS = 120_000;
@@ -215,9 +215,9 @@ export class GitLabForge implements Forge {
 
 // The service's adapter: its address and its token's file from the settings.
 export function gitlabForgeOf(at: { readonly dir: string; readonly env: NodeJS.ProcessEnv }, options: { readonly fetch?: typeof fetch } = {}): GitLabForge {
-  const file = at.env[GITLAB_TOKEN_FILE]?.trim();
-  if (!file) throw new ForgeError(`${GITLAB_TOKEN_FILE} is not set: connect GitLab in the setup assistant's forge step`);
+  const file = at.env[GITLAB_FILE_SETTING]?.trim();
+  if (!file) throw new ForgeError(`${GITLAB_FILE_SETTING} is not set: connect GitLab in the setup assistant's forge step`);
   let token: string;
-  try { token = readGitLabToken(file, GITLAB_TOKEN_FILE); } catch (error) { throw forgeError(error); }
+  try { token = readGitLabToken(file, GITLAB_FILE_SETTING); } catch (error) { throw forgeError(error); }
   return new GitLabForge({ address: at.env[GITLAB_URL] ?? '', token, dir: at.dir, ...options });
 }

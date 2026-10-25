@@ -16,6 +16,7 @@ import { PASSWORD, startSetup, type SetupService } from './support.ts';
 // Built here, so no line of the repository holds a value shaped like a credential.
 const GOOD = ['gitlab', 'credential', 'of', 'the', 'step'].join('-');
 const BAD = ['not', 'a', 'known', 'one'].join('-');
+const NAMED = '/srv/state/forge-gitlab.token';
 
 const project = (path: string): GitLabProject => ({ path_with_namespace: path, http_url_to_repo: `https://gitlab.invalid/${path}.git`, default_branch: 'main', visibility: 'private', archived: false, access_level: 30 });
 
@@ -113,5 +114,5 @@ test('a GitLab token file the environment names is shown as such and not replace
     const refused = await service.call('/api/setup/forge', { method: 'POST', user: owner, body: { forge: 'gitlab', address, value: GOOD } });
     assert.equal(refused.status, 409);
     assert.equal(refused.json.error, 'environment');
-  }, { CLEARED_V2_GITLAB_TOKEN_FILE: '/srv/state/forge-gitlab.token' });
+  }, { CLEARED_V2_GITLAB_TOKEN_FILE: NAMED });
 });

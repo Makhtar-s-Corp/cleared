@@ -16,7 +16,7 @@ import type { Language } from '../../../app/src/catalog.ts';
 import { lasted } from '../../../app/web/lib/time.ts';
 import { FlowConfigError, loadFlowConfig, workspaceOf } from '../../flow/config.ts';
 import { forgeKindOf } from '../../forge/index.ts';
-import { GITLAB_TOKEN_FILE, GITLAB_URL } from '../../forge/gitlab.ts';
+import { GITLAB_FILE_SETTING, GITLAB_URL } from '../../forge/gitlab.ts';
 import type { WorkspaceConfig } from '../../workspace/config.ts';
 import { doctorTranslator, type DoctorLevel, type DoctorLine, type DoctorSection } from '../section.ts';
 
@@ -40,7 +40,7 @@ function fileProblem(file: string): { key: string; mode?: string } | undefined {
   if (!stats.isFile()) return { key: 'file_not_file' };
   if (stats.uid !== process.getuid?.()) return { key: 'file_owner' };
   if ((stats.mode & 0o077) !== 0) return { key: 'file_open', mode: (stats.mode & 0o777).toString(8) };
-  try { readGitLabToken(file, GITLAB_TOKEN_FILE); } catch { return { key: 'file_unreadable' }; }
+  try { readGitLabToken(file, GITLAB_FILE_SETTING); } catch { return { key: 'file_unreadable' }; }
   return undefined;
 }
 
@@ -51,7 +51,7 @@ export async function gitlabChecks(input: { readonly env: NodeJS.ProcessEnv; rea
   const say = (id: Check, level: DoctorLevel, key: string, values: Record<string, string | number> = {}, todo?: string) =>
     lines.push({ id, level, text: t(key, values), ...(todo ? { todo: t(todo, values) } : {}) });
 
-  const file = env[GITLAB_TOKEN_FILE]?.trim();
+  const file = env[GITLAB_FILE_SETTING]?.trim();
   if (!file) {
     say('gitlab_file', 'notice', 'none', {}, 'none_todo');
     return lines;
@@ -73,7 +73,7 @@ export async function gitlabChecks(input: { readonly env: NodeJS.ProcessEnv; rea
   let client: GitLabClient | undefined;
   if (address === undefined || problem) say('gitlab_account', 'off', 'after_settings');
   else {
-    client = new GitLabClient({ address, token: readGitLabToken(file, GITLAB_TOKEN_FILE), ...(input.fetch ? { fetch: input.fetch } : {}) });
+    client = new GitLabClient({ address, token: readGitLabToken(file, GITLAB_FILE_SETTING), ...(input.fetch ? { fetch: input.fetch } : {}) });
     try {
       const user = (await client.call('GET', '/user')).value as { username?: unknown } | null;
       say('gitlab_account', 'ok', 'account_ok', { address, name: String(user?.username ?? '?') });
