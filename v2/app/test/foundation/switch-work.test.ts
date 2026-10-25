@@ -5,11 +5,16 @@
 // language, is web/test/switch-work.test.tsx's, since the catalogs come
 // through Vite); and the Lead's stream, which says the lead's state
 // and plans again each time the screen opens it, asks the shell to recount
-// the inbox only for a question or a plan the screen did not hold yet.
+// the inbox only for a question or a plan the screen did not hold yet, and
+// draws the thread again only for a frame that changes what it holds. A
+// read of the cache that answers what it already held (a poll of a
+// resource the change stream does not cover, every ten seconds) tells no
+// screen to draw again.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { LeadState, Plan } from '../../../src/api/types.ts';
 import { loadCatalog } from '../../src/catalog.ts';
+import { Cache, hashOf, POLL_MS } from '../../web/lib/cache.ts';
 import { translator } from '../../web/lib/i18n.ts';
 import { ago, count, decimal, duration, fixed, lasted, quantity, since } from '../../web/lib/time.ts';
 
@@ -25,12 +30,13 @@ function built(run: () => void): { numbers: number; relative: number } {
     construct(target, args) { made[key] += 1; return Reflect.construct(target as never, args); },
     apply(target, self, args) { made[key] += 1; return Reflect.apply(target as never, self, args); },
   });
-  Intl.NumberFormat = counted(NumberFormat, 'numbers');
-  Intl.RelativeTimeFormat = counted(RelativeTimeFormat, 'relative');
+  const intl = Intl as unknown as Record<'NumberFormat' | 'RelativeTimeFormat', object>;
+  intl.NumberFormat = counted(NumberFormat, 'numbers');
+  intl.RelativeTimeFormat = counted(RelativeTimeFormat, 'relative');
   try { run(); }
   finally {
-    Intl.NumberFormat = NumberFormat;
-    Intl.RelativeTimeFormat = RelativeTimeFormat;
+    intl.NumberFormat = NumberFormat;
+    intl.RelativeTimeFormat = RelativeTimeFormat;
   }
   return made;
 }
@@ -89,4 +95,42 @@ test('the Lead\'s stream, opened again, says nothing new to the inbox; a new que
   assert.equal(inboxNews({ kind: 'state', state: state(asked) }, { lead: state(null), plans: [] }), true, 'a question the screen did not hold');
   assert.equal(inboxNews({ kind: 'plan', plan: plan('p1', 'Guestbook search', 'approved') }, held), true, 'a plan that moved');
   assert.equal(inboxNews({ kind: 'plan', plan: plan('p2', 'Another plan') }, held), true, 'a new plan');
+});
+
+test('the Lead\'s thread is drawn again only for a frame that changes what it holds', async () => {
+  const { frameChanges } = await import('../../web/screens/lead/model.ts') as { frameChanges: (frame: unknown, held: { lead: LeadState; plans: readonly Plan[] }) => boolean };
+  const asked = { sessionId: 'lead-session', requestId: 'q1' };
+  const held = { lead: state(asked), plans: [plan('p1', 'Guestbook search')] };
+  assert.equal(frameChanges({ kind: 'state', state: state({ ...asked }) }, held), false, 'the same state again');
+  assert.equal(frameChanges({ kind: 'plan', plan: plan('p1', 'Guestbook search') }, held), false, 'the same plan again');
+  assert.equal(frameChanges({ kind: 'state', state: state(asked, 'working') }, held), true, 'another phase');
+  assert.equal(frameChanges({ kind: 'plan', plan: plan('p1', 'Guestbook search', 'approved') }, held), true, 'a plan that moved');
+  assert.equal(frameChanges({ kind: 'plan', plan: plan('p2', 'Another plan') }, held), true, 'a new plan');
+  assert.equal(frameChanges({ kind: 'message', message: { seq: 9, at: '2026-10-25T08:00:00Z', by: 'lead', text: 'hi', kind: 'message' } }, held), true, 'a line of the thread');
+});
+
+test('a refetch that answers what the cache held tells no reader and keeps the held value; a new value tells it', async () => {
+  let now = 0;
+  const values: Record<string, unknown> = { '/workspace': { services: ['a', 'b'], base: 'main' } };
+  const cache = new Cache(async (path) => structuredClone(values[path]), { now: () => now });
+  try {
+    cache.setLive(true);
+    let told = 0;
+    const leave = cache.subscribe({ keys: new Set([hashOf(['workspace'])]), notify: () => { told += 1; } });
+    const first = await cache.read('/workspace');
+    assert.equal(told, 1, 'the first value is told');
+    now = POLL_MS;
+    await cache.refetch(['workspace']);
+    assert.equal(told, 1, 'the same value read again is not told');
+    assert.equal(cache.peek('/workspace'), first, 'the held value is kept');
+    assert.equal(cache.stale(['workspace']), false, 'and fresh again');
+    values['/workspace'] = { services: ['a', 'b', 'c'], base: 'main' };
+    now = 2 * POLL_MS;
+    await cache.refetch(['workspace']);
+    assert.equal(told, 2, 'a new value is told');
+    assert.deepEqual(cache.peek('/workspace'), values['/workspace']);
+    leave();
+  } finally {
+    cache.dispose();
+  }
 });
