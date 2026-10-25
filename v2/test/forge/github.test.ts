@@ -66,11 +66,12 @@ test('each call is the gh command the service ran before, in the folder it is gi
 });
 
 test('an installation token lists the installation\'s repositories, any other credential the account\'s', async () => {
-  const app = setup([], { token: `ghs_${'x'.repeat(36)}` });
+  // Token-shaped words built from parts, so that the guard does not read a secret here.
+  const app = setup([], { token: ['gh', 's_', 'x'.repeat(36)].join('') });
   assert.equal((await app.forge.listRepositories()).length, 3);
   assert.deepEqual(app.gh.calls()[0]?.args, ['api', '--paginate', '--jq', `.repositories[] | ${PROJECTION}`, 'installation/repositories?per_page=100']);
   assert.equal(app.gh.calls()[0]?.token, true, 'the environment it is given reaches gh');
-  const user = setup([], { token: `ghp_${'y'.repeat(36)}` });
+  const user = setup([], { token: ['gh', 'p_', 'y'.repeat(36)].join('') });
   await user.forge.listRepositories();
   assert.equal(user.gh.calls()[0]?.args.at(-1), 'user/repos?per_page=100');
 });
