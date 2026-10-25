@@ -269,7 +269,8 @@ async function waitFor(what: string, ready: () => Promise<boolean>, timeoutMs: n
   const deadline = Date.now() + timeoutMs;
   for (;;) {
     if (await ready()) return;
-    if (Date.now() >= deadline) throw new RuntimeError(`${what} did not become ready within ${timeoutMs} ms`);
+    const seconds = Math.round(timeoutMs / 1000);
+    if (Date.now() >= deadline) throw new RuntimeError(`${what} did not become ready within ${seconds} second${seconds === 1 ? '' : 's'}`);
     await sleep(pollMs);
   }
 }
