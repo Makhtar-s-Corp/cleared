@@ -149,6 +149,13 @@ test('a service that never becomes ready stops the start and removes what was cr
   assert.deepEqual(onlyVolume(fake), [sessionNames(SESSION).volume]);
 });
 
+test('a readiness wait of one second is said in the singular', async () => {
+  const fake = new FakeDocker();
+  fake.execAnswer = () => ({ code: 2, stdout: '', stderr: '' });
+  await assert.rejects(startSession(new Docker(fake.runner), runtimeSpec({ readyTimeoutMs: 1000, readyPollMs: 100 })), /: postgres did not become ready within 1 second$/);
+  assert.deepEqual(onlyVolume(fake), [sessionNames(SESSION).volume]);
+});
+
 test('a failure halfway removes everything the start created, labelled objects only', async () => {
   const fake = new FakeDocker();
   fake.containers.push({ id: 'f'.repeat(64), name: 'production-db', labels: {}, state: 'running' });
