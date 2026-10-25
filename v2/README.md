@@ -23,6 +23,7 @@ Run from `v2/`:
 | `npm start` | Starts the service (`node src/main.ts`). |
 | `npm run app` | Starts the app (`node app/main.ts`), see [The app](#the-app). |
 | `npm run user -- add <name>` | Adds a person who signs in to the app (the `cleared-v2 user add <name>` command). |
+| `npm run status` | Says what the service is doing, from its ledger and its `/health`: its last beat, its sessions, what waits for you, the quota, the mirrors, the releases and one line per problem. Exit 1 with a problem, 2 when it cannot tell; `-- --json` gives one JSON object. See [The heartbeat and the status](#the-heartbeat-and-the-status). |
 | `npm test` | Builds the front end, runs the unit tests with `node --test` (`test/` and `app/test/`), then the components' tests with Vitest (`app/web/test/`, rendered to HTML under Node). |
 | `npx tsc --noEmit` | Type checks `src/`, `test/` and `scripts/`. `npm run typecheck` also checks the app's server with `tsc --noEmit -p app` and the front end with `tsc --noEmit -p app/web`; `npm test` runs both through `app/test/static.test.ts`. |
 | `node src/cli/ledger-mcp.ts` | Serves the ledger's session history to an agent as a read-only MCP server on stdio, see [The ledger's MCP server](#the-ledgers-mcp-server). Not through `npm run`, whose banner would reach the protocol's stdout. |
@@ -160,6 +161,10 @@ A slash command `@cleared <task>` posted to `POST /hooks/chat` creates a ticket 
 ## GitHub Issues and Linear
 
 With `CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE` or `CLEARED_V2_MIRROR_LINEAR_TOKEN_FILE` set, the service keeps its tickets on GitHub Issues or Linear too, and brings back what people change there, every minute (P230 to P232, `src/tickets/mirror.ts`). A person's change wins over an agent's; a tracker never approves a ticket, never starts a session, and never writes as the owner. Settings, what is mirrored and the conflict rule: [docs/v2/mirrors.md](../docs/v2/mirrors.md). Linear is tested against a fake only.
+
+## The heartbeat and the status
+
+The service beats every minute (`CLEARED_V2_HEARTBEAT_SECONDS`), as v1's wake did (B2.1, P239, `src/heartbeat/`). With `CLEARED_V2_HEARTBEAT_PING_URL_FILE` set, each beat with no problem calls the address that file holds, so a push monitoring service of your choice alerts you when the beats stop; with `CLEARED_V2_HEARTBEAT_FAIL_URL_FILE` too, a beat with a problem calls that one instead, with the problems' codes only. Each file must be readable by the service's account alone, outside the project's checkout, and hold an HTTPS address (HTTP on loopback). A problem is a session unmoved for 2 hours (`CLEARED_V2_HEARTBEAT_SESSION_MINUTES`), a mirror without a full pass for 10 minutes (`CLEARED_V2_HEARTBEAT_TRACKER_MINUTES`), a refused address file, and, seen by `npm run status`, a beat older than three intervals or a service that does not answer. Each one is recorded once in the ledger's `events` (`heartbeat_problem`) while it lasts. The decisions and what v1 had that v2 does not: the [milestone 4 plan](../docs/v2/milestone-4-plan.md), section 8. Tested against a fake monitor only.
 
 ## The harness pick
 

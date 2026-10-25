@@ -307,22 +307,113 @@ Written on 2026-10-25 at the lead's request, after pull request 388 merged (the 
 
 1. **Run `serve/install.ts` again on each server**, from the checkout the units should use, so that its systemd user units name `wake.ts` instead of `wake.sh` and `serve/install.sh` (decisions log, the cleanup's entry, "For an installation"). It checks every port it binds before it writes anything (its header, `serve/install.ts`).
 
-## 9. The week's figures (`v2-j4-weekly`, issue #396)
+## 8. The v2 service's heartbeat and status (`v2-j4-heartbeat`, issue #392)
 
-This section was written on 2026-10-25 by the author of issue #396 (Opus 5.5), before the lane's tests and code. Inputs: issue #396 (matrix C17), the [decisions log](decisions-log.md) (the ten ideas of 01:09 and their money rule, the entries of lanes `j3-ticket-cost` and `j3-visual-redesign`, the owner's decisions of 11:14 and 12:20 on Consumption), the [requirements matrix](requirements-matrix.md) (C17, O15, P211, B3.6, B3.7), and the code at `origin/v2` `99ee767`. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md). Sections 7 and 8 are taken by the heartbeat and project page lanes (pull requests 393 and 395).
+Section 4 is the cleanup lane's (pull request 388); sections 6 and 7 are the passkeys lane's and its deploy checklist (pull request 391).
+
+### 8.1 Context
+
+B2.1 keeps v1's heartbeat and `cleared status` (`keep-and-drop.md`: `lib/heartbeat.mjs`, now `lib/heartbeat.ts`, and `docs/heartbeat.md`). Pull request 388 keeps them as v1's modules, in TypeScript, run by v1's wake, and leaves out "the heartbeat and `cleared status` in the v2 service" (its section 4). v2 has neither: when its service stops, nobody hears it, and no command says what it is doing. This lane gives the v2 service a beat a push monitor listens to, and a status command that reads v2's ledger, in strict TypeScript, without touching v1's files that 388 rewrites.
+
+### 8.2 What exists at the end, and how it is proven
+
+- `src/heartbeat/settings.ts`: the settings, read from the environment, and the monitor's addresses, read from private files. `src/heartbeat/snapshot.ts`: what v2's ledger says of the service's health, read-only. `src/heartbeat/beat.ts`: the problems (`diagnose`, a pure function), each continuous problem recorded once, and the beat sent to the monitor. `src/heartbeat/status.ts` and `src/heartbeat/messages/heartbeat.{en,fr}.json`: the status's words and its JSON.
+- `src/cli/status.ts`, run as `npm run status` (`-- --json` for one JSON object): exit 0 when nothing is wrong, 1 with a problem (a notice never counts), 2 when the status cannot be collected.
+- The notify module (`modules/notify.ts`) starts the beat at the service's start, with or without a project, and stops it at its stop.
+- Proven by `test/heartbeat/diagnose.test.ts` (each problem, case by case), `test/heartbeat/settings.test.ts` (the files and the addresses refused), `test/heartbeat/beat.test.ts` (the beat against a fake monitor on loopback: success, failure, a problem recorded once, a failed delivery said once an hour, and never an address, a title or a path in what leaves or in the ledger), `test/heartbeat/snapshot.test.ts` (on the real tables), `test/heartbeat/status.test.ts` (the words and the JSON), `test/heartbeat/cli.test.ts` (the command, in French and in English, its JSON and its exit codes, against a fake `/health`), `test/heartbeat/catalog.test.ts`, and `test/notify/module.test.ts` (the beat starts and stops with the service).
+
+### 8.3 What it watches, from what v2 has
+
+v2 has no per-minute wake: its service runs. The beat is the service's own timer, and what v1 read from its wake, its lanes and its processes is read from v2's tables.
+
+| Problem code | When | Read from |
+| --- | --- | --- |
+| `beat_missing` | no beat recorded (the status only) | `v2_heartbeat_state` |
+| `beat_late` | the last beat is older than three intervals (the status); the beat before this one was (the service) | `v2_heartbeat_state` |
+| `beat_failed` | the last beat could not read the ledger | `v2_heartbeat_state` |
+| `service_unreachable` | the service's `/health` does not answer (the status only) | `CLEARED_V2_HOST`, `CLEARED_V2_PORT` |
+| `session_stalled` | an author, reviewer or reader session alive and unmoved for more than two hours: the idle watchdog stops one at 15 minutes, so this one escaped it | `sessions`, `session_events` |
+| `tracker_stale` | a configured mirror whose last full pass is older than ten minutes | `mirror_trackers` |
+| `monitor_invalid` | a monitor address file the service refused | `v2_heartbeat_state` |
+
+A notice, never a failure: `monitor_off`, no success address is set, so nobody hears it when the service stops. The status also says, without a problem: the sessions running, what waits for the owner in the inbox (the oldest item, its kind and for how long), the subscription's two windows (`latestQuota`, percent only, no money), the mirrors' last reads and the release trains not landed.
+
+Not carried from v1, each for its reason: the wake's own records (`wake_failed`, `pending_stalled`), its lead (`lead_stuck`: v2's lead is a permanent session that waits by design, as the watchdog says), its lanes and orphan processes (`lane_idle`, `orphan_process`, `--reap`: v2's sessions are containers labelled `cleared.dev=v2`, stopped by the watchdog and the restart recovery), its forge and tracker probes (`forge_credential`, a `gh` or `tracker.sh` call: v2 runs neither for its status, and the mirrors' reads say a tracker's health), its shared-account and heavy-lock checks (v1's settings).
+
+### 8.4 Decisions this lane takes
+
+- **The beat.** Every `CLEARED_V2_HEARTBEAT_SECONDS` (60 by default, 15 to 3600), and once at the start. Each beat writes its time, finds the problems, records each continuous problem once (`v2_heartbeat_incidents`, and a `heartbeat_problem` row of the ledger's `events` with its code), then calls the success address with no problem, or the failure address with one. Without a failure address, the monitor sees the missing success.
+- **What leaves the host.** A GET with no body for a success; a POST whose body is `Cleared health: blocked` and the problems' codes, one per line, for a failure. Never a ticket, a title, a session id, a path or an address. A delivery that fails is a `heartbeat_delivery_failed` event, at most one an hour, with no address.
+- **The addresses are credentials.** `CLEARED_V2_HEARTBEAT_PING_URL_FILE` and `CLEARED_V2_HEARTBEAT_FAIL_URL_FILE` name files, as the mirrors' tokens do; never a variable holding the address. Each file is a regular file, not a link, owned by the service's account, readable by it alone (no group or other bit), outside the project's checkout. The address is HTTPS, or HTTP on loopback, without a user or a password. A refused file is said by its variable, never its content, and leaves the beat on without that address (`monitor_invalid`).
+- **The status reads no secret.** It reads the ledger read-only and the thresholds from the environment; whether the monitor is on, off or refused is what the service last wrote. It asks the service's own `/health` on its configured address, nothing else.
+- **Thresholds.** `CLEARED_V2_HEARTBEAT_SESSION_MINUTES` (120) and `CLEARED_V2_HEARTBEAT_TRACKER_MINUTES` (10), as v1's `lane_idle_minutes` and `service_minutes`.
+- **Tables.** `v2_heartbeat_state` and `v2_heartbeat_incidents`, of the notify module: v2's ledger is in v1's format and may be v1's own file, which has `heartbeat_state` and `heartbeat_incidents`.
+- **Where it starts.** In the notify module, the one whose job is what leaves the host for the owner, so neither `main.ts` nor `registry.ts` changes (388 changed the registry while this lane ran). A tenth module is the other way (question for the owner, default applied, in the log entry).
+- **JSON.** `schema: 1` and v1's stable keys where v2 has them (`schema`, `project`, `checkedAt`, `ok`, `problems`, `notices`, `waiting`, `quota`), with v2's own (`service`, `lastBeat`, `monitor`, `sessions`, `trackers`, `releases`). Each problem has `code`, `id`, `level` and a `message` in the status's language.
+- **Language.** `CLEARED_V2_APP_LANGUAGE`, French by default; every duration through `app/web/lib/time.ts` ("2 h", never "120 minutes").
+- **`cleared status`.** v1's root command keeps reading v1's state. Pointing it (`cleared.ts`, since 388) at v2's status is not done here, to keep the lane to v2; the v2 status is `npm run status` in `v2/`.
+- **Matrix lines.** P239 (the beat, the status, their settings); B2.1 updated.
+
+### 8.5 Out of scope
+
+v1's `lib/heartbeat.mjs`, `cleared`, `wake.sh` and `test/heartbeat.test.mjs`, which 388 made `lib/heartbeat.ts`, `cleared.ts`, `wake.ts` and `test/heartbeat.test.ts`; a screen of the app that shows the status; reaping processes; a real monitoring service (the tests' monitor is a fake on loopback); the lead's health.
+
+### 8.6 Files this lane owns
+
+`v2/src/heartbeat/`, `v2/src/cli/status.ts`, `v2/test/heartbeat/`; the `status` script in `v2/package.json`; the beat's start and stop and its tables in `modules/notify.ts` and their case in `test/notify/module.test.ts`; a row in `v2/README.md`; its lines of the matrix and its log entry.
+
+### 8.7 Unknowns, and who closes them
+
+| Unknown on 2026-10-25 | Closed by |
+| --- | --- |
+| Whether a monitoring service the owner picks accepts a POST body on its failure address | the owner's set-up; the body is plain text of a few lines, as v1's |
+| Whether the first piloted project's service runs the status under its own account | the owner; the status reads no secret, so another account reads it when it can read the ledger |
+
+## 9. The project page, per service (`v2-j4-project-page`, issue #394)
+
+Written on 2026-10-25 by the author of issue #394 (Opus 5.5), before the lane's tests and code. Sections 6 to 8 are the lanes of pull requests 391 and 393, merged into `v2` before this one. Inputs: issues #394 and #274, the [decisions log](decisions-log.md) (the entries of lanes `j3-project-page` and `j3-flaky-page`, and the ten ideas of 2026-10-25), the matrix (P59, P101 to P105), and sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), since `milestone-2-plan.md` has no sections 9 and 10.
 
 ### 9.1 Context
 
-C17 asks for the week's figures in the app. The ledger already holds what they need: each session's turns with their tokens, their times and the dollars the harness reported (`session_events`, `sessions` with its service), each ticket's moves (`tracker_history`), and each plan item's estimate (`plan_items`). The Consumption screen says the tokens per agent and the quotas, and a Done ticket's card says its own cost (P211), but nothing says what the week delivered and what it took. This lane reads those tables, writes nothing, and adds a panel to the Consumption screen.
+Milestone 3 made the page (pull requests 313 and 363, P101 to P105): made at a service's first fetch from its base branch, made again after each merge, quoted in every author's and reviewer's `CLAUDE.md`. P59 stayed `later` because three things were left. A folder service of a monorepo gets a page of the whole repository under its own name, so two folder services have the same page. The only test on an example copies the guestbook alone, never the two-service workspace of `examples/workspace.conf`. The lead's briefing reads a service's committed `docs/project.md` only, so a project that commits none gives the lead nothing of it.
 
 ### 9.2 What exists at the end, and how it is proven
+
+- **A folder service's page is its folder's.** Its layout lists the folder only, its `package.json` and README are the folder's, its recent decisions are the first-parent commits that touch the folder or `.cleared/agents.conf`, and its header names the folder and the last such commit. A merge in another folder leaves the page as it is.
+- **The page says where the service sits in the workspace**: the services it consumes and the contract it provides, when the workspace names them.
+- **The lead reads the pages.** A service with no committed page gets a line in the lead's briefing from its generated page: the README's first paragraph, else the package name. The workspace's own service too, when its checkout commits no `docs/project.md`.
+- Proven by `test/workspace/project-page-workspace.test.ts`: the tracked files of `examples/guestbook` and `examples/filter-api` as the two services of `examples/workspace.conf`, through the real effects on local bare repositories (first connection of each, a merge on one, a session of each, no secret), then the same two as folders of one repository; and new cases in `test/lead/briefing.test.ts`.
+
+### 9.3 Decisions this lane takes
+
+- **The folder's tip, not the base's.** The page carries the sha of the last commit that touched the folder or `.cleared/agents.conf` (the safe commands are the repository's), so `updateProjectPage`'s check stays "the page names the tip it was made from".
+- **The page stays English**, written for the sessions as before. No word a person reads in the app changes, so no catalog changes.
+- **Matrix lines.** P240 (a folder service's page), P241 (the workspace's part of the page), P242 (the lead's lines); P59 `done`, naming 313, 363 and this lane's pull request. P238 is lane `v2-j4-passkeys`'s and P239 lane `v2-j4-heartbeat`'s.
+
+### 9.4 Out of scope
+
+A screen that shows the page; a page edited by hand; a page in the project's language; the decisions folder of a project (read through `lib/memory`, as before); a real account of any kind. The tests run on local repositories in temporary folders, and nothing is pushed.
+
+### 9.5 Files this lane owns
+
+`v2/src/workspace/project-page.ts`, the page's call in `v2/src/flow/effects.ts`, the lead's service lines in `v2/src/lead/briefing.ts`, `v2/test/workspace/project-page-workspace.test.ts`, the new cases of `v2/test/lead/briefing.test.ts`, this section, its matrix lines and its log entry.
+
+## 10. The week's figures (`v2-j4-weekly`, issue #396)
+
+This section was written on 2026-10-25 by the author of issue #396 (Opus 5.5), before the lane's tests and code. Inputs: issue #396 (matrix C17), the [decisions log](decisions-log.md) (the ten ideas of 01:09 and their money rule, the entries of lanes `j3-ticket-cost` and `j3-visual-redesign`, the owner's decisions of 11:14 and 12:20 on Consumption), the [requirements matrix](requirements-matrix.md) (C17, O15, P211, B3.6, B3.7), and the code at `origin/v2` `99ee767`. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md). Section 7 is the deploy checklist; sections 8 and 9 are the heartbeat's and the project page's (pull requests 393 and 395), merged before this lane's code.
+
+### 10.1 Context
+
+C17 asks for the week's figures in the app. The ledger already holds what they need: each session's turns with their tokens, their times and the dollars the harness reported (`session_events`, `sessions` with its service), each ticket's moves (`tracker_history`), and each plan item's estimate (`plan_items`). The Consumption screen says the tokens per agent and the quotas, and a Done ticket's card says its own cost (P211), but nothing says what the week delivered and what it took. This lane reads those tables, writes nothing, and adds a panel to the Consumption screen.
+
+### 10.2 What exists at the end, and how it is proven
 
 - `src/consumption/week.ts`: `weekFigures(db, tickets, { project, services, now, timeZone })`, the figures of the screen's seven days. `GET /api/consumption/week?tz=<zone>`, registered with the other Consumption routes and guarded as they are.
 - The Consumption screen's "This week" panel ("Cette semaine"), read on its own, so a failed read of the week leaves the rest of the screen as it is. Its words in `app/messages/consumption.{en,fr}.json`, its durations through `lib/time.ts`.
 - The fixtures source answers the route from a week of invented tickets, on request (`fixtureSource({ week: true })`), so the counts other tests pin do not move.
 - Proven by `test/consumption/week.test.ts` (each figure on a real ledger and a ticket store in memory), `test/consumption/routes.test.ts` (the route and its guard), `test/consumption/ticket-cost.test.ts` (the cost of a period), `app/web/test/consumption-week.test.tsx` (the panel in English and French, with and without dollars, with and without estimates), `app/test/consumption/week-browser.test.ts` (the panel in Chromium, at 1440 and 390), and the captures in `docs/v2/weekly/`.
 
-### 9.3 The figures
+### 10.3 The figures
 
 1. **The week** is the screen's seven calendar days in the person's time zone (`lastDays`, `zoneOf`), from the first one's midnight to now. Its tokens are then the sum of the agents' tokens the screen already shows.
 2. **Tickets merged.** A ticket of the workspace that is Done now, whose last move to Done is in the week and was written by the service's agents (the flow or the guarded merge), never by the mirror (`cleared-mirror`, an issue closed on a tracker) nor by a person (a move by hand is not a merge). Each with its id, its title and its services.
@@ -331,23 +422,23 @@ C17 asks for the week's figures in the app. The ledger already holds what they n
 5. **Estimates against what it took.** For each merged ticket that a plan estimated (`plan_items`), the estimate's minutes against its own minutes, measured as the estimates measure their samples (`ticketSample`: from the author's first start to the release request, less the owner's waits). Minutes only: an estimate's dollars fall back to invented defaults when history is short (`DEFAULT_ESTIMATES`), which is not a real source. The panel says how many of the merged tickets had an estimate.
 6. **Per service.** A session's service is its own when it names one; else its ticket's, when the ticket names one service; else, for a ticket that names none, the workspace's first service, where it runs. The lead's turns, the questions to the code and a session of a ticket on several services that names none go to one row of the workspace's own, so the rows add up to the week. A merged ticket counts once on each of its services, once in the total.
 
-### 9.4 Decisions this lane takes
+### 10.4 Decisions this lane takes
 
 - **No table, no write.** The figures are read when the screen asks, from the tables above.
 - **The cost of a period** is P211's rule given a start: `sessionsCost(sessions, since)` counts only what finished after it, its dollars the increase of each running total, so a ticket's card and the week never count a dollar twice.
 - **Where.** The Consumption screen, which the quota gauge opens (owner decisions of 11:14 and 12:20): the sidebar stays the development's.
 - **Language.** The panel's words in the catalogs, French and English; durations as `lib/time.ts` says them ("42 min", "3 h 05", "2 j 4 h").
-- **Matrix lines.** P243 (P239 and P240 to P242 are left to the heartbeat and project page lanes, which are open); C17 updated.
+- **Matrix lines.** P243 (P239 is pull request 393's, P240 to P242 are 395's); C17 updated.
 
-### 9.5 Out of scope
+### 10.5 Out of scope
 
 A week other than the last seven days (no week picker, no week before); a report sent by mail or in a notification; euros; an estimate of the dollars; the figures of v1's imported tickets (they have no sessions in v2); a change of the Consumption screen's own cost panel, which still sums each turn's total (the log names it).
 
-### 9.6 Files this lane owns
+### 10.6 Files this lane owns
 
 `v2/src/consumption/week.ts`, the `since` of `v2/src/consumption/ticket-cost.ts`, the route in `v2/src/consumption/routes.ts`, the ticket store and services given to it in `v2/src/modules/lead.ts`, the route and its type in `v2/src/api/types.ts` (and the pinned count of `test/api/types.test.ts`); the panel in `v2/app/web/screens/consumption/` and its keys in `v2/app/messages/consumption.*.json`; `v2/app/fixtures/week.ts` and its route in `v2/app/fixtures/source.ts`; the tests above, the browser test in `.github/workflows/v2.yml`'s list; `docs/v2/weekly/`; a section of `v2/README.md`; its matrix lines and its log entry.
 
-### 9.7 Unknowns, and who closes them
+### 10.7 Unknowns, and who closes them
 
 | Unknown on 2026-10-25 | Closed by |
 | --- | --- |

@@ -1,5 +1,5 @@
 // The week's figures (docs/v2/requirements-matrix.md, C17, issue #396;
-// docs/v2/milestone-4-plan.md, section 9), read from what the ledger already
+// docs/v2/milestone-4-plan.md, section 10), read from what the ledger already
 // holds, with no table of their own and nothing written:
 //
 //   the week  the Consumption screen's seven days in the person's zone

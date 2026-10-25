@@ -124,6 +124,42 @@ test('the lead\'s memory ends with the first line of each other service\'s page,
   assert.ok(!text.includes('billing'), 'a service whose checkout is not on this server has no line');
 });
 
+// ---- the generated pages, for a service that commits none (issue #394, P242) ----
+
+async function leadWithPages(committed: boolean) {
+  const { mkdirSync } = await import('node:fs');
+  const { join } = await import('node:path');
+  const { projectCheckout } = await import('../../src/workspace/checkout.ts');
+  const { realLeadEffects } = await import('../../src/lead/briefing.ts');
+  const { ensureProjectPage } = await import('../../src/workspace/project-page.ts');
+  const { AGENTS_CONF, remote, tempDir } = await import('../workspace/git.ts');
+  const root = tempDir('lead-pages');
+  const page = (text: string): Record<string, string> => (committed ? { 'docs/project.md': text } : {});
+  const workspace = await projectCheckout({ url: remote({ 'README.md': '# Guestbook\n\nA web page that lists entries and adds one.\n', ...page('# Guestbook, as committed\n') }), dir: join(root, 'guestbook'), base: 'main' });
+  const filter = await projectCheckout({ url: remote({ '.cleared/agents.conf': AGENTS_CONF, 'package.json': JSON.stringify({ name: 'filter-api' }), ...page('# Filter API, as committed\n') }), dir: join(root, 'filter-api'), base: 'main' });
+  const env: NodeJS.ProcessEnv = { ...process.env, CLEARED_STATE_DIR: join(root, 'state') };
+  delete env.ORCH_LEDGER;
+  mkdirSync(join(root, 'state'), { recursive: true });
+  await ensureProjectPage({ dir: workspace.dir, base: 'main', name: 'guestbook', env });
+  await ensureProjectPage({ dir: filter.dir, base: 'main', name: 'filter-api', env });
+  const effects = realLeadEffects({ projectDir: workspace.dir, repoUrl: 'unused', base: 'main', workdir: join(root, 'lead'), env, services: [{ name: 'guestbook', dir: workspace.dir }, { name: 'filter-api', dir: filter.dir }] });
+  return effects.memory();
+}
+
+test('a service that commits no page gets the lead\'s line from its generated page, the workspace\'s own service too', async () => {
+  const memory = await leadWithPages(false);
+  assert.ok(!memory.some((entry) => entry.type === 'project'), 'nothing committed');
+  const services = memory.find((entry) => entry.type === 'services')?.content ?? '';
+  assert.deepEqual(services.split('\n'), ['guestbook: A web page that lists entries and adds one.', 'filter-api: Package: filter-api'],
+    'the README\'s first paragraph, else the package; never the page\'s own heading');
+});
+
+test('a committed page stays the lead\'s line; the generated one is not added beside it', async () => {
+  const memory = await leadWithPages(true);
+  assert.match(memory.find((entry) => entry.type === 'project')?.content ?? '', /Guestbook, as committed/);
+  assert.deepEqual(memory.filter((entry) => entry.type === 'services').map((entry) => entry.content), ['filter-api: Filter API, as committed']);
+});
+
 test('with a full list of services, the lead\'s memory stays in its budget and the briefing under 20 KB', async () => {
   const memory = await leadMemory(15, `Filter API ${'x'.repeat(300)}`);
   const bytes = memory.reduce((n, entry) => n + Buffer.byteLength(entry.content), 0);

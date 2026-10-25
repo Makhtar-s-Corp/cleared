@@ -1,4 +1,4 @@
-// The week's figures (C17, issue #396, milestone 4 plan section 9), read
+// The week's figures (C17, issue #396, milestone 4 plan section 10), read
 // from what the ledger already holds and written nowhere: the screen's seven
 // days in the person's zone; the tickets merged in them (Done now, the last
 // move to Done the service's agents', never the mirror's nor a person's);
