@@ -5751,6 +5751,20 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 - Pull request: 366, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-ui-polish`.
 
+## 2026-10-25: the polish captures are compressed before v2 goes to main
+
+The 120 PNG captures of `docs/v2/ui-polish/` (P222, 366) weighed 11.3 MB. They were compressed once, on a workstation, with `pngquant --quality=80-95 --skip-if-larger --force --ext .png` then `optipng -o2` on each file (system tools; no script is committed, since `v2/` tracks no shell script): 11,267,957 bytes before, 4,003,907 after (-64 %). Lossless alone (`optipng -o2`) gave 9.3 MB (-18 %); the quantized captures read the same for UI review. No code changes; the history keeps the old files (no rewrite, no force push), so only checkouts get lighter. Future captures can go through the same two commands before they are committed.
+
+- Pull request: against `v2`, branch `amdiakhate/j3-png`.
+- Author: the night driver, approved by the product owner on 2026-10-25.
+
+## 2026-10-25: a milestone 3 report for the product owner
+
+`docs/v2/milestone-3-report.md`, in French, next to the plans of milestones 1 and 2: what the ten ideas (P210 to P219) and the passes after them (P221, P222, B2.2, B5.5b, issues #347 to #353 and #360) bring, how each change is checked, what keeps running, and what waits for the owner (the open or partial lines B6.1q, B5.10g, D21, D13, B5.1c, O6, P69, B6.3p, P71, B3.10, P7, P47, P51). It adds no matrix line: it is a summary of lines already there, and three lanes were picking the next free ids at the time. Every id it cites was checked against the matrix; the test counts come from the last checks in this log (2108 Node, 339 Vitest, 0 fail). The 4.0 MB of the captures is the size after PR 369.
+
+- Pull request: 370, against `v2`.
+- Author: the night driver.
+
 ## 2026-10-25: the tests CI saw unstable, their causes, and tests on the error paths the coverage found unrun (the author's choices, lane `j3-test-gaps`, P225)
 
 **The need.** No issue: the brief is the line. Measure the coverage of v2 without a new dependency, name the critical modules little covered (the engine, the fast lane, the harness pick, the receipt, the session runtime), add useful tests on their error paths and limits, and make stable the two tests CI saw unstable: `test/scripts/rehearsal-adapter.test.ts` (the lead's turn) and `app/test/inbox/mobile-browser.test.ts` (Go in French at 375 px, "Traité."), the real cause first. While the lane ran, the owner added two more seen on pull requests with no code: `app/test/consumption/wins-browser.test.ts`, "in French the panel is French, and holds on a phone" (no horizontal scroll, run 40176736780), and the Go test in English (pull request 370). No change of the product's behaviour. `milestone-2-plan.md` has no sections 9 and 10, as earlier lanes noted; the conventions followed are those of section 10 of `milestone-1-plan.md` (a lane changes its own files and appends here). P223 and P224 are left to lanes `j3-tab-perf` and `j3-a11y`, which had claimed no id when this lane began.
@@ -5780,6 +5794,8 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 **Tests first.** `832e810` holds the phone test with the Go's answer held 400 ms and the old wait: both languages fail every run, "Traité." and "Handled.". `46ef4a8` holds the rehearsal test alone: on the old ids it fails at the first id (`<session>-turn-1-1` does not match `GENERATED_ID`). `e065805` holds the Consumption test with the media queries answered 500 ms late and the old check: both of its tests fail every run, at 390 in English and on the phone in French. The coverage tests guard rather than fix: each passes on the code as it is, and no file of `src/` changed for them.
 
 **Checks** (on `origin/v2` at `c41101e`). `npm run typecheck` passes. `npm test` five times over the lane, the last two on its final code: each time 2123 Node tests, 2045 pass, 78 skipped (`CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_REAL_HARNESS` unset), 0 fail, and 339 Vitest tests pass. The suite under coverage: 2123 tests, 0 fail. `test/scripts/` and `test/session/` together: 359 of 359. The CI's `browser` list (21 files) with `CLEARED_V2_PLAYWRIGHT`, three times, the host's load average between 20 and 60 from other lanes: 61, 62 and 62 of 64. What failed was never this lane's: `app/test/notify/browser.test.ts` timed out each time, as lane `j3-ui-polish` found it does on an untouched `origin/v2` on this host; the screen-switch budget once (issue #367, lane `j3-tab-perf`); `choices-browser` (a 30-second wait) and `stack-browser` (`ERR_NETWORK_CHANGED`) once, then 2 of 2 and 3 of 3 alone. `mobile-browser.test.ts` passed 8 of 8 in six runs at once and in four more under a load of 61, and `wins-browser.test.ts` 2 of 2 in four runs at once, each with its delay kept. `npm run guard -- --base origin/v2`: nothing refused (run without a private-term list, `CLEARED_REPO` unset). Its first run refused three lines of the new tests, a token-shaped string and the CI's session id quoted in a comment, which `c6d0185` replaced.
+
+**The merge of 369 and 370** (lanes `j3-png` and `j3-m3-report`, at `origin/v2` `dbaeb4d`). The log keeps their entries, then this one; the matrix merged by itself, every id once. Neither touches `v2/`. After the merge: `npm run typecheck` passes; `npm test` runs 2123 Node tests, 2045 pass, 78 skipped, 0 fail, and 339 Vitest tests pass; `npm run guard -- --base origin/v2`: nothing refused.
 
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read, no network beyond `npm ci` of the lock file, `git fetch` and GitHub (the CI's logs read with `gh`), no tunnel, no secret; the app and the browser listen on port 0 on loopback.
 
