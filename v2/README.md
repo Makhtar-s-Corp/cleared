@@ -49,7 +49,7 @@ What [`compose.yaml`](compose.yaml) holds (`test/install/compose.test.ts`):
 
 To stop Cleared: `docker compose -f v2/compose.yaml down`. The state folder stays. To remove the images too, by label: `docker image ls --filter label=cleared.dev=v2`, then `docker image rm` of the ids. Published images, a Compose file fetched from a registry and Docker Desktop wait for the owner (questions 1 and 4 of [the milestone 5 plan](../docs/v2/milestone-5-plan.md)).
 
-The `cleared` command ([`src/cli/cleared.ts`](src/cli/cleared.ts)) runs `src/cli/<command>.ts` with its arguments: `cleared install`, `cleared status`, and each command a later lane adds as a file. In the image it is the entrypoint's `cleared` role, which runs it as the state folder's owner: `docker compose -f v2/compose.yaml run --rm --no-deps service cleared status`, with the variables the install was given (`docker compose exec` would run it as root). From a clone it is `node v2/src/cli/cleared.ts <command>`.
+The `cleared` command ([`src/cli/cleared.ts`](src/cli/cleared.ts)) runs `src/cli/<command>.ts` with its arguments: `cleared status`, `cleared user`, and each command a later lane adds as a file. From a clone it is `node v2/src/cli/cleared.ts <command>`. In the image it is the entrypoint's `cleared` role, which runs it as the state folder's owner (`docker compose exec` would run it as root); `docker compose -f v2/compose.yaml run --rm --no-deps service cleared status`, with the variables the install was given, is the intended form, not yet run.
 
 ## Commands
 
