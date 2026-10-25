@@ -10,9 +10,9 @@
 // section with no list is one entry. The same entry twice at one level is
 // proposed once.
 import type { KnowledgeLevel } from '../api/types.ts';
-import { LESSON_HEADINGS, sectionsOf } from '../workspace/handover.ts';
+import { DECISION_HEADINGS, LESSON_HEADINGS, sectionsOf } from '../workspace/handover.ts';
 
-export const DECISION_HEADINGS = { workspace: '## Decisions for the workspace', service: '## Decisions for the service', contract: '## Decisions for the contract' } as const;
+export { DECISION_HEADINGS };
 
 // The longest entry the inbox shows, in characters; a longer one is cut and says so.
 export const MAX_PROPOSAL = 4000;
