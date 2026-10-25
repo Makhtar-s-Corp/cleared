@@ -6271,4 +6271,7 @@ The run made the labels `status:In Progress`, `status:In Review`, `status:Ready 
 
 **Resources.** No Docker object, no port opened outside the tests (port 0 on loopback), no tunnel, no secret written; no Linear key asked for or used; two issues made and closed on the example repository, nothing on any other.
 
+**The merge of 383** (lane `j3-mobile-title`, at `origin/v2` `068dd0f`). 383 took P229, so this lane's lines are P230 to P232; the log keeps 383's entry before this one, and the matrix keeps the ids in order. 383 changes the phone's top bar and its tests, none of this lane's files. After the merge: `npm run typecheck` passes; `npm test` runs 2226 Node tests, 2128 pass, 98 skipped, 0 fail, and 349 Vitest tests pass; `npm run guard -- --base origin/v2`: nothing refused.
+
+- Pull request: 384, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-issue-mirrors`.
