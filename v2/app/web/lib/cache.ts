@@ -196,6 +196,13 @@ export class Cache {
     return this.client.fetchQuery({ queryKey: key, queryFn: () => this.#read(path), staleTime: 0 });
   }
 
+  // A refetch once a write is accepted: a read already on its way was asked
+  // before the write, so it is dropped, its value kept, and a new one goes
+  // out; the session screen takes any list after a gesture for newer (issue #376).
+  #after(key: Key): Promise<void> {
+    return this.client.refetchQueries({ queryKey: key, exact: true }, { cancelRefetch: true });
+  }
+
   held(key: Key): boolean {
     return this.client.getQueryData(key) !== undefined;
   }
@@ -254,7 +261,7 @@ export class Cache {
     if (patch && before) this.client.setQueryData(['inbox'], patch(before));
     try {
       const answer = await send(path, { method: 'POST', body }) as T;
-      for (const key of touchedBy(path)) if (this.held(key)) void this.refetch(key).catch(() => {});
+      for (const key of touchedBy(path)) if (this.held(key)) void this.#after(key).catch(() => {});
       return answer;
     } catch (error) {
       if (patch && before) {

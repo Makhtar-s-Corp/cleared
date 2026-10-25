@@ -755,7 +755,8 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const [note, setNote] = useState('');
   const [tab, setTab] = useState<Tab>(() => tabOf(window.location.hash));
   const [filter, setFilter] = useState<Filter>('all');
-  const [taken, setTaken] = useState<{ readonly id: string; readonly by: TakenOver | null } | null>(null);   // what a gesture of this tab knows, newer than the list
+  // What a gesture of this tab knows, newer than the list; `list`, the list the cache held when the service accepted it.
+  const [taken, setTaken] = useState<{ readonly id: string; readonly by: TakenOver | null; readonly list: unknown } | null>(null);
   const [editor, setEditor] = useState<EditorLinks | null>(null);    // the links that open the checkout in an editor (flow/editor.ts)
   const [editorOpen, setEditorOpen] = useState(false);
   const [gesture, setGesture] = useState(false);              // a take over, a give back, a Go or a Change on its way
@@ -812,7 +813,9 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
         const next = viewSessions(all, loaded.detail);
         return next.length === before.length && next.every((s, index) => s === before[index]) ? before : next;
       });
-      setTaken((local) => (local && !gestureNow.current ? null : local));
+      // The gesture's word stays until the list says the same, or a list newer than the gesture says otherwise:
+      // a redraw for another resource reads the list held before it (issue #376).
+      setTaken((local) => (local && !gestureNow.current && (all !== local.list || (all.find((s) => s.id === local.id)?.takenOver?.by ?? null) === (local.by?.by ?? null)) ? null : local));
     } catch { /* the next change tries again */ }
   }, [context, loaded.detail, readSteps]);
   useEffect(() => { void readSteps(); }, [readSteps]);
@@ -1122,7 +1125,8 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const takeOver = async () => {
     setGesture(true);
     if (await post(id, '/takeover', null, 'takeover_failed')) {
-      setTaken({ id, by: { by: view.me, at: context.now().toISOString() } });
+      const list = await context.api<unknown>('/sessions').catch(() => null);
+      setTaken({ id, by: { by: view.me, at: context.now().toISOString() }, list });
       select('terminal');
       context.inboxChanged();
     }
@@ -1140,7 +1144,10 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   };
   const giveBack = async () => {
     setGesture(true);
-    if (await post(id, '/giveback', null, 'giveback_failed')) setTaken({ id, by: null });
+    if (await post(id, '/giveback', null, 'giveback_failed')) {
+      const list = await context.api<unknown>('/sessions').catch(() => null);
+      setTaken({ id, by: null, list });
+    }
     setGesture(false);
   };
 
