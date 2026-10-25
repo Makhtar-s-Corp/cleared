@@ -13,7 +13,7 @@ import { join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ForgeRepository } from '../../src/forge/contract.ts';
 import { readSettings, settingsPath } from '../../src/setup/settings.ts';
-import { cloneEnvironment, confirm, ConnectError, listChoices, pick, propose, repositoryDir, WORKSPACE_FILE } from '../../src/workspace/connect.ts';
+import { cloneEnvironment, confirm, ConnectError, listChoices, pick, propose, renderWorkspace, repositoryDir, WORKSPACE_FILE, type ServiceLines } from '../../src/workspace/connect.ts';
 import { parseWorkspace } from '../../src/workspace/config.ts';
 import { FakeForge } from '../forge/fake.ts';
 import { fakeGh } from '../forge/fake-gh.ts';
@@ -225,6 +225,46 @@ test('a checkout folder that holds another repository is refused, and left as it
   execFileSync('git', ['clone', '-q', listed[1]?.url as string, clone]);
   await assert.rejects(propose({ repositories: pick(listed, ['example-org/guestbook']), whole: [], stateDir: dir, env }), (error: unknown) => error instanceof ConnectError && error.message === 'checkout_other');
   assert.equal(gitIn(clone, ['remote', 'get-url', 'origin']), listed[1]?.url);
+});
+
+// A value with a line break would end its line and start another, a section
+// included: every value the file is made of is checked on its own.
+const SERVICE: ServiceLines = {
+  name: 'api', kind: 'folder', repo: 'example-org/both', url: 'https://forge.invalid/example-org/both.git', base: 'main', path: 'api', dir: '/state/services/api/checkout',
+  consumes: [], contract: { format: 'openapi', path: 'contract/openapi.yaml' }, hand: { health_url: 'http://127.0.0.1:8793/health' },
+};
+
+test('the file refuses a line break or a NUL in any value: path, contract, repository, address, base, name, dir, id, a kept key', () => {
+  const text = renderWorkspace({ id: 'demo', name: 'api', services: [SERVICE] });
+  assert.match(text, /^\[service api\]$/m);
+  assert.match(text, /^path = api$/m);
+  const evil = '\n[service injected]\nkind = repository';
+  const cases: [string, Parameters<typeof renderWorkspace>[0]][] = [
+    ['path', { id: 'demo', name: 'api', services: [{ ...SERVICE, path: `api${evil}` }] }],
+    ['contract', { id: 'demo', name: 'api', services: [{ ...SERVICE, contract: { format: 'openapi', path: `openapi.yaml${evil}` } }] }],
+    ['repository', { id: 'demo', name: 'api', services: [{ ...SERVICE, repo: `example-org/both${evil}` }] }],
+    ['url', { id: 'demo', name: 'api', services: [{ ...SERVICE, url: `https://forge.invalid/x.git\r${evil}` }] }],
+    ['base', { id: 'demo', name: 'api', services: [{ ...SERVICE, base: `main${evil}` }] }],
+    ['name', { id: 'demo', name: 'api', services: [{ ...SERVICE, name: `api${evil}` }] }],
+    ['dir', { id: 'demo', name: 'api', services: [{ ...SERVICE, dir: `/state${evil}` }] }],
+    ['consumes', { id: 'demo', name: 'api', services: [{ ...SERVICE, consumes: [`web${evil}`] }] }],
+    ['id', { id: `demo${evil}`, name: 'api', services: [SERVICE] }],
+    ['workspace name', { id: 'demo', name: `api\0${evil}`, services: [SERVICE] }],
+    ['kept key', { id: 'demo', name: 'api', services: [{ ...SERVICE, hand: { run: `Dockerfile:3000${evil}` } }] }],
+  ];
+  for (const [what, input] of cases) assert.throws(() => renderWorkspace(input), (error: unknown) => error instanceof ConnectError && error.message === 'invalid', what);
+});
+
+test('a repository with a folder named with a newline: the folder is not proposed, and no section is injected into the file', async () => {
+  const { dir, env, settings } = state();
+  const evil = 'evil\n[service injected]\nkind = repository';
+  const repositories = [repository('example-org/mono', remote({ 'api/package.json': '{}', 'web/package.json': '{}', [`${evil}/package.json`]: '{}' }))];
+  const proposal = await propose({ repositories, whole: [], stateDir: dir, env });
+  assert.deepEqual(proposal.services.map((service) => service.path), ['api', 'web']);
+  await confirm({ repositories, whole: [], ticks: { services: ['api', 'web'], links: [], contracts: [] }, stateDir: dir, env, authorModel: MODEL, settings });
+  const text = readFileSync(join(dir, WORKSPACE_FILE), 'utf8');
+  assert.doesNotMatch(text, /injected/);
+  assert.deepEqual(text.match(/^\[service [^\]]+\]$/gm), ['[service api]', '[service web]']);
 });
 
 test('git asks gh for GitHub\'s credential, which reads GH_TOKEN itself: the value is in no git setting', () => {

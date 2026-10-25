@@ -104,3 +104,9 @@ test('links: the guestbook\'s call of POST /check, found once the filter API\'s 
   assert.deepEqual(proposeLinks(services, reads), [{ id: 'guestbook>filter-api', from: 'guestbook', to: 'filter-api', items: ['POST /check'], places: [{ file: 'src/filter.ts', line: 38 }] }]);
   assert.deepEqual(proposeLinks(services.map((service) => ({ ...service, contract: null })), reads), [], 'no contract proposed, nothing to read a call against');
 });
+
+test('a folder whose name holds a newline or another control character is never proposed, as a top folder or a workspaces entry', () => {
+  const evil = 'evil\n[service injected]\nkind = repository';
+  assert.deepEqual(folderServices(tree({ 'api/package.json': '{}', 'web/package.json': '{}', [`${evil}/package.json`]: '{}', 'tab\there/go.mod': '' })), { folders: ['api', 'web'], from: 'manifests' });
+  assert.deepEqual(folderServices(tree({ 'package.json': JSON.stringify({ workspaces: [evil, 'packages/*'] }), [`${evil}/package.json`]: '{}', 'packages/ok/package.json': '{}', [`packages/${evil}/package.json`]: '{}' })), { folders: ['packages/ok'], from: 'workspaces' });
+});
