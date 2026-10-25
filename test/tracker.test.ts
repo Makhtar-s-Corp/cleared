@@ -495,7 +495,7 @@ test('GitHub Issues ticket moves through request, actor checks, guarded merge, a
   writeFileSync(appKey, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
   writeFileSync(join(box.home, 'bin', 'curl'), `#!${process.execPath}
 try { process.getBuiltinModule('node:fs').readFileSync(0); } catch { /* no input */ }
-process.stdout.write('{"token":"fake-installation-token","expires_at":"' + new Date(Date.now() + 3_600_000).toISOString().replace(/\\.\\d{3}Z$/, 'Z') + '"}\\n');
+process.stdout.write('{"token":' + '"fake-installation-token","expires_at":"' + new Date(Date.now() + 3_600_000).toISOString().replace(/\\.\\d{3}Z$/, 'Z') + '"}\\n');
 `, { mode: 0o755 });
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, readFile(confPath, 'utf8').replace('adapter = local',
