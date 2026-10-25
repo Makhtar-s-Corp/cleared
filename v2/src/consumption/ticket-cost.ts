@@ -23,8 +23,8 @@
 //            when a session that finished a turn reported no total (Codex,
 //            Cursor): a partial sum is not the cost
 //
-// sessionsCost takes the events of each session, as flow/receipt.ts
-// ticketUsage does, so the proof receipt can read the same figures.
+// The proof receipt of a pull request (flow/engine.ts #receipt, P210) says
+// ticketCost's figures, so the card and the receipt never differ.
 import type { DatabaseSync } from 'node:sqlite';
 import type { AgUiEvent, SessionEvent } from '../session/events.ts';
 import { turnTokens } from './usage.ts';

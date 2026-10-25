@@ -69,6 +69,9 @@ export const CUSTOM_NAMES = [
   // Milestone 3 (B6.3, P152): an author's work handed to the other harness,
   // journaled by the flow on the session left and on the new one.
   'cleared.handed_over',
+  // Milestone 3 (P210, issue #326): the proof receipt's captures of a
+  // service, journaled by the flow on the author's session when it is done.
+  'cleared.proof_captured',
 ] as const;
 export type CustomName = (typeof CUSTOM_NAMES)[number];
 
@@ -200,6 +203,13 @@ export type CustomValue = {
     readonly from: { readonly session: SessionId; readonly harness: Harness; readonly model: string };
     readonly to: { readonly session: SessionId; readonly harness: Harness; readonly model: string };
     readonly by: UserId;
+  };
+  // The captures of the proof receipt (flow/proof-capture.ts): the files'
+  // names in the ticket's proof folder, and what was not taken, by its code.
+  'cleared.proof_captured': {
+    readonly service: string;
+    readonly before?: string; readonly after?: string; readonly video?: string; readonly videoMs?: number;
+    readonly missing: readonly { readonly part: 'before' | 'after' | 'video'; readonly reason: 'no_browser' | 'no_before' | 'no_after' | 'failed' }[];
   };
 };
 

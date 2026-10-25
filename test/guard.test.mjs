@@ -47,7 +47,9 @@ test('the Codex adapter tells a guard refusal (3) from a CI run in progress (2),
   const box = sandbox();
   writeFileSync(join(box.home, 'prompt.md'), 'p');
   const call = ({ ci = 0, script }) => {
-    writeFileSync(join(box.home, 'bin', 'gh'), `#!/usr/bin/env bash\necho ${ci}\n`, { mode: 0o755 });
+    // The runs in progress are `ci`; the base's last commit is old, so no deployment is in progress whatever the hour
+    // (an answer of 0 was read as today at midnight: the host was busy from 00:00 to 00:10).
+    writeFileSync(join(box.home, 'bin', 'gh'), `#!/usr/bin/env bash\nif [ "$1" = api ]; then echo 2026-01-01T00:00:00Z; else echo ${ci}; fi\n`, { mode: 0o755 });
     writeFileSync(join(box.home, 'task.sh'), `#!/usr/bin/env bash\n${script}\n`, { mode: 0o755 });
     const run = spawnSync(join(ORCH_HOME, 'adapters', 'codex.sh'), ['run', '--model', 'm', '--prompt-file', join(box.home, 'prompt.md'), '--report', join(box.home, 'r.md'), '--usage', join(box.home, 'u.json')], {
       cwd: box.repo, encoding: 'utf8', env: { ...box.env, ADAPTER_RUNNER: 'container', ADAPTER_TASK_SCRIPT: join(box.home, 'task.sh') },

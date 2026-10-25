@@ -124,6 +124,10 @@ import type { LeverReader } from '../consumption/levers.ts';
 import { GIVEN_BACK, GIVEN_BACK_REVIEW, TAKEN_OVER } from './takeover.ts';
 import { NO_ANSWER, answerMessage, channelOf, channelPrompt, lastSaid, verdictsOf, type ChannelMessage } from './channel.ts';
 import { testComment, testLine, testRunOf } from './review-tests.ts';
+import type { ProofCapture } from './proof-capture.ts';
+import { PROOF_FILES } from './proof-capture.ts';
+import type { ReceiptCapture, ReceiptData, ReceiptTest } from './receipt.ts';
+import { ticketCost } from '../consumption/ticket-cost.ts';
 import { CI_REPAIR_ATTEMPTS, onBase, repairComment, repairMessage, type CiFailures } from './ci-repair.ts';
 import type { PrClose } from './pr-close.ts';
 import { authorPrompt, contractSendBackMessage, fileDiff, handoverMessage, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
@@ -141,6 +145,10 @@ export type { MergeOutcome } from '../release/lock.ts';
 // What the flow does outside this process. `service` names the service of
 // a workspace of several the call is for; absent, the one-service
 // workspace's (its first service, which the milestone 1 fields name).
+// The receipts' captures, under the checkouts' root, a folder no ticket is named.
+export const PROOF_FOLDER = '.proof';
+export const PROOF_TIMEOUT_MS = 90_000;
+
 export type FlowEffects = {
   settings(service?: ServiceConfig): Promise<ProjectSettings>;    // the service's settings at its base branch
   refreshProject(service?: ServiceConfig): Promise<void>;         // projectCheckout: fetch the forge, so publish sees the base as it is now (issue 141)
@@ -150,7 +158,14 @@ export type FlowEffects = {
   prepareWorkdir(input: { readonly ticket: Ticket; readonly role: Role; readonly service?: ServiceConfig; readonly variant?: VariantKey; readonly branch?: string }): Promise<{ readonly workdir: string; readonly briefing: Briefing }>;
   // `contract`: the service whose contract a step builds against, when its session has one: its lessons for the contract are filed there.
   captureHandover(input: { readonly workdir: string; readonly role: Role; readonly model: string; readonly ticket: TicketId; readonly sessionId: SessionId; readonly contract?: string }): Promise<string | null>;
-  publish(input: { readonly ticket: TicketId; readonly workdir: string; readonly branch: string; readonly report: string; readonly service?: ServiceConfig }): Promise<Published>;
+  // `receipt`: the facts of the proof receipt at the top of the body (P210, flow/receipt.ts).
+  publish(input: { readonly ticket: TicketId; readonly workdir: string; readonly branch: string; readonly report: string; readonly service?: ServiceConfig; readonly receipt?: ReceiptData }): Promise<Published>;
+  // The proof receipt's captures of `service` (P210, flow/proof-capture.ts):
+  // the page of what its base runs, the page of the session's trial
+  // environment and a video of the flow on it, written in `dir`, while the
+  // author's session still runs. Never throws in the real one; a throw here
+  // is journaled as failed. Absent: no capture is taken.
+  captureProof?(input: { readonly ticket: TicketId; readonly session: SessionId; readonly service: ServiceConfig; readonly dir: string }): Promise<ProofCapture>;
   // The lock's `--ask` request; the request time the lock recorded, when it says one.
   requestRelease(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<{ readonly requestedAt?: string }>;
   prChecks(pr: number, service?: ServiceConfig): Promise<ReleaseItem['pr']['checks']>;   // the pull request's checks on the forge now
@@ -1256,6 +1271,7 @@ export class FlowEngine {
   async #stepDone(live: Live, step: Step): Promise<void> {
     const { ticket: id, project } = live.input;
     this.#step({ id: live.id, ticket: id, project }, 'STEP_FINISHED', 'author');
+    if (step.kind !== 'contract') await this.#captureProof(live, this.#service(step.service));
     await this.#close(live, 'done');
     this.#stepOf.delete(live.id);
     this.#emit({ type: 'author_done', at: this.#at(), project, ticket: id, session: live.id });
@@ -2394,6 +2410,7 @@ export class FlowEngine {
     if (step && step.state === 'running' && this.#steps.list(id).length > 1) return this.#stepDone(author, step);
     const session = { id: author.id, ticket: id, project };
     this.#step(session, 'STEP_FINISHED', 'author');
+    await this.#captureProof(author, step ? this.#service(step.service) : this.#workspace.services[0] as ServiceConfig);
     await this.#close(author, 'done');
     if (step) this.#steps.update(step.id, { state: 'done', cost: this.#stepCost(step) ?? 0, minutes: this.#stepMinutes(step) });
     this.#emit({ type: 'author_done', at: this.#at(), project, ticket: id, session: author.id });
@@ -2640,6 +2657,72 @@ export class FlowEngine {
     await this.#startReview(ticket, author.input.workdir, [...channel, answer], journaled);
   }
 
+  // ---- the proof receipt (P210, issue #326) --------------------------------
+
+  // The captures of `service`, taken while the author's session and its
+  // trial environment still run, journaled on the session. A capture that
+  // throws, or still runs at the cap, loses the captures, never the ticket.
+  async #captureProof(live: Live, service: ServiceConfig): Promise<void> {
+    const capture = this.#effects.captureProof;
+    if (!capture) return;
+    const { ticket: id, project } = live.input;
+    const failed: ProofCapture = { missing: (['before', 'after', 'video'] as const).map((part) => ({ part, reason: 'failed' as const })) };
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let got: ProofCapture;
+    try {
+      // A browser that hangs is given up after the cap: the ticket goes on without its captures.
+      const late = new Promise<ProofCapture>((resolve) => { timer = setTimeout(() => resolve(failed), this.config.proofTimeoutMs ?? PROOF_TIMEOUT_MS); });
+      got = await Promise.race([capture({ ticket: id, session: live.id, service, dir: this.#proofDir(id, service.name) }), late]);
+    } catch {
+      got = failed;
+    } finally {
+      clearTimeout(timer);
+    }
+    this.#journal({ id: live.id, ticket: id, project }, { type: 'CUSTOM', name: 'cleared.proof_captured', value: { service: service.name, ...got } });
+  }
+
+  #proofDir(ticket: TicketId, service: string): string {
+    return posix.join(this.config.workdirRoot, PROOF_FOLDER, ticket, service);
+  }
+
+  // The receipt's facts, from the ledger only: each review round's run of
+  // the declared tests and the last captures of each service, in the
+  // current flow; the tokens, the dollars and the time of the ticket as its
+  // card says them (consumption/ticket-cost.ts, P211): every session of
+  // every run, from the ticket's first stored event to its last.
+  #receipt(id: TicketId, reviewer: Live): ReceiptData {
+    const tests: ReceiptTest[] = [];
+    const captures = new Map<string, ReceiptCapture>();
+    for (const row of this.#flowRows(id))
+      for (const { event } of this.#store.events.after(row.id)) {
+        if (event.type !== 'CUSTOM') continue;
+        if (row.role === 'reviewer' && event.name === 'cleared.review_verdict' && event.value.tests)
+          tests.push({ round: event.value.round, command: event.value.tests.command, outcome: event.value.tests.outcome });
+        if (row.role === 'author' && event.name === 'cleared.proof_captured') captures.set(event.value.service, event.value);
+      }
+    const cost = ticketCost(this.#store.db, { project: reviewer.input.project, ticket: id });
+    return {
+      ticket: id,
+      tests: tests.sort((a, b) => a.round - b.round),
+      testsDeclared: (reviewer.settings.testCommand?.length ?? 0) > 0,
+      tokens: cost.tokens,
+      costUsd: cost.costUsd,
+      elapsedMs: cost.elapsedMs,
+      captures: [...captures.values()],
+      ...(this.config.linkBase ? { linkBase: this.config.linkBase } : {}),
+    };
+  }
+
+  // A capture of the receipt as a file, for the app's link
+  // (GET /api/tickets/:id/proof/:service/:file): one of the three names, of a
+  // service of the workspace, of a ticket the store knows; a plain file.
+  async proofFile(ticket: TicketId, service: string, file: string): Promise<string | undefined> {
+    if (!(Object.values(PROOF_FILES) as string[]).includes(file)) return undefined;
+    if (!this.#workspace.services.some((s) => s.name === service)) return undefined;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(ticket) || !(await this.registry.ticketStore.get(ticket))) return undefined;
+    return posix.join(this.#proofDir(ticket, service), file);
+  }
+
   // ---- a pass: publish, record, ask the lock -------------------------------
 
   async #publishAndAsk(reviewer: Live, report: string, round: number): Promise<void> {
@@ -2655,7 +2738,7 @@ export class FlowEngine {
       // The project checkout is fetched first: publish reads the base as the
       // checkout last saw it (issue 141).
       await this.#effects.refreshProject();
-      published = await this.#effects.publish({ ticket: id, workdir, branch: this.#branchOf(id), report });
+      published = await this.#effects.publish({ ticket: id, workdir, branch: this.#branchOf(id), report, receipt: this.#receipt(id, reviewer) });
     } catch (error) {
       this.#step(session, 'STEP_FINISHED', 'release');
       await this.#putBack(id, `The branch was not published: ${name(error)}`, 'publish_refused');
@@ -2751,13 +2834,14 @@ export class FlowEngine {
       await this.#putBack(id, note, reason);
     };
     const order = landingOrder(this.#workspace.services, this.#servicesOf(ticket).map((s) => s.name)).map((name) => this.#service(name));
+    const receipt = this.#receipt(id, reviewer);
     const published: { service: ServiceConfig; pr: Published; files: readonly string[] | null; diff: string }[] = [];
     const skipped: string[] = [];
     for (const service of order) {
       try {
         await this.#effects.refreshProject(service);
         const workdir = this.#workdirs.get(id)?.get(service.name) ?? posix.join(this.config.workdirRoot, id, service.name);
-        const pr = await this.#effects.publish({ ticket: id, workdir, branch: ticketBranch(id), report, service });
+        const pr = await this.#effects.publish({ ticket: id, workdir, branch: ticketBranch(id), report, service, receipt });
         const changed = await this.#changes(id, pr.head, service);
         published.push({ service, pr, files: changed?.files ?? null, diff: changed?.diff ?? '' });
       } catch (error) {
