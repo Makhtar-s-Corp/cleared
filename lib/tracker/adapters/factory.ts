@@ -14,8 +14,8 @@ export type TrackerOptions = Omit<LocalTrackerOptions, 'conf'> & Omit<GithubTrac
 
 const parse = <T>(text: string): T => JSON.parse(text) as T;
 class ShellTracker {
-  conf: ConfSections;
-  path: string;
+  declare conf: ConfSections;
+  declare path: string;
   constructor(conf: ConfSections) { this.conf = conf; this.path = join(ORCH_HOME, 'lib/tracker/adapters/linear.ts'); }
   run(...args: string[]): string { return execFileSync(this.path, args, { encoding: 'utf8' }).trim(); }
   downloadCapture(url: string): Buffer { return execFileSync(this.path, ['download-capture', url], { timeout: 20000, maxBuffer: 5_100_000 }); }

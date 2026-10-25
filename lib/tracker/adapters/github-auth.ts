@@ -49,10 +49,10 @@ export function mintInstallationToken(settings: AppSettings, { now = () => Date.
 }
 
 export class GithubAppTokens {
-  settings: AppSettings;
-  now: () => number;
-  mint: (settings: AppSettings) => InstallationToken;
-  current: InstallationToken | null;
+  declare settings: AppSettings;
+  declare now: () => number;
+  declare mint: (settings: AppSettings) => InstallationToken;
+  declare current: InstallationToken | null;
   constructor(settings: AppSettings, options: TokenOptions = {}) {
     this.settings = settings;
     this.now = options.now || (() => Date.now());

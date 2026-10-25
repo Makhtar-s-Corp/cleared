@@ -56,11 +56,11 @@ const guard = (text: string): void => {
 };
 
 export class GithubTracker {
-  conf: ConfSections | undefined;
-  settings: GithubSettings;
-  repo: string;
-  tokens: TokenSource | null;
-  api: GithubApi;
+  declare conf: ConfSections | undefined;
+  declare settings: GithubSettings;
+  declare repo: string;
+  declare tokens: TokenSource | null;
+  declare api: GithubApi;
   constructor({ conf, api, tokens }: GithubTrackerOptions = {}) {
     this.conf = conf;
     // The checks below throw unless repository, owner_id and app_login are set.

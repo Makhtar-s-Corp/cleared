@@ -22,7 +22,9 @@
     "noUncheckedIndexedAccess": true,
     "noImplicitOverride": true,
     "noFallthroughCasesInSwitch": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    // Library declarations are not ours to check: Playwright's name the DOM, which a Node project does not load.
+    "skipLibCheck": true
   },
   "include": ["*.ts", "lib/**/*.ts", "serve/**/*.ts", "app/**/*.ts", "test/**/*.ts"],
   "exclude": ["v2", "examples", "node_modules", "app/node_modules"]

@@ -57,11 +57,11 @@ const value = (entry: StoredEntry): SQLInputValue[] => [entry.id, entry.type, en
 const rowEntry = (row: EntryRow): StoredEntry => ({ ...row, links: JSON.parse(row.links || '[]') });
 
 export class LocalMemory {
-  project: string;
-  conf: ConfSections;
-  db: DatabaseSync;
-  tracker: MemoryTracker | null;
-  fts: boolean;
+  declare project: string;
+  declare conf: ConfSections;
+  declare db: DatabaseSync;
+  declare tracker: MemoryTracker | null;
+  declare fts: boolean;
   constructor({ project = projectDir(), conf = loadConf(), db = openLedger(), tracker = null }: LocalMemoryOptions = {}) {
     this.project = realpathSync(resolve(project));
     this.conf = conf;

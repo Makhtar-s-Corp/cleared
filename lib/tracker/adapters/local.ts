@@ -47,10 +47,10 @@ const ticketNumber = (id: string | number | bigint): number => {
 };
 
 export class LocalTracker {
-  conf: ConfSections | undefined;
-  db: DatabaseSync;
-  actor: Identity;
-  approvalDir: string;
+  declare conf: ConfSections | undefined;
+  declare db: DatabaseSync;
+  declare actor: Identity;
+  declare approvalDir: string;
   constructor({ conf, db = openLedger(), actor, approvalDir = join(stateDir(), 'validations') }: LocalTrackerOptions = {}) {
     this.conf = conf;
     this.db = db;
