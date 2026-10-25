@@ -41,6 +41,21 @@ function Diagram({ drawing, picked, t }: { readonly drawing: Drawing; readonly p
   );
 }
 
+// The assistant's workspace step (lane v2-j5-connect): pick the repositories, have the links proposed.
+function ConnectLink({ t }: { readonly t: Translate }) {
+  return <Button asChild><a className="services-connect" href="/setup/workspace" data-act="services_connect">{t('map_connect')}</a></Button>;
+}
+
+// No map to read, as on a server with no workspace yet: the reason, and the way to connect one.
+export function ServicesFailed({ t, message }: { readonly t: Translate; readonly message: string }) {
+  return (
+    <div className="services">
+      <p className="empty error">{message}</p>
+      <p className="services-connect-line">{t('map_connect_hint')} <ConnectLink t={t} /></p>
+    </div>
+  );
+}
+
 function Legend({ t }: { readonly t: Translate }) {
   const item = (kind: string, label: string) => (
     <li data-legend={kind}>
@@ -75,6 +90,7 @@ export function ServicesView({ map, t, now, picked, busy = false, note = '', onP
         </div>
         <div className="services-actions">
           <p className="services-built">{builtLine(map, now, t)}</p>
+          <ConnectLink t={t} />
           <Button id="services-refresh" disabled={busy} onClick={onRefresh}>
             <ArrowsClockwise size={16} aria-hidden="true" />{busy ? t('map_refreshing') : t('map_refresh')}
           </Button>
@@ -164,6 +180,6 @@ export default function ServicesPage() {
     }
   };
 
-  if (!map) return failed !== null ? <div className="services"><p className="empty error">{failed}</p></div> : <div className="services" aria-busy="true" />;
+  if (!map) return failed !== null ? <ServicesFailed t={t} message={failed} /> : <div className="services" aria-busy="true" />;
   return <ServicesView map={map} t={t} now={context.now()} picked={picked} busy={busy} note={note} onPick={(service) => setPicked((before) => (before === service ? null : service))} onRefresh={() => void refresh()} />;
 }
