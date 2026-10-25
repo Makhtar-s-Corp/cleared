@@ -6414,5 +6414,5 @@ The behaviour is the same either way.
 
 **Resources.** No Docker object; no port opened but port 0 on loopback in the tests and 8817 on loopback for the live run, both closed after; no tunnel, no secret. No real monitoring service was called.
 
-- Pull request: PR_NUMBER, against `v2`.
+- Pull request: 393, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-heartbeat`.
