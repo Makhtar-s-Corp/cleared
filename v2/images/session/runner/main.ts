@@ -468,9 +468,12 @@ export async function run(deps: RunnerDeps): Promise<number> {
     }
   }
 
-  // The project's briefing (CLAUDE.md, written by the service) would load
-  // only with the 'project' setting source, which also loads the project's
-  // settings and hooks; it is appended to the system prompt instead.
+  // The setting sources: 'user' alone (B5.5b and M7, the owner's decision
+  // of 2026-10-25 06:06). In the container it is CLAUDE_CONFIG_DIR, the
+  // session's config volume, where the base branch's skills are mounted read
+  // only. The project's briefing (CLAUDE.md, written by the service) would
+  // load only with the 'project' source, which also loads the checkout's
+  // settings, hooks and skills; it is appended to the system prompt instead.
   //
   // The prompt cache serves a prefix only up to its first changed byte
   // (issue #335, P219). The preset's per-session sections (the working
@@ -494,7 +497,7 @@ export async function run(deps: RunnerDeps): Promise<number> {
       cwd: WORKDIR,
       model: start.model,
       ...(resume ? { resume: start.sessionId } : { sessionId: start.sessionId }),
-      settingSources: [],
+      settingSources: ['user'],
       // No co-author trailer on commits: its address would make the guard
       // refuse the publish (lib/guard/codex-guard.mjs, "email address").
       settings: { attribution: { commit: '', pr: '' } },
