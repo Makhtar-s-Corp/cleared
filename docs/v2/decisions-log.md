@@ -6678,7 +6678,7 @@ The three issues were then closed by hand as not planned. Nothing ran against Li
 - Pull request: 403, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-mirror-doctor`.
 
-## 2026-10-25: milestone 5's plan, in sixteen lanes and five waves, and C5 done (the author's choices, lane `v2-j5-plan`, issue #404)
+## 2026-10-25: milestone 5's plan, in thirteen lanes and five waves, and C5 done (the author's choices, lane `v2-j5-plan`, issue #404)
 
 **The need.** Issue #404, docs only. (1) Matrix line C5 (the project page kept up to date) still read `later`, though P59 delivered it in pull request 395 with its tests. (2) Milestone 5 had no plan. The issue asks for `docs/v2/milestone-5-plan.md` from the brief's section 6 and the matrix lines D14, B6.5, B6.5p, C4, C15, C16, C18 and M10: the one-command install (Docker Compose, label `cleared.dev=v2`), the browser setup assistant, `cleared doctor` and the README, with the proof that a newcomer gets a first ticket live in under an hour following the assistant only. The plan splits the work into lanes (files owned, tests, proof) and marks what needs real accounts or a fresh machine. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository. The content is taken from the matrix lines and the two complements, and the conventions from sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md).
 
@@ -6700,7 +6700,7 @@ The three issues were then closed by hand as not planned. Nothing ran against Li
 
 **Tests first.** `25c15e1` committed `v2/test/milestone-5-plan.test.ts` alone. On `origin/v2` 5 of its 6 tests failed: C5 not done, no plan, no milestone 5 line in it, no waves, no lane sections. The em dash test passed with nothing to read. One change came with the plan. The waves check read every row that starts with a number, which matched the proof's table of steps, so it now reads the "Waves" section only. The tests check what stays true as lanes deliver: C5 and its test files, every milestone 5 line named in the plan, every lane of the waves with its own section, at most three lanes a wave, and the four headings of each lane. They do not check the `planned` status, which the first lane to deliver changes.
 
-**Checks** (at `origin/v2` `c3de885`). CHECKS_PLACEHOLDER
+**Checks** (on `origin/v2` at `c3de885`, which had not moved when this was written). `npm run typecheck` passes. `npm test`: 2486 Node tests, 2377 pass, 109 skipped, 0 fail, and 359 Vitest tests pass. `npm run guard -- --base origin/v2`: nothing refused (the v2 files, and the lines added since `origin/v2`; run without a private-term list, `CLEARED_REPO` unset). The guard does not read `docs/v2/`, so the plan, the matrix and this entry were also searched for the owner's name, the organisation's and the first piloted project's: none.
 
 **Resources.** No Docker object, no Claude Code login read, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, `git fetch` and GitHub (the issue and the pull request), no port but the tests' own ephemeral loopback ones, no tunnel, no secret.
 

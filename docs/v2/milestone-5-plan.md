@@ -4,7 +4,7 @@ Written on 2026-10-25 by the author of issue #404 (Opus 5.5), before any code of
 
 `milestone-2-plan.md` has no sections 9 and 10, as the lanes of milestones 3 and 4 noted; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), adapted in section 3 below. This plan's branch is `v2-j5-plan`: `v2/j5-plan` cannot exist beside the local branch `v2`.
 
-Milestone 5 runs as lanes, sections 4 to 16, in five waves (section 17). No matrix line `P` is added by this plan: each lane adds its own when it delivers, at the next free id.
+Milestone 5 runs as thirteen lanes, sections 4 to 16, in five waves (section 17). No matrix line `P` is added by this plan: each lane adds its own when it delivers, at the next free id.
 
 ## 1. The proof (B6.5p), as measured steps
 
@@ -120,7 +120,7 @@ A newcomer today reads `v2/README.md`, sets the variables it lists, runs `npm ru
 
 - The first start of decision 5: the setup code, `/setup` alone until the owner exists.
 - `v2/src/setup/`: the settings file of decision 6, the steps' registry with a stub per step of section 1, and the records of each step (when it was shown, when it was done or skipped, the person's time and the machine's time).
-- The steps this lane fills: the owner's account (the approval key made as `npm run setup` makes it, the public key shown with where it goes), the forge token (checked by reading the account's repositories through the forge contract of section 6), and the model login (decision 7).
+- The steps this lane fills: the owner's account (the approval key made as `npm run setup` makes it, the public key shown with where it goes), the forge token (checked on the spot by reading the account's repositories, on its own: the forge contract of section 6 is made in the same wave, and section 11 moves the step onto it), and the model login (decision 7).
 - `v2/app/web/screens/setup/`: one page per step, a progress line, each step's time, Back and Skip where a step allows it; French and English.
 - Proven by `test/setup/*.test.ts` (the code, the settings file under the environment, a token never answered back, the steps' records), `app/web/test/setup/*.test.tsx`, a browser test in both languages (`app/test/setup/setup-browser.test.ts`), the catalogs' tests, and captures at the four widths, light and dark (B3.7, B4.5).
 
@@ -291,7 +291,7 @@ M10 names GitLab as the first forge after GitHub. Section 6 makes the contract; 
 
 - `v2/src/forge/gitlab.ts` over GitLab's REST API (merge requests, pipelines, notes, projects), a token from a file, the address configurable for a self-managed GitLab.
 - The lock's merge for a GitLab service, with the same checks as for GitHub (the reviewed head, the human's approval, the health watch).
-- The assistant's forge step offers GitLab.
+- The assistant's forge step offers GitLab, and goes through the contract for both forges.
 - A doctor section `gitlab`, run only when named, as `mirror`.
 - Proven by `test/forge/gitlab.test.ts` and `test/forge/contract.test.ts` (section 6's cases) against a fake GitLab on loopback, the lock's tests for a GitLab service, the step's tests.
 
@@ -447,7 +447,7 @@ At most three lanes run at once (B4.3), and lanes of one wave never edit the sam
 
 | Wave | Lanes | Needs before it starts |
 | --- | --- | --- |
-| 1 | `v2-j5-compose`, `v2-j5-assistant`, `v2-j5-forge` | this plan merged. The assistant's forge step calls `listRepositories()` of the forge lane: until that merges it calls `gh` through a one-line function of its own, which the forge lane's merge replaces |
+| 1 | `v2-j5-compose`, `v2-j5-assistant`, `v2-j5-forge` | this plan merged. The three lanes touch no file of each other: the assistant's forge step checks the token on its own, `v2-j5-connect` (wave 2) is the first to call `listRepositories()`, and `v2-j5-gitlab` (wave 3) moves the forge step onto the contract; `install.ts` shows the service's log line that holds the setup code, whatever the assistant lane writes in it |
 | 2 | `v2-j5-doctor`, `v2-j5-run`, `v2-j5-connect` | wave 1 merged (the step stubs, the modules, the forge contract) |
 | 3 | `v2-j5-images`, `v2-j5-gitlab` | wave 2 merged (the doctor's sections folder, the workspace step) |
 | 4 | `v2-j5-secrets`, `v2-j5-env-setup`, `v2-j5-first-ticket` | wave 3 merged (the prepared images' builder) |
