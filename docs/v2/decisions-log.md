@@ -5317,7 +5317,7 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **The measure.** `v2/scripts/prompt-cache.ts` (`node scripts/prompt-cache.ts`, or `--json`) builds the first request of each session of a reference fake run from Cleared's own code. The tools come from `LEAD_TOOLS` and `AUTHOR_TOOLS`. The briefings come from `renderLeadBriefing`, `renderBriefing` and `readerBriefing`, with the guestbook example's README as the project page. The first turns come from `authorPrompt`, `variantPrompt`, `pickPrompt`, `reviewPrompt`, `readerPrompt` and `openingPrompt`. The system prompt option comes from the runner itself, run on a stand-in query.
 - **The model.**
-  - The cache reads and writes at three ends: the preset's static part (the boundary `sdk.d.ts` calls cross-session cacheable), the end of the system prompt and the end of the first message. The last two are this model's assumption: the SDK documents only the first.
+  - The cache reads and writes at three ends: the end of the preset's static part, the end of the system prompt and the end of the first message. Of the first, `sdk.d.ts` says that blocks before that boundary are eligible for cross-session caching, and that blocks after it are not. The other two are this model's assumption: that the ordinary prefix cache still reads where Claude Code ends the system prompt and the first message. The briefing comes after the boundary, so every gain below rests on that assumption.
   - An entry lives 5 minutes from its last use.
   - The SDK's texts (the built-in tools, the preset, the per-session sections) count no tokens, and are told apart by what makes them differ: branch, commit, day.
   - Cleared's texts count one token per 4 bytes of UTF-8. That is an estimate, not the tokenizer's count.
@@ -5348,8 +5348,10 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 Estimated tokens. "Served" is the part of a session's first request a cache entry of an earlier session covers.
 
+**The lower bound.** `node scripts/prompt-cache.ts --no-system-entry` measures with no entry at the end of the system prompt. The run then shares only the authors' tools, 401 tokens in each of four sessions: 1604 of 40053, 4.0 %. That holds before and after alike, because the two entries left fall in the same places either way. If Claude Code writes no entry there, this change gains nothing.
+
 **What it shows, and what it does not.**
-- The gain is in sessions of one role whose briefings are the same and that start within 5 minutes of each other: the plan's second ticket (401 to 3549) and its review (0 to 3121).
+- Under the model, the gain is in sessions of one role whose briefings are the same and that start within 5 minutes of each other: the plan's second ticket (401 to 3549) and its review (0 to 3121).
 - The variants of one ticket already shared their whole system prompt: same branch, same commit, same day.
 - A ticket with a decision or a handover of its own has a briefing of its own and gains nothing (LOCAL-14's first variant).
 - The lead gains nothing.
@@ -5365,7 +5367,7 @@ Estimated tokens. "Served" is the part of a session's first request a cache entr
 
 These pass on that code and are kept as guards: the map test, the tools assertions added to `test/lead/engine.test.ts` (both generations' tools, byte for byte) and `test/flow/plan-gate.test.ts` (`AUTHOR_TOOLS` as written, no ticket id), and the model's own tests. Existing tests changed: the two runner assertions, whose expected object gained the two keys, and the two tests that gained the tools assertions. No assertion was removed.
 
-**Checks** (on `origin/v2` at `c2bd384`, which had not moved when this was written). `npm run typecheck` passes. `npm test`: 2011 Node tests, 1947 pass, 64 skipped (the browser tests, with no `CLEARED_V2_PLAYWRIGHT`), 0 fail; 316 Vitest tests pass. `npm run guard -- --base origin/v2` is run before the READY.
+**Checks** (on `origin/v2` at `c2bd384`, which had not moved when this was written). `npm run typecheck` passes. `npm test`: 2012 Node tests, 1948 pass, 64 skipped (the browser tests, with no `CLEARED_V2_PLAYWRIGHT`), 0 fail; 316 Vitest tests pass. `npm run guard -- --base origin/v2`: nothing refused, in the 685 v2 files and in the lines changed (run without a private-term list, `CLEARED_REPO` unset).
 
 **Resources.** No Docker object, no session image, no login file read, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, no port, no tunnel, no secret.
 

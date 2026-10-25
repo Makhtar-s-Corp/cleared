@@ -8,10 +8,14 @@
 //     serves a prefix only up to its first changed byte (the Messages API's
 //     prompt caching).
 //   - A prefix is served only where an earlier request wrote an entry: here
-//     the end of the preset's static part (the boundary sdk.d.ts of SDK
-//     0.3.306 calls cross-session cacheable), the end of the system prompt
-//     and the end of the first message. An entry lives 5 minutes from the
-//     start of the last request that wrote or read it.
+//     the end of the preset's static part (sdk.d.ts of SDK 0.3.306: blocks
+//     before that boundary are eligible for cross-session caching, blocks
+//     after it are not), the end of the system prompt and the end of the
+//     first message. The last two are this model's assumption: that the
+//     ordinary prefix cache still reads where Claude Code ends the system
+//     prompt and the conversation. `--no-system-entry` measures without the
+//     entry at the end of the system prompt, the run's lower bound. An entry
+//     lives 5 minutes from the start of the last request that wrote or read it.
 //   - The SDK's own texts are not Cleared's to count: the built-in tools, the
 //     preset and its per-session sections (the working directory, git status,
 //     the date) are blocks of no tokens, known by what makes them differ (the
@@ -24,7 +28,7 @@
 // Only each session's first request is measured: the turns after it reuse
 // their own session's prefix whatever Cleared writes.
 //
-// Run: node scripts/prompt-cache.ts (a table), or with --json.
+// Run: node scripts/prompt-cache.ts (a table), with --json, with --no-system-entry.
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { AUTHOR_TOOLS } from '../src/flow/author-tools.ts';
@@ -118,7 +122,9 @@ export type SessionStart = {
   readonly prompt: string;                               // the first turn
 };
 
-export async function firstRequest(session: SessionStart): Promise<CacheRequest> {
+export type ModelOptions = { readonly systemEntry?: boolean };   // an entry at the end of the system prompt, true by default
+
+export async function firstRequest(session: SessionStart, options: ModelOptions = {}): Promise<CacheRequest> {
   const system = await runnerSystemPrompt(session.briefing);
   if (system.append !== session.briefing) throw new Error('the runner did not append the briefing');
   const moved = system.excludeDynamicSections === true;
@@ -131,7 +137,7 @@ export async function firstRequest(session: SessionStart): Promise<CacheRequest>
       { key: `host tools ${tools}`, tokens: session.tools.length ? estimateTokens(tools) : 0 },
       { key: 'the preset, static part', tokens: 0, entry: true },
       ...(moved ? [] : [context]),
-      { key: `briefing ${session.briefing}`, tokens: estimateTokens(session.briefing), entry: true },
+      { key: `briefing ${session.briefing}`, tokens: estimateTokens(session.briefing), entry: options.systemEntry !== false },
       ...(moved ? [context] : []),
       { key: `turn ${session.prompt}`, tokens: estimateTokens(session.prompt), entry: true },
     ],
@@ -216,8 +222,8 @@ export function referenceRun(): SessionStart[] {
   ];
 }
 
-export async function measureReferenceRun(): Promise<Measure> {
-  return measure(await Promise.all(referenceRun().map(firstRequest)));
+export async function measureReferenceRun(options: ModelOptions = {}): Promise<Measure> {
+  return measure(await Promise.all(referenceRun().map((session) => firstRequest(session, options))));
 }
 
 // ---- the table ----------------------------------------------------------------
@@ -235,6 +241,6 @@ export function table(result: Measure): string {
 }
 
 if (import.meta.main) {
-  const result = await measureReferenceRun();
+  const result = await measureReferenceRun({ systemEntry: !process.argv.includes('--no-system-entry') });
   process.stdout.write(process.argv.includes('--json') ? `${JSON.stringify(result, null, 2)}\n` : `${table(result)}\n`);
 }

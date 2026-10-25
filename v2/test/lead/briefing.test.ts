@@ -1,7 +1,7 @@
 // The briefing of a lead generation (docs/v2/milestone-2-plan.md, section
-// 4.2): the lead's rules, then its open commitments and the last handover
-// record, then the memory, everything that came from a model, the owner or
-// a team quoted as data.
+// 4.2): the lead's rules, then the memory, its open commitments and the last
+// handover record, everything that came from a model, the owner or a team
+// quoted as data, and last the generation's number and start (issue #335).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { LEAD_RULES } from '../../src/lead/prompts.ts';

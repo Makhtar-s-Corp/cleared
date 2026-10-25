@@ -76,3 +76,15 @@ test('two tickets started together with the same briefing share it: the per-sess
   // A ticket with an approved decision of its own has a briefing of its own: its first variant shares the tools only.
   assert.equal(of('author LOCAL-14, variant 1 of 3').cached, tools);
 });
+
+// The lower bound: should Claude Code write no entry at the end of the system
+// prompt (sdk.d.ts says the blocks after the preset's static part are not
+// eligible for cross-session caching), only the authors' tools are shared.
+test('without an entry at the end of the system prompt, the run shares the authors\' tools alone', async () => {
+  const result = await measureReferenceRun({ systemEntry: false });
+  const sessions = referenceRun();
+  const tools = estimateTokens(JSON.stringify(sessions.find((s) => s.label === 'author LOCAL-13')!.tools));
+  assert.deepEqual(result.requests.filter((r) => r.cached > 0).map((r) => [r.label, r.cached]), [
+    ['author LOCAL-13', tools], ['author LOCAL-14, variant 1 of 3', tools], ['author LOCAL-14, variant 2 of 3', tools], ['author LOCAL-14, variant 3 of 3', tools],
+  ]);
+});

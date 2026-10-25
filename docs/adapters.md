@@ -690,7 +690,7 @@ Neither was run against the real CLI: a run needs the session image and the serv
 
 - the `claude-code` section of the doctor: the briefing's codeword (MAPLE);
 - a question about the working directory or the branch, answered from that first message;
-- a second session started with the same CLAUDE.md within 5 minutes, whose `cachedInputTokens` should then cover the briefing.
+- a second session started with the same CLAUDE.md within 5 minutes, whose `cachedInputTokens` should then cover the briefing. This one settles whether the change gains anything. The same `sdk.d.ts` says blocks after the preset's static part are not eligible for cross-session caching, and the briefing comes after it (the decisions log of 2026-10-25, P219, the lower bound).
 
 `v2/src/session/adapters/claude-code/map.ts` turns a user frame into events only for its tool results. A context message the SDK might print therefore reaches neither the ledger nor the thread (`test/session/claude-code/map.test.ts`).
 
