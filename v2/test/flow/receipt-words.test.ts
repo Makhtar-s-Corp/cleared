@@ -1,4 +1,4 @@
-// The proof receipt's words (lane j3-ui-polish, matrix P221): a receipt with
+// The proof receipt's words (lane j3-ui-polish, matrix P222): a receipt with
 // no capture claims no cause it cannot know, and the figures' source is
 // named as the ticket card names it, the agents, in both languages.
 import test from 'node:test';

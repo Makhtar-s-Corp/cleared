@@ -86,7 +86,7 @@
 .shot-img { display: block; width: 100%; height: 100%; object-fit: cover; object-position: top; border-radius: 8px; }
 .frame-phone .shot-img { border-radius: 11px; }
 .shot-none { display: flex; align-items: center; justify-content: center; height: 100%; padding: 12px; border: 1px dashed var(--dashed); border-radius: 8px; color: var(--text-faint); font-size: var(--text-md); text-align: center; }
-/* A release with no picture at all (P221): the line alone, in the facts' faint text, no empty frame. */
+/* A release with no picture at all (P222): the line alone, in the facts' faint text, no empty frame. */
 .shots-head + .shot-none { display: block; height: auto; padding: 0; border: 0; text-align: left; font-size: var(--text-sm); }
 .shot figcaption { margin-top: 6px; font-size: var(--text-sm); color: var(--text-faint); }
 .shot.after figcaption { color: var(--ok-text); font-weight: var(--weight-strong); }

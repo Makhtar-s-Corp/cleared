@@ -490,7 +490,7 @@ export function RightCards({ view, t, onFile }: { readonly view: SessionView; re
   const checks = ticketChecks(parts);
   const steps = ticketSteps(parts, view.now.getTime());
   // A Done ticket's empty lists are facts, not a wait, and its screen card,
-  // which can only say it has no picture, is not drawn (P221).
+  // which can only say it has no picture, is not drawn (P222).
   const done = view.ticket?.status === 'Done';
   return (
     <>

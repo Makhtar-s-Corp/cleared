@@ -5690,11 +5690,11 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 - Pull request: 363, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-flaky-page`.
 
-## 2026-10-25: the polish pass over the screens of the ten ideas (the author's choices, lane `j3-ui-polish`, P221)
+## 2026-10-25: the polish pass over the screens of the ten ideas (the author's choices, lane `j3-ui-polish`, P222)
 
 **The need.** No issue: the brief named `ui-overhaul-plan.md` section 5, item 3 (the art director's fresh look), and asked for Impeccable's critique and polish on the screens the ten ideas added tonight (the proof receipt, the ticket cost, the templates, the question from the Plan tab, the phone inbox, the harness stats, the production check), fixed in one pull request with before and after captures and no new feature, before `v2` goes to `main`.
 
-**Read.** `milestone-2-plan.md` has no sections 9 and 10, as earlier lanes noted. Read in their place: `milestone-1-plan.md` sections 9 and 10 (a lane edits its screen, its catalogs and its tests) and `ui-overhaul-plan.md` sections 9 and 10 (its "a mobile application" out of scope is a native application). The matrix had no line for this pass: P221 is new (no open pull request against `v2` used it).
+**Read.** `milestone-2-plan.md` has no sections 9 and 10, as earlier lanes noted. Read in their place: `milestone-1-plan.md` sections 9 and 10 (a lane edits its screen, its catalogs and its tests) and `ui-overhaul-plan.md` sections 9 and 10 (its "a mobile application" out of scope is a native application). The matrix had no line for this pass: P222 is new. P222 was free when the lane began, then pull request 365 (lane `j3-docs-slop`) took it, so this lane moved to P222.
 
 **Impeccable.** 4.7.0 in the lane's worktree, out of git (the anchored patterns were already in the shared exclude file); the installer's hooks file was removed before any edit; `DO_NOT_TRACK=1`; no live server, no listener. `critique`, two isolated assessments: the design review (Opus 5.5, on the forty before captures and the code) scored 26 of 40; the detector found nothing on the five screen files, with regex rules only (the rules that need a parsed page did not run, and no page was opened for it). `polish` was applied through the fixes below, on the screens' existing tokens and components: no new token, no orphaned style left.
 

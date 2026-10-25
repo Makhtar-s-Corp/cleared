@@ -1,4 +1,4 @@
-// The polish pass on a phone (lane j3-ui-polish, matrix P221), in a real
+// The polish pass on a phone (lane j3-ui-polish, matrix P222), in a real
 // browser on the fixtures source, at 375 and 390 pixels, in English and in
 // French: the harness pick's wins table keeps each header on one line and
 // fits its panel, and

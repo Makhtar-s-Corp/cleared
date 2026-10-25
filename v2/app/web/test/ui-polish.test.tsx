@@ -1,5 +1,5 @@
 // The polish pass over the screens the ten ideas of 2026-10-25 added (lane
-// j3-ui-polish, matrix P221, docs/v2/ui-overhaul-plan.md section 5): a Done
+// j3-ui-polish, matrix P222, docs/v2/ui-overhaul-plan.md section 5): a Done
 // ticket's right column speaks of a finished ticket and draws no card that
 // can only be empty; the Plan tab's question card says nothing twice and
 // does not explain the interface to itself; the harness pick's words say
