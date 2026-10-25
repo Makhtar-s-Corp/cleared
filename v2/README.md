@@ -160,7 +160,7 @@ A slash command `@cleared <task>` posted to `POST /hooks/chat` creates a ticket 
 
 ## GitHub Issues and Linear
 
-With `CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE` or `CLEARED_V2_MIRROR_LINEAR_TOKEN_FILE` set, the service keeps its tickets on GitHub Issues or Linear too, and brings back what people change there, every minute (P230 to P232, `src/tickets/mirror.ts`). A person's change wins over an agent's; a tracker never approves a ticket, never starts a session, and never writes as the owner. Settings, what is mirrored and the conflict rule: [docs/v2/mirrors.md](../docs/v2/mirrors.md). Linear is tested against a fake only.
+With `CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE` or `CLEARED_V2_MIRROR_LINEAR_TOKEN_FILE` set, the service keeps its tickets on GitHub Issues or Linear too, and brings back what people change there, every minute (P230 to P232, `src/tickets/mirror.ts`). A person's change wins over an agent's; a tracker never approves a ticket, never starts a session, and never writes as the owner. A person hands an issue over to Cleared there with the label `cleared` or by assigning it to the mirror's account: its ticket becomes a one-item plan that waits in the Inbox for your approval, and the lead is told (C3, P244). Settings, what is mirrored, the conflict rule and the delegation: [docs/v2/mirrors.md](../docs/v2/mirrors.md). Linear is tested against a fake only.
 
 ## The heartbeat and the status
 
@@ -168,7 +168,7 @@ The service beats every minute (`CLEARED_V2_HEARTBEAT_SECONDS`), as v1's wake di
 
 ## The service map
 
-The service reads each service's code at its base branch and draws what links them (M6, `src/map/`, the app's `/services`, reached from the tower's line of services, the palette or G M): the calls to another service's OpenAPI contract, the channels of an events contract another service names, the databases each one keeps and the tables another one reads. Each call says whether the workspace file declares it, the code shows it, or both; a call only the code shows is one the release train does not know. Picking a service shows what a change of it reaches, and the lead reads the same through its tool `service_impact` before it plans. The map is built again when a base commit moves, checked at the start, every 10 minutes (`CLEARED_V2_MAP_MINUTES`, 0 for never) and on Refresh. No setting's value is read, and only names that are identifiers are kept. What is read and the rules: the [milestone 4 plan](../docs/v2/milestone-4-plan.md), section 11.
+The service reads each service's code at its base branch and draws what links them (M6, `src/map/`, the app's `/services`, reached from the tower's line of services, the palette or G M): the calls to another service's OpenAPI contract, the channels of an events contract another service names, the databases each one keeps and the tables another one reads. Each call says whether the workspace file declares it, the code shows it, or both; a call only the code shows is one the release train does not know. Picking a service shows what a change of it reaches, and the lead reads the same through its tool `service_impact` before it plans. The map is built again when a base commit moves, checked at the start, every 10 minutes (`CLEARED_V2_MAP_MINUTES`, 0 for never) and on Refresh. No setting's value is read, and only names that are identifiers are kept. What is read and the rules: the [milestone 4 plan](../docs/v2/milestone-4-plan.md), section 12.
 
 ## The harness pick
 

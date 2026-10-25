@@ -15,7 +15,7 @@ const lead = (phase: LeadState['phase']): LeadState => ({ phase } as LeadState);
 // Go to lists every screen (the product owner's decision of 2026-10-25, 11:14, P227).
 test('the screens in order, each with its address and the chord that reaches it', () => {
   assert.deepEqual(SCREENS.map((item) => [item.screen, item.href]), [['tower', '/'], ['inbox', '/inbox'], ['session', '/sessions'], ['lead', '/lead'], ['consumption', '/consumption'], ['services', '/services']]);
-  // The service map is reached from the tower's line of services, the palette and G M, not the sidebar (milestone 4, section 11).
+  // The service map is reached from the tower's line of services, the palette and G M, not the sidebar (milestone 4, section 12).
   assert.deepEqual(NAV.map((item) => item.screen), ['tower', 'inbox', 'session', 'lead']);
   for (const item of SCREENS) {
     const chord = SHORTCUTS.find((s) => s.action.kind === 'go' && s.action.to === item.go);

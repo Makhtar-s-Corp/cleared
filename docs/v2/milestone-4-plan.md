@@ -445,22 +445,70 @@ A week other than the last seven days (no week picker, no week before); a report
 | Whether the owner wants the calendar week (from Monday) rather than the last seven days | the owner (question in the log entry, the seven days applied) |
 | Whether a week with one agent that reports no dollars should still say the dollars of the others, marked partial | the owner (question in the log entry, no dollars applied, as P211 does) |
 
-## 11. The service map (`v2-j4-service-map`, issue #397)
+## 11. Delegation from GitHub Issues and Linear (`v2-j4-delegation`, issue #398)
 
-This section was written on 2026-10-25 by the author of issue #397 (Opus 5.5), before the lane's tests and code. Sections 9 and 10 are the lanes that ran beside this one: the project page (issue #394, pull request 395) and the week's figures (issue #396, pull request 399), merged first. Inputs: issue #397, the [decisions log](decisions-log.md) (its latest entries, the ten ideas of 2026-10-25 among them: money only from a real source, fakes only), the [requirements matrix](requirements-matrix.md) (its rules, M0, M1, M5, M6, M10, P227), the [multi-repository complement](complement-multi-depots.md) (item 6), and the code at `origin/v2` `a6adcbd`. The brief named sections 9 and 10 of `milestone-2-plan.md`, which has eight, as earlier lanes noted; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md).
+Written on 2026-10-25 by the author of issue #398 (Opus 5.5), before the lane's tests and code. Sections 8 to 10 are the lanes of pull requests 393, 395 and 399, merged into `v2` before this one. Inputs: issue #398, the [decisions log](decisions-log.md) (the entries of lanes `v2-j4-issue-mirrors`, `v2-j4-mirror-followups` and `j3-chat-launch`, and the ten ideas of 2026-10-25), the matrix (C3, D17, D18, P230 to P232, P237), [mirrors.md](mirrors.md), and sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), since `milestone-2-plan.md` has no sections 9 and 10.
 
 ### 11.1 Context
 
-A workspace is several services (M0, M1), and what links them is written in one place only: each service's `consumes` line in the workspace file, which the release train reads for its landing order and its compatibility check (M5, `release/order.ts`). Nothing reads the code: a call nobody declared, an event a service listens to, a table two services write, are seen by no one, and the lead plans a ticket across services from the names of the services alone. M6 asks for a map of the services (calls, events, databases, contracts) kept up to date, an impact analysis by the lead, and a diagram in the app.
+C3 asks for work to be handed to Cleared from Linear and GitHub Issues, Slack later. The mirrors (pull requests 384 and 390) bring an issue created on a tracker into the app as a ticket, but only one created after the mirror's first pass, and the ticket then waits in Todo: a tracker never starts a session by itself (P232). No one on the tracker can say "Cleared, take this one", and the lead never hears of the issue.
 
 ### 11.2 What exists at the end, and how it is proven
+
+- **A delegation, read by each tracker.** On GitHub, the label `cleared` on an open issue, or the issue assigned to the mirror's own account. On Linear, the same label on the issue, or the issue assigned to the key's own user, in a state that is neither completed nor canceled. Who delegated and when come from the issue's events (GitHub's `labeled` and `assigned`) or its history (Linear's `addedLabelIds` and `toAssigneeId`), read with the actor rules the state uses (P231, rule 5).
+- **The mirror takes it once.** A person's delegation made after the tracker's first pass is kept in `mirror_delegations`, once per issue and time:
+  - The issue becomes a ticket when it is not one yet, whatever its creation time.
+  - An issue in a state the app does not have (Linear's Backlog or Triage) comes in Todo, and the mirror moves the tracker to Todo.
+  - The ticket goes to the lead's plans as a one-item plan bound to it, proposed, waiting in the Inbox for the owner.
+  - The lead is told in its thread: who delegated, on which tracker, the ticket and the plan.
+  - A comment on the issue, in `CLEARED_V2_APP_LANGUAGE`, gives the ticket's id and says that the owner approves it in Cleared.
+- **What it does not take.** An agent's delegation (a bot, an integration, an actor the tracker does not name) does nothing. A ticket that is not in Todo, or whose plan item still runs, gets no new plan: the comment says it is already in hand.
+- **The start is the owner's.** The owner approves the plan in the Inbox, as any plan, and the runner starts the ticket with the owner as the one who approved it. A release still waits for the owner. A rejected plan leaves the ticket in Todo.
+- **Nothing is lost while the lead is off.** With no lead running, the delegation waits in its table, and is handed over at the first pass after the lead starts.
+- Proven by new cases in `test/tickets/mirror-github.test.ts` and `mirror-linear.test.ts` (the delegation each tracker reads, against its fake), `test/tickets/mirror-delegation.test.ts` (the pass: an older issue taken, a Backlog issue in Todo, an agent's label, a ticket in hand, once only, a lead not running, the settings), `test/tickets/delegation.test.ts` (the plan bound to the ticket, its approval starting it with no second ticket, the lead's line), `test/tickets/delegation-proof.test.ts` (C3's steps on both fakes, the real ticket store and the plan runner), `test/tickets/mirror-catalog.test.ts`, and a real run on the example repository `cleared-example-guestbook`, quoted in the pull request.
+
+### 11.3 Decisions this lane takes
+
+- **The owner approves, the tracker does not.** A person on GitHub or Linear is never the owner, and nothing a tracker writes can carry the owner's signature (D18, P232). So a delegation makes the ticket and the plan, and the start waits for the owner's gesture in the app. No tracker account is linked to a user of the app, as the chat command does with `CLEARED_V2_CHAT_USERS` (P212). A start at once for linked accounts is a question for the owner, in the log entry, with this default applied.
+- **The service writes the plan, not the model.** `PlanRunner.proposeTicket` stores a one-item plan whose item is bound to the existing ticket, so the runner's approval creates no second ticket (`#createTickets` skips a bound item), and the mirror exports no second issue. Its estimate is the runner's, from the ticket's `size:<s>` label (else `s`), and its lane is the fast lane when the ticket carries the Quick label, after the services' sensitivity (decision 24). The item's body is the ticket's, with no acceptance criterion required: it is the person's text, not the model's. The lead's tools, `lead/contract.ts` and `api/types.ts` do not change.
+- **One plan per ticket at a time.** The plan's goal is `delegation-<ticket>`: a second delegation while the first plan waits replaces it, as a second proposal for a goal does.
+- **The tracker's text is data.** The lead's line names the ticket, the tracker, the issue's key and who delegated it; the title is quoted, cleaned as every text of a plan is. The lead reads the rest with its `ticket` tool. The line is in English, as the plans' other lines are.
+- **The label.** `CLEARED_V2_DELEGATION_LABEL`, `cleared` by default, compared without case; a name that starts with `status:` is refused, so it cannot be read as a state. The delegation is read whenever a mirror runs; `CLEARED_V2_DELEGATION=off` turns it off.
+- **The mirror's own account.** The mirror never puts the label on or assigns an issue, except when it creates one from a ticket that carries the label: such a label, put on within a minute of the mirror's own write, is not a delegation. Any other delegation by the mirror's account is a person's, as for a state (the mirrors' log entry, decision 4).
+- **Polling.** The delegation is read in the mirror's pass: no webhook, no new listener.
+- **Matrix lines.** P244 (the delegation); C3 updated. P243 is the week's figures' (pull request 399, issue #396); the lane of issue #397 (M6) runs beside this one, so the id is checked again at each merge of `origin/v2`.
+
+### 11.4 Out of scope
+
+Slack (C3's "later"; the chat command is P212); a start without the owner's approval; linking a tracker's people to the app's users; removing the label or the assignee to take a delegation back (a person moves the issue instead, P232 rule 7); Linear's agent delegation (an issue delegated to an application user), which needs an OAuth application; a real Linear account.
+
+### 11.5 Files this lane owns
+
+The delegation's parts of `v2/src/tickets/mirror.ts`, `mirror-tracker.ts`, `mirror-github.ts` and `mirror-linear.ts`; `v2/src/tickets/delegation.ts`; the delegation's keys of `v2/src/tickets/messages/mirror.{en,fr}.json`; `PlanRunner.proposeTicket` in `v2/src/lead/plans/runner.ts`; the wiring in `v2/src/modules/tickets.ts`; the fakes and tests named above, and the pinned tables in `test/tickets/services.test.ts`; `docs/v2/mirrors.md`; this section, its matrix lines and its log entry.
+
+### 11.6 Unknowns, and who closes them
+
+| Unknown on 2026-10-25 | Closed by |
+| --- | --- |
+| Whether GitHub records a `labeled` and an `assigned` event for an issue created with them | closed by this lane's real run on the example repository: an issue opened with the label has its `labeled` event, an assignment its `assigned` event |
+| Whether Linear's history fills `addedLabelIds` and `toAssigneeId` as its schema says, and names the actor of a label put on at creation | the owner's real trial; until then a delegation no event names is read from the issue's creator |
+
+## 12. The service map (`v2-j4-service-map`, issue #397)
+
+This section was written on 2026-10-25 by the author of issue #397 (Opus 5.5), before the lane's tests and code. Sections 9 to 11 are the lanes that ran beside this one and merged first: the project page (issue #394, pull request 395), the week's figures (issue #396, pull request 399) and the delegation (issue #398, pull request 401). This section was written as section 11 and renumbered at the merge of 401. Inputs: issue #397, the [decisions log](decisions-log.md) (its latest entries, the ten ideas of 2026-10-25 among them: money only from a real source, fakes only), the [requirements matrix](requirements-matrix.md) (its rules, M0, M1, M5, M6, M10, P227), the [multi-repository complement](complement-multi-depots.md) (item 6), and the code at `origin/v2` `a6adcbd`. The brief named sections 9 and 10 of `milestone-2-plan.md`, which has eight, as earlier lanes noted; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md).
+
+### 12.1 Context
+
+A workspace is several services (M0, M1), and what links them is written in one place only: each service's `consumes` line in the workspace file, which the release train reads for its landing order and its compatibility check (M5, `release/order.ts`). Nothing reads the code: a call nobody declared, an event a service listens to, a table two services write, are seen by no one, and the lead plans a ticket across services from the names of the services alone. M6 asks for a map of the services (calls, events, databases, contracts) kept up to date, an impact analysis by the lead, and a diagram in the app.
+
+### 12.2 What exists at the end, and how it is proven
 
 - `src/map/scan.ts`: what one service's code says, a pure function over its files, its `.cleared/agents.conf` and its contract. `src/map/source.ts`: those files read from git's objects at `refs/remotes/origin/<base>` of the service's own checkout, as the recipes and the reader read them, never the working tree. `src/map/build.ts`: the map of the workspace from each service's facts and the workspace file. `src/map/impact.ts`: the impact of a change of one or more services, a pure function, and its text for the lead. `src/map/service.ts`: the scans' table, the refresh and its timer. `src/map/routes.ts`: `GET /api/service-map` and `POST /api/service-map/refresh`. `src/map/tools.ts`: the lead's tool `service_impact`.
 - The lead module (`modules/lead.ts`) owns the table, serves the two routes, starts the timer at the service's start and gives the lead its tool through the engine's extensions, beside the plans'.
 - The app has a screen at `/services`: the diagram, its text equivalent, and the impact of the service picked. It is reached from the tower's line of services, the palette's Go to and the chord G M.
-- Proven by `test/map/scan.test.ts` (each kind of fact, the traps of 11.3), `test/map/examples.test.ts` (the two example repositories, `examples/guestbook` and `examples/filter-api`, scanned as committed), `test/map/source.test.ts` (git repositories built in the test: the base read, not the working tree; a new commit on the base changes the map; a link, a large file, a binary file are not read), `test/map/build.test.ts`, `test/map/impact.test.ts` (the same order as `landingOrder`), `test/map/service.test.ts` (the table, a scan kept while the base has not moved, the timer), `test/map/routes.test.ts`, `test/map/tools.test.ts`, `test/lead/contract.test.ts` (the tool's line), `test/api/types.test.ts` (the two routes), and the app's `app/test/services/model.test.ts`, `app/web/test/services.test.tsx`, `app/test/services/services-browser.test.ts` and `app/test/a11y-browser.test.ts` (the screen, French and English, light and dark, 1440 and 390 pixels).
+- Proven by `test/map/scan.test.ts` (each kind of fact, the traps of 12.3), `test/map/examples.test.ts` (the two example repositories, `examples/guestbook` and `examples/filter-api`, scanned as committed), `test/map/source.test.ts` (git repositories built in the test: the base read, not the working tree; a new commit on the base changes the map; a link, a large file, a binary file are not read), `test/map/build.test.ts`, `test/map/impact.test.ts` (the same order as `landingOrder`), `test/map/service.test.ts` (the table, a scan kept while the base has not moved, the timer), `test/map/routes.test.ts`, `test/map/tools.test.ts`, `test/lead/contract.test.ts` (the tool's line), `test/api/types.test.ts` (the two routes), and the app's `app/test/services/model.test.ts`, `app/web/test/services.test.tsx`, `app/test/services/services-browser.test.ts` and `app/test/a11y-browser.test.ts` (the screen, French and English, light and dark, 1440 and 390 pixels).
 
-### 11.3 What the map holds, and where each fact comes from
+### 12.3 What the map holds, and where each fact comes from
 
 | Fact | Read from | Kept |
 | --- | --- | --- |
@@ -478,7 +526,7 @@ The traps, each with its test:
 - **No value of a setting.** The map names an engine and a table, never a variable's value: `[session] env` (the guestbook's `DATABASE_URL=postgres://...`) is not read, and a test checks that no address reaches the map.
 - **What comes from a repository is an identifier or nothing.** The sessions write these repositories, and the map reaches the lead's prompt. An operation, a table, a channel and a file are kept only when they match a strict pattern (letters, digits and a few signs, a bounded length), cleaned as every lead answer is; anything else is dropped and counted. No free text of a repository (a comment, a description) is kept.
 
-### 11.4 Decisions this lane takes
+### 12.4 Decisions this lane takes
 
 - **Declared and found, both shown.** A call declared and found is the normal case. Found only: the code calls a service the workspace file does not say it consumes, so the train's order and its compatibility check do not know it; the map and the impact say so. Declared only: the workspace says it, the code shows no call the map can read (a protobuf or JSON Schema contract, a call built another way); it stays a call. The train goes on reading `consumes` alone: the map informs, it does not change a release (question for the owner, default applied, in the log entry).
 - **Kept up to date by the base commit.** The map is stored with the base commit of each service it read (`service_maps`). A refresh fetches each service's checkout (as the recipes' refresh does) and builds the map again only when a base commit, a fetch's outcome or the workspace file moved: a call is read against the provider's contract, so a provider's new commit is read with its callers. It runs at the service's start, every `CLEARED_V2_MAP_MINUTES` (10 by default, 0 for never) and on the screen's Refresh. A fetch that fails keeps the last scan and says so on that service.
@@ -489,19 +537,19 @@ The traps, each with its test:
 - **Its place.** Not a screen of the sidebar: the owner's decision of 11:14 (P227) keeps the sidebar to a few screens. It is reached from the tower's line of services, which only a workspace of several services shows, from the palette and from the chord G M (question for the owner, default applied, in the log entry).
 - **Words.** `app/messages/services.{en,fr}.json`; every time through `app/web/lib/time.ts` ("read 3 min ago", "lu il y a 3 min"). The lead's tool speaks English, as the lead's other tools do.
 - **Fixtures.** The app's fixtures serve the map of the two example repositories, scanned by the service's own code from `examples/`, so the screen shows what the service would.
-- **Matrix lines.** M6, and P245 for these choices (P240 to P243 are 395's and 399's, P244 was left free for a lane that ran beside this one).
+- **Matrix lines.** M6, and P245 for these choices (P240 to P243 are 395's and 399's, P244 is 401's).
 
-### 11.5 Out of scope
+### 12.5 Out of scope
 
 Calls found through a protobuf or JSON Schema contract, or with no contract; the languages' own parsers (the scan reads text, line by line); a message broker's configuration (Kafka topics, queues) beyond the AsyncAPI contract; changing the train's order or its compatibility check from the map; guessing the links of a workspace being connected (M10, milestone 5); editing the map by hand.
 
-### 11.6 Files this lane owns
+### 12.6 Files this lane owns
 
 `v2/src/map/`, `v2/test/map/`; the `service_impact` line of `lead/contract.ts` and its test; the map's table, routes, timer and tool in `modules/lead.ts`; the two routes and their types in `api/types.ts` and `test/api/types.test.ts`; the screen `app/web/screens/services/`, its catalogs, its fixture and its tests, and the lines of the shell that add a screen (`app/src/server.ts`, `app/src/catalog.ts`, `app/web/lib/{routes,router,catalogs}.ts`, `app/web/shell/{model,keys}.ts`, the shell's catalogs), the tower's link; the browser test's line in `.github/workflows/v2.yml`; a section of `v2/README.md`; its lines of the matrix and its log entry.
 
-### 11.7 Unknowns, and who closes them
+### 12.7 Unknowns, and who closes them
 
 | Unknown on 2026-10-25 | Closed by |
 | --- | --- |
-| Whether the first piloted project's calls are found by the rule of 11.3 (its code may build its addresses another way) | the owner, on its map: a call declared and not found says it |
+| Whether the first piloted project's calls are found by the rule of 12.3 (its code may build its addresses another way) | the owner, on its map: a call declared and not found says it |
 | Whether the caps (2 000 files, 16 MB) fit the first piloted project's repositories | the map says a service past a cap; the caps are constants of `map/source.ts` |

@@ -14,7 +14,7 @@ export { itemServices } from './store.ts';
 export const MAX_ITEMS = 12;
 export const MAX_TITLE = 120;
 const MAX_SUMMARY = 2000;
-const MAX_BODY = 20_000;
+export const MAX_BODY = 20_000;
 const CRITERION = /^\s*[-*] \[ \] \S/m;
 
 export type ValidStep = NonNullable<PlanItemInput['steps']>[number];

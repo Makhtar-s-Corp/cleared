@@ -1,5 +1,5 @@
 // What one service's code says about the others (docs/v2/milestone-4-plan.md,
-// section 11.3), read line by line from its files, its agents.conf and its
+// section 12.3), read line by line from its files, its agents.conf and its
 // package.json, with no parser of any language:
 //
 //   a call       a path of another service's OpenAPI contract, on a line

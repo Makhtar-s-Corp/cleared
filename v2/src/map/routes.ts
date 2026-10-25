@@ -1,4 +1,4 @@
-// The service map's routes (docs/v2/milestone-4-plan.md, section 11.4),
+// The service map's routes (docs/v2/milestone-4-plan.md, section 12.4),
 // registered by the lead module: GET /api/service-map, the stored map,
 // built at the first read when it never was; and POST
 // /api/service-map/refresh, for a user the service knows, which fetches

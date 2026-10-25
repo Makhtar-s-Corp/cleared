@@ -1,4 +1,4 @@
-// The map kept up to date (section 11.4): built at the first refresh and
+// The map kept up to date (section 12.4): built at the first refresh and
 // stored; built again only when a service's base commit, a fetch's outcome
 // or the workspace file moved; one refresh at a time; a timer of
 // CLEARED_V2_MAP_MINUTES (10, 0 for never).

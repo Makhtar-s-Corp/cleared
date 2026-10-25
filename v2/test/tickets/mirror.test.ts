@@ -631,12 +631,12 @@ test('the settings: nothing configured is no mirror; tokens come from files; an 
   writeFileSync(file, `${value}\n`, { mode: 0o600 });
   assert.equal(loadMirrorConfig({}), undefined);
   const github = loadMirrorConfig({ CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE: file });
-  assert.deepEqual(github, { pollMs: 60_000, language: 'fr', github: { api: 'https://api.github.com', token: value } });
+  assert.deepEqual(github, { pollMs: 60_000, language: 'fr', github: { api: 'https://api.github.com', token: value }, delegation: { label: 'cleared' } });
   const linear = loadMirrorConfig({
     CLEARED_V2_MIRROR_LINEAR_TOKEN_FILE: file, CLEARED_V2_MIRROR_LINEAR_TEAM: 'ENG', CLEARED_V2_MIRROR_LINEAR_API: 'http://127.0.0.1:4567/graphql',
     CLEARED_V2_MIRROR_POLL_SECONDS: '30', CLEARED_V2_APP_LANGUAGE: 'en',
   });
-  assert.deepEqual(linear, { pollMs: 30_000, language: 'en', linear: { api: 'http://127.0.0.1:4567/graphql', token: value, team: 'ENG' } });
+  assert.deepEqual(linear, { pollMs: 30_000, language: 'en', linear: { api: 'http://127.0.0.1:4567/graphql', token: value, team: 'ENG' }, delegation: { label: 'cleared' } });
   const refused: [Record<string, string>, RegExp][] = [
     [{ CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE: join(dir, 'missing') }, /CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE/],
     [{ CLEARED_V2_MIRROR_LINEAR_TOKEN_FILE: file }, /CLEARED_V2_MIRROR_LINEAR_TEAM/],

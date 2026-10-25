@@ -1,4 +1,4 @@
-// The map kept up to date (docs/v2/milestone-4-plan.md, section 11.4): one
+// The map kept up to date (docs/v2/milestone-4-plan.md, section 12.4): one
 // row per workspace in service_maps, the map and the key it was built
 // from. A refresh fetches each service's checkout, reads each base commit,
 // and builds the map again only when the key moved: a base commit, a

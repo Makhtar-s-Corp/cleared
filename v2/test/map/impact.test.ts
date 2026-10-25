@@ -1,4 +1,4 @@
-// The impact of a change (section 11.4): who calls the services changed,
+// The impact of a change (section 12.4): who calls the services changed,
 // directly and through others; who listens to their channels; who shares
 // their databases; which callers must change with a contract; the landing
 // order, the train's own function's; and the text the lead reads.

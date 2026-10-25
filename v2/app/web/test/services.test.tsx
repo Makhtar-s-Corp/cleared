@@ -1,4 +1,4 @@
-// The service map screen as HTML (milestone 4, section 11): the drawing is
+// The service map screen as HTML (milestone 4, section 12): the drawing is
 // one image with its name, the links are said in words beside it, each
 // service is a button that shows its impact, the legend says each kind in
 // words as well as by its line; in both languages, every word from the

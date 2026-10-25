@@ -1,5 +1,5 @@
 // A service's files as the map reads them (docs/v2/milestone-4-plan.md,
-// section 11.3): from git's objects at refs/remotes/origin/<base> of the
+// section 12.3): from git's objects at refs/remotes/origin/<base> of the
 // service's own checkout, which no session writes, as the recipes and the
 // reader read theirs; never the working tree or an unpushed commit. A
 // folder of a monorepo is read alone, its paths inside it. Only plain

@@ -1,4 +1,4 @@
-// The lead's tool service_impact (section 11.4): given the services a goal
+// The lead's tool service_impact (section 12.4): given the services a goal
 // changes, the impact read from the map, built first when it never was;
 // refused with a sentence the model reads for a service the workspace does
 // not have, an empty list, or a map not running yet.

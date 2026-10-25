@@ -1,4 +1,4 @@
-// A service's files as its base branch holds them (section 11.3): read from
+// A service's files as its base branch holds them (section 12.3): read from
 // git's objects at refs/remotes/origin/<base> of the service's own checkout,
 // never its working tree; plain text files within the caps; a folder of a
 // monorepo read alone. And the same rules on a folder of the disk, which the

@@ -1,4 +1,4 @@
-// The map's two routes (section 11.4): GET /api/service-map, built at the
+// The map's two routes (section 12.4): GET /api/service-map, built at the
 // first read, and POST /api/service-map/refresh, for a known user; the app's
 // proof first, then the flow running. The lead module declares them, their
 // table, and gives the lead its tool.

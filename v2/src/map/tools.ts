@@ -1,5 +1,5 @@
 // The lead's tool service_impact (docs/v2/milestone-4-plan.md, section
-// 11.4), given to the lead's engine through its extensions, beside the
+// 12.4), given to the lead's engine through its extensions, beside the
 // plans' tools: the services a goal changes in, the impact read from the
 // map out (impact.ts impactText), the map built first when it never was.
 // Its line, description and schema are lead/contract.ts's.

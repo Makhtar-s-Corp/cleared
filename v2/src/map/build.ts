@@ -1,4 +1,4 @@
-// The map of a workspace (docs/v2/milestone-4-plan.md, section 11): each
+// The map of a workspace (docs/v2/milestone-4-plan.md, section 12): each
 // service's read, scanned against the others' contracts, joined with what
 // the workspace file declares. A call is declared (the consumer's
 // `consumes`), found (scan.ts), or both; an event goes from the service

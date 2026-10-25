@@ -12,7 +12,7 @@
 // Origin (schedules/budget.ts). The quota reading (issue #270) is its too,
 // beside the Consumption screen it feeds: each harness's windows read every
 // CLEARED_V2_QUOTA_MINUTES (60; 0 turns it off) into quota_readings. The
-// service map (docs/v2/milestone-4-plan.md, section 11) is its too: its
+// service map (docs/v2/milestone-4-plan.md, section 12) is its too: its
 // table and its two routes, its refresh at the start and every
 // CLEARED_V2_MAP_MINUTES (10; 0 turns it off), and the lead's tool
 // service_impact, given with the plans' tools through the extensions.

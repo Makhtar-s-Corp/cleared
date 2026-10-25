@@ -1,4 +1,4 @@
-// The service map screen's rules (milestone 4, section 11): the drawing's
+// The service map screen's rules (milestone 4, section 12): the drawing's
 // places, callers to the left of the services they call and databases under
 // their owner; the links in words, which the drawing only repeats; the
 // impact of the service picked; the map's age and problems in readable

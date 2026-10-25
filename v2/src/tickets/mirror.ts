@@ -19,6 +19,13 @@
 // go both ways too, each settled by decide() against the value both sides
 // last agreed on (mirror_fields); and each write in the app says its ticket
 // to the change stream (MirrorDeps.changed), so an open page redraws.
+//
+// A delegation (C3, P244): a person hands an issue over on a tracker (the
+// delegation label, or the issue assigned to the mirror's account). The
+// mirror makes it a ticket if it is not one yet, whatever its age, and hands
+// the ticket to the lead's plans (MirrorDeps.delegate), once per issue and
+// time (mirror_delegations), then says on the issue what became of it. The
+// plans propose it to the owner: the tracker still starts nothing (P232).
 import { readFileSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import type { Language } from '../../app/src/catalog.ts';
@@ -27,9 +34,11 @@ import type { UserId } from '../session/contract.ts';
 import type { Actor, Comment, Ticket, TicketId, TicketStore } from './contract.ts';
 import { GitHubTracker } from './mirror-github.ts';
 import { LinearTracker } from './mirror-linear.ts';
-import type { Tracker, TrackerComment, TrackerIssue } from './mirror-tracker.ts';
+import { DELEGATION_LABEL, type Tracker, type TrackerComment, type TrackerIssue } from './mirror-tracker.ts';
 
-export { TrackerError, type Tracker, type TrackerChange, type TrackerComment, type TrackerEdit, type TrackerIssue } from './mirror-tracker.ts';
+export {
+  DELEGATION_LABEL, TrackerError, type Tracker, type TrackerChange, type TrackerComment, type TrackerDelegation, type TrackerEdit, type TrackerIssue,
+} from './mirror-tracker.ts';
 
 export const MIRROR_ACTOR: Actor = { kind: 'agents', id: 'cleared-mirror' };
 export const MIRROR_MESSAGES_DIR = new URL('./messages/', import.meta.url).pathname;
@@ -75,6 +84,12 @@ export const MIRROR_TABLES: string[] = [
   ticket TEXT NOT NULL, tracker TEXT NOT NULL, local TEXT, remote TEXT NOT NULL, at TEXT NOT NULL, UNIQUE (tracker, remote)
 )`,
   'CREATE INDEX IF NOT EXISTS mirror_comments_local ON mirror_comments(tracker, local)',
+  // Each delegation (P244), once per issue and time: its ticket, and what
+  // the plans made of it once they were told (null until then).
+  `CREATE TABLE IF NOT EXISTS mirror_delegations (
+  tracker TEXT NOT NULL, issue TEXT NOT NULL, at TEXT NOT NULL, ticket TEXT NOT NULL, who TEXT NOT NULL, outcome TEXT, told_at TEXT,
+  PRIMARY KEY (tracker, issue, at)
+)`,
 ];
 
 // ---- the rule ----------------------------------------------------------
@@ -109,6 +124,7 @@ export type MirrorConfig = {
   readonly language: Language;
   readonly github?: { readonly api: string; readonly token: string };
   readonly linear?: { readonly api: string; readonly token: string; readonly team: string };
+  readonly delegation?: { readonly label: string };    // none: CLEARED_V2_DELEGATION=off
 };
 
 export class MirrorConfigError extends Error {
@@ -153,12 +169,16 @@ export function loadMirrorConfig(env: NodeJS.ProcessEnv = process.env): MirrorCo
     if (!team) throw new MirrorConfigError('CLEARED_V2_MIRROR_LINEAR_TEAM must name the Linear team (its key, such as ENG)');
     linear = { api: apiFrom('CLEARED_V2_MIRROR_LINEAR_API', env.CLEARED_V2_MIRROR_LINEAR_API, LINEAR_API), token: tokenFrom('CLEARED_V2_MIRROR_LINEAR_TOKEN_FILE', linearFile), team };
   }
+  const switched = env.CLEARED_V2_DELEGATION?.trim() || 'on';
+  if (switched !== 'on' && switched !== 'off') throw new MirrorConfigError(`CLEARED_V2_DELEGATION must be on or off, got "${switched}"`);
+  const label = env.CLEARED_V2_DELEGATION_LABEL?.trim() || DELEGATION_LABEL;
+  if (label.toLowerCase().startsWith('status:')) throw new MirrorConfigError('CLEARED_V2_DELEGATION_LABEL must not start with status:, which names a state');
   const github = githubFile
     ? { api: apiFrom('CLEARED_V2_MIRROR_GITHUB_API', env.CLEARED_V2_MIRROR_GITHUB_API, GITHUB_API), token: tokenFrom('CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE', githubFile) }
     : undefined;
   return {
     pollMs: poll * 1000, language: env.CLEARED_V2_APP_LANGUAGE?.trim() === 'en' ? 'en' : 'fr',
-    ...(github ? { github } : {}), ...(linear ? { linear } : {}),
+    ...(github ? { github } : {}), ...(linear ? { linear } : {}), ...(switched === 'on' ? { delegation: { label } } : {}),
   };
 }
 
@@ -170,6 +190,17 @@ export type MirrorFlow = {
   isActive(ticket: TicketId): boolean;
   setAside(ticket: TicketId, by: UserId, words: { readonly note: string; readonly message: string }): Promise<unknown>;
 };
+
+// A delegated ticket, as the mirror hands it to the lead's plans
+// (tickets/delegation.ts), and what they made of it: a plan proposed, or
+// the ticket already in hand (an item of a plan, or in a state past Todo).
+// No outcome: the plans do not run yet, and the mirror asks again at its
+// next pass.
+export type DelegationRequest = {
+  readonly ticket: Ticket; readonly tracker: string; readonly key: string; readonly url: string; readonly who: string;
+};
+export type DelegationOutcome = { readonly plan: string } | { readonly inPlan: string } | { readonly inState: string };
+export type MirrorDelegate = (request: DelegationRequest) => Promise<DelegationOutcome | undefined>;
 
 export type MirrorDeps = {
   readonly db: DatabaseSync;
@@ -183,6 +214,8 @@ export type MirrorDeps = {
   readonly log?: (line: string) => void;
   // A ticket the mirror wrote in the app (created, moved, edited, commented).
   readonly changed?: (ticket: TicketId) => void;
+  // A delegation's ticket handed to the plans; none: delegations are not read.
+  readonly delegate?: MirrorDelegate;
 };
 
 // A tracker's list is read from a little before the last read, so that a
@@ -284,7 +317,9 @@ export class Mirror {
       const row = this.#db.prepare('SELECT * FROM mirror_links WHERE tracker = ? AND issue = ?').get(tracker.name, issue.id) as Row | undefined;
       if (row) this.#read(tracker, linkOf(row), issue);
       else if (Date.parse(issue.createdAt) >= Date.parse(startedAt) && issue.status !== null) await this.#import(tracker, issue, issue.status);
+      if (this.#deps.delegate) await this.#delegated(tracker, issue, startedAt);
     }
+    if (this.#deps.delegate) await this.#handOver(tracker, this.#deps.delegate);
     for (const comment of await tracker.commentsSince(since)) await this.#comeIn(tracker, comment);
     for (const ticket of await this.#deps.tickets.list({ project: this.#deps.project })) {
       if (Date.parse(ticket.createdAt) < Date.parse(startedAt) || !this.#holds(tracker, ticket) || this.#link(ticket.id, tracker.name)) continue;
@@ -490,6 +525,59 @@ export class Mirror {
     this.#paired(link.ticket, tracker.name, null, await tracker.comment(link.issue, text));
   }
 
+  // ---- a delegation (C3, P244) ----------------------------------------
+
+  // A person's delegation made after the tracker's first pass, recorded
+  // once with its ticket. The mirror's account labels an issue only when it
+  // creates one from a ticket that has the label: within a minute of one of
+  // its writes, its delegation is that. An issue in a state the app does
+  // not have comes in Todo, and the tracker is moved there with it.
+  async #delegated(tracker: Tracker, issue: TrackerIssue, startedAt: string): Promise<void> {
+    const delegation = issue.delegation;
+    if (!delegation || delegation.actor === 'agent' || Date.parse(delegation.at) < Date.parse(startedAt)) return;
+    if (this.#db.prepare('SELECT 1 FROM mirror_delegations WHERE tracker = ? AND issue = ? AND at = ?').get(tracker.name, issue.id, delegation.at)) return;
+    if (delegation.actor === 'mirror' && this.#wroteNear(tracker.name, issue.id, delegation.at)) return;
+    const states = this.#deps.tickets.states;
+    if (!this.#issueLink(tracker, issue.id)) await this.#import(tracker, issue, issue.status ?? states.todo);
+    const link = this.#issueLink(tracker, issue.id) as Link;
+    if (issue.status === null && (await this.#deps.tickets.get(link.ticket))?.status === states.todo) await this.#push(tracker, link, states.todo);
+    this.#db.prepare('INSERT OR IGNORE INTO mirror_delegations (tracker, issue, at, ticket, who) VALUES (?, ?, ?, ?, ?)').run(tracker.name, issue.id, delegation.at, link.ticket, delegation.who);
+  }
+
+  // Each delegation not yet told to the plans, in order; once told, the
+  // issue says what became of it. Plans that do not run yet: the rest waits.
+  async #handOver(tracker: Tracker, delegate: MirrorDelegate): Promise<void> {
+    const waiting = this.#db.prepare('SELECT * FROM mirror_delegations WHERE tracker = ? AND told_at IS NULL ORDER BY at, rowid').all(tracker.name) as Row[];
+    for (const row of waiting) {
+      const link = this.#link(String(row.ticket) as TicketId, tracker.name);
+      const ticket = link ? await this.#deps.tickets.get(link.ticket) : undefined;
+      const told = this.#db.prepare('UPDATE mirror_delegations SET outcome = ?, told_at = ? WHERE tracker = ? AND issue = ? AND at = ?');
+      if (!link || !ticket) {
+        told.run('gone', this.#iso(), tracker.name, String(row.issue), String(row.at));
+        continue;
+      }
+      const where = this.#db.prepare('SELECT key, url FROM mirror_links WHERE ticket = ? AND tracker = ?').get(link.ticket, tracker.name) as Row;
+      const who = String(row.who);
+      const outcome = await delegate({ ticket, tracker: tracker.title, key: String(where.key), url: String(where.url), who });
+      if (!outcome) return;
+      const text = 'plan' in outcome ? this.#t('delegated', { who, ticket: ticket.id, plan: outcome.plan })
+        : 'inPlan' in outcome ? this.#t('delegated_in_plan', { who, ticket: ticket.id, plan: outcome.inPlan })
+        : this.#t('delegated_in_state', { who, ticket: ticket.id, state: outcome.inState });
+      told.run(JSON.stringify(outcome), this.#iso(), tracker.name, String(row.issue), String(row.at));
+      this.#paired(ticket.id, tracker.name, null, await tracker.comment(link.issue, text));
+    }
+  }
+
+  #issueLink(tracker: Tracker, issue: string): Link | undefined {
+    const row = this.#db.prepare('SELECT * FROM mirror_links WHERE tracker = ? AND issue = ?').get(tracker.name, issue) as Row | undefined;
+    return row ? linkOf(row) : undefined;
+  }
+
+  #wroteNear(tracker: string, issue: string, at: string): boolean {
+    const writes = this.#db.prepare('SELECT at FROM mirror_writes WHERE tracker = ? AND issue = ?').all(tracker, issue) as Row[];
+    return writes.some((w) => Math.abs(Date.parse(String(w.at)) - Date.parse(at)) <= ECHO_WINDOW_MS);
+  }
+
   // ---- the follow-ups: the text and the comments (P237) ---------------
 
   // The app's side of a field: who made the value the mirror wrote, as
@@ -576,23 +664,24 @@ export function createMirror(config: MirrorConfig | undefined, deps: {
   readonly db: DatabaseSync; readonly tickets: TicketStore; readonly project: string;
   readonly services: readonly { readonly name: string; readonly repo: string }[];
   readonly flow?: () => MirrorFlow | undefined; readonly now?: () => Date; readonly log?: (line: string) => void;
-  readonly changed?: (ticket: TicketId) => void;
+  readonly changed?: (ticket: TicketId) => void; readonly delegate?: MirrorDelegate;
 }): Mirror | undefined {
   if (!config) return undefined;
   const trackers: Tracker[] = [];
   const states = deps.tickets.states;
+  const delegationLabel = config.delegation?.label ?? DELEGATION_LABEL;
   if (config.github) {
     const seen = new Set<string>();
     for (const service of deps.services) {
       if (seen.has(service.repo)) continue;
       seen.add(service.repo);
-      trackers.push(new GitHubTracker({ api: config.github.api, token: config.github.token, repo: service.repo, service: service.name, states }));
+      trackers.push(new GitHubTracker({ api: config.github.api, token: config.github.token, repo: service.repo, service: service.name, states, delegationLabel }));
     }
   }
-  if (config.linear) trackers.push(new LinearTracker({ api: config.linear.api, token: config.linear.token, team: config.linear.team, states }));
+  if (config.linear) trackers.push(new LinearTracker({ api: config.linear.api, token: config.linear.token, team: config.linear.team, states, delegationLabel }));
   return new Mirror({
     db: deps.db, tickets: deps.tickets, trackers, project: deps.project, services: deps.services.map((s) => s.name), language: config.language,
     ...(deps.flow ? { flow: deps.flow } : {}), ...(deps.now ? { now: deps.now } : {}), ...(deps.log ? { log: deps.log } : {}),
-    ...(deps.changed ? { changed: deps.changed } : {}),
+    ...(deps.changed ? { changed: deps.changed } : {}), ...(deps.delegate && config.delegation ? { delegate: deps.delegate } : {}),
   });
 }

@@ -1,5 +1,5 @@
 // The map of a workspace from each service's read and the workspace file
-// (section 11.4): a call declared, found, or both; an event from a provider's
+// (section 12.4): a call declared, found, or both; an event from a provider's
 // channels to who listens; a database and who else reads its tables; what
 // could not be read said per service.
 import test from 'node:test';

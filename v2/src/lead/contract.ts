@@ -17,7 +17,7 @@ export const LEAD_TICKET = 'lead';
 export const LEAD_TOOL_NAMES = [
   'state', 'ticket', 'session', 'search_memory', 'propose_plan', 'start_ticket', 'stop_session',
   'message_session', 'answer_question', 'commit', 'fulfil', 'tell_owner', 'handover',
-  // The service map's (docs/v2/milestone-4-plan.md, section 11), whose handler is map/tools.ts's.
+  // The service map's (docs/v2/milestone-4-plan.md, section 12), whose handler is map/tools.ts's.
   'service_impact',
 ] as const;
 export type LeadToolName = (typeof LEAD_TOOL_NAMES)[number];

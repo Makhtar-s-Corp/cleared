@@ -1,5 +1,5 @@
 // The service map screen's rules (docs/v2/milestone-4-plan.md, section
-// 11.4): where each box of the drawing goes, callers left of the services
+// 12.4): where each box of the drawing goes, callers left of the services
 // they call and each database under its owner; the links in words, which
 // the drawing only repeats; the impact of the service picked, as the
 // service computed it; the map's age and its problems. No React here, so

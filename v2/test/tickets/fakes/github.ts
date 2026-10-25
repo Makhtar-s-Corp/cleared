@@ -2,7 +2,8 @@
 // writes, on loopback, port 0. Each token is an account; a test acts on an
 // issue as a person or a bot through the methods, the mirror through HTTP.
 // As GitHub's, its issue events say a change of the title (`renamed`) and
-// nothing of a change of the body.
+// nothing of a change of the body. An assignment is an `assigned` event
+// naming its assignee (a delegation, C3, P244).
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
@@ -10,11 +11,11 @@ export type FakeAccount = { readonly login: string; readonly type: 'User' | 'Bot
 type Label = { name: string };
 type Issue = {
   number: number; title: string; body: string | null; state: 'open' | 'closed'; state_reason: string | null;
-  labels: Label[]; created_at: string; updated_at: string; html_url: string; user: FakeAccount; pull_request?: { url: string };
+  labels: Label[]; assignees: FakeAccount[]; created_at: string; updated_at: string; html_url: string; user: FakeAccount; pull_request?: { url: string };
 };
 type Event = {
   id: number; event: string; actor: FakeAccount | null; created_at: string; label?: Label; state_reason?: string | null;
-  rename?: { from: string; to: string }; performed_via_github_app: unknown;
+  rename?: { from: string; to: string }; assignee?: FakeAccount; performed_via_github_app: unknown;
 };
 export type FakeComment = { id: number; body: string; user: FakeAccount; created_at: string; updated_at: string; issue_url: string; performed_via_github_app: unknown };
 
@@ -67,7 +68,7 @@ export class FakeGitHub {
     const number = this.#next++;
     const issue: Issue = {
       number, title: input.title, body: input.body ?? null, state: 'open', state_reason: null,
-      labels: (input.labels ?? []).map((name) => ({ name })), created_at: at, updated_at: at,
+      labels: (input.labels ?? []).map((name) => ({ name })), assignees: [], created_at: at, updated_at: at,
       html_url: `https://github.com/${repo}/issues/${number}`, user: by,
       ...(input.pullRequest ? { pull_request: { url: `https://api.github.com/repos/${repo}/pulls/${number}` } } : {}),
     };
@@ -95,6 +96,20 @@ export class FakeGitHub {
     issue.labels = issue.labels.filter((l) => l.name !== name);
     this.#record(repo, number, by, 'unlabeled', { label: { name } });
     return true;
+  }
+
+  assign(repo: string, number: number, by: FakeAccount, assignee: FakeAccount): void {
+    const issue = this.issue(repo, number);
+    if (issue.assignees.some((a) => a.login === assignee.login)) return;
+    issue.assignees.push(assignee);
+    this.#record(repo, number, by, 'assigned', { assignee });
+  }
+
+  unassign(repo: string, number: number, by: FakeAccount, assignee: FakeAccount): void {
+    const issue = this.issue(repo, number);
+    if (!issue.assignees.some((a) => a.login === assignee.login)) return;
+    issue.assignees = issue.assignees.filter((a) => a.login !== assignee.login);
+    this.#record(repo, number, by, 'unassigned', { assignee });
   }
 
   // A person moves the issue as GitHub's screen does: the old status label off, the new one on.

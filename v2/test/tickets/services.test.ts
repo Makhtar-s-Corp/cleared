@@ -61,7 +61,7 @@ test('the tickets module declares the workspace tables apart from the v1 tracker
   assert.deepEqual(tickets.tables, [...TICKET_TABLES, ...WORKSPACE_TABLES, ...MIRROR_TABLES]);
   // The follow-ups' tables come after 384's (P237), never as new columns of its tables.
   const made = MIRROR_TABLES.flatMap((statement) => /^CREATE TABLE IF NOT EXISTS (\w+)/.exec(statement)?.[1] ?? []);
-  assert.deepEqual(made, ['mirror_trackers', 'mirror_links', 'mirror_applied', 'mirror_writes', 'mirror_followed', 'mirror_fields', 'mirror_edits', 'mirror_comments']);
+  assert.deepEqual(made, ['mirror_trackers', 'mirror_links', 'mirror_applied', 'mirror_writes', 'mirror_followed', 'mirror_fields', 'mirror_edits', 'mirror_comments', 'mirror_delegations']);
   for (const statement of WORKSPACE_TABLES) assert.match(statement, /^CREATE TABLE IF NOT EXISTS (workspaces|services|ticket_services) /);
   assert.deepEqual(tickets.routes.map((r) => `${r.method} ${r.path}`), ['GET /api/workspace']);
 });

@@ -1,4 +1,4 @@
-// What one service's code says (docs/v2/milestone-4-plan.md, section 11.3):
+// What one service's code says (docs/v2/milestone-4-plan.md, section 12.3):
 // the calls to a provider's contract, the channels it listens to, its
 // databases and their tables, read line by line from its files, its
 // agents.conf and its package.json; and the traps the example repositories

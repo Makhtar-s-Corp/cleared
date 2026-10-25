@@ -1,5 +1,5 @@
 // The impact of a change of one or more services (docs/v2/milestone-4-plan.md,
-// section 11.4), from the map alone: who calls them, directly or through
+// section 12.4), from the map alone: who calls them, directly or through
 // others; who listens to their channels; who shares their databases; which
 // callers must change in the same ticket when a contract changes (the rule
 // the release card applies, release/order.ts compatibility); and the order

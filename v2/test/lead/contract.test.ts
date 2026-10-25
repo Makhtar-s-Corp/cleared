@@ -35,7 +35,7 @@ const shape = (schema: JsonSchema): unknown => {
   return schema.type;
 };
 
-test('the lead has the thirteen host tools of section 3.2, then the service map\'s (milestone 4, section 11), in its order, each in the schema subset', () => {
+test('the lead has the thirteen host tools of section 3.2, then the service map\'s (milestone 4, section 12), in its order, each in the schema subset', () => {
   assert.deepEqual([...LEAD_TOOL_NAMES], [
     'state', 'ticket', 'session', 'search_memory', 'propose_plan', 'start_ticket', 'stop_session',
     'message_session', 'answer_question', 'commit', 'fulfil', 'tell_owner', 'handover', 'service_impact',

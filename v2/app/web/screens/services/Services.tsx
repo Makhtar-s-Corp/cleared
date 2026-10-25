@@ -1,4 +1,4 @@
-// The service map screen (docs/v2/milestone-4-plan.md, section 11.4): the
+// The service map screen (docs/v2/milestone-4-plan.md, section 12.4): the
 // drawing of the workspace's services, their databases and the links
 // between them, one image with its name; beside it the same links in words,
 // which is what a screen reader and a narrow screen read; the services as

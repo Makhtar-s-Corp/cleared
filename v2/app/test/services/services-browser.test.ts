@@ -1,4 +1,4 @@
-// The service map in a real browser (milestone 4, section 11), on the
+// The service map in a real browser (milestone 4, section 12), on the
 // fixtures source, which serves the example workspace's map read by the
 // service's own code: it opens from the tower's line of services and from
 // the G M chord without a reload; a service picked by the keyboard shows
