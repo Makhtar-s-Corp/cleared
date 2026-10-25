@@ -6420,3 +6420,26 @@ The choice is one condition in `#goOut` (`src/tickets/mirror.ts`).
 
 - Pull request: 388, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-cleanup`; the decisions: the owner, 2026-10-25 16:30 (the guard) and 16:34 (the quota).
+
+## 2026-10-25: the project page per service, for folder services, in the workspace, and in the lead's briefing (the author's choices, lane `v2-j4-project-page`, P59, P240 to P242, issue #394)
+
+**The need.** Issue #394, matrix P59 (from issue #274): a page per service, made at its first connection, made again after each merge, read by the sessions at their start, tested on an example repository. Milestone 3 made the page (pull requests 313 and 363, P101 to P105) and left P59 `later`. This lane read what was left. A folder service of a monorepo got a page of the whole repository under its own name. The only example test copied the guestbook alone. The lead's briefing read a service's committed `docs/project.md` and nothing else. The plan is section 8 of [milestone-4-plan.md](milestone-4-plan.md). The brief named sections 9 and 10 of `milestone-2-plan.md`, which has eight; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), as the earlier lanes did.
+
+**The branch.** The brief asked for `v2/j4-project-page`. Git refuses that name while a local branch `v2` exists, since one ref cannot be both a file and a folder, and no branch is deleted. The lane runs on `v2-j4-project-page`, the `v2-jN-topic` form of B4.1 that the other lanes of milestone 4 use.
+
+**Decision.**
+1. **A folder service's page is its folder's (P240).** `PageSource` takes the service's `path`. The layout is `git ls-tree` under the folder, to two levels below it, with the repository's paths as they are, so a session can use them as written. `package.json` and `README.md` are the folder's. The recent decisions are the first-parent commits that touched the folder or `.cleared/agents.conf`, whose safe commands are the repository's, as `settings()` reads them. The scripts are said to run from the folder.
+2. **The folder's tip, not the base's.** The page names the last commit that touched what it is made from (`git rev-list -1 <base> -- <folder> .cleared/agents.conf`), so `updateProjectPage` keeps its one check, "the page names its tip", and a merge in another folder writes nothing. A whole repository keeps the base's tip, as before.
+3. **Where the service sits (P241).** The page's architecture adds the services it consumes and the contract it provides, as the workspace's configuration names them. A one-service workspace names neither, so its page is unchanged.
+4. **The lead's line (P242).** A service with no committed page gets its line in the lead's briefing from its generated page: the README's first paragraph, else the package's name (`pageSummary`), never the page's own heading, which would say only its name. The workspace's own service gets one too when its memory holds no committed page. That line is counted in the budget before the memory is read and dropped when the memory holds the committed page, so the budget is never passed.
+5. **No user string.** The page stays English, written for the sessions; nothing a person reads in the app changed, so no catalog changed.
+
+**Not done, and why.** No screen shows the page, and it is not edited by hand. A project's decisions folder still goes through `lib/memory`. A folder service whose checkout is the workspace's own still has no line of its own in the lead's briefing, as before: the default checkout of a folder service is its own (`<state>/services/<name>/checkout`).
+
+**Tests first.** `273f461` committed the plan's section and the tests alone. On `origin/v2` 5 of the 9 new tests failed: the workspace part of the page, the three folder cases and the lead's line of a service with no committed page. The 4 that pass guard what already worked: a session of each repository service briefed on its own page, a merge on one service leaving the other's page unwritten, no secret in either example's page, and a committed page staying the lead's line. The tests run on local bare repositories seeded from the tracked files of `examples/guestbook` and `examples/filter-api`, as `examples/workspace.conf` names them. The implementation commit also types one helper of the lead's test, which the typecheck refused.
+
+**Checks.** `npm run typecheck`; `npm test`; `npm run guard -- --base origin/v2`. The counts are in the pull request.
+
+**Resources.** No Docker object, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no port, no secret.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-project-page`.

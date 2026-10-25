@@ -134,7 +134,7 @@ async function leadWithPages(committed: boolean) {
   const { ensureProjectPage } = await import('../../src/workspace/project-page.ts');
   const { AGENTS_CONF, remote, tempDir } = await import('../workspace/git.ts');
   const root = tempDir('lead-pages');
-  const page = (text: string) => (committed ? { 'docs/project.md': text } : {});
+  const page = (text: string): Record<string, string> => (committed ? { 'docs/project.md': text } : {});
   const workspace = await projectCheckout({ url: remote({ 'README.md': '# Guestbook\n\nA web page that lists entries and adds one.\n', ...page('# Guestbook, as committed\n') }), dir: join(root, 'guestbook'), base: 'main' });
   const filter = await projectCheckout({ url: remote({ '.cleared/agents.conf': AGENTS_CONF, 'package.json': JSON.stringify({ name: 'filter-api' }), ...page('# Filter API, as committed\n') }), dir: join(root, 'filter-api'), base: 'main' });
   const env: NodeJS.ProcessEnv = { ...process.env, CLEARED_STATE_DIR: join(root, 'state') };

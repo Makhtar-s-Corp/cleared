@@ -68,7 +68,10 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
   };
   const pageOf = async (service: ServiceConfig | undefined, how: 'ensure' | 'update') => {
     const { dir, base } = of(service);
-    const source = { dir, base, name: sessionService(service).name, env };
+    // A folder service's page is its folder's; every page says where the
+    // service sits in the workspace (issue #394).
+    const { name, path, consumes, contract } = sessionService(service);
+    const source = { dir, base, name, env, path, consumes, contract };
     return how === 'ensure' ? ensureProjectPage(source) : updateProjectPage(source);
   };
 
