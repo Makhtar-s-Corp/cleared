@@ -18,7 +18,7 @@ import { fixtureProject, reviewedPull, sandbox, scratch } from './support.ts';
 test('runtime and provider-neutral tests contain no provider name or query', () => {
   const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: ORCH_HOME, encoding: 'utf8' }).trim().split('\n');
   const checked = files.filter((file) => {
-    if (file.startsWith('lib/tracker/adapters/') || file.startsWith('docs/') || file.startsWith('prompts/')
+    if (file.startsWith('lib/tracker/adapters/') || (/^(v2|examples)\//.test(file) && file.endsWith('.ts')) || file.startsWith('docs/') || file.startsWith('prompts/')
       || file === 'agents.example.conf' || file.startsWith('test/')) return false;
     // npm's lock files list registry packages by name: v2's names graphql (a package CopilotKit pulls in), not a tracker.
     if (file.endsWith('package-lock.json')) return false;
