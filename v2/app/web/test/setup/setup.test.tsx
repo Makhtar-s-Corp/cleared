@@ -44,15 +44,16 @@ test('the progress line: every step in order, the current one marked for assisti
     assert.equal(markup.match(/aria-current="step"/g)?.length, 1);
     assert.match(markup, /data-step="model"[^>]*aria-current="step"|aria-current="step"[^>]*data-step="model"/);
     assert.match(markup, /data-state="skipped"/);
-    const text = visibleText(markup);
-    assert.match(text, language === 'en' ? /2 min/ : /2\s?min/, 'the forge step\'s time, as a person reads it');
+    const text = visibleText(markup).join(' ');
+    assert.match(text, /2\smin/, 'the forge step\'s time, as a person reads it');
     assert.doesNotMatch(text, /\d{4,} ?ms/, 'no figure in milliseconds');
   });
 });
 
 test('a step\'s time: the person\'s, and the machine\'s when it worked', () => {
-  assert.equal(stepTime(step('forge', { state: 'done', personMs: 130_000, machineMs: 1_400 }), en), '2 min, machine 1 s');
-  assert.equal(stepTime(step('owner', { state: 'done', personMs: 40_000 }), en), '40 s');
+  // The shell's units of time: "2 min" with a no-break space, "40s" in English.
+  assert.equal(stepTime(step('forge', { state: 'done', personMs: 130_000, machineMs: 1_400 }), en), '2\u00a0min, machine 1s');
+  assert.equal(stepTime(step('owner', { state: 'done', personMs: 40_000 }), en), '40s');
   assert.equal(stepTime(step('checks'), en), '');
   assert.match(stepTime(step('forge', { state: 'done', personMs: 130_000, machineMs: 1_400 }), fr), /2\s?min, machine 1\s?s/);
 });
@@ -88,9 +89,9 @@ test('the forge step: a hidden field, the rights a fine-grained credential needs
     for (const right of language === 'en' ? ['Contents', 'Pull requests', 'Commit statuses', 'Metadata'] : ['Contents', 'Pull requests', 'Commit statuses', 'Metadata']) assert.match(empty, new RegExp(right));
     const set = html(<ForgeStep t={t} step={step('forge', { state: 'done', doneAt: '2026-10-25T10:03:00.000Z' })} api={api} onDone={noop} initial={{ credential: { set: true, at: '2026-10-25T10:03:00.000Z', source: 'assistant' } }} />);
     noMark(set, `forge set ${language}`);
-    assert.match(visibleText(set), language === 'en' ? /25 October/ : /25 octobre/);
+    assert.match(visibleText(set).join(' '), language === 'en' ? /25 October/ : /25 octobre/);
     const env = html(<ForgeStep t={t} step={step('forge')} api={api} onDone={noop} initial={{ credential: { set: true, at: null, source: 'environment' } }} />);
-    assert.match(visibleText(env), /GH_TOKEN/);
+    assert.match(visibleText(env).join(' '), /GH_TOKEN/);
     assert.doesNotMatch(env, /type="password"/, 'the environment\'s credential is not replaced from here');
   });
 });

@@ -16,6 +16,8 @@
 //     stream's `closed` frame ends it, with its reason; a stream that gives
 //     up is "lost". Open again opens a new one.
 //   - The keys go through the model's batcher; the size follows the panel.
+//   - The setup assistant's model step mounts it too (lane v2-j5-assistant):
+//     its routes at `root`, a shell only (`fixedMode`), no switch.
 import { useEffect, useRef, useState, type Ref } from 'react';
 import type { TerminalChunk, TerminalClosed, TerminalMode } from '../../../../src/api/types.ts';
 import { Button } from '@/components/ui/button.tsx';
@@ -79,15 +81,18 @@ function themeOf(): Record<string, string> {
 // Fit only a terminal that is shown: a hidden one measures nothing.
 const shown = (element: HTMLElement | null): element is HTMLElement => !!element && element.offsetWidth > 0 && element.offsetHeight > 0;
 
-export function WebTerminal({ session, csrf, active, t, harness }: { readonly session: string; readonly csrf: string; readonly active: boolean; readonly t: Translate; readonly harness: string }) {
+export function WebTerminal({ session, csrf, active, t, harness, root, fixedMode }: {
+  readonly session: string; readonly csrf: string; readonly active: boolean; readonly t: Translate; readonly harness: string;
+  readonly root?: string; readonly fixedMode?: TerminalMode;
+}) {
   const host = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<TerminalStatus>({ kind: 'opening' });
   const [note, setNote] = useState('');
   const [started, setStarted] = useState(active);
   const [attempt, setAttempt] = useState(0);
-  const [mode, setMode] = useState<TerminalMode>(DEFAULT_MODE);
+  const [mode, setMode] = useState<TerminalMode>(fixedMode ?? DEFAULT_MODE);
   const [name, setName] = useState(harness);
-  const [canHarness, setCanHarness] = useState(true);
+  const [canHarness, setCanHarness] = useState(fixedMode === undefined);
   const switching = useRef(false);                          // a switch closes the terminal: its `closed` frame is not shown
   const refit = useRef<() => void>(() => {});
   const words = useRef(t);                                   // the catalog, without reopening the terminal when it changes
@@ -120,7 +125,7 @@ export function WebTerminal({ session, csrf, active, t, harness }: { readonly se
       refit.current = () => { if (shown(element)) fit.fit(); };
       refit.current();
 
-      const api = terminalApi(session, csrf);
+      const api = terminalApi(session, csrf, undefined, root);
       const batcher = new InputBatcher({ send: api.input, onError: () => setNote(words.current('terminal_input_failed')) });
       cleanups.unshift(() => batcher.dispose());
       term.onData((data) => batcher.push(data));
@@ -189,7 +194,7 @@ export function WebTerminal({ session, csrf, active, t, harness }: { readonly se
       refit.current = () => {};
       for (const cleanup of cleanups) cleanup();
     };
-  }, [started, attempt, session, csrf, mode]);
+  }, [started, attempt, session, csrf, mode, root]);
 
   // Shell, or back to the harness: one terminal at a time, so the one open
   // closes first (the harness leaves, its transcript kept), then the other opens.
@@ -197,7 +202,7 @@ export function WebTerminal({ session, csrf, active, t, harness }: { readonly se
     const next = otherMode(mode);
     switching.current = true;
     setStatus({ kind: 'opening' });
-    void terminalApi(session, csrf).close().catch(() => {}).then(() => {
+    void terminalApi(session, csrf, undefined, root).close().catch(() => {}).then(() => {
       setMode(next);
       setAttempt((n) => n + 1);
     });

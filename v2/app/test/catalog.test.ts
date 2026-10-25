@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { CATALOGS, LANGUAGES, MESSAGES_DIR, loadCatalog } from '../src/catalog.ts';
+import { CATALOGS, LANGUAGES, MESSAGES_DIR, SCREENS, loadCatalog } from '../src/catalog.ts';
 import { format, hasMark, translator } from '../web/lib/i18n.ts';
 
 const files = readdirSync(MESSAGES_DIR).filter((name) => name.endsWith('.json')).sort();

@@ -77,8 +77,10 @@ export async function verifyPassword(password: string, stored: string): Promise<
 export const PASSWORD_LENGTH = { min: 15, max: 1024 } as const;
 
 // A name typed at the sign-in page and shown in the header: letters,
-// digits, dot, dash and underscore, 1 to 32 characters.
-const NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+// digits, dot, dash and underscore, 1 to 32 characters. The setup
+// assistant's owner step checks it too (app/src/setup.ts).
+export const USER_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+const NAME = USER_NAME;
 
 type Row = Record<string, unknown>;
 const user = (row: Row): User => ({ id: String(row.id), name: String(row.name) });

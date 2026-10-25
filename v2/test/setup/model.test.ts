@@ -30,7 +30,8 @@ class FakeContainer implements SessionContainer {
       async resize() {},
       onOutput: (listener) => { self.#output.push(listener); },
       onExit: (listener) => { self.#exit.push(listener); },
-      async end() { self.ended += 1; for (const listener of self.#exit.splice(0)) listener(); },
+      // A process's exit comes after its end is asked, never inside the call.
+      async end() { self.ended += 1; await new Promise((resolve) => setImmediate(resolve)); for (const listener of self.#exit.splice(0)) listener(); },
     };
   }
 }
