@@ -5855,6 +5855,8 @@ With the CPU slowed four times the budget is at its edge: what is left is the ne
 
 **The merge of 369 and 370** (lanes `j3-png` and `j3-m3-report`, at `origin/v2` `dbaeb4d`). The log keeps their entries, then this one; the matrix merged by itself, every id once. Neither touches `v2/`. After the merge: `npm run typecheck` passes; `npm test` runs 2123 Node tests, 2045 pass, 78 skipped, 0 fail, and 339 Vitest tests pass; `npm run guard -- --base origin/v2`: nothing refused.
 
+**The merge of 372** (lane `j3-tab-perf`, P223, at `origin/v2` `6d7097f`). The log keeps 372's entry, then this one; the matrix keeps P223, then this lane's P225, every id once. 372 changes the shell (`App.tsx`, `NotifyButton.tsx`) and the cache's subscribers, but neither the sidebar's mode (`useBand`), nor the tooltips' rule, nor the Go's optimistic move, so the three causes above stand. After the merge: `npm run typecheck` passes; `npm test` runs 2129 Node tests, 2050 pass, 79 skipped, 0 fail, and 342 Vitest tests pass; this lane's six Node test files, 93 of 93; with `CLEARED_V2_PLAYWRIGHT`, `mobile-browser` 8 of 8, `wins-browser` 2 of 2, 372's `switch-work-browser` 1 of 1 and `budget-browser` alone 1 of 1, `phone-fit-browser` 8 of 8; `npm run guard -- --base origin/v2`: nothing refused.
+
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read, no network beyond `npm ci` of the lock file, `git fetch` and GitHub (the CI's logs read with `gh`), no tunnel, no secret; the app and the browser listen on port 0 on loopback.
 
 - Pull request: 373, against `v2`.
