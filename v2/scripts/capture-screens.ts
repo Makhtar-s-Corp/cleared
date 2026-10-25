@@ -36,6 +36,14 @@
 // sheet-inbox (the inbox's sheet, with its own keys A, T, R and Space), and
 // palette-inbox-permission (the palette over that request: its three answers).
 //
+// Lane j3-ui-polish's, named only, the screens the ten ideas of 2026-10-25
+// added: consumption (the whole page, the harness pick's wins under the
+// agents' cards), tower-template (the bar with the Bug template picked),
+// resolved (the session screen of the Done ticket LOCAL-149: its cost and
+// its production page; the fixtures source then holds its story),
+// plan-ask (a session's Plan tab scrolled to its question to the code) and
+// inbox-release (the release card selected, the phone's layout at 390).
+//
 // --via load (the default) opens each screen's address as a page; --via
 // click opens the tower, then reaches each screen by a click on a link of
 // the page, which the app answers without a document load (lane 34): the
@@ -52,6 +60,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { RESOLVED_AUTHOR_ID } from '../app/fixtures/cost.ts';
 import { fixturePreview } from '../app/fixtures/session.ts';
 import { fixtureSource } from '../app/fixtures/source.ts';
 import { FIXTURE_NOW } from '../app/fixtures/tower.ts';
@@ -65,7 +74,9 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox', 'palette-inbox-permission', 'login', 'account'] as const;
+export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox', 'palette-inbox-permission', 'login', 'account', 'consumption', 'tower-template', 'resolved', 'plan-ask', 'inbox-release'] as const;
+// The extras captured as the whole page, not the window.
+const WHOLE = new Set<string>(['consumption', 'resolved']);
 export type CaptureScreen = typeof SCREENS[number] | typeof EXTRAS[number];
 // What an empty capture answers empty, in the page.
 const EMPTY = /\/api\/service\/(?:inbox|sessions|tickets|plans|lead\/messages|lead\/stream)(?:\?.*)?$/;
@@ -97,7 +108,7 @@ export async function capture(options: { readonly out: string; readonly screens?
 
   const preview = createServer();
   const previewBase = await listen(preview);
-  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }), extra: { previewOrigin: previewBase, language: options.language ?? 'fr' } });
+  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW, resolved: screens.includes('resolved') }), extra: { previewOrigin: previewBase, language: options.language ?? 'fr' } });
   preview.on('request', createPreviewHandler({ upstream: fixturePreview(), origin: previewBase, appOrigins: [app.origin] }));
   const errors: string[] = [];
   const away: string[] = [];
@@ -135,12 +146,15 @@ export async function capture(options: { readonly out: string; readonly screens?
         const inbox = await (await page.request.get(`${app.base}/api/service/inbox`)).json() as { id: string; kind: string; state: string; reasonCode?: string }[];
         const waits = inbox.filter((item) => item.kind === 'permission' && item.state === 'waiting');
         const permission = waits.find((item) => item.reasonCode) ?? waits[0];
+        const release = inbox.find((item) => item.kind === 'release' && item.state === 'waiting');
         const paths: Readonly<Record<CaptureScreen, string>> = {
           tower: '/', inbox: '/inbox', sessions: '/sessions', session: `/sessions/${author?.id ?? ''}`, lead: '/lead',
           palette: '/', sheet: '/', 'palette-inbox': '/inbox', 'palette-session': `/sessions/${author?.id ?? ''}`, 'sheet-session': `/sessions/${author?.id ?? ''}`,
           'rail-tooltip': '/', 'tower-empty': '/', 'lead-empty': '/lead', account: '/',
           login: '/login', review: `/sessions/${reviewer?.id ?? ''}`, 'review-editor': `/sessions/${reviewer?.id ?? ''}`, 'review-takeover': `/sessions/${reviewer?.id ?? ''}`,
           'inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`, 'inbox-handled': '/inbox', 'sheet-inbox': '/inbox', 'palette-inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`,
+          consumption: '/consumption', 'tower-template': '/', resolved: `/sessions/${RESOLVED_AUTHOR_ID}`, 'plan-ask': `/sessions/${author?.id ?? ''}#plan`,
+          'inbox-release': `/inbox#${encodeURIComponent(release?.id ?? '')}`,
         };
         let documents = 0;
         page.on('load', () => { documents += 1; });
@@ -193,6 +207,19 @@ export async function capture(options: { readonly out: string; readonly screens?
             if (await handled.count() > 0) await handled.scrollIntoViewIfNeeded();
             await settle(page);
           }
+          if (screen === 'tower-template') {
+            await page.locator('[data-bar="template"]').click();
+            await page.locator('[data-template="bug"]').click();
+            await page.mouse.move(0, 0);
+            await settle(page);
+          }
+          if (screen === 'resolved') await page.locator('#s-left [data-ticket-production]').waitFor({ timeout: 10_000 });
+          if (screen === 'plan-ask') {
+            await page.locator('#plan-ask-input').waitFor({ timeout: 10_000 });
+            await page.locator('.plan-ask').scrollIntoViewIfNeeded();
+            await settle(page);
+          }
+          if (screen === 'inbox-release') await page.locator('#detail [data-act="approve"]').waitFor({ timeout: 10_000 });
           let menu = false;
           if (screen === 'account' && await page.locator('#person').isVisible()) {
             await page.locator('#person').click();
@@ -211,7 +238,7 @@ export async function capture(options: { readonly out: string; readonly screens?
             await page.waitForTimeout(300);
           }
           const file = join(options.out, `${screen}-${w}-${theme}.png`);
-          await page.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
+          await page.screenshot({ path: file, animations: 'disabled', caret: 'hide', fullPage: WHOLE.has(screen) });
           files.push(file);
           if (screen === 'review-editor') await page.locator('[role="tab"][aria-controls="tab-terminal"]').click();
           if (screen === 'review-takeover') {
@@ -223,6 +250,7 @@ export async function capture(options: { readonly out: string; readonly screens?
             await page.mouse.move(0, 0);
             await page.keyboard.press('BracketLeft');
           }
+          if (screen === 'tower-template' || screen === 'plan-ask' || screen === 'inbox-release') await page.goto(`${app.base}/`);
           if (empty) {
             await page.unroute(EMPTY);
             await page.goto(`${app.base}/`);
