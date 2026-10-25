@@ -306,3 +306,50 @@ The passkey files above; the passkey parts of `app/lib/actions.ts`, `app/lib/not
 Written on 2026-10-25 at the lead's request, after pull request 388 merged (the v1 drops gone, `wake.ts` in place of the bash wake). These are steps for the owner or the operator on each server; no lane runs them, and nothing in this repository does them.
 
 1. **Run `serve/install.ts` again on each server**, from the checkout the units should use, so that its systemd user units name `wake.ts` instead of `wake.sh` and `serve/install.sh` (decisions log, the cleanup's entry, "For an installation"). It checks every port it binds before it writes anything (its header, `serve/install.ts`).
+
+## 9. The week's figures (`v2-j4-weekly`, issue #396)
+
+This section was written on 2026-10-25 by the author of issue #396 (Opus 5.5), before the lane's tests and code. Inputs: issue #396 (matrix C17), the [decisions log](decisions-log.md) (the ten ideas of 01:09 and their money rule, the entries of lanes `j3-ticket-cost` and `j3-visual-redesign`, the owner's decisions of 11:14 and 12:20 on Consumption), the [requirements matrix](requirements-matrix.md) (C17, O15, P211, B3.6, B3.7), and the code at `origin/v2` `99ee767`. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md). Sections 7 and 8 are taken by the heartbeat and project page lanes (pull requests 393 and 395).
+
+### 9.1 Context
+
+C17 asks for the week's figures in the app. The ledger already holds what they need: each session's turns with their tokens, their times and the dollars the harness reported (`session_events`, `sessions` with its service), each ticket's moves (`tracker_history`), and each plan item's estimate (`plan_items`). The Consumption screen says the tokens per agent and the quotas, and a Done ticket's card says its own cost (P211), but nothing says what the week delivered and what it took. This lane reads those tables, writes nothing, and adds a panel to the Consumption screen.
+
+### 9.2 What exists at the end, and how it is proven
+
+- `src/consumption/week.ts`: `weekFigures(db, tickets, { project, services, now, timeZone })`, the figures of the screen's seven days. `GET /api/consumption/week?tz=<zone>`, registered with the other Consumption routes and guarded as they are.
+- The Consumption screen's "This week" panel ("Cette semaine"), read on its own, so a failed read of the week leaves the rest of the screen as it is. Its words in `app/messages/consumption.{en,fr}.json`, its durations through `lib/time.ts`.
+- The fixtures source answers the route from a week of invented tickets, on request (`fixtureSource({ week: true })`), so the counts other tests pin do not move.
+- Proven by `test/consumption/week.test.ts` (each figure on a real ledger and a ticket store in memory), `test/consumption/routes.test.ts` (the route and its guard), `test/consumption/ticket-cost.test.ts` (the cost of a period), `app/web/test/consumption-week.test.tsx` (the panel in English and French, with and without dollars, with and without estimates), `app/test/consumption/week-browser.test.ts` (the panel in Chromium, at 1440 and 390), and the captures in `docs/v2/weekly/`.
+
+### 9.3 The figures
+
+1. **The week** is the screen's seven calendar days in the person's time zone (`lastDays`, `zoneOf`), from the first one's midnight to now. Its tokens are then the sum of the agents' tokens the screen already shows.
+2. **Tickets merged.** A ticket of the workspace that is Done now, whose last move to Done is in the week and was written by the service's agents (the flow or the guarded merge), never by the mirror (`cleared-mirror`, an issue closed on a tracker) nor by a person (a move by hand is not a merge). Each with its id, its title and its services.
+3. **Tokens and time.** Every session of the workspace that finished a turn in the week, whatever its role: authors, reviewers, the lead, the questions to the code. The tokens are the four counts of each turn finished in the week; the agents' time is each turn from its start to its end, the part of it inside the week. Both as P211 counts them (`ticket-cost.ts`).
+4. **Dollars**, only as the harness reported them (`total_cost_usd`, the API-equivalent figure): each session's running total, its increase over the week. When a session that finished a turn in the week reported none (Codex, Cursor), the week has no dollar figure, and the panel says the week is counted in tokens and time. Never euros, never an estimate.
+5. **Estimates against what it took.** For each merged ticket that a plan estimated (`plan_items`), the estimate's minutes against its own minutes, measured as the estimates measure their samples (`ticketSample`: from the author's first start to the release request, less the owner's waits). Minutes only: an estimate's dollars fall back to invented defaults when history is short (`DEFAULT_ESTIMATES`), which is not a real source. The panel says how many of the merged tickets had an estimate.
+6. **Per service.** A session's service is its own when it names one; else its ticket's, when the ticket names one service; else, for a ticket that names none, the workspace's first service, where it runs. The lead's turns, the questions to the code and a session of a ticket on several services that names none go to one row of the workspace's own, so the rows add up to the week. A merged ticket counts once on each of its services, once in the total.
+
+### 9.4 Decisions this lane takes
+
+- **No table, no write.** The figures are read when the screen asks, from the tables above.
+- **The cost of a period** is P211's rule given a start: `sessionsCost(sessions, since)` counts only what finished after it, its dollars the increase of each running total, so a ticket's card and the week never count a dollar twice.
+- **Where.** The Consumption screen, which the quota gauge opens (owner decisions of 11:14 and 12:20): the sidebar stays the development's.
+- **Language.** The panel's words in the catalogs, French and English; durations as `lib/time.ts` says them ("42 min", "3 h 05", "2 j 4 h").
+- **Matrix lines.** P243 (P239 and P240 to P242 are left to the heartbeat and project page lanes, which are open); C17 updated.
+
+### 9.5 Out of scope
+
+A week other than the last seven days (no week picker, no week before); a report sent by mail or in a notification; euros; an estimate of the dollars; the figures of v1's imported tickets (they have no sessions in v2); a change of the Consumption screen's own cost panel, which still sums each turn's total (the log names it).
+
+### 9.6 Files this lane owns
+
+`v2/src/consumption/week.ts`, the `since` of `v2/src/consumption/ticket-cost.ts`, the route in `v2/src/consumption/routes.ts`, the ticket store and services given to it in `v2/src/modules/lead.ts`, the route and its type in `v2/src/api/types.ts` (and the pinned count of `test/api/types.test.ts`); the panel in `v2/app/web/screens/consumption/` and its keys in `v2/app/messages/consumption.*.json`; `v2/app/fixtures/week.ts` and its route in `v2/app/fixtures/source.ts`; the tests above, the browser test in `.github/workflows/v2.yml`'s list; `docs/v2/weekly/`; its matrix lines and its log entry.
+
+### 9.7 Unknowns, and who closes them
+
+| Unknown on 2026-10-25 | Closed by |
+| --- | --- |
+| Whether the owner wants the calendar week (from Monday) rather than the last seven days | the owner (question in the log entry, the seven days applied) |
+| Whether a week with one agent that reports no dollars should still say the dollars of the others, marked partial | the owner (question in the log entry, no dollars applied, as P211 does) |
