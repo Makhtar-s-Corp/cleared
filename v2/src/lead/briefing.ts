@@ -1,11 +1,12 @@
 // The briefing of a lead generation (docs/v2/milestone-2-plan.md, section
 // 4.2), written as CLAUDE.md in the lead's workdir, which the runner appends
 // to the system prompt: the lead's rules first, as the only instructions;
-// then, under lib/memory's reference line and quoted line by line, the open
-// commitments from the table, the last handover record (the lead's account,
-// the structured parts the service wrote, the thread's last messages) and
-// the lead's memory. Everything below the line came from a model, the owner
-// or a team, and carries across generations: it is data, so a heading or an
+// then, under lib/memory's reference line and quoted line by line, the
+// lead's memory, the open commitments from the table and the last handover
+// record (the lead's account, the structured parts the service wrote, the
+// thread's last messages); last, the generation's number and start, a line
+// of the service's. What is quoted came from a model, the owner or a team,
+// and carries across generations: it is data, so a heading or an
 // instruction in it opens nothing.
 //
 // Also the effects behind it: the lead's workdir, a fresh clone of the base
@@ -89,8 +90,16 @@ const MEMORY_HEADINGS: Readonly<Record<string, string>> = {
   services: "The services' pages, first lines",
 };
 
+// Ordered from what changes least to what changes most (issue #335, P219):
+// the prompt cache serves a prefix only up to its first changed byte, so
+// the rules and the memory come first, and the generation's number and the
+// time it started come last, not at the head of the briefing.
 export function renderLeadBriefing(input: LeadBriefingInput): string {
-  let text = `${LEAD_RULES}\n## This generation\n\nYou are generation ${input.generation} of the lead, started at ${input.at}. Below are your open commitments, the last handover record and the project's memory. When the lead's own account and the structured parts of the record disagree, the structured parts win: the service wrote them from its tables.\n\n${REFERENCE_LINE}\n`;
+  let text = `${LEAD_RULES}\n## Your briefing\n\nBelow are the project's memory, your open commitments, the last handover record, then this generation's number and start. When the lead's own account and the structured parts of the record disagree, the structured parts win: the service wrote them from its tables.\n\n${REFERENCE_LINE}\n`;
+  text += '\n## Project memory\n';
+  if (input.memoryError) text += `The memory could not be read for this generation (${input.memoryError}).\n`;
+  else if (input.memory.length === 0) text += 'None.\n';
+  else for (const entry of input.memory) text += `\n### ${MEMORY_HEADINGS[entry.type] ?? entry.type}\n${block(entry.content)}`;
   text += `\n## Open commitments\n${input.commitments.length ? block(input.commitments.map(commitmentLine).join('\n')) : 'None.\n'}`;
   const h = input.handover;
   if (!h) text += '\n## Last handover\nNo handover yet: this is the first generation.\n';
@@ -101,10 +110,7 @@ export function renderLeadBriefing(input: LeadBriefingInput): string {
     const lines = lastFitting(h.messages, HANDOVER_LIMITS.messages);
     text += `\n### The thread's last messages\n${lines.length ? block(lines.join('\n')) : 'None.\n'}`;
   }
-  text += '\n## Project memory\n';
-  if (input.memoryError) text += `The memory could not be read for this generation (${input.memoryError}).\n`;
-  else if (input.memory.length === 0) text += 'None.\n';
-  else for (const entry of input.memory) text += `\n### ${MEMORY_HEADINGS[entry.type] ?? entry.type}\n${block(entry.content)}`;
+  text += `\n## This generation\nYou are generation ${input.generation} of the lead, started at ${input.at}.\n`;
   return text;
 }
 

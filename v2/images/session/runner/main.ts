@@ -471,7 +471,16 @@ export async function run(deps: RunnerDeps): Promise<number> {
   // The project's briefing (CLAUDE.md, written by the service) would load
   // only with the 'project' setting source, which also loads the project's
   // settings and hooks; it is appended to the system prompt instead.
+  //
+  // The prompt cache serves a prefix only up to its first changed byte
+  // (issue #335, P219). The preset's per-session sections (the working
+  // directory, git status: the ticket's branch and commits) would stand
+  // between its static part and the briefing; excluded, the SDK gives them to
+  // the model as the first user message, so two sessions with the same
+  // briefing share the whole system prompt. `snapshot`, the SDK's default,
+  // is said: the prompt is recorded once and sent as is for the session.
   const briefing = deps.readFile(`${WORKDIR}/CLAUDE.md`);
+  const systemPrompt = { type: 'preset', preset: 'claude_code', ...(briefing === undefined ? {} : { append: briefing }), excludeDynamicSections: true, snapshot: true };
   const lane5 = deps.hooks ?? hooksFor(role);
   const hooks: Hooks = {
     ...lane5,
@@ -496,7 +505,7 @@ export async function run(deps: RunnerDeps): Promise<number> {
       persistSession: true,
       includePartialMessages: false,
       pathToClaudeCodeExecutable: CLAUDE_BIN,
-      systemPrompt: briefing === undefined ? { type: 'preset', preset: 'claude_code' } : { type: 'preset', preset: 'claude_code', append: briefing },
+      systemPrompt,
       env,
       stderr: (text: string) => deps.log?.(text),
       ...(start.maxBudgetUsd === undefined ? {} : { maxBudgetUsd: start.maxBudgetUsd }),
