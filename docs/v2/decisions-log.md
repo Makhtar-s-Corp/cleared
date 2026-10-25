@@ -5555,4 +5555,5 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, no tunnel, no secret; git runs on temporary repositories; the app and the browser listen on port 0 on loopback.
 
+- Pull request: 362, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-fast-lane`.
