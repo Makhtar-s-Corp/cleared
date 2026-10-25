@@ -40,7 +40,7 @@ import type { RehearsalScript } from '../src/session/adapters/index.ts';
 import { END_TERMINAL, GIVE_PROGRAM, READ_PROGRAM, SHELL_COMMAND, TAKE_PROGRAM, WRITE_PROGRAM, terminalCommand } from '../src/terminal/container.ts';
 import { guestbookHeading } from './proof-guestbook-heading.ts';
 import { FROZEN_BRANCH, RUN_BRANCH, breaksHealth, type BaseSettings } from './proof-base.ts';
-import { buildApp, freePort, listening, plannedAuthor, startBroker, writeGhStub } from './proof-rehearsal.ts';
+import { buildApp, freePort, listening, plannedAuthor, startBroker, writeGhStub, writeNodeStub, writeSendmailStub } from './proof-rehearsal.ts';
 
 const V2 = fileURLToPath(new URL('../', import.meta.url));
 const EXAMPLES = fileURLToPath(new URL('../../examples/', import.meta.url));
@@ -462,7 +462,7 @@ secrets_dir = ${notify}
 coalesce_minutes = 1
 `);
   writeFileSync(join(notify, 'credentials.json'), JSON.stringify({ email: { to: 'owner@guestbook.invalid', from: 'cleared@guestbook.invalid' } }), { mode: 0o600 });
-  writeFileSync(join(bin, 'sendmail'), `#!/bin/sh\n{ printf '%s\\n' "---- $(date -u +%FT%TZ)"; cat; } >> "${mail}"\n`, { mode: 0o755 });
+  writeSendmailStub(bin, mail);
   writeFileSync(forge, JSON.stringify({ next: 101, prs: [] }));
   writeGhStub(bin, forge, Object.fromEntries(SERVICES.map((name) => [`rehearsal/${name}`, servicePaths(root, name).origin])));
 
@@ -498,7 +498,7 @@ coalesce_minutes = 1
   const containers = join(root, 'containers.json');
   writeFileSync(containers, JSON.stringify({ ledger, workdirs: work, services: SERVICES, trialPort, root }), { mode: 0o600 });
   const docker = join(bin, 'docker');
-  writeFileSync(docker, `#!/bin/sh\nexec "${process.execPath}" --no-warnings "${SELF}" docker-stub "${containers}" "$@"\n`, { mode: 0o755 });
+  writeNodeStub(docker, SELF, ['docker-stub', containers]);
 
   const env = {
     ...base,
