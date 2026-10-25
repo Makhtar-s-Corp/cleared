@@ -173,8 +173,11 @@ export function ConsumptionView({ data, t, language, now, busy = false, note = '
         <p className="consumption-period">{periodText(data.days, language)}</p>
       </header>
       <div className="consumption-grid">
-        <div className="harnesses" role="list" aria-label={t('consumption_harnesses_label')}>
-          {data.harnesses.map((h) => <div role="listitem" key={h.harness}><HarnessCard h={h} data={data} t={t} language={language} /></div>)}
+        <div className="main-col">
+          <div className="harnesses" role="list" aria-label={t('consumption_harnesses_label')}>
+            {data.harnesses.map((h) => <div role="listitem" key={h.harness}><HarnessCard h={h} data={data} t={t} language={language} /></div>)}
+          </div>
+          <Wins data={data} t={t} language={language} />
         </div>
         <aside className="side" aria-labelledby="limits-title">
           <section className="panel limits">
@@ -213,7 +216,6 @@ export function ConsumptionView({ data, t, language, now, busy = false, note = '
           </section>
         </aside>
       </div>
-      <Wins data={data} t={t} language={language} />
       <footer className="consumption-foot">
         <p>{measuredAt(data, language, t)}</p>
         <p className="foot-data"><ArrowRight size={12} aria-hidden="true" />{t('consumption_footer_data')}</p>
