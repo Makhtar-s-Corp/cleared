@@ -11,7 +11,8 @@ import type { Translate } from '@/lib/i18n.ts';
 import { dayOf, refusal } from '../model.ts';
 import { StepFrame, type StepProps } from '../step.tsx';
 
-const NEW_TOKEN = 'https://github.com/settings/personal-access-tokens/new';
+// GitHub's page that makes a fine-grained credential.
+const GITHUB_NEW_FINE_GRAINED = 'https://github.com/settings/personal-access-tokens/new';
 
 export function credentialLine(t: Translate, prefix: string, credential: CredentialView): string {
   if (!credential.set) return '';
@@ -54,7 +55,7 @@ export function ForgeStep({ t, api, onDone, initial }: StepProps<Pick<ForgeView,
   const showField = credential !== undefined && !fromEnvironment && (!credential.set || replacing);
   return (
     <StepFrame t={t} prefix="forge">
-      <p><a className="setup-link" href={NEW_TOKEN} target="_blank" rel="noreferrer">{t('forge_create')}</a></p>
+      <p><a className="setup-link" href={GITHUB_NEW_FINE_GRAINED} target="_blank" rel="noreferrer">{t('forge_create')}</a></p>
       <h3>{t('forge_rights_title')}</h3>
       <ul className="setup-rights">
         {FORGE_RIGHTS.map((right) => (

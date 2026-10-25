@@ -2,6 +2,7 @@
   "model_title": "Connect Claude Code",
   "model_intro": "Cleared's sessions run Claude Code on your Claude subscription. Run the command below, open the address it shows, sign in, and paste what it prints into the field.",
   "model_command": "The command",
+  "model_command_text": "claude setup-token",
   "model_terminal_open": "Open a terminal to run it",
   "model_terminal_note": "The terminal runs in a throwaway container with nothing of this machine in it. Nothing you type there is kept, and the container is removed when the terminal closes.",
   "model_terminal_elsewhere": "Or run it on any computer where Claude Code is installed.",

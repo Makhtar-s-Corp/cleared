@@ -52,7 +52,7 @@ export function ModelStep({ t, api, onDone, initial, csrf = '', terminalHere = t
   return (
     <StepFrame t={t} prefix="model">
       <h3>{t('model_command')}</h3>
-      <pre className="setup-code"><code>claude setup-token</code></pre>
+      <pre className="setup-code"><code>{t('model_command_text')}</code></pre>
       {view?.terminal && terminalHere && showField ? (
         terminal ? (
           <div className="setup-terminal">

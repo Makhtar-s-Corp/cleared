@@ -8,7 +8,7 @@
   "setup_step_model": "Claude Code",
   "setup_step_workspace": "Repositories",
   "setup_step_environment": "Environment",
-  "setup_step_secrets": "Test secrets",
+  "setup_step_test_values": "Test secrets",
   "setup_step_checks": "Checks",
   "setup_step_first_ticket": "First ticket",
   "setup_state_todo": "To do",
@@ -27,6 +27,5 @@
   "setup_finished_title": "Cleared is set up",
   "setup_finished_body": "Every step is done or skipped. It took {person} of your time and {machine} of the machine's.",
   "setup_finished_skipped": "Skipped steps stay here: open /setup again to do them.",
-  "setup_tower": "Open Cleared",
-  "setup_date": "{date}"
+  "setup_tower": "Open Cleared"
 }

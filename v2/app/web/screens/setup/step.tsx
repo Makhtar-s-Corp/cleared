@@ -4,7 +4,7 @@
 import type { ReactNode } from 'react';
 import type { StepId, StepView } from '../../../../src/setup/types.ts';
 import type { Translate } from '@/lib/i18n.ts';
-import type { SetupApi } from './model.ts';
+import { stepKey, type SetupApi } from './model.ts';
 
 export type StepProps<T = unknown> = {
   readonly t: Translate;
@@ -29,7 +29,7 @@ export function StepFrame({ t, prefix, children }: { readonly t: Translate; read
 // A step a later lane fills: what it will do, and that it can be skipped for now.
 export function StepStub({ t, id }: { readonly t: Translate; readonly id: StepId }) {
   return (
-    <StepFrame t={t} prefix={id.replace(/-/g, '_')}>
+    <StepFrame t={t} prefix={stepKey(id)}>
       <p className="setup-note" data-step-stub={id}>{t('setup_stub_later')}</p>
     </StepFrame>
   );

@@ -110,7 +110,7 @@ None for the lane: its real run is on this server, labelled. The fresh machine i
 
 ## 5. The browser setup assistant (`v2-j5-assistant`)
 
-Matrix: B6.5. Wave 1. Effort L.
+Matrix: B6.5, and P248, the lane's own line, added when it delivered. Wave 1. Effort L.
 
 ### 5.1 Context
 
