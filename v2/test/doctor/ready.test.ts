@@ -154,7 +154,7 @@ test('disk space: under 5 GB fails, under 20 GB is said, sizes as a person reads
   assert.equal(one(await run(made), 'disk').level, 'ok');
 });
 
-test('the settings file: none is said, open to others is said, a credential file it names that is refused fails by its variable, never by its value', async () => {
+test('the settings file: none is said, open to others is said, a file it names for a variable that is refused fails by its variable, never by its value', async () => {
   const made = install();
   const settings = join(made.state, 'settings.conf');
   chmodSync(settings, 0o644);
@@ -163,7 +163,7 @@ test('the settings file: none is said, open to others is said, a credential file
   chmodSync(made.forgeFile, 0o644);
   const lines = await run(made);
   clean(lines);
-  const refused = byId(lines, 'settings').find((line) => line.level === 'fail');
+  const refused = byId(lines, 'credentials').find((line) => line.level === 'fail');
   assert.ok(refused, JSON.stringify(lines));
   assert.match(refused.text, /GH_TOKEN/);
   assert.match(refused.todo ?? '', /chmod 600/);
@@ -237,7 +237,7 @@ test('the checkouts: none yet is said, another repository, no base or not a chec
   const noWorkspace = { ...made.env, CLEARED_V2_PROJECT: '' };
   const none = await readyChecks({ env: noWorkspace, language: 'en', probes: made.probes() });
   assert.equal(one(none, 'checkout').level, 'notice');
-  assert.equal(one(none, 'repository').level, 'notice');
+  assert.equal(one(none, 'repository').level, 'off', 'said once, by the checkout line');
   const refused = await readyChecks({ env: { ...made.env, CLEARED_V2_REPO: 'not a repo' }, language: 'en', probes: made.probes() });
   assert.equal(one(refused, 'checkout').level, 'fail');
   assert.equal(one(await readyChecks({ env: { ...made.env, CLEARED_V2_BASE: 'release' }, language: 'en', probes: made.probes() }), 'checkout').level, 'fail');

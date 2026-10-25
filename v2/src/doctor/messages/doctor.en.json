@@ -1,0 +1,13 @@
+{
+  "usage": "Usage: cleared doctor [ready | --full [section ...] [--no-build] [--model <id>]]",
+  "usage_ready": "With no argument, the ready section: is this install ready for a first ticket. Read only.",
+  "usage_full": "--full runs every section of scripts/doctor.ts, which builds the images and starts a session, or the sections named after it.",
+  "unknown_argument": "\"{argument}\" is not an argument of cleared doctor.",
+  "mark_ok": "ok",
+  "mark_fail": "failed",
+  "mark_notice": "note",
+  "mark_off": "not run",
+  "summary_ok": "{count} checks, no check failed.",
+  "summary_fail_one": "1 check failed, of {count}.",
+  "summary_fail_many": "{failed} checks failed, of {count}."
+}
