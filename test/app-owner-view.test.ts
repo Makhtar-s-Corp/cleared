@@ -19,7 +19,6 @@ import { createActions } from '../app/lib/actions.ts';
 import type { Conf } from '../lib/conf.ts';
 import type { Question } from '../lib/board-report.ts';
 import type { Version } from '../app/lib/events.ts';
-import type { Passkey } from '../app/lib/credentials.ts';
 
 // What the tests read of the collector's snapshot: a card, and the details of its ticket.
 type Change = { pr?: unknown; files: number | null; additions: number | null; deletions: number | null; lines: number | null; checks: string | null; draft: boolean | null };
@@ -207,7 +206,7 @@ test('a ticket in the approval status without a request from Cleared is not read
     assert.deepEqual([card.kind, card.waiting, card.approval, card.column], ['tracker', false, null, 'awaiting']);
     assert.match(card.reason, /Cleared/);
     assert.ok(validBoard(snap));
-    const actions = createActions({ source: { snapshot: async () => snap }, origin: 'https://cockpit.example', readPasskeys: () => [{ id: 'k' } as Passkey], writePasskeys: () => {}, run: async () => ({ ok: true }) });
+    const actions = createActions({ source: { snapshot: async () => snap }, origin: 'https://cockpit.example', run: async () => ({ ok: true }) });
     await assert.rejects(actions.begin({ id: 's' }, { gesture: 'clear', ticket: 'EX-7', versions: [{ pr: 314, head: 'a'.repeat(40) }] }), (error: { code?: string }) => error.code === 'not_waiting');
   } finally { p.close(); }
   const asked = await project({ status: 'Needs Approval', approval: true });
