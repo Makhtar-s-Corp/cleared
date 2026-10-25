@@ -16,7 +16,7 @@
   "service_down": "ne répond pas sur {address}",
   "beat_never": "jamais",
   "beat_failed_at": "{time}, il n'a pas pu lire le registre",
-  "monitor_on": "active, un battement toutes les {time}",
+  "monitor_on": "active, intervalle de {time}",
   "monitor_off": "inactive : personne ne l'apprend quand le service s'arrête",
   "monitor_invalid": "refusée, voir les problèmes",
   "monitor_unknown": "inconnue tant que le service n'a pas battu",

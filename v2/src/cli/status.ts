@@ -24,11 +24,13 @@ const t = statusTranslator(statusLanguage(process.env));
 const args = process.argv.slice(2);
 const asJson = args.includes('--json');
 
-// The status cannot be collected: a line, or one schema 1 object with --json.
+// The status cannot be collected: a line, or one schema 1 object with --json,
+// with the keys of a status collected, empty.
 function fail(message: string): never {
   if (asJson) {
     console.log(JSON.stringify({
       schema: 1, project: null, checkedAt: new Date().toISOString(), ok: false,
+      service: null, lastBeat: null, monitor: null, sessions: { running: 0, names: [] }, waiting: null, quota: null, trackers: [], releases: [],
       problems: [{ code: 'status_error', id: 'status', level: 'problem', message: t('problem_status_error', { reason: message }) }], notices: [],
     }, null, 2));
   } else console.error(`cleared-v2: ${message}`);
