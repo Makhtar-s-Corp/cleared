@@ -97,6 +97,8 @@ import type { Registry } from '../modules/registry.ts';
 import { HostToolRefused, type Answer, type Briefing, type Decision, type Harness, type HostTool, type Role, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserId } from '../session/contract.ts';
 import { handoverNote, refuseTarget } from '../session/handover.ts';
 import { readToolInput, readToolOutput, type AgUiEvent, type Question, type SessionEvent, type SessionPhase, type StepName } from '../session/events.ts';
+import { skillTicketService } from '../knowledge/store.ts';
+import { skillPath } from '../knowledge/skill.ts';
 import { DEFAULT_SAFE_COMMANDS, type Policy } from '../session/policy.ts';
 import type { Store } from '../store/db.ts';
 import type { Actor, Ticket, TicketId } from '../tickets/contract.ts';
@@ -1986,7 +1988,11 @@ export class FlowEngine {
     const live = input.role === 'author' ? [...this.#live.values()].find((candidate) => candidate.input.policy === input.policy) : undefined;
     const gate = live ? this.#gates.get(live.id) : undefined;
     const planning = input.role === 'author' && (gate ? gate.phase !== 'working' : input.policy.planning === true);
-    return { ...input.policy, planning, learned: [...this.#store.policyRules.learned(input.project), ...toolRules(input.tools)], ticketFiles: this.#ticketFiles(input.ticket, input.workdir) };
+    const skill = input.role === 'author' ? skillTicketService(this.#store.db, input.ticket) : undefined;
+    return {
+      ...input.policy, planning, learned: [...this.#store.policyRules.learned(input.project), ...toolRules(input.tools)], ticketFiles: this.#ticketFiles(input.ticket, input.workdir),
+      ...(skill ? { skillFile: skillPath(skill) } : {}),
+    };
   }
 
   // An edit counts once its result says it was made: a refused or failed

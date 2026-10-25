@@ -5082,6 +5082,25 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 - Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j2-matrix-audit`.
 
+## 2026-10-25: Two gaps of milestone 2 closed: the decisions headings in every briefing, the skill ticket's one file under .claude/ (the author's choices, lane `j2-knowledge`, C2, O12)
+
+**The need.** C2 was `partial`: a handover's `## Decisions for ...` sections are read (`knowledge/proposals.ts`) but no briefing told the author the headings, only the lessons headings, and only on a workspace of several services. O12 was `partial`: the daily skill ticket writes `.claude/skills/cleared-<service>/SKILL.md`, and the policy locks `.claude/`, so each such ticket asked the owner.
+
+**Decision.**
+1. **C2.** The paragraph that names the lessons headings now names the decisions headings with the same filing: the workspace's memory, the service's (or the workspace's when its checkout is the workspace's), the contract's when one would take it. `DECISION_HEADINGS` moved to `workspace/briefing.ts` beside `LESSON_HEADINGS` (no import cycle: `proposals.ts` imports from `handover.ts`, which imports the briefing); `knowledge/proposals.ts` still exports it. A workspace of one service gets no such paragraph, as before, so the milestone 1 text is the same byte for byte (a test pins it). The choice made: "every service" is every service of a workspace of several, since the paragraph's condition (the filing targets) is not changed here.
+2. **O12.** `Policy.skillFile` (a path relative to the workdir). `policyFor` sets it for an author on a ticket that has a row in `knowledge_skill_tickets` (the knowledge module writes that row when it makes the ticket, so a person cannot make a ticket a skill ticket by its text). `allowedEdit` allows an Edit, Write or MultiEdit whose path, resolved against the workdir, is exactly that file, with the rule `edit.skill`; the check comes before the `.claude/` lock and replaces nothing in it. The rows read the table directly (`skillTicketService`), and a store without the knowledge tables answers "no skill ticket", so no module order is needed.
+3. **Not allowed, tested.** Any other path under `.claude/` (settings, hooks, commands, agents, another service's skill, another file of the same folder, a path through `..`, a nested `.claude/`), a notebook edit, a shell write of the skill file (stays `ask`), a reviewer, a reader and a plan awaiting its Go. An ordinary ticket has no `skillFile`.
+4. **Left alone.** `settingSources` (B5.5b waits for a decision). A symlink in the checkout named like the skill file is not seen by the policy, as for every `edit.workdir` row; the ticket's review and the lock read the diff.
+5. **Lines.** P200 (C2), P201 (O12); C2 and O12 are `done`.
+
+**Tests first.** `914d388` was committed before any code. On the old code: the briefing test and the effects test failed (no decisions heading), `test/session/skill-policy.test.ts` ("writes its skill file without asking") and `test/flow/skill-policy.test.ts` failed (`ask`, rule `default`, not `allow`, `edit.skill`). The tests of the limits (nothing else under `.claude/`) pass on the old code too, as they guard what the change must not open.
+
+**Checks.** See the pull request. `npm run guard -- --base origin/v2` is run before the READY.
+
+**Resources.** No Docker object, no network beyond `npm ci` of the lock file, no tunnel, no secret.
+
+- Author: Sonnet 5.5 (claude-sonnet-5-5), lane `j2-knowledge`.
+
 ## 2026-10-25: a proof receipt at the top of every pull request Cleared opens (the author's choices, lane `j3-proof-receipt`, issue #326, P210)
 
 **The need.** The owner's decision of 01:09 (the ten ideas, P210): each pull request Cleared opens starts with a proof receipt holding a capture before and after, a video of about 20 seconds of the flow recorded by Playwright, the tests run with their result, and the cost (tokens and time; dollars or euros only from a real source).
@@ -5106,6 +5125,8 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 **Checks** (on the branch's last code commit, on `origin/v2` at `292ec62`). `npm run typecheck` passes. `npm test` passes: 1906 Node tests, 1859 pass, 47 skipped (the browser tests, with no `CLEARED_V2_PLAYWRIGHT`), 0 fail; Vitest, 295 tests pass. With `CLEARED_V2_PLAYWRIGHT`, `test/flow/proof-capture.test.ts` passes 6 of 6, the confinement included. `npm run guard -- --base origin/v2`: nothing refused.
 
 **Resources.** No Docker object, no tunnel, no secret, no real account, no real GitHub call (a fake gh). The tests and the hand run listen on port 0 on loopback.
+
+**Review 1, and a red `verify`.** The review asked for the merge of `origin/v2` (pull request 337: P200 and P201 kept before P210) and a green `verify`. That job failed in a v1 test the lane does not touch, `test/routing.test.mjs` (the Codex adapter and the door of the heavy commands). The cause is in the test's fake `gh`: it answered `0` to every call, the base's last commit date included, and `date -d 0` is today at midnight. So `host-state.sh` read a merge minutes old, and the host was "deploying" from 00:00 to 00:10. The run was at 00:09 UTC. The fakes of that test and of `test/guard.test.mjs` now answer an old date to `gh api`. The old fake fails with `TZ` set so that the local time is 00:04, and the new one passes then and at any other hour. Two of the review's followups are done: a proof file that disappears between its check and its read ends that answer only, and a receipt the guard refuses is logged. Three are left as they are. First, a page of the after environment that names its files from the root (`/app.js`) or redirects to `/` is outside the preview's prefix, so those requests are aborted and its capture may be empty: safe, and to be seen in the real proof run. Second, a capture given up at the cap still runs in the background until its own timeouts end (15 s per page, 20 s of flow). Third, "the last capture per service" follows the order of the sessions, which is right while a service has one author. The app sets `nosniff` on every answer it serves (`app/src/server.ts`), the captures included.
 
 - Pull request: 338, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-proof-receipt`.
