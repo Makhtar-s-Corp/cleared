@@ -59,7 +59,7 @@ export function createReaderRuntime(options: { readonly flow: Pick<Runtime, 'eng
       const servicePaths = [...new Set([env.CLEARED_V2_STATE_DIR, env.HOME ?? homedir(), config.projectDir, config.workdirRoot].filter((p): p is string => !!p && p !== '/'))];
       reader = new ReaderService({
         store, adapter, effects: effectsOf(config), model, idleMs: config.idleMs,
-        workspace: { id: config.project, services: workspaceOf(config).services.map((service) => ({ name: service.name, base: service.base })) },
+        workspace: { id: config.project, services: workspaceOf(config).services.map((service) => ({ name: service.name, base: service.base, repo: service.repo, path: service.path })) },
         clean: (text) => cleanText(text, { secrets: secretValues(env), servicePaths }),
       });
       reader.startTimer();

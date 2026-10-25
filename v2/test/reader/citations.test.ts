@@ -24,7 +24,7 @@ test('a mention is service/path:line or service/path:from-to, for a service of t
 });
 
 test('a mention is not read inside another word, a path outside the service, nor a line 0', () => {
-  assert.deepEqual(mentionsIn('see vendor/guestbook/src/page.ts:3, guestbook/../etc/passwd:1, guestbook/src/page.ts:0 and guestbook/src/:4', ['guestbook']), []);
+  assert.deepEqual(mentionsIn('see vendor/guestbook/src/page.ts:3, guestbook/../etc/passwd:1, guestbook/src/page.ts:0 and guestbook/src/:4', ['guestbook', 'filter-api']), []);
 });
 
 test('a bare path:line counts only in an ask of one service, and is marked bare', () => {
