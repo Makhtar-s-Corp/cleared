@@ -5565,4 +5565,5 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read, no network beyond `npm ci` of the lock file and `npm pack` of the SDK's tarball (read, not run), no tunnel, no port opened, no secret.
 
+- Pull request: 361, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-skills-user`.
