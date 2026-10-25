@@ -6595,4 +6595,5 @@ The behaviour is the same either way.
 
 **Resources.** No Docker object; no port opened but port 0 on loopback in the tests; no tunnel, no secret. No real Slack, Cursor, Codex or Linear account; git repositories built by the tests in temporary folders.
 
+- Pull request: 402, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-service-map`.
