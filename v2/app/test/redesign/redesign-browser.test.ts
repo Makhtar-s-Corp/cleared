@@ -208,3 +208,40 @@ test('the gauge in French: its words and its reset through lib/time.ts', { skip 
     assert.match(await page.locator('#quota-gauge').getAttribute('aria-label'), /^Quota de la semaine\u00a0: 62\u00a0% utilisés, reset [a-zé]+\. \d{1,2}\u00a0h\u00a0\d{2}\. Ouvre Consommation\.$/);
   }, false, 'fr');
 });
+
+// The product owner's answer of 2026-10-25, 12:20: the gauge on a phone too. In the top bar, between the search and
+// the person, a 44 px target with the percent and a thin bar; the bar of screens at the foot stays the four screens.
+for (const language of ['en', 'fr'] as const) {
+  test(`${language} on a phone (390): the gauge in the top bar, a 44 px target read out with its percent and its reset; a tap opens Consumption`, { skip }, async () => {
+    await signedIn(390, async (page, base) => {
+      const gauge = page.locator('#quota-gauge');
+      await gauge.waitFor();
+      await fontsReady(page);
+      const box = await gauge.evaluate((el: any) => { const r = el.getBoundingClientRect(); return { top: r.top, bottom: r.bottom, width: r.width, height: r.height, visible: getComputedStyle(el).display !== 'none' }; });
+      const bar = await page.locator('.sidebar').evaluate((el: any) => el.getBoundingClientRect().bottom);
+      assert.ok(box.visible, 'the gauge is shown on a phone');
+      assert.ok(box.top >= 0 && box.bottom <= bar, `in the top bar: ${box.top} to ${box.bottom}, the bar ends at ${bar}`);
+      assert.ok(box.width >= 44 && box.height >= 44, `a touch target of ${box.width} by ${box.height}`);
+      assert.equal(await page.locator('.side-nav #quota-gauge').count(), 0, 'not in the bar of screens');
+      assert.deepEqual(await page.locator('.side-nav .nav-item').evaluateAll((items: any[]) => items.map((i) => i.dataset.nav)), ['tower', 'inbox', 'session', 'lead']);
+      const name = await gauge.getAttribute('aria-label');
+      assert.match(name, language === 'en'
+        ? /^Weekly quota: 62% used, resets [A-Z][a-z]{2} \d{1,2}:\d{2}\. Opens Consumption\.$/
+        : /^Quota de la semaine : 62 % utilisés, reset [a-zé]+\. \d{1,2} h \d{2}\. Ouvre Consommation\.$/);
+      assert.equal((await gauge.innerText()).trim(), language === 'en' ? '62%' : '62 %');
+      // Nothing of the top bar overlaps, and the page does not scroll sideways.
+      const boxes = await page.locator('.sidebar > .side-head .side-brand, .sidebar > #palette-open, .side-foot > #quota-gauge, .side-foot > .source-pill, .side-foot-row > *').evaluateAll((items: any[]) => items
+        .filter((el) => getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().width > 0)
+        .map((el) => { const r = el.getBoundingClientRect(); return { name: el.id || el.className, left: r.left, right: r.right }; }));
+      for (let i = 0; i < boxes.length; i += 1) for (let j = i + 1; j < boxes.length; j += 1) {
+        const [a, b] = [boxes[i]!, boxes[j]!];
+        assert.ok(a.right <= b.left + 0.5 || b.right <= a.left + 0.5, `${a.name} and ${b.name} overlap`);
+      }
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390), 'no sideways scroll');
+      await gauge.tap();
+      await page.waitForURL(`${base}/consumption`);
+      await page.locator('.consumption-grid').waitFor();
+      assert.equal(await gauge.getAttribute('aria-current'), 'page');
+    }, true, language);
+  });
+}
