@@ -171,7 +171,7 @@ export function linkRows(map: ServiceMap, t: Translate): LinkRow[] {
     const to = link.kind === 'database' ? databaseName(map, link.to, t) : link.to;
     const key = link.kind === 'event' ? 'map_link_event' : link.kind === 'database' ? (items ? 'map_link_database' : 'map_link_database_bare') : (items ? 'map_link_call' : 'map_link_call_bare');
     return {
-      key: `${link.kind}:${link.from}:${link.to}`, kind: link.kind, text: t(key, { from: link.from, to, items }), state: stateOf(link, t),
+      key: `${link.kind}:${link.from}:${link.to}`, kind: link.kind, text: t(key, { from: link.from, to, list: items }), state: stateOf(link, t),
       undeclared: link.kind === 'call' && !link.declared, places: link.places.map((place) => `${place.file}:${place.line}`).join(', '),
     };
   });
@@ -186,12 +186,12 @@ export function impactLines(map: ServiceMap, service: string, t: Translate): Imp
   const lines: ImpactLine[] = [];
   for (const caller of one.callers) {
     if (caller.through !== null) lines.push({ kind: 'through', text: t('map_impact_through', { name: caller.name, through: caller.through }) });
-    else lines.push({ kind: 'caller', text: caller.items.length > 0 ? t('map_impact_caller', { name: caller.name, items: caller.items.join(', ') }) : t('map_impact_caller_bare', { name: caller.name }) });
+    else lines.push({ kind: 'caller', text: caller.items.length > 0 ? t('map_impact_caller', { name: caller.name, list: caller.items.join(', ') }) : t('map_impact_caller_bare', { name: caller.name }) });
   }
-  for (const listener of one.listeners) lines.push({ kind: 'listener', text: t('map_impact_listener', { name: listener.name, items: listener.channels.join(', ') }) });
+  for (const listener of one.listeners) lines.push({ kind: 'listener', text: t('map_impact_listener', { name: listener.name, list: listener.channels.join(', ') }) });
   for (const shared of one.sharing) {
     const own = shared.database.startsWith(`${service}:`);
-    lines.push({ kind: 'sharing', text: t(own ? 'map_impact_sharing' : 'map_impact_shared', { name: shared.name, items: shared.tables.join(', ') }) });
+    lines.push({ kind: 'sharing', text: t(own ? 'map_impact_sharing' : 'map_impact_shared', { name: shared.name, list: shared.tables.join(', ') }) });
   }
   const contract = map.services.find((s) => s.name === service)?.contract;
   if (contract) lines.push({ kind: 'contract', text: t('map_impact_contract', { format: formatName(contract.format), path: contract.path }) });
