@@ -9,7 +9,13 @@
 // locally one. The numbers are printed as "measure" lines for the browser
 // job's summary.
 //
+// The same budget under load, reproduced (lane j3-tab-perf, P223): with
+// CLEARED_V2_BUDGET_SLOWDOWN=4 the page's CPU is slowed four times through
+// the browser's own throttling once the screens were drawn, about what a
+// full parallel run of the browser job does to it on the lane's host.
+//
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/foundation/budget-browser.test.ts
+//   CLEARED_V2_BUDGET_SLOWDOWN=4 CLEARED_V2_PLAYWRIGHT=... node --test app/test/foundation/budget-browser.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
@@ -23,6 +29,9 @@ const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
 const RUNS = process.env.CI === 'true' ? 3 : 1;
 export const BUDGET_MS = 100;
+// 1 unless set: the CPU slowdown of the counted switches.
+const SLOWDOWN = Math.max(1, Number(process.env.CLEARED_V2_BUDGET_SLOWDOWN) || 1);
+const NAMED = SLOWDOWN === 1 ? '' : `_cpu${SLOWDOWN}x`;
 
 // Any busy placeholder the screen draws, counted from the moment it is armed.
 const BUSY_WATCH = `(() => {
@@ -67,12 +76,15 @@ test('twenty switches among the five screens: under 100 ms at p95, no document, 
       await page.click('button[type=submit]');
       await page.waitForURL(`${app.base}/`);
       await page.locator('#tower-body .tower').waitFor();
-      const run = await switchRun(page, 20, () => page.evaluate(() => { (window as unknown as { __busy: { armed: boolean } }).__busy.armed = true; }), LAP_TWO);
+      const run = await switchRun(page, 20, async () => {
+        await page.evaluate(() => { (window as unknown as { __busy: { armed: boolean } }).__busy.armed = true; });
+        if (SLOWDOWN > 1) await (await context.newCDPSession(page)).send('Emulation.setCPUThrottlingRate', { rate: SLOWDOWN });
+      }, LAP_TWO);
       runs.push(run);
       const busy = await page.evaluate(() => (window as unknown as { __busy: { count: number } }).__busy.count);
       const navigations = await page.evaluate(() => performance.getEntriesByType('navigation').length);
-      console.log(`measure tab_switch_p95_run${r + 1}_ms ${run.p95.toFixed(1)}`);
-      console.log(`measure tab_switch_median_run${r + 1}_ms ${run.median.toFixed(1)}`);
+      console.log(`measure tab_switch${NAMED}_p95_run${r + 1}_ms ${run.p95.toFixed(1)}`);
+      console.log(`measure tab_switch${NAMED}_median_run${r + 1}_ms ${run.median.toFixed(1)}`);
       assert.equal(run.documents, 0, 'a switch loads no document');
       assert.equal(navigations, 1, 'one document for the whole run');
       assert.ok(Math.max(...run.requests) <= 1, `at most one request per switch: ${run.requests.join(' ')}`);
@@ -87,7 +99,7 @@ test('twenty switches among the five screens: under 100 ms at p95, no document, 
   }
   const p95s = runs.map((run) => run.p95);
   const median = percentile(p95s, 50);
-  console.log(`measure tab_switch_p95_median_ms ${median.toFixed(1)}`);
+  console.log(`measure tab_switch${NAMED}_p95_median_ms ${median.toFixed(1)}`);
   console.log(`measure tab_switch_documents ${runs.reduce((sum, run) => sum + run.documents, 0)}`);
   console.log(`measure tab_switch_requests_max ${Math.max(...runs.flatMap((run) => run.requests))}`);
   assert.deepEqual(errors, []);
