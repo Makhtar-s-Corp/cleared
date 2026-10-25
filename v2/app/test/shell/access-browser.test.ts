@@ -4,12 +4,14 @@
 // takes it away, Esc closes the panel and gives the focus back to the
 // menu's button; axe finds no violation of WCAG 2.2 AA. The app's other
 // calls go to the fixtures; the tokens' go to the run module's own routes,
-// through the app's proxy, as in the service.
+// through the app's proxy, as in the service. With CLEARED_V2_CAPTURES=<folder>,
+// the panel with a token just made is captured at 1440, 1280, 768 and 390 px,
+// light and dark, in English, and at 1440 in French.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/shell/access-browser.test.ts
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { createRequire } from 'node:module';
@@ -28,6 +30,8 @@ const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'];
 const PROOF = 'proof-of-the-access-browser-test';
+const CAPTURES = process.env.CLEARED_V2_CAPTURES;
+const WIDTHS = [1440, 1280, 768, 390] as const;
 declare const document: any;
 declare const window: any;
 
@@ -102,6 +106,19 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await page.click('#access-copy');
     assert.equal(await page.evaluate(() => navigator.clipboard.readText()), shown);
     assert.deepEqual(await violations(page), [], 'axe, with the value shown');
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'dark'; });
+    assert.deepEqual(await violations(page), [], 'axe, dark');
+    for (const theme of CAPTURES ? ['light', 'dark'] : []) {
+      await page.evaluate((value: string) => { document.documentElement.dataset.theme = value; }, theme);
+      for (const width of language === 'en' ? WIDTHS : [1440]) {
+        if (language === 'fr' && theme === 'dark') continue;
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        mkdirSync(CAPTURES as string, { recursive: true });
+        await page.screenshot({ path: join(CAPTURES as string, `access-${width}-${theme}${language === 'fr' ? '-fr' : ''}.png`) });
+      }
+    }
+    await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
+    await page.setViewportSize({ width: 1440, height: 900 });
 
     await page.click('#access [data-revoke]');
     await page.waitForFunction(() => document.querySelectorAll('#access [data-revoke]').length === 0);

@@ -10,7 +10,7 @@ import { loadCatalog } from '../../src/catalog.ts';
 import { translator, type Translate } from '../lib/i18n.ts';
 import { AccessBody } from '../shell/Access.tsx';
 import { ACCESS_COMMAND, accessNameProblem, accessRows, initialAccess, type AccessView } from '../shell/access.ts';
-import { html, renderSidebar, visibleText } from './render.tsx';
+import { html, visibleText } from './render.tsx';
 
 const en = translator(loadCatalog('shell', 'en'));
 const fr = translator(loadCatalog('shell', 'fr'));
@@ -95,7 +95,7 @@ test('a refused name, a full list and a failed call are said, as alerts', () => 
 
 test('the French panel', () => {
   const text = visibleText(body({ ...listed, fresh: { token: tokens[1]!, value: `clr_${'Q'.repeat(43)}` } }, fr)).join(' | ');
-  assert.match(text, /Accès à l’API/);
+  assert.match(text, /Un jeton personnel/);
   assert.match(text, /Vos jetons/);
   assert.match(text, /n’approuve jamais une mise en production/);
   assert.match(text, /Révoquer/);
@@ -103,9 +103,17 @@ test('the French panel', () => {
   assert.doesNotMatch(text, /⟦|«access_/);
 });
 
+// The menu's content is drawn only when it opens: the browser test opens it
+// (app/test/shell/access-browser.test.ts); here, the button is in it and the shell draws the panel.
 test('the person\'s menu opens the panel', () => {
-  const markup = renderSidebar('tower', en);
-  assert.match(markup, /<button[^>]*id="access-open"[^>]*>API access<\/button>/);
+  const sidebar = readFileSync(new URL('../shell/Sidebar.tsx', import.meta.url), 'utf8');
+  const menu = sidebar.slice(sidebar.indexOf('<PopoverContent'), sidebar.indexOf('</PopoverContent>'));
+  assert.match(menu, /<Button className="plain menu-access" id="access-open" onClick=\{\(\) => \{ setMenu\(false\); props\.onAccess\?\.\(\); \}\}>\{t\('access_open'\)\}<\/Button>/);
+  const shell = readFileSync(new URL('../shell/App.tsx', import.meta.url), 'utf8');
+  assert.match(shell, /onAccess=\{openAccess\}/);
+  assert.match(shell, /overlay === 'access' && raw \? <AccessPanel t=\{t\} api=\{raw\}/);
+  assert.equal(en('access_open'), 'API access');
+  assert.equal(fr('access_open'), 'Accès à l’API');
 });
 
 test('the panel\'s words: in both catalogs, no key a guard reads as a credential', () => {

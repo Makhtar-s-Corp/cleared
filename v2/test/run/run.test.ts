@@ -103,7 +103,8 @@ test('the app makes a token for the signed-in person: its value answered once, i
 test('the token routes want the app: no proof, a wrong proof, a token in its place, or no person, and nothing is made', async () => {
   const s = await serve();
   const made = await madeToken(s);
-  for (const headers of [{}, { [SERVICE_PROOF_HEADER]: 'wrong', [SERVICE_USER_HEADER]: 'u1' }, bearer(made.value), { ...bearer(made.value), [SERVICE_USER_HEADER]: 'u1' }]) {
+  const sent: Record<string, string>[] = [{}, { [SERVICE_PROOF_HEADER]: 'wrong', [SERVICE_USER_HEADER]: 'u1' }, bearer(made.value), { ...bearer(made.value), [SERVICE_USER_HEADER]: 'u1' }];
+  for (const headers of sent) {
     assert.equal((await call(s.base, 'POST', ACCESS_PATH, { body: { name: 'more' }, headers })).status, 401, JSON.stringify(headers));
     assert.equal((await call(s.base, 'GET', ACCESS_PATH, { headers })).status, 401);
     assert.equal((await call(s.base, 'POST', `${ACCESS_PATH}/${made.token.id}/revoke`, { headers })).status, 401);
