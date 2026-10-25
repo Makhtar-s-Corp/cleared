@@ -5618,5 +5618,5 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no tunnel, no port opened, no secret.
 
-- Pull request: to be named after it opens, against `v2`.
+- Pull request: 364, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-no-bash-core`.
