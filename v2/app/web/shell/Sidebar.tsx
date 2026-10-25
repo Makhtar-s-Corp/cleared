@@ -101,8 +101,9 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
           })}
         </ul>
       </nav>
+      {/* A group of the sidebar, which is a landmark already, not a region: the tower's block of the same name is one. */}
       {props.groups.length > 0 ? (
-        <section className="side-sessions" aria-labelledby="side-sessions-title">
+        <div className="side-sessions" role="group" aria-labelledby="side-sessions-title">
           <p className="side-title" id="side-sessions-title">{t('side_sessions')}</p>
           {props.groups.map((group) => (
             <div className="side-group" key={group.key} data-group={group.key}>
@@ -119,7 +120,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
               </ul>
             </div>
           ))}
-        </section>
+        </div>
       ) : null}
       <div className="side-foot">
         {/* The lead's state in words: its dot beside Plans alone read as a plan running (art director, item 14). */}
@@ -132,8 +133,8 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
                 <span className="avatar" aria-hidden="true">{props.userName.slice(0, 1).toUpperCase()}</span><span className="name">{props.userName}</span>
               </button>
             </PopoverTrigger>
-            <PopoverContent side="top" align="start" className="person-menu">
-              <p className="menu-note">{signedIn}</p>
+            <PopoverContent side="top" align="start" className="person-menu" aria-labelledby="person-menu-title">
+              <p className="menu-note" id="person-menu-title">{signedIn}</p>
               {/* On a phone the theme's button is here, the top bar has no room for it. */}
               <Button className="plain menu-theme" onClick={props.onTheme}>{t(props.theme === 'dark' ? 'theme_light' : 'theme_dark')}</Button>
               {/* Each language named in itself (lane i18n): the person finds theirs whatever the page's. */}
