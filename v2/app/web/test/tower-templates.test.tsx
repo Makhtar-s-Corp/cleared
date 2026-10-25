@@ -57,7 +57,10 @@ test('each template\'s sections, in both languages, from the catalogs', () => {
   assert.match(templateBody('bug', en), /## Steps to reproduce/);
   assert.match(templateBody('bug', fr), /## Étapes pour reproduire/);
   assert.match(templateBody('ci', en), /No test skipped or removed/);
-  assert.match(templateBody('question', fr), /Aucun changement du code/);
+  // A branch with no commit is not published (workspace/publish.ts): Review fixes what it can, Question writes its answer down.
+  assert.match(templateBody('review', en), /fixed on this branch, each with a test/);
+  assert.match(templateBody('question', fr), /là où le prochain lecteur la cherchera/);
+  for (const template of TICKET_TEMPLATES) assert.doesNotMatch(templateBody(template, en), /No change to the code/i, template);
   assert.equal(templateBody('review', sentinel), '«template_review_body»');
 });
 
