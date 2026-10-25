@@ -75,7 +75,6 @@ export function Bar({ t, title, body, services = [], picked = [], variants = 1, 
       </div>
       {templates ? (
         <div className="ask-templates" id="ask-templates" role="group" aria-label={t('bar_templates_label')}>
-          <span className="ask-variants-label" aria-hidden="true">{t('bar_template')}</span>
           {TICKET_TEMPLATES.map((id) => (
             <Toggle key={id} className="svc-toggle" pressed={template === id} onPressedChange={() => onTemplate?.(id)} data-template={id}>
               {template === id ? <Check size={12} aria-hidden="true" /> : null}{t(`template_${id}`)}

@@ -71,7 +71,7 @@ const shot = async (page: any, name: string) => { if (SHOTS) await page.locator(
 
 test('a question asked from the Plan tab is about the session\'s service, and opens its own screen', { skip }, async () => {
   await withPlan({ language: 'en' }, async ({ page, calls, away }) => {
-    assert.match(await page.locator('.plan-ask').innerText(), /Read only, on the base branch of guestbook/);
+    assert.match(await page.locator('.plan-ask').innerText(), /Reads the base branch of guestbook/);
     await page.click('[data-act="plan_ask"]');
     assert.equal(await page.locator('.plan-ask-note').innerText(), 'Write the question first.');
     assert.deepEqual(asked(calls), [], 'an empty question is not sent');
@@ -93,7 +93,7 @@ test('in French, on a phone: a named line is the ask\'s target, and nothing scro
   await withPlan({ language: 'fr', width: 390, height: 844 }, async ({ page, calls, away }) => {
     const card = await page.locator('.plan-ask').innerText();
     assert.match(card, /Interroger le code/);
-    assert.match(card, /Lecture seule, sur la branche de base de guestbook/);
+    assert.match(card, /Lit la branche de base de guestbook/);
     assert.ok(await noOverflow(page), 'no horizontal scroll at 390 on the Plan tab');
 
     const question = 'Que fait guestbook:src/page.ts:12 ?';
