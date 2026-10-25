@@ -6001,7 +6001,7 @@ With the CPU slowed four times the budget is at its edge: what is left is the ne
 - The budget runs alone at 26.7, 25.7 and 28.1 ms.
 - `npm run guard -- --base origin/v2`: nothing refused.
 
-**A capture for the product owner, during the lane.** At the owner's request, the current state was captured with the same script, in French, dark, at 1440 and 390: the tower, the session, the inbox and Consumption, beside the before captures this lane already had (no tower among them). The files were compressed with the same two commands and pushed as one commit on a separate branch from `origin/v2`, `amdiakhate/j3-visual-redesign-wip`, under `docs/v2/visual-redesign/wip/`. No pull request was opened for it, and this lane's branch was not touched by it.
+**A capture for the product owner, during the lane, then cancelled.** At the owner's request, the current state was captured with the same script, in French, dark, at 1440 and 390, compressed with the same two commands, and pushed as one commit on a separate branch from `origin/v2`, with no pull request; this lane's branch was not touched by it. The owner then cancelled that request: this pull request's captures are enough. The separate branch was left as it is, since no branch is deleted; it is not part of this work.
 
 ## 2026-10-25: the sidebar is for the development; Consumption becomes a quota gauge at its foot (owner decision of 11:14, P227, issue #375)
 
