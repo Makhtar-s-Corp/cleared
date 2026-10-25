@@ -133,7 +133,8 @@ for (const language of LANGUAGES) {
       // shows the plan handled, with no Go yet, while the write is on its way.
       await page.route('**/sessions/*/plan/go', async (route: any) => { await new Promise((resolve) => setTimeout(resolve, 400)); await route.continue(); });
       await page.locator('#detail [data-act="plan_go"]').tap();
-      await page.locator('#detail .d-done').waitFor();
+      // What the detail says once the Go is answered, not while it is on its way.
+      await page.locator('#detail .d-done').filter({ hasText: words.go }).waitFor();
       assert.match((await page.locator('#detail .d-done').innerText()).trim(), words.go);
       assert.deepEqual(source.calls.map((call) => `${call.method} ${call.path}`), [`POST /api/sessions/${plan?.sessionId}/plan/go`]);
     });
