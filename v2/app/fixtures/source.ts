@@ -260,7 +260,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
         const question = ((await readJson(request)) as { question?: unknown } | undefined)?.question;
         if (typeof question !== 'string' || !question.trim() || question.length > 4000) return sendJson(response, 400, { error: 'a question is a non-empty text of at most 4000 characters' });
         const at = now().toISOString();
-        const turn = { question: question.trim(), answer: null, at, costUsd: null, inputTokens: 0, outputTokens: 0 };
+        const turn = { question: question.trim(), answer: null, at, costUsd: null, inputTokens: 0, outputTokens: 0, citations: [] };
         if (parts.length === 1) {
           const ask: Ask = { id: `ask-${randomUUID()}`, question: question.trim(), service: null, target: null, session: null, state: 'starting', turns: [turn], costUsd: 0, inputTokens: 0, outputTokens: 0, weekPercent: null, createdAt: at, by: user };
           asks.set(ask.id, ask);

@@ -33,6 +33,7 @@ import { hasMark, translator, type Translate } from '../lib/i18n.ts';
 import { looksLikeCommand } from '../lib/intent.ts';
 import { duration, estimate, since } from '../lib/time.ts';
 import { AskScreen } from '../screens/ask/Ask.tsx';
+import { answerParts } from '../screens/ask/model.ts';
 import { planLine, type InboxView, type Local } from '../screens/inbox/model.ts';
 import { Side, Thread } from '../screens/lead/Lead.tsx';
 import type { LeadView } from '../screens/lead/model.ts';
@@ -87,6 +88,8 @@ async function dataWords(): Promise<Set<string>> {
   const inbox = inboxFixture(FIXTURE_NOW, { train: 'waiting', sessionPlan: 'medium', reading: true });
   const words = strings([tower, lead, session.sessions, session.ticket, Array.from(session.store.events.after(AUTHOR_ID)), inbox, askFixture(), platformAsk()]);
   for (const s of [...tower.sessions, ...session.sessions, ...inbox.sessions]) words.add(formatModel(s.harness, s.model));
+  // An answer is drawn cut around the citations it links (P215): each piece is the answer's.
+  for (const turn of askFixture().turns) for (const part of answerParts(turn.answer ?? '', turn.citations)) words.add(part.text.trim());
   // The project's and the person's names the sidebar is drawn with (render.tsx).
   words.add('Guestbook');
   words.add('alex');

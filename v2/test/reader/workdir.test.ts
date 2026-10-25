@@ -56,9 +56,11 @@ test('a file is read at the service\'s base, from git, and only a plain text fil
 });
 
 test('the ask\'s folder holds each named service at its base, the briefing and the mark, and is made again from scratch', async () => {
-  const { root, effects } = await setup();
-  const dir = await effects.prepare({ id: 'ask-1', services: ['guestbook', 'svc'], briefing: '# Briefing\n' });
+  const { root, project, effects } = await setup();
+  const { dir, commits } = await effects.prepare({ id: 'ask-1', services: ['guestbook', 'svc'], briefing: '# Briefing\n' });
   assert.equal(dir, join(root, 'asks', 'ask-1'));
+  const base = gitIn(project.dir, ['rev-parse', 'refs/remotes/origin/main']);
+  assert.deepEqual(commits, { guestbook: base, svc: base }, 'the commit each service was exported at');
   assert.deepEqual(readdirSync(dir).sort(), ['CLAUDE.md', 'HANDOVER.md', READ_ONLY_MARK, 'guestbook', 'svc'].sort());
   assert.equal(readFileSync(join(dir, 'CLAUDE.md'), 'utf8'), '# Briefing\n');
   assert.match(readFileSync(join(dir, 'HANDOVER.md'), 'utf8'), /nothing to hand over/i, 'the runner\'s Stop hook finds it, and a reader writes nothing');
@@ -67,10 +69,38 @@ test('the ask\'s folder holds each named service at its base, the briefing and t
   assert.deepEqual(readdirSync(join(dir, 'svc')), ['a.ts'], 'a folder service is its folder alone');
 
   const again = await effects.prepare({ id: 'ask-1', services: ['svc'], briefing: '# Again\n' });
-  assert.equal(again, dir);
+  assert.equal(again.dir, dir);
   assert.equal(existsSync(join(dir, 'guestbook')), false, 'what the last session had is gone');
   assert.equal(readFileSync(join(dir, 'CLAUDE.md'), 'utf8'), '# Again\n');
   for (const bad of ['', '../x', 'a/b', '.', '..']) await assert.rejects(effects.prepare({ id: bad, services: [], briefing: '' }), ReaderError, bad);
+});
+
+test('a citation\'s lines are counted at the commit the reader read, from git, after the base moved on', async () => {
+  const { root, project, effects } = await setup();
+  const { commits } = await effects.prepare({ id: 'ask-4', services: ['guestbook', 'svc'], briefing: 'x' });
+  const read = commits.guestbook as string;
+  // The base moves on: the page loses half its lines, and a new file lands.
+  const seed = join(root, 'later');
+  gitIn(root, ['clone', '-q', gitIn(project.dir, ['remote', 'get-url', 'origin']), 'later']);
+  writeFiles(seed, { 'src/page.ts': 'short\n', 'src/new.ts': 'new\n' });
+  gitIn(seed, ['add', '-A']);
+  gitIn(seed, ['commit', '-q', '-m', 'later']);
+  gitIn(seed, ['push', '-q', 'origin', 'main']);
+  gitIn(project.dir, ['fetch', '-q', 'origin']);
+  assert.equal(await effects.fileAt('guestbook', 'src/page.ts'), 'short\n', 'the base is the later commit now');
+  assert.equal(await effects.linesAt('guestbook', read, 'src/page.ts'), 40, 'the page as the reader read it');
+  assert.equal(await effects.linesAt('svc', commits.svc as string, 'a.ts'), 1, 'a folder service counts inside its folder');
+  for (const [service, commit, path, why] of [
+    ['guestbook', read, 'src/new.ts', 'a file landed after the reader read'],
+    ['guestbook', read, 'src/link.ts', 'a link'],
+    ['guestbook', read, 'src', 'a folder'],
+    ['guestbook', read, 'bin/blob.dat', 'not text'],
+    ['guestbook', read, '.env', 'a secret'],
+    ['guestbook', read, '../x.ts', 'outside the service'],
+    ['guestbook', 'main', 'src/page.ts', 'a branch, not a commit'],
+    ['guestbook', 'f'.repeat(40), 'src/page.ts', 'a commit the checkout does not have'],
+    ['billing', read, 'src/page.ts', 'an unknown service'],
+  ] as const) await assert.rejects(effects.linesAt(service, commit, path), (error: unknown) => error instanceof ReaderError && error.kind === 'invalid', why);
 });
 
 test('a release removes the folder, the session\'s containers and its config volume, by its label', async () => {

@@ -371,6 +371,21 @@ export type AskAnswer = {
   readonly costUsd: number | null;
   readonly inputTokens: number;
   readonly outputTokens: number;
+  readonly citations: readonly AskCitation[];               // the code the answer cites (P215)
+};
+// A `service/path:line` or `service/path:from-to` an answer writes, checked
+// by the service at the commit the reader read (src/reader/citations.ts).
+// url is a GitHub link to that commit and those lines, built by the service
+// and null when the check failed, problem then saying why.
+export type AskCitation = {
+  readonly text: string;                                    // the mention as the answer writes it
+  readonly service: string;
+  readonly path: string;                                    // inside the service
+  readonly from: number;
+  readonly to: number;
+  readonly commit: string | null;                           // null: the service was not in what the reader read
+  readonly url: string | null;
+  readonly problem: 'no_file' | 'no_line' | 'no_repository' | 'unchecked' | null;
 };
 export type Ask = {
   readonly id: string;

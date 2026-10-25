@@ -9,7 +9,7 @@
 // call goes through the app's forwarding with the signed-in user; the
 // reader's own checks (MAX_QUESTION, a target's service, three asks at once)
 // stay the service's, and the screen checks the length before it sends.
-import type { Ask, AskAnswer, AskBody } from '../../../../src/api/types.ts';
+import type { Ask, AskAnswer, AskBody, AskCitation } from '../../../../src/api/types.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { ApiError, type ScreenContext } from '../../lib/screen.ts';
 import { count, fixed } from '../../lib/time.ts';
@@ -75,6 +75,58 @@ export function totalLine(ask: Pick<Ask, 'costUsd' | 'inputTokens' | 'outputToke
   const usage = usageLine(ask, language, t) as string;
   return ask.weekPercent === null ? usage : `${usage} · ${t('ask_week', { n: Math.round(ask.weekPercent) })}`;
 }
+
+// -------------------------------------------------------------- citations
+
+// The code an answer cites (P215): the service checked each mention at the
+// commit the reader read and linked it to GitHub. The screen draws a link
+// only where the service sent one, and only to https://github.com/; an
+// address the reader wrote stays text.
+export type AnswerPart = { readonly text: string; readonly url?: string; readonly commit?: string };
+
+const GITHUB = 'https://github.com/';
+const linked = (citation: AskCitation) => citation.url !== null && citation.url.startsWith(GITHUB) && citation.text !== '';
+// A mention stands whole as the service reads it (src/reader/citations.ts):
+// not inside a longer path, nor before more digits or a range.
+const whole = (answer: string, at: number, end: number) => !/[A-Za-z0-9_./-]/.test(answer[at - 1] ?? '') && !/^(?:[0-9]|[-–][0-9])/.test(answer.slice(end));
+
+export function answerParts(answer: string, citations: readonly AskCitation[] | undefined): AnswerPart[] {
+  const found: { at: number; citation: AskCitation }[] = [];
+  for (const citation of (citations ?? []).filter(linked)) {
+    for (let at = answer.indexOf(citation.text); at !== -1; at = answer.indexOf(citation.text, at + 1)) {
+      if (whole(answer, at, at + citation.text.length)) found.push({ at, citation });
+    }
+  }
+  // From the start, the longer mention first where two start together; one inside another is left.
+  found.sort((a, b) => a.at - b.at || b.citation.text.length - a.citation.text.length);
+  const parts: AnswerPart[] = [];
+  let end = 0;
+  for (const { at, citation } of found) {
+    if (at < end) continue;
+    if (at > end) parts.push({ text: answer.slice(end, at) });
+    parts.push({ text: citation.text, url: citation.url as string, ...(citation.commit ? { commit: citation.commit } : {}) });
+    end = at + citation.text.length;
+  }
+  if (end < answer.length || parts.length === 0) parts.push({ text: answer.slice(end) });
+  return parts;
+}
+
+export const uncheckedOf = (turn: Pick<AskAnswer, 'citations'>): AskCitation[] => (turn.citations ?? []).filter((citation) => citation.url === null);
+
+const short = (commit: string) => commit.slice(0, 7);
+
+// "src/x.ts:3: no such file at commit 5b2d8e1".
+export function citationNote(citation: AskCitation, t: Translate): string {
+  if (citation.commit === null) return t('ask_citation_not_read', { mention: citation.text, service: citation.service });
+  switch (citation.problem) {
+    case 'no_line': return t('ask_citation_no_line', { mention: citation.text, commit: short(citation.commit) });
+    case 'no_repository': return t('ask_citation_no_repository', { mention: citation.text, service: citation.service });
+    case 'unchecked': return t('ask_citation_unchecked', { mention: citation.text });
+    default: return t('ask_citation_no_file', { mention: citation.text, commit: short(citation.commit) });
+  }
+}
+
+export const citationTitle = (citation: Pick<AskCitation, 'commit'> | AnswerPart, t: Translate) => t('ask_citation_open', { commit: short(citation.commit ?? '') });
 
 // -------------------------------------------------------------- questions
 
