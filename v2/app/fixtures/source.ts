@@ -28,6 +28,8 @@
 // LOCAL-149 has its author's and its reviewer's sessions (fixtures/cost.ts),
 // and its production page's check (P218), read by the service's own reader.
 // The choice of the receipt's captures (P226) is kept by ticket, Auto until posted.
+// The week's figures (C17) are the service's own weekFigures over the
+// consumption fixture's ledger; with `week`, it holds a week of merged tickets.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { KEEPALIVE_MS } from '../../src/api/events.ts';
 import { changeFrame, leadFrame, sseFrame, type Ask, type CaptureChoice, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
@@ -90,7 +92,7 @@ export type FixtureSource = DataSource & {
 
 const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 
-export async function fixtureSource(options: { readonly now?: () => Date; readonly project?: string; readonly resolved?: boolean } = {}): Promise<FixtureSource> {
+export async function fixtureSource(options: { readonly now?: () => Date; readonly project?: string; readonly resolved?: boolean; readonly week?: boolean } = {}): Promise<FixtureSource> {
   const now = options.now ?? (() => new Date());
   const fixture = await towerFixture(now(), options.project === undefined ? {} : { project: options.project });
   const lead = await leadFixture(now(), options.project === undefined ? {} : { project: options.project });
@@ -117,7 +119,7 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
     return item.kind === 'release' && outcome ? { ...item, state: 'handled', outcome: { decision: 'close', ...outcome } } : item;
   };
   const asked = (item: NextInboxItem) => (item.kind === 'permission' || item.kind === 'question') && answered.has(`${item.sessionId}\n${item.requestId}`) ? { ...item, state: 'handled' as const } : item;
-  const consumption = consumptionFixture(project, now);
+  const consumption = consumptionFixture(project, now, { week: options.week === true });
   let serviceMap = serviceMapFixture(now());
   const batches = new BatchRunner({
     db: consumption.db, tickets: created, project, levers: consumption.levers, weekStopPercent: 85, now,
@@ -207,6 +209,8 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
     // The consumption screen (O15): the service's own read and levers over a week of invented turns.
     if (collection === 'consumption') {
       if (method === 'GET' && parts.length === 1) return sendJson(response, 200, consumption.read(url.searchParams.get('tz') ?? undefined));
+      // The week's figures (C17): with `week`, a week of merged tickets on the same ledger.
+      if (method === 'GET' && id === 'week' && parts.length === 2) return sendJson(response, 200, await consumption.week(url.searchParams.get('tz') ?? undefined));
       if (method === 'POST' && id === 'levers' && parts.length === 2) {
         const body = await readJson(request);
         if (typeof body !== 'object' || body === null || Array.isArray(body)) return sendJson(response, 400, { error: 'the body is an object: { model?, maxLanes?, paused? }' });

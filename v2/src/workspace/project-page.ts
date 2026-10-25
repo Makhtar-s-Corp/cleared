@@ -7,7 +7,9 @@
 //
 // It is read from the service's base branch (git ls-tree and git show on
 // refs/remotes/origin/<base>), never from the checkout's files, so nothing
-// untracked can reach it. A file that can hold a secret is left out by its
+// untracked can reach it. A folder service of a monorepo has the page of its
+// folder (issue #394): its files, its package.json and README, the commits
+// that touched it. A file that can hold a secret is left out by its
 // name, even from the layout; what is read is then cleaned of secret values
 // and of token shapes, so a commit subject or a README that quotes one does
 // not carry it into every briefing.
@@ -40,6 +42,21 @@ export function readProjectPage(env: NodeJS.ProcessEnv, service: string): string
   } catch {
     return null;
   }
+}
+
+// What one line can say of a page: the README's first paragraph, else the
+// package's name; null for a page that says neither. The lead's line of a
+// service that commits no page of its own (issue #394).
+export function pageSummary(page: string): string | null {
+  const lines = page.split('\n');
+  const start = lines.indexOf('## Architecture');
+  if (start < 0) return null;
+  const block: string[] = [];
+  for (const line of lines.slice(start + 1)) {
+    if (!line.trim() || line.startsWith('Layout of ')) break;
+    block.push(line.trim());
+  }
+  return block.find((line) => !/^(?:Package: |Consumes: |Provides the contract )/.test(line)) ?? block.find((line) => line.startsWith('Package: ')) ?? null;
 }
 
 // A path that can hold a secret: an environment file, a key or certificate,
@@ -80,14 +97,16 @@ function summaryOf(readme: string): string {
   return '';
 }
 
-// Every path of the base branch that may be shown, to two levels: a folder
-// of the second level is shown as a folder, as git lists it.
-function layoutOf(paths: readonly string[]): string[] {
+// Every path of the base branch that may be shown, to two levels under
+// `folder` (the repository's root by default): a folder of the second level
+// is shown as a folder, as git lists it.
+function layoutOf(paths: readonly string[], folder = ''): string[] {
   const seen = new Set<string>();
   for (const path of paths) {
-    const parts = path.split('/');
+    if (!path.startsWith(folder)) continue;
+    const parts = path.slice(folder.length).split('/');
     if (parts[0] === '.git') continue;
-    seen.add(parts.length === 1 ? path : parts.length === 2 ? path : `${parts[0]}/${parts[1]}/`);
+    seen.add(folder + (parts.length <= 2 ? parts.join('/') : `${parts[0]}/${parts[1]}/`));
   }
   const all = [...seen].sort((a, b) => a.localeCompare(b));
   const shown = all.slice(0, LAYOUT_LIMIT).map((entry) => `- \`${entry}\``);
@@ -104,12 +123,28 @@ export type PageSource = {
   readonly base: string;                  // the service's base branch
   readonly name: string;                  // the service's name
   readonly env: NodeJS.ProcessEnv;
+  readonly path?: string | null;          // a folder service's folder in the repository
+  readonly consumes?: readonly string[];  // the services of the workspace it calls
+  readonly contract?: { readonly format: string; readonly path: string } | null;   // the contract it provides
 };
 
-// The base branch's tip, or null when the checkout does not hold it yet.
-export async function baseSha(source: Pick<PageSource, 'dir' | 'base'>): Promise<string | null> {
+// The folder of a folder service, as git names its paths ("guestbook/"), or
+// '' for a whole repository.
+const folderOf = (source: Pick<PageSource, 'path'>) => (source.path ? `${source.path.replace(/^\.\/|\/+$/g, '')}/` : '');
+
+// What the page is made from: the folder and the repository's settings for
+// a folder service, everything otherwise.
+const pathsOf = (source: Pick<PageSource, 'path'>) => (folderOf(source) ? ['--', folderOf(source), '.cleared/agents.conf'] : []);
+
+// The tip the page is made at, or null when the checkout does not hold the
+// base yet: the base branch's tip, or for a folder service the last commit
+// of the base that touched its folder or the repository's settings, so a
+// merge in another folder leaves its page as it is.
+export async function baseSha(source: Pick<PageSource, 'dir' | 'base' | 'path'>): Promise<string | null> {
+  const ref = `refs/remotes/origin/${source.base}`;
   try {
-    return (await git(source.dir, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${source.base}^{commit}`])).trim() || null;
+    if (!folderOf(source)) return (await git(source.dir, ['rev-parse', '--verify', '--quiet', `${ref}^{commit}`])).trim() || null;
+    return (await git(source.dir, ['rev-list', '-1', ref, ...pathsOf(source)])).trim() || null;
   } catch {
     return null;
   }
@@ -130,11 +165,12 @@ export async function generateProjectPage(source: PageSource, known?: string): P
   const sha = known ?? await baseSha(source);
   if (!sha) throw new Error(`the base ${source.base} of ${source.name} is not in its checkout`);
   const ref = `refs/remotes/origin/${source.base}`;
-  const paths = (await git(source.dir, ['ls-tree', '-r', '--name-only', '-z', ref])).split('\0').filter((path) => path && !isDeniedPath(path));
+  const folder = folderOf(source);
+  const paths = (await git(source.dir, ['ls-tree', '-r', '--name-only', '-z', ref, ...(folder ? ['--', folder] : [])])).split('\0').filter((path) => path && !isDeniedPath(path));
 
   let packageName = '';
   const commands: string[] = [];
-  const pkg = await show(source, 'package.json');
+  const pkg = await show(source, `${folder}package.json`);
   if (pkg !== undefined) {
     try {
       const parsed = JSON.parse(pkg) as { name?: unknown; scripts?: Record<string, unknown> };
@@ -146,8 +182,11 @@ export async function generateProjectPage(source: PageSource, known?: string): P
   const conf = await show(source, '.cleared/agents.conf');
   const safe = conf === undefined ? [] : listOf(/^\s*safe_commands\s*=\s*(.*)$/m.exec(conf)?.[1]).map((c) => field(source.env, c, 80));
 
-  const readme = await show(source, 'README.md');
-  const subjects = (await git(source.dir, ['log', '--first-parent', `-n${DECISIONS}`, '--no-show-signature', '--format=%cs %s', ref])).split('\n').filter(Boolean);
+  const readme = await show(source, `${folder}README.md`);
+  const subjects = (await git(source.dir, ['log', '--first-parent', `-n${DECISIONS}`, '--no-show-signature', '--format=%cs %s', ref, ...pathsOf(source)])).split('\n').filter(Boolean);
+  // Where the service sits in the workspace, as its configuration says.
+  const consumes = (source.consumes ?? []).map((name) => `\`${field(source.env, name, 40)}\``);
+  const contract = source.contract ? `Provides the contract \`${field(source.env, source.contract.path, 120)}\` (${field(source.env, source.contract.format, 20)}).` : '';
 
   // The header is left out of the cleaning: the sha is git's, and the
   // cleaner could take its 12 characters for a phone number (issue #360),
@@ -155,18 +194,21 @@ export async function generateProjectPage(source: PageSource, known?: string): P
   const header = [
     `# Project page: ${field(source.env, source.name, 80)}`,
     '',
-    `Generated by Cleared from the base branch \`${field(source.env, source.base, 80)}\` at \`${sha.slice(0, 12)}\`. It is not part of the project, and it is made again after each merge.`,
+    `Generated by Cleared from ${folder ? `the folder \`${field(source.env, folder.slice(0, -1), 120)}\` of ` : ''}the base branch \`${field(source.env, source.base, 80)}\` at \`${sha.slice(0, 12)}\`${folder ? ', the last commit that changed it' : ''}. It is not part of the project, and it is made again after each merge.`,
     '',
   ];
   const lines = [
     '## Architecture',
     ...(packageName ? [`Package: ${packageName}`] : []),
     ...(readme !== undefined && summaryOf(readme) ? [field(source.env, summaryOf(readme), SUMMARY_LIMIT)] : []),
+    ...(consumes.length ? [`Consumes: ${consumes.join(', ')}.`] : []),
+    ...(contract ? [contract] : []),
     '',
-    'Layout of the base branch:',
-    ...layoutOf(paths),
+    folder ? 'Layout of the folder on the base branch:' : 'Layout of the base branch:',
+    ...layoutOf(paths, folder),
     '',
     '## Useful commands',
+    ...(folder && commands.length ? [`From the folder \`${field(source.env, folder.slice(0, -1), 120)}\`:`] : []),
     ...(commands.length ? commands : ['- None found in package.json.']),
     ...(safe.length ? ['', `Commands a session may run unasked: ${safe.map((c) => `\`${c}\``).join(', ')}.`] : []),
     '',

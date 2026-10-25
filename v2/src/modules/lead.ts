@@ -170,7 +170,10 @@ const lead: Module = {
     ...consumptionRoutes({
       target: (registry) => {
         const flow = flowRuntime.engine(registry);
-        return flow && store ? { db: store.db, project: flow.config.project, config: flow.config } : undefined;
+        return flow && store ? {
+          db: store.db, project: flow.config.project, config: flow.config,
+          tickets: registry.ticketStore, services: flow.config.workspace?.services.map((s) => s.name) ?? [],
+        } : undefined;
       },
       proof: () => flowRuntime.proof(),
     }),

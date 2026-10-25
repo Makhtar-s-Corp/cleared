@@ -9,12 +9,14 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { LEVERS_TABLE, LeverStore } from '../../src/consumption/levers.ts';
 import { consumptionRoutes } from '../../src/consumption/routes.ts';
+import type { WeekFigures } from '../../src/consumption/week.ts';
 import type { Consumption, LeverChoices } from '../../src/consumption/usage.ts';
 import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, CONSUMPTION_ROUTES } from '../../src/api/types.ts';
 import lead from '../../src/modules/lead.ts';
 import { MemoryUsers, defaultRegistry, dispatch, type Registry } from '../../src/modules/registry.ts';
 import { handle as health } from '../../src/server.ts';
 import { applyTables, openStore } from '../../src/store/db.ts';
+import { MemoryTicketStore } from '../../src/tickets/contract.ts';
 
 const PROOF = 'proof-of-the-app';
 
@@ -24,12 +26,15 @@ async function serve(options: { running?: boolean } = {}) {
   store.sessions.put({ id: 's1', project: 'guestbook', ticket: 'LOCAL-1', role: 'author', harness: 'claude-code', model: 'claude-opus-5-5', status: 'running', createdAt: '2026-10-23T08:00:00.000Z', updatedAt: '2026-10-23T08:00:00.000Z' });
   store.events.append({ at: '2026-10-23T08:00:00.000Z', sessionId: 's1', ticket: 'LOCAL-1', project: 'guestbook',
     event: { type: 'RUN_FINISHED', threadId: 's1', runId: 'r1', outcome: { type: 'success' }, usage: [{ inputTokens: 10, outputTokens: 5 }], result: { stopReason: 'end_turn', total_cost_usd: 0.2 } } as never });
+  const tickets = new MemoryTicketStore({ now: () => '2026-10-23T09:00:00.000Z' });
+  const merged = await tickets.create({ title: 'Sign the guestbook', project: 'guestbook' }, { kind: 'human', id: 'u1' });
+  await tickets.move(merged.id, tickets.states.done, { kind: 'agents', id: 'cleared-v2' });
   const users = new MemoryUsers();
   users.users.set('u1', { id: 'u1', name: 'owner' });
   const registry: Registry = { ...defaultRegistry(), users };
   const running = options.running !== false;
   const routes = consumptionRoutes({
-    target: () => (running ? { db: store.db, project: 'guestbook', config: { authorModel: 'claude-opus-5-5', reviewerModel: 'claude-sonnet-5-5' } } : undefined),
+    target: () => (running ? { db: store.db, project: 'guestbook', config: { authorModel: 'claude-opus-5-5', reviewerModel: 'claude-sonnet-5-5' }, tickets, services: ['guestbook'] } : undefined),
     proof: () => PROOF, now: () => new Date('2026-10-23T12:00:00.000Z'),
   });
   const server: Server = createServer((request, response) => dispatch({ registry, tables: [], routes }, request, response, health));
@@ -48,8 +53,9 @@ async function serve(options: { running?: boolean } = {}) {
   return { call, store };
 }
 
-test('the lead module declares the two routes of the screen', () => {
+test('the lead module declares the routes of the screen', () => {
   const declared = lead.routes.map((r) => `${r.method} ${r.path}`);
+  assert.ok(CONSUMPTION_ROUTES.includes('GET /api/consumption/week'));
   for (const route of CONSUMPTION_ROUTES) assert.ok(declared.includes(route), route);
   assert.ok(lead.tables.includes(LEVERS_TABLE));
 });
@@ -57,7 +63,7 @@ test('the lead module declares the two routes of the screen', () => {
 test('both routes answer 401 without the proof and 503 while the flow does not run; a write needs a known user', async () => {
   const t = await serve();
   const down = await serve({ running: false });
-  for (const [method, path] of [['GET', '/api/consumption'], ['POST', '/api/consumption/levers']] as const) {
+  for (const [method, path] of [['GET', '/api/consumption'], ['GET', '/api/consumption/week'], ['POST', '/api/consumption/levers']] as const) {
     assert.equal((await t.call(method, path, { proof: 'wrong', body: method === 'POST' ? {} : undefined })).status, 401);
     assert.equal((await down.call(method, path, { body: method === 'POST' ? { paused: true } : undefined })).status, 503);
   }
@@ -104,4 +110,17 @@ test('a lever that is not valid is a 400 with the reason, and nothing changes', 
   assert.equal((await t.call('POST', '/api/consumption/levers', { body: {} })).status, 400);
   assert.equal((await t.call('POST', '/api/consumption/levers', { body: { paused: true, maxLanes: 0 } })).status, 400);
   assert.equal(((await t.call('GET', '/api/consumption')).body as Consumption).levers.paused, false);
+});
+
+test('the week\'s figures in the asked zone: the tickets merged, the tokens, the time and the dollars, per service', async () => {
+  const t = await serve();
+  const { status, body } = await t.call('GET', '/api/consumption/week?tz=Europe%2FParis', { user: null });
+  assert.equal(status, 200, 'a read needs no user');
+  const week = body as WeekFigures;
+  assert.equal(week.timeZone, 'Europe/Paris');
+  assert.equal(week.days.at(-1), '2026-10-23');
+  assert.deepEqual(week.merged.map((m) => [m.id, m.title, m.services]), [['LOCAL-1', 'Sign the guestbook', ['guestbook']]]);
+  assert.deepEqual([week.spend.tokens, week.spend.costUsd], [15, 0.2]);
+  assert.deepEqual(week.services.map((s) => [s.service, s.merged, s.tokens]), [['guestbook', 1, 15]]);
+  assert.equal(((await t.call('GET', '/api/consumption/week?tz=Nowhere%2FAtAll')).body as WeekFigures).timeZone, 'UTC');
 });

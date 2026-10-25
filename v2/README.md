@@ -200,6 +200,16 @@ The receipt is built from structured fields only: no command output, no error te
 - **Dollars.** Only the API-equivalent figure the harness reports (Claude Code's `total_cost_usd`), never an estimate and never euros. Codex and Cursor report none, so a ticket with one of their sessions has no dollar figure.
 - **Not counted.** The lead's turns: they serve several tickets at once, and the ledger gives no share of them to one.
 
+## The week's figures
+
+`GET /api/consumption/week?tz=<zone>` (C17, `src/consumption/week.ts`) reads the ledger and the ticket store, and writes nothing. The Consumption screen's "This week" panel shows it, over the screen's seven days in the person's zone.
+
+- **Merged.** The tickets Done now whose last move to Done in the week was the service's (the flow or the guarded merge). An issue closed on a tracker and a move by hand are not merges.
+- **Tokens and time.** Every turn finished in the week, the lead's and the questions' included, counted as the cost of a ticket is.
+- **Dollars.** Only as the harness reported them, each session's increase over the week. A week with a Codex or Cursor turn has no dollar figure, and the panel says so.
+- **Estimates.** Each merged ticket a plan estimated, its minutes against its own, never in dollars.
+- **Per service.** A session's service, else its ticket's; the lead and the questions on a row of the workspace's own, so the rows add up to the week.
+
 ## Ticket templates
 
 The Tower's bar has a Template chip with four ready-made tickets: Bug, Review, CI and Question (P214, `src/tickets/templates.ts`, `app/web/screens/tower/templates.ts`). A template fills an empty or untouched description with its sections and keeps any words already written. Its ticket carries the label `type:<id>` (`type:bug`, `type:review`, `type:ci`, `type:question`); `POST /api/tickets` refuses an unknown one or two of them. The harness pick counts its wins per type from that label. The words are in `app/messages/tower.en.json` and `.fr.json`.

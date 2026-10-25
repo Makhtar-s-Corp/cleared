@@ -369,9 +369,85 @@ v1's `lib/heartbeat.mjs`, `cleared`, `wake.sh` and `test/heartbeat.test.mjs`, wh
 | Whether a monitoring service the owner picks accepts a POST body on its failure address | the owner's set-up; the body is plain text of a few lines, as v1's |
 | Whether the first piloted project's service runs the status under its own account | the owner; the status reads no secret, so another account reads it when it can read the ledger |
 
+## 9. The project page, per service (`v2-j4-project-page`, issue #394)
+
+Written on 2026-10-25 by the author of issue #394 (Opus 5.5), before the lane's tests and code. Sections 6 to 8 are the lanes of pull requests 391 and 393, merged into `v2` before this one. Inputs: issues #394 and #274, the [decisions log](decisions-log.md) (the entries of lanes `j3-project-page` and `j3-flaky-page`, and the ten ideas of 2026-10-25), the matrix (P59, P101 to P105), and sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), since `milestone-2-plan.md` has no sections 9 and 10.
+
+### 9.1 Context
+
+Milestone 3 made the page (pull requests 313 and 363, P101 to P105): made at a service's first fetch from its base branch, made again after each merge, quoted in every author's and reviewer's `CLAUDE.md`. P59 stayed `later` because three things were left. A folder service of a monorepo gets a page of the whole repository under its own name, so two folder services have the same page. The only test on an example copies the guestbook alone, never the two-service workspace of `examples/workspace.conf`. The lead's briefing reads a service's committed `docs/project.md` only, so a project that commits none gives the lead nothing of it.
+
+### 9.2 What exists at the end, and how it is proven
+
+- **A folder service's page is its folder's.** Its layout lists the folder only, its `package.json` and README are the folder's, its recent decisions are the first-parent commits that touch the folder or `.cleared/agents.conf`, and its header names the folder and the last such commit. A merge in another folder leaves the page as it is.
+- **The page says where the service sits in the workspace**: the services it consumes and the contract it provides, when the workspace names them.
+- **The lead reads the pages.** A service with no committed page gets a line in the lead's briefing from its generated page: the README's first paragraph, else the package name. The workspace's own service too, when its checkout commits no `docs/project.md`.
+- Proven by `test/workspace/project-page-workspace.test.ts`: the tracked files of `examples/guestbook` and `examples/filter-api` as the two services of `examples/workspace.conf`, through the real effects on local bare repositories (first connection of each, a merge on one, a session of each, no secret), then the same two as folders of one repository; and new cases in `test/lead/briefing.test.ts`.
+
+### 9.3 Decisions this lane takes
+
+- **The folder's tip, not the base's.** The page carries the sha of the last commit that touched the folder or `.cleared/agents.conf` (the safe commands are the repository's), so `updateProjectPage`'s check stays "the page names the tip it was made from".
+- **The page stays English**, written for the sessions as before. No word a person reads in the app changes, so no catalog changes.
+- **Matrix lines.** P240 (a folder service's page), P241 (the workspace's part of the page), P242 (the lead's lines); P59 `done`, naming 313, 363 and this lane's pull request. P238 is lane `v2-j4-passkeys`'s and P239 lane `v2-j4-heartbeat`'s.
+
+### 9.4 Out of scope
+
+A screen that shows the page; a page edited by hand; a page in the project's language; the decisions folder of a project (read through `lib/memory`, as before); a real account of any kind. The tests run on local repositories in temporary folders, and nothing is pushed.
+
+### 9.5 Files this lane owns
+
+`v2/src/workspace/project-page.ts`, the page's call in `v2/src/flow/effects.ts`, the lead's service lines in `v2/src/lead/briefing.ts`, `v2/test/workspace/project-page-workspace.test.ts`, the new cases of `v2/test/lead/briefing.test.ts`, this section, its matrix lines and its log entry.
+
+## 10. The week's figures (`v2-j4-weekly`, issue #396)
+
+This section was written on 2026-10-25 by the author of issue #396 (Opus 5.5), before the lane's tests and code. Inputs: issue #396 (matrix C17), the [decisions log](decisions-log.md) (the ten ideas of 01:09 and their money rule, the entries of lanes `j3-ticket-cost` and `j3-visual-redesign`, the owner's decisions of 11:14 and 12:20 on Consumption), the [requirements matrix](requirements-matrix.md) (C17, O15, P211, B3.6, B3.7), and the code at `origin/v2` `99ee767`. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md). Section 7 is the deploy checklist; sections 8 and 9 are the heartbeat's and the project page's (pull requests 393 and 395), merged before this lane's code.
+
+### 10.1 Context
+
+C17 asks for the week's figures in the app. The ledger already holds what they need: each session's turns with their tokens, their times and the dollars the harness reported (`session_events`, `sessions` with its service), each ticket's moves (`tracker_history`), and each plan item's estimate (`plan_items`). The Consumption screen says the tokens per agent and the quotas, and a Done ticket's card says its own cost (P211), but nothing says what the week delivered and what it took. This lane reads those tables, writes nothing, and adds a panel to the Consumption screen.
+
+### 10.2 What exists at the end, and how it is proven
+
+- `src/consumption/week.ts`: `weekFigures(db, tickets, { project, services, now, timeZone })`, the figures of the screen's seven days. `GET /api/consumption/week?tz=<zone>`, registered with the other Consumption routes and guarded as they are.
+- The Consumption screen's "This week" panel ("Cette semaine"), read on its own, so a failed read of the week leaves the rest of the screen as it is. Its words in `app/messages/consumption.{en,fr}.json`, its durations through `lib/time.ts`.
+- The fixtures source answers the route from a week of invented tickets, on request (`fixtureSource({ week: true })`), so the counts other tests pin do not move.
+- Proven by `test/consumption/week.test.ts` (each figure on a real ledger and a ticket store in memory), `test/consumption/routes.test.ts` (the route and its guard), `test/consumption/ticket-cost.test.ts` (the cost of a period), `app/web/test/consumption-week.test.tsx` (the panel in English and French, with and without dollars, with and without estimates), `app/test/consumption/week-browser.test.ts` (the panel in Chromium, at 1440 and 390), and the captures in `docs/v2/weekly/`.
+
+### 10.3 The figures
+
+1. **The week** is the screen's seven calendar days in the person's time zone (`lastDays`, `zoneOf`), from the first one's midnight to now. Its tokens are then the sum of the agents' tokens the screen already shows, when no Cursor session ran: the screen's cards are Claude Code's and Codex's, and the week counts every turn.
+2. **Tickets merged.** A ticket of the workspace that is Done now, whose last move to Done is in the week and was written by the service: the flow (`agents`), or the guarded merge, which `merge-pr.ts` writes through v1's tracker under the service account, a row the store reads as `other`. Never the mirror's (`cleared-mirror`, an issue closed on a tracker) nor a person's signed move (a move by hand is not a merge). Each with its id, its title and its services.
+3. **Tokens and time.** Every session of the workspace that finished a turn in the week, whatever its role: authors, reviewers, the lead, the questions to the code. The tokens are the four counts of each turn finished in the week; the agents' time is each turn from its start to its end, the part of it inside the week. Both as P211 counts them (`ticket-cost.ts`).
+4. **Dollars**, only as the harness reported them (`total_cost_usd`, the API-equivalent figure): each session's running total, its increase over the week. When a session that finished a turn in the week reported none (Codex, Cursor), the week has no dollar figure, and the panel says the week is counted in tokens and time. Never euros, never an estimate.
+5. **Estimates against what it took.** For each merged ticket that a plan estimated (`plan_items`), the estimate's minutes against its own minutes, measured as the estimates measure their samples (`ticketSample`: from the author's first start to the release request, less the owner's waits). Minutes only: an estimate's dollars fall back to invented defaults when history is short (`DEFAULT_ESTIMATES`), which is not a real source. The panel says how many of the merged tickets had an estimate.
+6. **Per service.** A session's service is its own when it names one; else its ticket's, when the ticket names one service; else, for a ticket that names none, the workspace's first service, where it runs. The lead's turns, the questions to the code and a session of a ticket on several services that names none go to one row of the workspace's own, so the rows add up to the week. A merged ticket counts once on each of its services, once in the total.
+
+### 10.4 Decisions this lane takes
+
+- **No table, no write.** The figures are read when the screen asks, from the tables above.
+- **The cost of a period** is P211's rule given a start: `sessionsCost(sessions, since)` counts only what finished after it, its dollars the increase of each running total, so a ticket's card and the week never count a dollar twice.
+- **Where.** The Consumption screen, which the quota gauge opens (owner decisions of 11:14 and 12:20): the sidebar stays the development's.
+- **Language.** The panel's words in the catalogs, French and English; durations as `lib/time.ts` says them ("42 min", "3 h 05", "2 j 4 h").
+- **Matrix lines.** P243 (P239 is pull request 393's, P240 to P242 are 395's); C17 updated.
+
+### 10.5 Out of scope
+
+A week other than the last seven days (no week picker, no week before); a report sent by mail or in a notification; euros; an estimate of the dollars; the figures of v1's imported tickets (they have no sessions in v2); a change of the Consumption screen's own cost panel, which still sums each turn's total (the log names it).
+
+### 10.6 Files this lane owns
+
+`v2/src/consumption/week.ts`, the `since` of `v2/src/consumption/ticket-cost.ts`, the route in `v2/src/consumption/routes.ts`, the ticket store and services given to it in `v2/src/modules/lead.ts`, the route and its type in `v2/src/api/types.ts` (and the pinned count of `test/api/types.test.ts`); the panel in `v2/app/web/screens/consumption/` and its keys in `v2/app/messages/consumption.*.json`; `v2/app/fixtures/week.ts` and its route in `v2/app/fixtures/source.ts`; the tests above, the browser test in `.github/workflows/v2.yml`'s list; `docs/v2/weekly/`; a section of `v2/README.md`; its matrix lines and its log entry.
+
+### 10.7 Unknowns, and who closes them
+
+| Unknown on 2026-10-25 | Closed by |
+| --- | --- |
+| Whether the owner wants the calendar week (from Monday) rather than the last seven days | the owner (question in the log entry, the seven days applied) |
+| Whether a week with one agent that reports no dollars should still say the dollars of the others, marked partial | the owner (question in the log entry, no dollars applied, as P211 does) |
+
 ## 11. The service map (`v2-j4-service-map`, issue #397)
 
-This section was written on 2026-10-25 by the author of issue #397 (Opus 5.5), before the lane's tests and code. Sections 9 and 10 are left to the lanes that run beside this one (the project page, issue #394, and the week's figures, issue #396); the numbers are settled at the merge, as section 8's were. Inputs: issue #397, the [decisions log](decisions-log.md) (its latest entries, the ten ideas of 2026-10-25 among them: money only from a real source, fakes only), the [requirements matrix](requirements-matrix.md) (its rules, M0, M1, M5, M6, M10, P227), the [multi-repository complement](complement-multi-depots.md) (item 6), and the code at `origin/v2` `a6adcbd`. The brief named sections 9 and 10 of `milestone-2-plan.md`, which has eight, as earlier lanes noted; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md).
+This section was written on 2026-10-25 by the author of issue #397 (Opus 5.5), before the lane's tests and code. Sections 9 and 10 are the lanes that ran beside this one: the project page (issue #394, pull request 395) and the week's figures (issue #396, pull request 399), merged first. Inputs: issue #397, the [decisions log](decisions-log.md) (its latest entries, the ten ideas of 2026-10-25 among them: money only from a real source, fakes only), the [requirements matrix](requirements-matrix.md) (its rules, M0, M1, M5, M6, M10, P227), the [multi-repository complement](complement-multi-depots.md) (item 6), and the code at `origin/v2` `a6adcbd`. The brief named sections 9 and 10 of `milestone-2-plan.md`, which has eight, as earlier lanes noted; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md).
 
 ### 11.1 Context
 
@@ -413,7 +489,7 @@ The traps, each with its test:
 - **Its place.** Not a screen of the sidebar: the owner's decision of 11:14 (P227) keeps the sidebar to a few screens. It is reached from the tower's line of services, which only a workspace of several services shows, from the palette and from the chord G M (question for the owner, default applied, in the log entry).
 - **Words.** `app/messages/services.{en,fr}.json`; every time through `app/web/lib/time.ts` ("read 3 min ago", "lu il y a 3 min"). The lead's tool speaks English, as the lead's other tools do.
 - **Fixtures.** The app's fixtures serve the map of the two example repositories, scanned by the service's own code from `examples/`, so the screen shows what the service would.
-- **Matrix lines.** M6, and P245 for these choices (P240 to P244 are taken by the lanes that run beside this one; the id moves at the merge if one of them takes it first).
+- **Matrix lines.** M6, and P245 for these choices (P240 to P243 are 395's and 399's, P244 was left free for a lane that ran beside this one).
 
 ### 11.5 Out of scope
 
