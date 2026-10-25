@@ -29,8 +29,8 @@ after(async () => { for (const served of open) await served.close(); });
 async function serve(overrides: Partial<McpRouteDeps> = {}, extra: Route[] = []): Promise<Served> {
   const t = await setup();
   const routes = [...lanesMcpRoutes({
-    engine: () => t.engine, store: () => t.store, token: () => TOKEN, language: 'en',
-    redactor: createRedactor({ env: {}, paths: [] }), ...overrides,
+    engine: () => t.engine, store: () => t.store, token: () => TOKEN, language: () => 'en',
+    redactor: () => createRedactor({ env: {}, paths: [] }), ...overrides,
   }), ...extra];
   const app: App = { registry: t.engine.registry, tables: [], routes };
   const server: Server = createServer((request, response) => dispatch(app, request, response, handle));
@@ -58,7 +58,7 @@ const initialize = { jsonrpc: '2.0', id: 1, method: 'initialize', params: { prot
 
 test('the route is POST /mcp, and the token is a file of its own beside the ledger', () => {
   assert.equal(MCP_PATH, '/mcp');
-  const routes = lanesMcpRoutes({ engine: () => undefined, store: () => undefined, token: () => undefined, language: 'en', redactor: createRedactor({ env: {}, paths: [] }) });
+  const routes = lanesMcpRoutes({ engine: () => undefined, store: () => undefined, token: () => undefined, language: () => 'en', redactor: () => createRedactor({ env: {}, paths: [] }) });
   assert.deepEqual(routes.map((r) => `${r.method} ${r.path}`), ['POST /mcp']);
   assert.equal(mcpTokenPath('/state/ledger.db'), `/state/${MCP_ACCESS_FILE}`);
   assert.notEqual(MCP_ACCESS_FILE, PROOF_FILE);
@@ -157,7 +157,7 @@ test('only this machine and the tailnet: loopback, 100.64.0.0/10 and fd7a:115c:a
 
 test('a peer outside this machine and the tailnet, a session\'s container on a Docker bridge, is 403 before the token is read', async () => {
   const t = await setup();
-  const route = lanesMcpRoutes({ engine: () => t.engine, store: () => t.store, token: () => TOKEN, language: 'en', redactor: createRedactor({ env: {}, paths: [] }) })[0] as Route;
+  const route = lanesMcpRoutes({ engine: () => t.engine, store: () => t.store, token: () => TOKEN, language: () => 'en', redactor: () => createRedactor({ env: {}, paths: [] }) })[0] as Route;
   const request = Object.assign(Readable.from([Buffer.from(JSON.stringify(initialize))]), {
     method: 'POST', url: MCP_PATH, socket: { remoteAddress: '172.17.0.2' },
     headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
