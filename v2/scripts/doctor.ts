@@ -441,6 +441,18 @@ async function claudeCodeSection(build: boolean, model: string): Promise<void> {
   const planted = 'planted-by-the-doctor';
   writeFileSync(join(workdir, '.env'), `DUMMY_SETTING=${planted}\n`);
   writeFileSync(join(workdir, 'CLAUDE.md'), '# Briefing\n\nThe project codeword is MAPLE.\n');
+  // B5.5b (the owner's decision of 2026-10-25 06:06): the runner reads the
+  // user source alone. The skills mounted from the base branch are listed;
+  // the checkout's own skill and its settings' hooks are not loaded.
+  const skillOf = (name: string) => `---\nname: ${name}\ndescription: Planted by the doctor.\n---\nReply OK.\n`;
+  const skills = join(scratch, 'skills');
+  mkdirSync(join(skills, 'doctor-skill'), { recursive: true });
+  writeFileSync(join(skills, 'doctor-skill', 'SKILL.md'), skillOf('doctor-skill'));
+  mkdirSync(join(workdir, '.claude', 'skills', 'checkout-skill'), { recursive: true });
+  writeFileSync(join(workdir, '.claude', 'skills', 'checkout-skill', 'SKILL.md'), skillOf('checkout-skill'));
+  const hookMark = 'project-hook-ran';
+  const projectHook = [{ hooks: [{ type: 'command', command: `touch ${WORKDIR_MOUNT}/${hookMark}` }] }];
+  writeFileSync(join(workdir, '.claude', 'settings.json'), JSON.stringify({ hooks: { SessionStart: projectHook, PreToolUse: projectHook } }, null, 2) + '\n');
 
   const all: SessionEvent[] = [];
   const log = {
@@ -462,7 +474,7 @@ async function claudeCodeSection(build: boolean, model: string): Promise<void> {
   };
   const input: StartInput = {
     project: 'doctor', ticket: 'DOCTOR-1', role: 'author', harness: 'claude-code', model, workdir,
-    briefing: { projectPage: '', decisions: [], glossary: [], lessons: [], lastHandover: null }, policy,
+    briefing: { projectPage: '', decisions: [], glossary: [], lessons: [], lastHandover: null }, policy, skills,
     prompt: 'Remember the word PLUM. Then use the Bash tool to run exactly: touch allowed.txt . Then reply OK.',
   };
 
@@ -539,6 +551,9 @@ async function claudeCodeSection(build: boolean, model: string): Promise<void> {
     check('after allow_once the file exists in the workdir', existsSync(join(workdir, 'allowed.txt')));
     const init = raw.find((line) => (line.message as { subtype?: string } | undefined)?.subtype === 'init')?.message as Record<string, unknown> | undefined;
     check(`the session runs Claude Code ${CLAUDE_CODE_VERSION} with ${model}, logged in without an API key`, init?.claude_code_version === CLAUDE_CODE_VERSION && init?.model === model && init?.apiKeySource === 'none', JSON.stringify({ version: init?.claude_code_version, model: init?.model, apiKeySource: init?.apiKeySource }));
+    const listed = Array.isArray(init?.skills) ? init.skills as unknown[] : [];
+    check('Claude Code lists the skill mounted from the base branch (the user source)', listed.includes('doctor-skill'), JSON.stringify(listed));
+    check('neither the checkout\'s own skill nor its settings\' hooks are loaded (no project source)', !listed.includes('checkout-skill') && !existsSync(join(workdir, hookMark)) && !raw.some((line) => /^hook_/.test(String((line.message as { subtype?: unknown } | undefined)?.subtype ?? ''))), JSON.stringify({ checkoutSkill: listed.includes('checkout-skill'), hookRan: existsSync(join(workdir, hookMark)) }));
 
     from = await turn(handle, 'a rm -r the inbox denies', 'Use the Bash tool to run exactly: rm -r olddir . If it is denied, do not retry and reply DENIED.', (): Answer => ({ decision: { kind: 'reject_once', message: 'Denied from the doctor inbox.' }, by: 'doctor' }));
     check('the rm -r was escalated (rule delete.outside_ticket) and reject_once stopped it', rule(from).includes('delete.outside_ticket') && existsSync(join(workdir, 'olddir', 'keep.txt')));
