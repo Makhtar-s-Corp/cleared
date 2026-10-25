@@ -121,6 +121,16 @@ A slash command `@cleared <task>` posted to `POST /hooks/chat` creates a ticket 
 - **The answers.** At once: the ticket's id, its title and the Tower's address. Then, posted to `response_url`: the author session's address when it starts, and the pull request's when the release waits for approval, each once, a restart included. The addresses are the app's (`CLEARED_V2_APP_ORIGIN`, else `http://127.0.0.1:8792`); the words are in `src/flow/messages/chat.en.json` and `.fr.json`, in the app's language.
 - **The limits.** The ticket is a batch of one: it starts within the Consumption screen's lanes and the week stop, and the answer says when it waits. The service listens on this machine only: how a chat platform reaches it is the owner's setup.
 
+## The harness pick
+
+`POST /api/tickets` with `harnesses`, 2 to 4 names, runs a variant of the ticket on each (P213, `src/flow/harness-pick.ts`). Once all have ended, the flow keeps by itself the variant that committed a change and whose own run of the declared test command passed, with the fewest tokens, else the shortest agent time; the others stop and their containers go. None green: the owner chooses in the inbox. The wins per ticket type are on the Consumption screen. Tested with fake adapters only.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `CLEARED_V2_PICK_HARNESSES` | `claude-code` | The harnesses a pick may run, each at most once: `claude-code`, `codex` (on `gpt-6-luna` unless `codex=<model>`), `cursor=<model>` (Cursor has no default model). Leave it unset until the owner's real trials of Codex and Cursor (`docs/adapters.md`). A wrong value stops the service at start. |
+
+- **The limits.** The Consumption screen's lanes, as for variants, and the week stop (`CLEARED_V2_WEEK_STOP_PERCENT`, 85 by default), read per harness: a harness at the stop starts no variant.
+
 ## The guard
 
 The guard checks every v2 file except the app's web fonts (`app/public/fonts/*.woff2`) and its three icons (`app/public/icons/icon-192.png`, `icon-512.png` and `apple-touch-icon.png`, by exact name), which are binary; it says how many it left out, and any other binary file is refused. The guard reads its private-term fingerprint lists from a project's committed `.cleared/agents.conf` (`[guard] salt`, `terms`, `allowed`), as v1 does. This repository commits no such list, so by default, and in CI, `npm run guard` checks secrets, private keys, IBANs, credentials in URLs, email addresses and phone numbers, and no private terms; it says so when it runs. This is a known gap: closing it in CI needs a fingerprint list the guard can read there, either a committed guard configuration with its lists or lists provided to the workflow. To check private terms too, point it at a project whose committed configuration names its lists: `CLEARED_REPO=<project checkout> [ORCH_GUARD_REF=<ref>] npm run guard`. The lines changed since `--base` leave out `package-lock.json`, which npm writes: the strict mode reads a dependency named `js-tokens` with a version range as an assigned secret. The tree check still reads the whole lock file. `app/dist/` is not checked: it is built, and git ignores it.

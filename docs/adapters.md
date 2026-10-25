@@ -713,6 +713,8 @@ Sources: cursor.com/docs/cli/overview, /cli/reference/parameters, /cli/reference
 
 **Reachability.** The adapter is registered as `cursor` and the terminal route picks the adapter by the session's own harness, so a Take over of a Cursor session reaches it. But the flow and the lead start every session as `claude-code` (`HARNESS` in `flow/engine.ts` and `lead/engine.ts`), so no ticket can name `cursor` yet: choosing a harness per project or ticket is a later lane. Until then a trial starts a session through the adapter directly (`createCursorAdapter(...).start({ harness: 'cursor', ... })`).
 
+**The harness pick (2026-10-25, P213, issue #329).** A ticket started with `harnesses` runs one author variant per harness named (`flow/harness-pick.ts`), so it is the first flow path that can start a `cursor` or `codex` author. It starts only the harnesses `CLEARED_V2_PICK_HARNESSES` names (`claude-code` alone by default; `codex` on `gpt-6-luna` unless `codex=<model>`; `cursor=<model>`, as this adapter has no default model). The variable stays unset until the owner's trials above are done; the tests run fake adapters under the three names.
+
 **Image.** The session image does not contain Cursor. No pinned, verifiable install source was found (the documented install is `curl https://cursor.com/install | bash`, unpinned), so nothing was added to `images/session/Dockerfile`. A turn in an image without it ends with `cursor_not_installed`. `CursorRuntime.image` names an image that has it.
 
 **Probe.** `node scripts/doctor.ts cursor` runs `--version` and `status` only, never `login`, and prints `not_installed`, `not_signed_in` or `ready`. On this server (2026-10-23, no Cursor): `cursor: not_installed`, exit 0.

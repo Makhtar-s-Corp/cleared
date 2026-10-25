@@ -77,7 +77,10 @@
 // once (3 by default). A variant that fails fails alone. Once one is done,
 // the inbox compares them; the owner's choice stops the others, releases
 // their containers and networks at once, and the review runs on the chosen
-// one's checkout, which is the ticket's from then on.
+// one's checkout, which is the ticket's from then on. A harness pick
+// (issue #329, flow/harness-pick.ts) runs one variant per harness named and,
+// once all have ended, keeps by itself the cheapest whose own tests passed,
+// through the same choice; a harness at the week stop starts no variant.
 //
 // A release whose checks fail is repaired (issue #273, flow/ci-repair.ts):
 // a failure read on the card's own head, while a one-service ticket waits
@@ -121,6 +124,8 @@ import type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts
 import { atOrAfter, landingOf, type Landing } from './ledger.ts';
 import { NOT_AGAIN, NOT_NOW, PROPOSED, changeMessage, goMessage, noPlanNote, type Gate, type GoBy } from './plan-gate.ts';
 import type { LeverReader } from '../consumption/levers.ts';
+import { QUOTA_WINDOWS, latestQuota } from '../consumption/quota.ts';
+import { sessionsCost } from '../consumption/ticket-cost.ts';
 import { GIVEN_BACK, GIVEN_BACK_REVIEW, TAKEN_OVER } from './takeover.ts';
 import { NO_ANSWER, answerMessage, channelOf, channelPrompt, lastSaid, verdictsOf, type ChannelMessage } from './channel.ts';
 import { testComment, testLine, testRunOf } from './review-tests.ts';
@@ -136,6 +141,7 @@ import { ReplayStore, replayPrompt, stepCommit, type Checkpoint, type Replay } f
 import { StepStore, deriveSteps, publicStep, stepName, stepSiblings, type Step, type StepSpec } from './steps.ts';
 import { foldState, sessionPlanOf } from './state.ts';
 import { VARIANT_PARALLEL, VariantStore, diffLines, publicVariant, variantPrompt, type Variant, type VariantKey } from './variants.ts';
+import { PICK_DEFAULT, PICK_STOP_PERCENT, pickPrompt, pickWinner, ticketType, type PickMeasure } from './harness-pick.ts';
 
 export type { ProjectSettings } from './config.ts';
 export type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
@@ -247,6 +253,9 @@ export type FlowDeps = {
   // of the sessions that start from now on and the most steps run at once.
   // Nothing is overridden when absent.
   readonly levers?: LeverReader;
+  // The share of a quota window at which no variant of a harness pick starts
+  // (CLEARED_V2_WEEK_STOP_PERCENT, the plans' stop); PICK_STOP_PERCENT when absent.
+  readonly weekStopPercent?: number;
 };
 
 export type FlowErrorKind = 'not_found' | 'conflict' | 'invalid' | 'unavailable';
@@ -361,6 +370,7 @@ export class FlowEngine {
   #locks: ((service: ServiceConfig) => ServiceLock) | undefined;
   #release: FlowDeps['release'];
   #levers: LeverReader | undefined;
+  #weekStop: number;
   #resuming = new Set<SessionId>();                                 // sessions whose container a resume is starting: never released
   #workdirs = new Map<TicketId, Map<string, string>>();             // a train ticket's checkout per service, as prepared
   #gates = new Map<SessionId, Gate>();                              // an author's session plan and its hold (plan-gate.ts)
@@ -374,6 +384,7 @@ export class FlowEngine {
   #variants: VariantStore;                                          // the ticket's variants (issue #271)
   #variantOf = new Map<SessionId, string>();                        // the variant an author session works on
   #variantDirs = new Set<string>();                                 // the variants' checkouts, whose edits are their own
+  #picking = new Set<string>();                                     // the variants items a harness pick is deciding (issue #329)
   // Sessions the watchdog stopped while they waited for a person (issue
   // #290): their ticket's flow goes on, what they wait for stays in the
   // inbox, and the answers given since are told to them when they resume.
@@ -397,6 +408,7 @@ export class FlowEngine {
     this.#locks = deps.locks;
     this.#release = deps.release;
     this.#levers = deps.levers;
+    this.#weekStop = deps.weekStopPercent ?? PICK_STOP_PERCENT;
     this.#trains = new TrainStore(deps.store.db, this.#now);
     this.#steps = new StepStore(deps.store.db, this.#now);
     this.#variants = new VariantStore(deps.store.db, this.#now);
@@ -943,13 +955,14 @@ export class FlowEngine {
   // The caller is a person (the API routes), or the plan runner for the
   // person who approved the plan (`origin`): the service moving a ticket to
   // Todo itself, when it puts one back, never starts anything.
-  // `variants`: 2 to 4 authors at once (issue #271); absent or 1, one.
-  async start(ticketId: TicketId, by: UserId, origin?: Origin, variants?: number): Promise<void> {
+  // `variants`: 2 to 4 authors at once (issue #271); absent or 1, one. A
+  // list of harnesses is a harness pick (issue #329): a variant on each.
+  async start(ticketId: TicketId, by: UserId, origin?: Origin, variants?: number | readonly Harness[]): Promise<void> {
     const tickets = this.registry.ticketStore;
     const ticket = await tickets.get(ticketId);
     if (!ticket) throw new FlowError('not_found', `unknown ticket ${ticketId}`);
-    const count = variants ?? 1;
-    const refused = count === 1 ? undefined : this.variantsRefusal(count);
+    const count = typeof variants === 'object' ? variants.length : variants ?? 1;
+    const refused = count === 1 && typeof variants !== 'object' ? undefined : this.variantsRefusal(variants as number | readonly Harness[]);
     if (refused) throw new FlowError('invalid', refused);
     if (ticket.project !== this.config.project) throw new FlowError('invalid', `ticket ${ticketId} belongs to project ${ticket.project ?? 'none'}, and this service runs ${this.config.project}`);
     if (this.#active.has(ticketId)) throw new FlowError('conflict', `ticket ${ticketId} already runs`);
@@ -966,7 +979,7 @@ export class FlowEngine {
     try {
       await tickets.move(ticketId, tickets.states.progress, SERVICE);
       if (count > 1) {
-        await this.#startVariants(ticket, by, origin, count);
+        await this.#startVariants(ticket, by, origin, typeof variants === 'object' ? variants : count);
         return;
       }
       const steps = this.#stepPlan(ticket, origin);
@@ -1600,19 +1613,31 @@ export class FlowEngine {
 
   // ---- a ticket in variants (issue #271) ------------------------------------
 
-  // Why `count` variants cannot run on this workspace; undefined when they
-  // can. The route asks before it creates the ticket, start() again.
-  variantsRefusal(count: number): string | undefined {
-    if (!Number.isInteger(count) || count < VARIANTS_MIN || count > VARIANTS_MAX) return `variants is a whole number from ${VARIANTS_MIN} to ${VARIANTS_MAX}`;
+  // Why `count` variants, or a harness pick on these harnesses, cannot run
+  // on this workspace; undefined when they can. The route asks before it
+  // creates the ticket, start() again.
+  variantsRefusal(spec: number | readonly Harness[]): string | undefined {
+    if (typeof spec === 'object') {
+      if (spec.length < VARIANTS_MIN || spec.length > VARIANTS_MAX) return `a harness pick names ${VARIANTS_MIN} to ${VARIANTS_MAX} harnesses, one per variant`;
+      const enabled = (this.config.pickHarnesses ?? PICK_DEFAULT).map((p) => p.harness);
+      for (const harness of spec) {
+        if (!enabled.includes(harness))
+          return `${String(harness)} is not enabled for the harness pick: CLEARED_V2_PICK_HARNESSES names ${enabled.join(', ')} (the real Codex and Cursor wait for the owner's trials)`;
+        if (!this.registry.sessionAdapters[harness]) return `no adapter for ${harness} is registered`;
+      }
+    } else if (!Number.isInteger(spec) || spec < VARIANTS_MIN || spec > VARIANTS_MAX) return `variants is a whole number from ${VARIANTS_MIN} to ${VARIANTS_MAX}`;
     if (this.#several) return `variants run on a workspace of one service, and ${this.#workspace.id} has ${this.#workspace.services.length}`;
     return undefined;
   }
 
-  async #startVariants(ticket: Ticket, by: UserId, origin: Origin | undefined, count: number): Promise<void> {
-    this.#variants.create(ticket.id, this.config.project, count);
+  async #startVariants(ticket: Ticket, by: UserId, origin: Origin | undefined, spec: number | readonly Harness[]): Promise<void> {
+    const pick = typeof spec === 'object';
+    const count = pick ? spec.length : spec;
+    this.#variants.create(ticket.id, this.config.project, pick ? { harnesses: spec, kind: ticketType(ticket.labels) } : count);
+    const how = pick ? `${count} variants, one per harness: ${spec.join(', ')}` : `${count} variants`;
     const comment = origin
-      ? `Started by the lead for plan ${origin.plan} (item ${origin.item}), approved by ${by}, in ${count} variants.`
-      : `Started by ${by} in ${count} variants.`;
+      ? `Started by the lead for plan ${origin.plan} (item ${origin.item}), approved by ${by}, in ${how}.`
+      : `Started by ${by} in ${how}.`;
     await this.registry.ticketStore.comment(ticket.id, comment, SERVICE).catch(() => undefined);
     await this.#runVariants(ticket.id, by);
   }
@@ -1632,6 +1657,15 @@ export class FlowEngine {
       if (variants.filter((v) => v.state === 'running').length >= limit) break;
       const next = variants.find((v) => v.state === 'waiting');
       if (!next) break;
+      // A harness at the week stop starts no variant of a pick; the others go on.
+      const stop = next.pick ? this.#quotaStop(next.harness) : undefined;
+      if (stop) {
+        const note = this.#clean(`Variant ${next.position} of ${variants.length} (${next.harness}) not started: ${stop}`);
+        this.#variants.update(next.id, { state: 'failed', note });
+        await this.registry.ticketStore.comment(id, note, SERVICE).catch(() => undefined);
+        this.#showVariants(id);
+        continue;
+      }
       // Running before the first wait, so a second tick never starts it too.
       this.#variants.update(next.id, { state: 'running' });
       try {
@@ -1647,22 +1681,71 @@ export class FlowEngine {
     const variants = this.#variants.list(id);
     if (this.#active.has(id) && variants.length > 0 && variants.every((v) => v.state === 'failed'))
       await this.#putBack(id, `Every variant of the ticket failed:\n${variants.map((v) => `- ${v.note ?? `variant ${v.position} failed`}`).join('\n')}`, 'variants_failed');
+    else await this.#pickIfEnded(id);
   }
 
-  // A variant's session, in its own checkout, told it is one of several.
+  // Why a harness starts no variant now: one of its windows at or above the
+  // week stop, the seven-day one first; undefined when it may start.
+  #quotaStop(harness: Harness): string | undefined {
+    for (const window of QUOTA_WINDOWS) {
+      const quota = latestQuota(this.#store.db, { project: this.config.project, window, now: this.#now(), harness });
+      if (quota && quota.usedPercent >= this.#weekStop)
+        return `the ${window === 'seven_day' ? 'seven-day' : 'five-hour'} window of ${harness} is at ${quota.usedPercent} %, at or above the stop of ${this.#weekStop} %.`;
+    }
+    return undefined;
+  }
+
+  // A harness pick whose variants have all ended keeps, by itself, the
+  // cheapest of those whose tests passed (flow/harness-pick.ts), through the
+  // owner's own choice; with none green, the owner chooses in the inbox.
+  async #pickIfEnded(id: TicketId): Promise<void> {
+    if (!this.#active.has(id)) return;
+    const variants = this.#variants.list(id);
+    const round = variants[0]?.round;
+    if (round === undefined || !variants[0]?.pick || variants.some((v) => v.state === 'waiting' || v.state === 'running' || v.state === 'chosen')) return;
+    if (!variants.some((v) => v.state === 'done')) return;
+    const item = this.inbox.variants({ ticket: id }).find((i) => i.round === round);
+    if (!item || this.#picking.has(item.id)) return;
+    this.#picking.add(item.id);
+    const done = variants.filter((v) => v.state === 'done');
+    // Green: its tests passed and it committed a change, so a variant that changes nothing never wins by spending least.
+    const green = (v: Variant) => v.tests === 'passed' && v.files.length > 0;
+    const winner = pickWinner(done.map((v) => ({ position: v.position, harness: v.harness, green: green(v), tokens: v.tokens, workMs: v.workMs ?? 0 })));
+    if (!winner) {
+      const declared = done.find((v) => v.session)?.session;
+      const command = declared ? this.#inputs.get(declared)?.settings.testCommand : undefined;
+      const why = command
+        ? `No variant committed a change and passed \`${command.join(' ')}\` in its own session: the harness pick keeps none, and the owner chooses in the inbox.`
+        : 'The service declares no test command, so no variant can pass its tests: the harness pick keeps none, and the owner chooses in the inbox.';
+      await this.registry.ticketStore.comment(id, why, SERVICE).catch(() => undefined);
+      return;
+    }
+    const chosen = done.find((v) => v.position === winner.position) as Variant;
+    const command = chosen.session ? this.#inputs.get(chosen.session)?.settings.testCommand?.join(' ') : undefined;
+    const passed = done.filter(green).length;
+    const measure = winner.measure === 'tokens' ? 'the fewest tokens' : 'the shortest agent time';
+    const why = passed === 1 ? 'and it was the only one to pass' : `and it used ${measure} of the ${passed} that passed`;
+    await this.#keep(item.id, id, variants, chosen, SERVICE.id, (stopped) =>
+      `Variant ${chosen.position} of ${variants.length} (${chosen.harness}) kept by the harness pick: its \`${command ?? 'tests'}\` passed, ${why}${stopped.length > 0 ? `; ${stopped.length === 1 ? 'variant' : 'variants'} ${stopped.join(', ')} stopped` : ''}.`,
+      winner.measure);
+  }
+
+  // A variant's session, in its own checkout, told it is one of several,
+  // on its harness and that harness's model.
   async #launchVariant(id: TicketId, variant: Variant, count: number, by: UserId | undefined): Promise<Live> {
-    const adapter = this.registry.sessionAdapters[HARNESS];
-    if (!adapter) throw new FlowError('unavailable', `no adapter for ${HARNESS} is registered`);
+    const adapter = this.registry.sessionAdapters[variant.harness];
+    if (!adapter) throw new FlowError('unavailable', `no adapter for ${variant.harness} is registered`);
     const ticket = await this.#ticketOf(id);
     const began = this.#now();
     const settings = await this.#settings(ticket);
     const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author', variant: { round: variant.round, position: variant.position } });
     const workspaceDone = this.#now();
-    const tools = this.config.authorTools === true;
+    // A Codex or Cursor author has no host tools (their adapters take none), as in a handover.
+    const tools = this.config.authorTools === true && variant.harness === HARNESS;
     const note = this.#origins.get(id)?.note;
-    const prompt = [authorPrompt(ticket, { plan: tools, report: tools }), variantPrompt(variant.position, count), ...(note ? [note] : [])].join('\n\n');
+    const prompt = [authorPrompt(ticket, { plan: tools, report: tools }), variantPrompt(variant.position, count), ...(variant.pick ? [pickPrompt(settings.testCommand)] : []), ...(note ? [note] : [])].join('\n\n');
     this.#variantDirs.add(prepared.workdir);
-    const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, prompt, tools ? 'plan' : undefined);
+    const live = await this.#launch(adapter, ticket, 'author', this.#variantModel(ticket, variant.harness), prepared.workdir, prepared.briefing, settings, prompt, tools ? 'plan' : undefined, undefined, variant.harness);
     const session = { id: live.id, ticket: id, project: this.config.project };
     // Read again after the waits: a choice, a put back or a set aside may
     // have dropped the variant while its checkout and its session started.
@@ -1687,8 +1770,19 @@ export class FlowEngine {
     return live;
   }
 
+  // The model of a variant on `harness`: the author's on Claude Code; on
+  // another, the one CLEARED_V2_PICK_HARNESSES names, else Codex's default.
+  #variantModel(ticket: Ticket, harness: Harness): string {
+    if (harness === HARNESS) return this.#authorModel(ticket);
+    const named = (this.config.pickHarnesses ?? []).find((p) => p.harness === harness)?.model;
+    if (named) return named;
+    if (harness === 'codex') return CODEX_MODEL;
+    throw new FlowError('invalid', `CLEARED_V2_PICK_HARNESSES names no model for ${harness}`);
+  }
+
   // A variant's author ended its work: what its branch changes is read and
   // shown with the others for the owner's choice, and the next one starts.
+  // In a harness pick, its own last run of the tests and its cost are kept.
   async #variantDone(live: Live, variant: Variant): Promise<void> {
     const { ticket: id, project } = live.input;
     this.#step({ id: live.id, ticket: id, project }, 'STEP_FINISHED', 'author');
@@ -1708,10 +1802,24 @@ export class FlowEngine {
     this.#variants.update(variant.id, {
       state: 'done', files: [...read.files], ...diffLines(diff), diff: diff.slice(0, VARIANT_DIFF_MAX), cut: diff.length > VARIANT_DIFF_MAX,
       cost: this.#stepCost({ sessions: [live.id] }), minutes: this.#stepMinutes({ sessions: [live.id] }), note,
+      ...(variant.pick ? this.#pickFacts(live) : {}),
     });
     if (!this.#active.has(id)) return;
     this.#showVariants(id);
     await this.#runVariants(id);
+  }
+
+  // A pick's variant as the ranking reads it: its own last run of the
+  // declared test command, from the ledger, and its tokens and agent time
+  // (P211's sessionsCost); no tokens when its harness reports none.
+  #pickFacts(live: Live): Pick<Variant, 'tests' | 'tokens' | 'workMs'> {
+    const events = this.#store.events.after(live.id);
+    const cost = sessionsCost([events]);
+    return {
+      tests: testRunOf(events, live.settings.testCommand)?.outcome ?? 'not_run',
+      tokens: cost.tokens !== null && cost.tokens > 0 ? cost.tokens : null,
+      workMs: cost.workMs,
+    };
   }
 
   // A variant's session that cannot go on fails its variant alone; the
@@ -1738,7 +1846,7 @@ export class FlowEngine {
     const shown = variants.map(publicVariant);
     const item = this.inbox.variants({ ticket: id }).find((i) => i.round === round);
     if (item) this.inbox.setVariants(item.id, shown);
-    else this.inbox.addVariants({ ticket: id, project: this.config.project, round, variants: shown });
+    else this.inbox.addVariants({ ticket: id, project: this.config.project, round, variants: shown, ...(variants[0]?.pick ? { pick: true } : {}) });
   }
 
   // A ticket that leaves the flow drops what of its variants was open, and
@@ -1771,13 +1879,24 @@ export class FlowEngine {
     if (!chosen) throw new FlowError('invalid', `the ticket ${id} has no variant ${position}`);
     if (chosen.state !== 'done') throw new FlowError('conflict', `variant ${position} of ${id} is ${chosen.state}: only a variant that is done is chosen`);
     if (!this.#active.has(id)) throw new FlowError('conflict', `ticket ${id} no longer runs`);
+    return this.#keep(itemId, id, variants, chosen, by, (stopped) =>
+      `Variant ${position} of ${variants.length} chosen by ${by} for review${stopped.length > 0 ? `; ${stopped.length === 1 ? 'variant' : 'variants'} ${stopped.join(', ')} stopped` : ''}.`);
+  }
+
+  // The variant kept, by the owner or by a harness pick (`measure`): the
+  // others stop now and their containers and networks go, and the review
+  // starts in the background.
+  async #keep(itemId: string, id: TicketId, variants: readonly Variant[], chosen: Variant, by: UserId, comment: (stopped: readonly number[]) => string, measure?: PickMeasure): Promise<{ readonly released: number }> {
+    const position = chosen.position;
     // Written before the first wait, so a second choice is refused.
-    const note = `The owner chose variant ${position} of ${variants.length}: this variant was stopped.`;
+    const note = measure
+      ? `The harness pick kept variant ${position} of ${variants.length}: this variant was stopped.`
+      : `The owner chose variant ${position} of ${variants.length}: this variant was stopped.`;
     const others = variants.filter((v) => v.id !== chosen.id);
     for (const v of others) if (v.state !== 'failed') this.#variants.update(v.id, { state: 'dropped', note });
-    this.#variants.update(chosen.id, { state: 'chosen' });
-    this.inbox.setVariants(itemId, this.#variants.list(id, item.round).map(publicVariant));
-    if (!this.inbox.handleVariants(itemId, by, position)) throw new FlowError('conflict', `variants item ${itemId} is already answered`);
+    this.#variants.update(chosen.id, { state: 'chosen', won: measure !== undefined });
+    this.inbox.setVariants(itemId, this.#variants.list(id, chosen.round).map(publicVariant));
+    if (!this.inbox.handleVariants(itemId, by, position, measure)) throw new FlowError('conflict', `variants item ${itemId} is already answered`);
     const dropped: SessionId[] = [];
     for (const v of others) {
       if (!v.session) continue;
@@ -1792,8 +1911,7 @@ export class FlowEngine {
       dropped.push(v.session);
     }
     const released = await this.#releaseNow(dropped);
-    const stopped = others.map((v) => v.position);
-    await this.registry.ticketStore.comment(id, `Variant ${position} of ${variants.length} chosen by ${by} for review${stopped.length > 0 ? `; ${stopped.length === 1 ? 'variant' : 'variants'} ${stopped.join(', ')} stopped` : ''}.`, SERVICE).catch(() => undefined);
+    await this.registry.ticketStore.comment(id, comment(others.map((v) => v.position)), SERVICE).catch(() => undefined);
     this.#background(this.#reviewVariant(id, chosen), id);
     return { released };
   }
@@ -1853,7 +1971,7 @@ export class FlowEngine {
 
   // start() in the background, for the routes: a person's click does not
   // wait for a clone. A failure becomes a note on the ticket (start wrote it).
-  begin(ticketId: TicketId, by: UserId, origin?: Origin, variants?: number): Promise<void> {
+  begin(ticketId: TicketId, by: UserId, origin?: Origin, variants?: number | readonly Harness[]): Promise<void> {
     return this.#track(this.start(ticketId, by, origin, variants).catch(() => undefined));
   }
 
@@ -1911,11 +2029,14 @@ export class FlowEngine {
 
   // The reviewer of a ticket that changed harness is the other harness than
   // its last author's, so that no harness judges its own work (B6.3, P154);
-  // a ticket that never changed harness keeps Claude Code's reviewer.
+  // a ticket that never changed harness keeps Claude Code's reviewer, and so
+  // does one whose last author is Codex or Cursor (a pick's kept variant,
+  // issue #329). The variants not kept have left the flow, so their
+  // harnesses count for nothing here.
   #reviewerHarness(ticket: TicketId): Harness {
     const authors = this.#flowRows(ticket).filter((row) => row.role === 'author');
     if (!authors.some((row) => row.harness !== HARNESS)) return HARNESS;
-    return authors.at(-1)?.harness === 'codex' ? HARNESS : 'codex';
+    return authors.at(-1)?.harness === HARNESS ? 'codex' : HARNESS;
   }
 
   // A resume starts a container under the session's own names while its
@@ -2601,9 +2722,12 @@ export class FlowEngine {
     const settings = kept?.settings ?? (await this.#settings(ticket));
     const prepared = await this.#prepare(ticket, 'author');
     // A Codex author has no host tools: it is started again on Codex, with none (B6.3).
+    // Another harness than Claude Code keeps the last author's model: Codex's
+    // after a handover, the one CLEARED_V2_PICK_HARNESSES named after a pick (issue #329).
     const harness = authorRow ? this.#harnessOf(authorRow.id) : HARNESS;
     const tools = this.config.authorTools === true && harness === HARNESS;
-    const live = await this.#launch(adapter, ticket, 'author', harness === HARNESS ? this.#authorModel(ticket) : CODEX_MODEL, prepared.workdir, prepared.briefing, settings,
+    const model = harness === HARNESS ? this.#authorModel(ticket) : (authorRow ? this.#store.sessions.get(authorRow.id)?.model : undefined) ?? CODEX_MODEL;
+    const live = await this.#launch(adapter, ticket, 'author', model, prepared.workdir, prepared.briefing, settings,
       `${authorPrompt(ticket, { plan: false, report: tools })}\n\n${message}`, tools ? 'report' : undefined, undefined, harness);
     this.#step({ id: live.id, ticket: id, project: live.input.project }, 'STEP_STARTED', 'author', began);
     if (journal && !journaled) this.#journal({ id: live.id, ticket: id, project: live.input.project }, journal);

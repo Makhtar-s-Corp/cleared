@@ -17,6 +17,7 @@ import tickets, { recordWorkspaceOf } from '../../src/modules/tickets.ts';
 import users from '../../src/modules/users.ts';
 import { StoreError, applyTables, openStore } from '../../src/store/db.ts';
 import { MIGRATIONS, MigrationError, migrate, type Migration } from '../../src/store/migrations.ts';
+import { harnessWins } from '../../src/flow/harness-pick.ts';
 
 const FIXTURE = readFileSync(new URL('./fixtures/ledger-m2.sql', import.meta.url), 'utf8');
 const ALL_TABLES = [sessions, users, tickets, flow, approval, inbox, lead, notify].flatMap((module) => module.tables);
@@ -167,11 +168,11 @@ test('a migration that throws at the start stops the process with exit 64 and th
   readFile(path, (db) => { before = [schemaOf(db), rows(db)]; });
   const result = spawnSync(process.execPath, [new URL('./failing-start.ts', import.meta.url).pathname, path], { encoding: 'utf8' });
   assert.equal(result.status, 64, result.stderr);
-  assert.match(result.stderr, /^cleared-v2: migration 3 \(planted\) failed: planted failure; the ledger is left as it was/m);
+  assert.match(result.stderr, new RegExp(`^cleared-v2: migration ${LATEST + 1} \\(planted\\) failed: planted failure; the ledger is left as it was`, 'm'));
   // The real migrations ran before the planted one, each in its own
   // transaction; the planted one left nothing.
   readFile(path, (db) => {
-    assert.deepEqual((db.prepare('SELECT version FROM v2_schema ORDER BY version').all() as { version: number }[]).map((r) => r.version), [1, 2]);
+    assert.deepEqual((db.prepare('SELECT version FROM v2_schema ORDER BY version').all() as { version: number }[]).map((r) => r.version), MIGRATIONS.map((m) => m.version));
     assert.equal(columnsOf(db, 'sessions').includes('planted'), false);
     const old = before as [unknown, Rows];
     assert.deepEqual(rows(db, Object.fromEntries(Object.keys(old[1]).map((t) => [t, columnsOf(db, t).filter((c) => !['service', 'preview_key', 'step'].includes(c))]))), old[1]);
@@ -189,7 +190,7 @@ test('a fresh ledger: the migrations wait for their tables, run after applyTable
     applyTables(store.db, users.tables);
     assert.deepEqual((store.db.prepare('SELECT version FROM v2_schema').all() as { version: number }[]).map((r) => r.version), [1]);
     applyTables(store.db, ALL_TABLES);
-    assert.deepEqual((store.db.prepare('SELECT version FROM v2_schema').all() as { version: number }[]).map((r) => r.version), [1, 2]);
+    assert.deepEqual((store.db.prepare('SELECT version FROM v2_schema').all() as { version: number }[]).map((r) => r.version), [1, 2, 3]);
     assert.ok(columnsOf(store.db, 'flow_inbox').includes('service') && columnsOf(store.db, 'flow_inbox').includes('step'));
     recordWorkspaceOf(store.db, ENV, () => '2026-10-23T08:00:00.000Z');
     assert.deepEqual({ ...store.db.prepare('SELECT id, name, created_at FROM workspaces').get() as object }, { id: 'guestbook', name: 'guestbook', created_at: '2026-10-23T08:00:00.000Z' });
@@ -200,6 +201,28 @@ test('a fresh ledger: the migrations wait for their tables, run after applyTable
     store.close();
   }
   assert.deepEqual(backups(dir), []);
+}));
+
+// The variants table as P75 (pull request 305) created it, before migration 3.
+const P75_VARIANTS = `CREATE TABLE IF NOT EXISTS ticket_variants (
+  id TEXT PRIMARY KEY, ticket TEXT NOT NULL, project TEXT NOT NULL, round INTEGER NOT NULL, position INTEGER NOT NULL,
+  state TEXT NOT NULL, session TEXT, workdir TEXT, files TEXT NOT NULL, added INTEGER NOT NULL, removed INTEGER NOT NULL,
+  diff TEXT NOT NULL, cut INTEGER NOT NULL, cost REAL, minutes REAL, note TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  UNIQUE (ticket, round, position)
+)`;
+
+test('migration 3: a variant written before the harness pick reads as a plain Claude Code variant, and counts no win', withDir((dir) => {
+  const path = fixtureLedger(dir);
+  readFile(path, (db) => {
+    db.exec(P75_VARIANTS);
+    db.prepare("INSERT INTO ticket_variants (id, ticket, project, round, position, state, session, workdir, files, added, removed, diff, cut, cost, minutes, note, created_at, updated_at) VALUES ('LOCAL-9:r1:v1', 'LOCAL-9', 'guestbook', 1, 1, 'chosen', 'sess-9', '/work/LOCAL-9.variant-1-1', '[\"src/a.ts\"]', 1, 0, '+a', 0, 0.2, 3, NULL, '2026-10-24T10:00:00.000Z', '2026-10-24T10:05:00.000Z')").run();
+  });
+  start(path);
+  readFile(path, (db) => {
+    assert.deepEqual({ ...db.prepare('SELECT harness, pick, kind, tests, tokens, work_ms, won, state, files FROM ticket_variants').get() as object },
+      { harness: 'claude-code', pick: 0, kind: 'other', tests: null, tokens: null, work_ms: null, won: 0, state: 'chosen', files: '["src/a.ts"]' });
+    assert.deepEqual(harnessWins(db, 'guestbook'), []);
+  });
 }));
 
 test('a ledger migrated by a newer Cleared is refused, not used', withDir((dir) => {
