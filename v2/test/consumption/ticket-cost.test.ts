@@ -87,6 +87,27 @@ test('a turn that ends in an error counts its time; a turn still running counts 
   assert.equal(sessionsCost([author]).workMs, 5 * 60_000);
 });
 
+// ---- a period (the week's figures, C17, issue #396) -----------------------
+
+test('from a start: only the turns finished after it, a turn across it counting its part inside, the dollars each running total\'s increase', () => {
+  const author = [
+    started('a', 0, 'r1'), finished('a', 10, 'r1', { inputTokens: 100 }, 0.4),
+    started('a', 20, 'r2'), finished('a', 40, 'r2', { inputTokens: 50 }, 0.7),
+    started('a', 50, 'r3'), finished('a', 55, 'r3', { inputTokens: 5 }, 0.2),
+  ];
+  const since = Date.parse(at(30));
+  assert.deepEqual(sessionsCost([author], since), { sessions: 1, turns: 2, tokens: 55, workMs: 15 * 60_000, costUsd: 0.5 },
+    '0.40 before the start, then 0.30 more and a resume of 0.20; 10 of the second turn\'s 20 minutes and the third\'s 5');
+  assert.deepEqual(sessionsCost([author], undefined), sessionsCost([author]), 'without a start, the whole of it, as before');
+});
+
+test('from a start: a session whose turns all ended before it is not counted, and does not make the dollars unknown', () => {
+  const codex = [started('c', 0, 'r1'), finished('c', 5, 'r1', { inputTokens: 40 }, null)];
+  const author = [started('a', 40, 'r1'), finished('a', 45, 'r1', { inputTokens: 10 }, 0.1)];
+  assert.deepEqual(sessionsCost([codex, author], Date.parse(at(30))), { sessions: 1, turns: 1, tokens: 10, workMs: 5 * 60_000, costUsd: 0.1 });
+  assert.equal(sessionsCost([codex, author]).costUsd, null);
+});
+
 // ---- the ledger ------------------------------------------------------------
 
 function put(store: Store, id: string, role: Role, harness: Harness, ticket = 'LOCAL-7') {

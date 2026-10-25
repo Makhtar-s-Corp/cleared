@@ -25,6 +25,11 @@
 //
 // The proof receipt of a pull request (flow/engine.ts #receipt, P210) says
 // ticketCost's figures, so the card and the receipt never differ.
+//
+// From a start (`since`, the week's figures, week.ts): only the turns
+// finished at or after it, a turn begun before it counting the time inside;
+// a session's dollars the increase of its running total after its last
+// total before the start; a session that finished no turn since is left out.
 import type { DatabaseSync } from 'node:sqlite';
 import type { AgUiEvent, SessionEvent } from '../session/events.ts';
 import { turnTokens } from './usage.ts';
@@ -44,7 +49,8 @@ export type TicketCost = SessionsCost & {
 
 const usd = (value: number) => Math.round(value * 1e6) / 1e6;
 
-export function sessionsCost(sessions: readonly (readonly Pick<SessionEvent, 'at' | 'event'>[])[]): SessionsCost {
+export function sessionsCost(sessions: readonly (readonly Pick<SessionEvent, 'at' | 'event'>[])[], since?: number): SessionsCost {
+  const from = since ?? -Infinity;
   let ran = 0;
   let turns = 0;
   let tokens = 0;
@@ -60,16 +66,22 @@ export function sessionsCost(sessions: readonly (readonly Pick<SessionEvent, 'at
     for (const { at, event } of events) {
       if (event.type === 'RUN_STARTED') open = Date.parse(at);
       if (event.type !== 'RUN_FINISHED' && event.type !== 'RUN_ERROR') continue;
-      if (open !== null) workMs += Math.max(0, Date.parse(at) - open);
+      const end = Date.parse(at);
+      const inside = end >= from;
+      if (open !== null && inside) workMs += Math.max(0, end - Math.max(open, from));
       open = null;
       if (event.type === 'RUN_ERROR') continue;
-      finished += 1;
-      tokens += turnTokens(event);
+      if (inside) {
+        finished += 1;
+        tokens += turnTokens(event);
+      }
       const total = event.result.total_cost_usd;
       if (typeof total !== 'number' || !Number.isFinite(total) || total < 0) continue;
-      spent += total >= last ? total - last : total;
+      if (inside) {
+        spent += total >= last ? total - last : total;
+        reported = true;
+      }
       last = total;
-      reported = true;
     }
     if (finished === 0) continue;
     ran += 1;
