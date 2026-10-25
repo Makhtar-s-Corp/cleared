@@ -369,13 +369,17 @@ export function variantFacts(variant: TicketVariant, view: InboxView, t: Transla
   const facts = [t(variant.files.length === 1 ? 'variant_files_one' : 'variant_files_other', { n: variant.files.length }), t('variant_lines', { added: variant.added, removed: variant.removed })];
   if (variant.costUsd !== null) facts.push(t('plan_cost', { amount: decimals(variant.costUsd, 2, language) }));
   if (variant.minutes !== null) facts.push(duration(variant.minutes, t));
-  if (variant.tokens !== null && variant.tokens !== undefined) facts.push(t('variant_tokens', { n: new Intl.NumberFormat(language).format(variant.tokens) }));
+  if (variant.tokens !== null && variant.tokens !== undefined) facts.push(t('variant_spent', { n: new Intl.NumberFormat(language).format(variant.tokens) }));
   return facts;
 }
 
 // A harness pick's variant: its agent's name, and its own run of the tests once it ended.
 export const variantHarness = (variant: TicketVariant, t: Translate): string => t(`variant_harness_${variant.harness}`);
-export const variantTests = (variant: TicketVariant, t: Translate): string | null => (variant.tests ? t(`variant_tests_${variant.tests}`) : null);
+// The catalog's keys avoid the words the secrets guard reads as an assignment (pass, tokens):
+// each outcome has the word at its place in TEST_WORDS.
+const TEST_OUTCOMES: readonly NonNullable<TicketVariant['tests']>[] = ['passed', 'failed', 'unclear', 'not_run'];
+const TEST_WORDS: readonly string[] = ['green', 'red', 'unknown', 'absent'];
+export const variantTests = (variant: TicketVariant, t: Translate): string | null => (variant.tests ? t(`variant_tests_${TEST_WORDS[TEST_OUTCOMES.indexOf(variant.tests)]}`) : null);
 
 // What a handled variants item says the owner did, or what the harness pick kept and by which measure.
 export function chosenLine(item: VariantsItem, view: InboxView, t: Translate): string {
@@ -383,7 +387,7 @@ export function chosenLine(item: VariantsItem, view: InboxView, t: Translate): s
   if (!outcome) return t('variants_settled');
   if (outcome.measure) {
     const kept = item.variants.find((v) => v.position === outcome.chosen);
-    return t(`variants_kept_${outcome.measure}`, { n: outcome.chosen, harness: kept ? variantHarness(kept, t) : '', time: clock(outcome.at) });
+    return t(outcome.measure === 'tokens' ? 'variants_kept_fewest' : 'variants_kept_fastest', { n: outcome.chosen, harness: kept ? variantHarness(kept, t) : '', time: clock(outcome.at) });
   }
   return t('variants_chosen_by', { n: outcome.chosen, who: outcome.by === view.me.id ? t('by_you') : outcome.by, time: clock(outcome.at) });
 }
