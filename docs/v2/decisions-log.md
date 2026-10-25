@@ -5261,5 +5261,5 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Resources.** No Docker object, no chat, Cursor or Codex account, no network beyond `npm ci` of the lock file, no tunnel, no secret; the tests and the captures listen on port 0 on loopback.
 
-- Pull request: against `v2`, its number in the pull request's own commit.
+- Pull request: 345, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-mobile-ui`.
