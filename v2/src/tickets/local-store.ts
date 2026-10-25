@@ -122,6 +122,7 @@ export class LocalTicketStore implements TicketStore {
   readonly #ticket: StatementSync;
   readonly #tickets: StatementSync;
   readonly #historyRows: StatementSync;
+  readonly #historiesRows: StatementSync;
   readonly #commentRows: StatementSync;
   readonly #serviceRows: StatementSync;
 
@@ -137,6 +138,7 @@ export class LocalTicketStore implements TicketStore {
     this.#ticket = db.prepare('SELECT * FROM tracker_tickets WHERE id = ?');
     this.#tickets = db.prepare('SELECT * FROM tracker_tickets ORDER BY id');
     this.#historyRows = db.prepare('SELECT status, actor_kind, actor_id, at, proof, approval_context, content_hash FROM tracker_history WHERE ticket = ? ORDER BY id');
+    this.#historiesRows = db.prepare('SELECT ticket, status, actor_kind, actor_id, at, proof, approval_context, content_hash FROM tracker_history WHERE ticket IN (SELECT value FROM json_each(?)) ORDER BY ticket, id');
     this.#commentRows = db.prepare('SELECT * FROM tracker_comments WHERE ticket = ? ORDER BY id');
     // Its own table, made here too: a store opened on the tracker tables
     // alone (as the v1 tools and the approval's tests open it) still reads
@@ -271,11 +273,38 @@ export class LocalTicketStore implements TicketStore {
     }
   }
 
+  #change(row: Row, number: number): StatusChange {
+    return { status: str(row, 'status'), by: { kind: this.#verified(row, number), id: str(row, 'actor_id') }, at: str(row, 'at') };
+  }
+
   async history(id: TicketId): Promise<StatusChange[]> {
     const number = Number(this.#row(id).id);
-    return (this.#historyRows.all(number) as Row[]).map((row) => ({
-      status: str(row, 'status'), by: { kind: this.#verified(row, number), id: str(row, 'actor_id') }, at: str(row, 'at'),
-    }));
+    return (this.#historyRows.all(number) as Row[]).map((row) => this.#change(row, number));
+  }
+
+  // One query for every ticket asked; a ticket has a row from its creation,
+  // so one without any is not this store's.
+  async histories(ids: readonly TicketId[]): Promise<Map<TicketId, StatusChange[]>> {
+    const numbers = new Map<number, TicketId>();
+    for (const id of ids) {
+      const number = this.#number(id);
+      if (number !== undefined) numbers.set(number, id);
+    }
+    const found = new Map<number, StatusChange[]>();
+    if (numbers.size > 0) {
+      for (const row of this.#historiesRows.all(JSON.stringify([...numbers.keys()])) as Row[]) {
+        const number = Number(row.ticket);
+        const changes = found.get(number) ?? [];
+        changes.push(this.#change(row, number));
+        found.set(number, changes);
+      }
+    }
+    const out = new Map<TicketId, StatusChange[]>();
+    for (const [number, id] of numbers) {
+      const changes = found.get(number);
+      if (changes) out.set(id, changes);
+    }
+    return out;
   }
 
   async comment(id: TicketId, body: string, by: Actor): Promise<Comment> {

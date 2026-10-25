@@ -21,7 +21,9 @@
 //
 // Every string of an answer goes through the ledger's cleaner (redact.ts).
 // The words are messages/lanes.<language>.json, over the shell's for a
-// duration, said as the app says it (app/web/lib/time.ts).
+// duration, said as the app says it (app/web/lib/time.ts); a duration from a
+// date that is none is null. A call reads the tickets once and their history
+// once (TicketStore.histories), whatever the number of lanes.
 import { readFileSync } from 'node:fs';
 import { loadCatalog, type Language } from '../../app/src/catalog.ts';
 import { translator, type Catalog, type Translate } from '../../app/web/lib/i18n.ts';
@@ -89,7 +91,12 @@ function relative(path: string): string | undefined {
 export function createLanesServer(deps: LanesDeps): ToolServer {
   const t = translator(lanesCatalog(deps.language));
   const now = deps.now ?? (() => new Date());
-  const since = (at: string) => lasted(now().getTime() - Date.parse(at), t);
+  // How long since `at`, as the app says it; null when a date is none, so
+  // an answer never says "NaN".
+  const since = (at: string) => {
+    const ms = now().getTime() - Date.parse(at);
+    return Number.isFinite(ms) ? lasted(ms, t) : null;
+  };
 
   function flow(): { engine: FlowEngine; store: Store } {
     if (!deps.engine || !deps.store) throw new ToolError('error_no_flow');
@@ -100,15 +107,16 @@ export function createLanesServer(deps: LanesDeps): ToolServer {
     const { engine, store } = flow();
     const tickets = engine.registry.ticketStore;
     const { todo, done } = tickets.states;
-    const out: Lane[] = [];
-    for (const ticket of await tickets.list({ project: engine.config.project })) {
-      if (ticket.status === todo || ticket.status === done) continue;
-      const start = flowStart(await tickets.history(ticket.id), todo, ticket);
+    const open = (await tickets.list({ project: engine.config.project })).filter((ticket) => ticket.status !== todo && ticket.status !== done);
+    // Every open ticket's history in one read, not one per ticket.
+    const histories = await tickets.histories(open.map((ticket) => ticket.id));
+    const out = open.map((ticket): Lane => {
+      const start = flowStart(histories.get(ticket.id) ?? [], todo, ticket);
       const sessions = store.sessions.list({ ticket: ticket.id })
         .filter((row) => row.role !== 'lead' && row.createdAt >= start)
         .flatMap((row) => engine.sessionDetail(row.id) ?? []);
-      out.push({ ticket, since: start, sessions });
-    }
+      return { ticket, since: start, sessions };
+    });
     return out.sort((a, b) => a.since.localeCompare(b.since) || a.ticket.id.localeCompare(b.ticket.id));
   }
 

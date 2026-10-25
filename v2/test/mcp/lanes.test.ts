@@ -10,8 +10,8 @@ import { createRedactor } from '../../src/mcp/redact.ts';
 import { finished, permission, setup, started, until, type Setup } from '../flow/support.ts';
 
 type Answer = { result?: Record<string, unknown> & { structuredContent?: Record<string, unknown>; isError?: boolean; content?: { text: string }[] }; error?: { code: number; message: string } };
-type Lane = { ticket: string; title: string; status: string; running: boolean; startedAt: string; runningFor: string; sessions: { sessionId: string; role: string; phase: string; for: string }[] };
-type Held = { path: string; service: string | null; ticket: string; title: string; sessionId: string; role: string; why: string[]; since: string; heldFor: string };
+type Lane = { ticket: string; title: string; status: string; running: boolean; startedAt: string; runningFor: string | null; sessions: { sessionId: string; role: string; phase: string; for: string | null }[] };
+type Held = { path: string; service: string | null; ticket: string; title: string; sessionId: string; role: string; why: string[]; since: string; heldFor: string | null };
 
 const edit = (id: string, path: string): FakeStep[] => [
   { emit: { type: 'TOOL_CALL_START', toolCallId: id, toolCallName: 'Edit' } },
@@ -146,6 +146,54 @@ test('a ticket put back and started again holds only what its new flow touched',
   await until(() => t.startedSessions.filter((s) => s.input.role === 'author').length === 2 && t.inbox.waitingFor(second()) === 1, 'the second author waiting');
   const held = await content('locked_files') as { files: Held[] };
   assert.deepEqual(held.files.map((f) => f.path), ['src/new.ts']);
+});
+
+test('an invalid date gives no duration, null, and never "NaN": a clock that fails, or a history with a date that is none (issue #351)', async () => {
+  const { t } = await holdingLane();
+  const broken = serverOf(t, { now: () => new Date(Number.NaN) });
+  const lanes = await broken.content('list_lanes') as { lanes: Lane[] };
+  assert.equal(lanes.lanes[0]?.runningFor, null);
+  assert.deepEqual(lanes.lanes[0]?.sessions.map((s) => s.for), [null]);
+  const held = await broken.content('locked_files') as { files: Held[] };
+  assert.equal(held.files.length, 2);
+  assert.deepEqual(held.files.map((f) => f.heldFor), [null, null]);
+  assert.doesNotMatch(JSON.stringify([lanes, held]), /NaN/);
+  // The history read through either way the tools may read it.
+  const store = t.tickets as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  const undated = (changes: { status: string; at: string }[]) => changes.map((c) => (c.status === 'Todo' ? c : { ...c, at: 'not a date' }));
+  const history = store.history!.bind(t.tickets);
+  store.history = async (...args) => undated(await history(...args) as { status: string; at: string }[]);
+  const histories = store.histories?.bind(t.tickets);
+  if (histories) store.histories = async (...args) => new Map([...(await histories(...args) as Map<string, { status: string; at: string }[]>)].map(([id, changes]) => [id, undated(changes)]));
+  const fr = await serverOf(t, { language: 'fr' }).content('list_lanes') as { lanes: Lane[] };
+  assert.equal(fr.lanes[0]?.startedAt, 'not a date');
+  assert.equal(fr.lanes[0]?.runningFor, null);
+  assert.doesNotMatch(JSON.stringify(fr), /NaN/);
+});
+
+test('a call reads the open tickets\' history once, however many lanes there are, and locked_files reads the lanes once (issue #352)', async () => {
+  const { t } = await holdingLane();
+  for (let i = 1; i <= 20; i++) {
+    const other = await t.tickets.create({ title: `Lane ${i}`, project: 'guestbook' }, { kind: 'human', id: 'u1' });
+    await t.tickets.move(other.id, t.tickets.states.progress, { kind: 'agents', id: 'cleared' });
+  }
+  const reads = { list: 0, history: 0 };
+  const store = t.tickets as unknown as Record<string, (...args: unknown[]) => Promise<unknown>>;
+  for (const name of ['list', 'history', 'histories']) {
+    const real = store[name]?.bind(t.tickets);
+    if (real) store[name] = async (...args) => { reads[name === 'list' ? 'list' : 'history']++; return await real(...args); };
+  }
+  const { content } = serverOf(t);
+  const lanes = await content('list_lanes') as { lanes: Lane[] };
+  assert.equal(lanes.lanes.length, 21);
+  assert.deepEqual(reads, { list: 1, history: 1 }, 'list_lanes: one list, one read of the history for the 21 lanes');
+  reads.list = reads.history = 0;
+  const held = await content('locked_files') as { files: Held[] };
+  assert.deepEqual(held.files.map((f) => f.path).sort(), ['src/entries.ts', 'src/view.ts']);
+  assert.deepEqual(reads, { list: 1, history: 1 }, 'locked_files: the lanes read once');
+  reads.list = reads.history = 0;
+  await content('list_tickets');
+  assert.deepEqual(reads, { list: 1, history: 0 }, 'list_tickets reads no history');
 });
 
 test('list_tickets gives the open tickets with their status, labels and whether a flow runs; never a body, and Done only when asked', async () => {

@@ -5454,3 +5454,23 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 
 - Pull request: 355, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-mcp-startup`.
+
+## 2026-10-25: the lanes' MCP tools say no "NaN" and read the history once per call (the author's choices, lane `j3-mcp-lanes-perf`, P216, issues #351 and #352)
+
+**The need.** Two non-blocking follow-ups of pull request 344 (P216). Issue #351: `since()` in `v2/src/mcp/lanes.ts` never says "NaN"; a date that is none gives a duration that is absent (`null`), and a test proves it. Issue #352: `lanes()` reads the open tickets' history without one read per ticket, or the measured call stays under a budget the test writes; `locked_files` does not read the lanes twice. The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight, as earlier lanes noted; the conventions followed are those of sections 9 and 10 of `milestone-1-plan.md` (a lane changes its own files). Neither issue's text nor pull request 344's comments say where `locked_files` read the lanes twice: it calls `lanes()` once on `v2`, so the test pins that.
+
+**Decision.**
+1. **A duration from a date that is none is `null`.** `lasted` (`app/web/lib/time.ts`) gives "NaNd NaNh" for `NaN`, since `Math.max(0, NaN)` is `NaN`. The fix is in `lanes.ts`, not in the shared `time.ts`: `since()` returns `null` when the clock or the date is not a date, so `runningFor`, a session's `for` and a file's `heldFor` are `null`. The date itself (`startedAt`, `since`) is given as the tracker wrote it. No new word, so no catalog change.
+2. **Every open ticket's history in one read.** `TicketStore` gains `histories(ids)`: a map from id to history, each as `history` gives it, an id the store does not know left out (`history` throws on one; a tool that lists must not fail on a ticket that went away between the two reads). The in-memory store reads its map; the local store runs one query, `tracker_history` joined to the ids through `json_each`, prepared once, and verifies each row's signature as `history` does, so a signed row is still the human's and an altered one is not. `lanes()` lists the tickets once, then reads the open ones' history once. Only these two stores implement the contract in the repository.
+3. **A count, not a budget.** The issue allowed a time budget; it was not taken. On the in-memory store the whole test over 21 lanes ran in 17 ms on the old code, so a budget would pass on the old code (B4.6 asks a defect test to fail there) and would flake on a loaded runner, as the browser budget test does. The test counts the store's reads instead: over 21 lanes, `list_lanes` and `locked_files` each list once and read the history once, and `list_tickets` reads none.
+
+**Tests first.** `6d9bc71` committed the tests alone. On that code four tests fail: the invalid date (`runningFor` is "NaNd NaNh"), the reads (21 reads of the history for 21 lanes), and the two `histories` tests (`histories is not a function`).
+
+**Checks.** `npm run typecheck` passes. `npm test` runs 2052 Node tests, 1984 pass, 68 skipped (the browser tests, with no `CLEARED_V2_PLAYWRIGHT`), 0 fail; Vitest, 321 tests pass. No browser test was run: nothing of the app changed. `npm run guard -- --base origin/v2`: nothing refused.
+
+**The merge of 355** (P220, at `origin/v2` `26822ed`). The log keeps 355's entry, then this one; the matrix merged by itself and keeps every id once (P216 with these follow-ups, P220 from 355). After the merge: `npm run typecheck` passes; `npm test` runs 2053 Node tests, 1985 pass, 68 skipped (the browser tests), 0 fail, and 321 Vitest tests pass; `test/ci-triggers.test.mjs` passes 4 of 4; `npm run guard -- --base origin/v2`: nothing refused.
+
+**Resources.** No Docker object, no account, no network beyond `git fetch` and GitHub, no port, no secret.
+
+- Pull request: 356, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-mcp-lanes-perf`.
