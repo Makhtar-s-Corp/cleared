@@ -173,8 +173,8 @@ test('a lead act can play an event as the adapter would map it: the status of a 
 });
 
 test('the ids the lead writes pass the cleaner whole, so the question it asks is the one an answer names', async () => {
-  // In CI a session id ending "a0134749174e" held a phone number's shape: the
-  // question's id "<session>-turn-1-1" was stored as "[removed: phone number]",
+  // In CI a session id whose last group held ten digits from "01" had a phone
+  // number's shape: the question's id "<session>-turn-1-1" was stored cleaned,
   // and the answer naming it was refused (run 40172850057, first attempt).
   const store = openStore(':memory:');
   const calls: Call[] = [];

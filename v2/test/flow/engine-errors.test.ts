@@ -8,21 +8,22 @@ import assert from 'node:assert/strict';
 import type { ReleaseItem } from '../../src/api/types.ts';
 import { approved, finished, quickAuthor, setup, started, text, until } from './support.ts';
 
-const SECRET = 'ghp_0123456789abcdefghijklmnopqrstuvwxyzAB';
+// What an error's message may carry that the log and the ticket must not.
+const PRIVATE = 'private-detail-of-the-error';
 const release = (t: Awaited<ReturnType<typeof setup>>) => t.inbox.list().find((i): i is ReleaseItem => i.kind === 'release');
 
 test('checks the forge cannot say leave the card pending, are logged without the error\'s message, and are asked again a minute later', async (context) => {
   const logged: string[] = [];
   context.mock.method(console, 'error', (line: string) => { logged.push(line); });
   let fails = 1;
-  const t = await setup({ scripts: { author: quickAuthor }, effects: { async prChecks() { if (fails-- > 0) throw new Error(`401 for ${SECRET}`); return 'passed'; } } });
+  const t = await setup({ scripts: { author: quickAuthor }, effects: { async prChecks() { if (fails-- > 0) throw new Error(`401 for ${PRIVATE}`); return 'passed'; } } });
   await t.engine.start(t.ticket.id, 'u1');
   await until(() => release(t)?.state === 'waiting', 'the release item', 5000);
   await t.engine.settled();
   await t.engine.tick();
   assert.equal(release(t)?.pr.checks, 'pending');
   assert.deepEqual(logged.filter((line) => line.includes('checks')), ['cleared-v2: the checks of pull request #7 could not be read (Error)']);
-  assert.ok(!logged.some((line) => line.includes(SECRET)));
+  assert.ok(!logged.some((line) => line.includes(PRIVATE)));
   // Within the minute the forge is not asked again.
   t.clock.now += 30_000;
   await t.engine.tick();
@@ -68,24 +69,24 @@ test('a lock that throws is asked again after the retry delay, and the ticket is
 test('an author handover that cannot be stored is said on the ticket, cleaned, and the review still runs', async () => {
   const t = await setup({
     scripts: { author: quickAuthor },
-    clean: (text) => text.replaceAll(SECRET, '[removed]'),
-    effects: { async captureHandover() { throw new Error(`disk full near ${SECRET}`); } },
+    clean: (text) => text.replaceAll(PRIVATE, '[cleaned]'),
+    effects: { async captureHandover() { throw new Error(`disk full near ${PRIVATE}`); } },
   });
   await t.engine.start(t.ticket.id, 'u1');
   await until(() => release(t)?.state === 'waiting', 'the release item', 5000);
   const said = (await t.tickets.comments(t.ticket.id)).map((c) => c.body).find((body) => body.includes('handover'));
   assert.match(said ?? '', /^The author's handover could not be stored: /);
-  assert.ok(!said?.includes(SECRET), said);
+  assert.ok(!said?.includes(PRIVATE), said);
   assert.ok(t.startedSessions.some((s) => s.input.role === 'reviewer'), 'the reviewer started');
 });
 
 test('a variant whose session cannot start fails alone, said on the ticket and cleaned; the other variant goes on', async () => {
   const t = await setup({
     scripts: { authors: [[started, ...text('a1', 'Done.'), finished(0.2)]] },
-    clean: (said) => said.replaceAll(SECRET, '[removed]'),
+    clean: (said) => said.replaceAll(PRIVATE, '[cleaned]'),
     effects: {
       async prepareWorkdir({ ticket, role, variant }) {
-        if (variant?.position === 2) throw new Error(`clone refused for ${SECRET}`);
+        if (variant?.position === 2) throw new Error(`clone refused for ${PRIVATE}`);
         return { workdir: `/work/${ticket.id}-${role}-${variant?.position ?? 0}`, briefing: { projectPage: 'A guestbook.', decisions: [], glossary: [], lessons: [], lastHandover: null } };
       },
       async variantChanges() { return { files: ['src/a.ts'], diff: 'diff --git a/src/a.ts b/src/a.ts\n' }; },
@@ -96,6 +97,6 @@ test('a variant whose session cannot start fails alone, said on the ticket and c
   assert.deepEqual((await t.engine.ticketVariants(t.ticket.id))?.map((v) => v.state), ['done', 'failed']);
   const said = (await t.tickets.comments(t.ticket.id)).map((c) => c.body).find((body) => body.startsWith('Variant 2 of 2 failed'));
   assert.match(said ?? '', /^Variant 2 of 2 failed: its session could not start: /);
-  assert.ok(!said?.includes(SECRET), said);
+  assert.ok(!said?.includes(PRIVATE), said);
   assert.ok(!t.flowEvents.some((e) => e.type === 'ticket_put_back'), 'one variant is enough to go on');
 });
