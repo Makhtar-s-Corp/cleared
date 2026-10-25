@@ -5,7 +5,9 @@
 //   - a newcomer opens the address, is sent to /setup, types the code the
 //     service printed, a name and a password, sees the public key, goes on;
 //   - the forge step checks a credential on the fake GitHub; the model step
-//     takes a pasted login; every later step is a stub that is skipped;
+//     takes a pasted login; every later step is skipped: the stubs, and the
+//     checks step once its lines are drawn (lane v2-j5-doctor fills it, its
+//     reads of Docker answered by a fake `docker` program on PATH);
 //   - each page has no policy violation, no page error, no missing key, and
 //     axe finds no violation of WCAG 2.2 AA;
 //   - with CLEARED_V2_CAPTURES=<folder>, the forge step is captured at 1440,
@@ -26,6 +28,7 @@ import { applyTables } from '../../../src/store/db.ts';
 import type { SessionContainer, TerminalProcess } from '../../../src/terminal/container.ts';
 import { serviceSource } from '../../src/proxy.ts';
 import { SESSION_TABLES } from '../../src/session-cookie.ts';
+import { fakeDockerOnPath } from '../../../test/doctor/fake-docker-cli.ts';
 import { FakeForge } from '../../../test/setup/fakes/github.ts';
 import { fakeGh } from '../../../test/forge/fake-gh.ts';
 import { FAST, PASSWORD, startSetup } from '../../../test/setup/support.ts';
@@ -76,6 +79,7 @@ async function checked(page: any, what: string): Promise<void> {
 }
 
 async function run(language: 'en' | 'fr'): Promise<void> {
+  const docker = fakeDockerOnPath();
   const fake = new FakeForge({ [GOOD]: ['org/guestbook', 'org/filter-api'] });
   const api = await fake.listen();
   // The workspace step lists through gh once the forge step is done: a fake on PATH, so no call reaches GitHub.
@@ -148,8 +152,9 @@ async function run(language: 'en' | 'fr'): Promise<void> {
 
     for (const id of ['workspace', 'environment', 'secrets', 'checks', 'first-ticket']) {
       await page.waitForURL(`${app.base}/setup/${id}`);
-      // The workspace step is filled (lane v2-j5-connect, its own browser test); the others are stubs.
-      await page.locator(id === 'workspace' ? '[data-workspace-step] [name="repository"]' : `[data-step-stub="${id}"]`).first().waitFor();
+      // The workspace and checks steps are filled (lanes v2-j5-connect and v2-j5-doctor, each with its own tests); the others are stubs.
+      const marker = id === 'workspace' ? '[data-workspace-step] [name="repository"]' : id === 'checks' ? '[data-check="docker"]' : `[data-step-stub="${id}"]`;
+      await page.locator(marker).first().waitFor();
       if (id === 'environment') await checked(page, 'a stub');
       await page.click('[data-act="setup_skip"]');
     }
@@ -165,13 +170,14 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     const settings = readFileSync(join(service.dir, 'settings.conf'), 'utf8');
     assert.ok(!settings.includes(GOOD) && !settings.includes(LOGIN), 'no credential in the settings');
     assert.equal(readSettings(join(service.dir, 'settings.conf')).env.CLEARED_V2_OWNER_ID, 'alex');
-    assert.equal(fake.requests.length, 1);
+    assert.equal(fake.requests.filter((r) => r.path.startsWith('/user/repos')).length, 1, 'the forge step read GitHub once');
   } finally {
     await browser.close();
     await app.close();
     db.close();
     await service.close();
     await fake.close();
+    docker.restore();
   }
 }
 

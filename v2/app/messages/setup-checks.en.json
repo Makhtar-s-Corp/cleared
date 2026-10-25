@@ -1,4 +1,17 @@
 {
   "checks_title": "Check the install",
-  "checks_intro": "Each part of the install checked, green, or red with what to do."
+  "checks_intro": "Each part of the install checked, green, or red with what to do.",
+  "checks_running": "Checking the install. This reads Docker, GitHub and this machine's disk, and changes nothing.",
+  "checks_again": "Check again",
+  "checks_level_ok": "Passed",
+  "checks_level_fail": "Failed",
+  "checks_level_notice": "Note",
+  "checks_level_off": "Not checked",
+  "checks_todo": "What to do:",
+  "checks_summary_ok": "{count} checks, none failed, in {took}.",
+  "checks_summary_fail_one": "1 check failed, of {count}. Fix it, then check again.",
+  "checks_summary_fail_many": "{failed} checks failed, of {count}. Fix them, then check again.",
+  "checks_notices": "The notes are said for you to know; none stops a first ticket.",
+  "checks_command": "The same checks from a terminal, in the clone: docker compose -f v2/compose.yaml run --rm --no-deps service cleared doctor",
+  "checks_error_other": "The checks could not run. Check again in a moment."
 }

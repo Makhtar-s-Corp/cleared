@@ -201,6 +201,10 @@ Repairing anything; a doctor page outside the assistant.
 
 None beyond this server and the `gh` login's token for the forge line, as in section 5.5.
 
+### 7.6 Delivered
+
+Matrix line P251, pull request 417. The ready section runs twelve checks, each line with a stable id that `docs/troubleshooting.md` (section 15) can name; the lane also added `v2/app/web/screens/setup/steps/checks.css`, `v2/app/web/test/setup/checks.test.tsx` and `v2/app/test/setup/checks-browser.test.ts`, and taught the assistant's browser test (`app/test/setup/setup-browser.test.ts`) that the checks step is no longer a stub. The real run found that this server has neither session image built, which the section says as a failure with the command that builds them.
+
 ## 8. `cleared run`, as a command and an API (`v2-j5-run`)
 
 Matrix: C18. Wave 2. Effort M.
@@ -230,7 +234,7 @@ None: tickets run on the fake harness; a real session is the proof's.
 
 ## 9. Connect a workspace (`v2-j5-connect`)
 
-Matrix: M10 (several repositories, setup sessions, links guessed and proposed), and P251, the lane's own line, added when it delivered. Wave 2. Effort L.
+Matrix: M10 (several repositories, setup sessions, links guessed and proposed), and P252, the lane's own line, added when it delivered. Wave 2. Effort L.
 
 ### 9.1 Context
 
