@@ -32,9 +32,19 @@ async function withBrowser(options: { language: 'en' | 'fr' }, run: (page: any) 
     // The page's answer to a width's media queries held 500 ms, as a slow
     // runner's is: the style moves at once, the shell's sidebar mode after.
     await context.addInitScript(() => {
-      const add = (window as any).MediaQueryList.prototype.addEventListener;
-      (window as any).MediaQueryList.prototype.addEventListener = function (this: unknown, type: string, listener: (event: unknown) => void, ...rest: unknown[]) {
-        return add.call(this, type, type === 'change' ? (event: unknown) => setTimeout(() => listener(event), 500) : listener, ...rest);
+      const proto = (window as any).MediaQueryList.prototype;
+      const add = proto.addEventListener;
+      const remove = proto.removeEventListener;
+      const late = new WeakMap<object, (event: unknown) => void>();
+      const lateOf = (listener: (event: unknown) => void) => {
+        if (!late.has(listener)) late.set(listener, (event: unknown) => setTimeout(() => listener(event), 500));
+        return late.get(listener);
+      };
+      proto.addEventListener = function (this: unknown, type: string, listener: (event: unknown) => void, ...rest: unknown[]) {
+        return add.call(this, type, type === 'change' ? lateOf(listener) : listener, ...rest);
+      };
+      proto.removeEventListener = function (this: unknown, type: string, listener: (event: unknown) => void, ...rest: unknown[]) {
+        return remove.call(this, type, type === 'change' ? lateOf(listener) : listener, ...rest);
       };
     });
     const page = await context.newPage();
