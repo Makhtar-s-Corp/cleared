@@ -74,6 +74,16 @@ test('the same v1 ticket imported for two workspaces is a sample of each', async
   } finally { db.close(); }
 });
 
+test('a second v1 ledger whose ticket numbers are taken is said, never counted as already imported', async () => {
+  const { run } = setup([sized('LOCAL-1', 's', 10), sized('LOCAL-2', 'm', 40)]);
+  await run(true);
+  const other = v1Ledger([sized('LOCAL-1', 'l', 70), { ...sized('LOCAL-3', 'xs', 5) }]);
+  const report = await run(true, { from: other.ledger });
+  assert.deepEqual(report.samples.added.map((s) => s.ticket), ['LOCAL-3']);
+  assert.deepEqual(report.samples.known, []);
+  assert.deepEqual(report.samples.skipped, [{ ticket: 'LOCAL-1', reason: 'taken' }]);
+});
+
 test('the v1 ledger is byte for byte the same after an import', async () => {
   const { v1, run } = setup([sized('LOCAL-1', 's', 10)]);
   const before = readFileSync(v1.ledger);
@@ -99,7 +109,8 @@ test('imported samples feed the plans\' estimates: the median minutes, the defau
   try {
     const samples = await historyOf({ tickets: new MemoryTicketStore(), store }, 'shop');
     assert.equal(samples.length, 4);
-    assert.deepEqual(estimateFor(samples, 's', 'full'), { minutes: 20, costUsd: DEFAULT_ESTIMATES.s.costUsd, weekPercent: null, samples: 3 });
+    // The minutes from v1's history; the cost the default, so the count says none.
+    assert.deepEqual(estimateFor(samples, 's', 'full'), { minutes: 20, costUsd: DEFAULT_ESTIMATES.s.costUsd, weekPercent: null, samples: 0 });
     assert.deepEqual(estimateFor(samples, 's', 'fast'), { ...DEFAULT_ESTIMATES.s, weekPercent: null, samples: 1 });
     assert.deepEqual(await historyOf({ tickets: new MemoryTicketStore(), store }, 'other'), []);
   } finally { store.close(); }
