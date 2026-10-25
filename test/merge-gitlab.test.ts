@@ -54,7 +54,7 @@ async function onGitLab(files: string[] = TOOLING, forge: (address: string, toke
   lab.onMerge = (_mr, sha) => {
     const work = join(pull.box.home, `merge-${Date.now()}`);
     const git = (...args: string[]) => execFileSync('git', ['-C', work, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' }).trim();
-    execFileSync('git', ['clone', '-q', pull.lane.remote, work]);
+    execFileSync('git', ['clone', '-q', '--branch', 'main', pull.lane.remote, work]);
     git('merge', '-q', '--no-ff', '-m', 'Merge branch feat/w into main', sha);
     git('push', '-q', 'origin', 'HEAD:main');
     return git('rev-parse', 'HEAD');

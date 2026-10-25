@@ -7237,5 +7237,7 @@ The two agreement cases came later, from a second read of the lock's path: with 
 
 **The merge of 427** (lane `v2-j5-images`, issue #422, at `origin/v2` `996bde5`). 427 took the id P254 for the prepared images, so this lane's line is P255: the matrix, section 11 of the plan and this entry say so. Both log entries and matrix lines are kept.
 
+**CI of 428** (run 40242142761, the `checks` workflow). Two of the lock's GitLab cases failed: the tooling merge and the agreement merge. The cause was in the test, not the lock. The fake GitLab's merge clones the sandbox's bare remote, and on the runner `git init --bare` names its HEAD after `init.defaultBranch` (`master`). The clone was then empty, and `git merge` refused ("Non-fast-forward commit does not make sense into an empty head"). This server's git defaults to `main`, which hid it. The clone now names `--branch main`. Checked with `init.defaultBranch=master` set through `GIT_CONFIG_*`: without the fix, the same two cases fail with the same error; with it, the eight cases pass. The root suite then passed: 413 tests, 411 pass, 2 skipped.
+
 - Pull request: 428, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-gitlab`.
