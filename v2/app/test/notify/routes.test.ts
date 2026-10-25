@@ -30,7 +30,7 @@ function setting(notify: Record<string, string> = {}, env: Record<string, string
 const browserKeys = () => {
   const ecdh = createECDH('prime256v1');
   ecdh.generateKeys();
-  return { p256dh: ecdh.getPublicKey().toString('base64url'), auth: Buffer.from('fedcba9876543210').toString('base64url') };
+  return { p256dh: ecdh.getPublicKey().toString('base64url'), auth: Buffer.from('f3e1d5c7b9a0e2c4').toString('base64url') };
 };
 const device = (n: number, host = 'fcm.googleapis.com') => ({ endpoint: `https://${host}/fcm/send/device-${n}`, keys: browserKeys() });
 

@@ -24,7 +24,7 @@ const service = (over: Partial<EnvironmentService>): EnvironmentService => ({
 const MIXED: EnvironmentView = {
   workspace: true,
   services: [
-    service({ name: 'api', state: 'ready', image: 'cleared-v2-prep-api:0123456789abcdef', builtAt: '2026-10-25T20:00:00.000Z', buildMs: 184_000 }),
+    service({ name: 'api', state: 'ready', image: 'cleared-v2-prep-api:9f2c4e6a8b0d1f3a', builtAt: '2026-10-25T20:00:00.000Z', buildMs: 184_000 }),
     service({ name: 'web', devcontainer: 'dockerfile', install: null, state: 'failed', error: 'npm error code ERESOLVE' }),
     service({ name: 'jobs', devcontainer: 'image', state: 'building', startedAt: '2026-10-25T20:58:00.000Z' }),
     service({ name: 'mail', readable: false, devcontainer: null, install: null }),
@@ -44,7 +44,7 @@ test('each service says its image in words, its build\'s time as a person reads 
     const text = visibleText(markup).join(' ');
     for (const state of ['ready', 'failed', 'building', 'none']) assert.ok(text.includes(t(`environment_state_${state}`)), `${language} ${state} in words`);
     assert.match(text, /3\s?min/, 'the build\'s time');
-    assert.ok(text.includes('cleared-v2-prep-api:0123456789abcdef'));
+    assert.ok(text.includes('cleared-v2-prep-api:9f2c4e6a8b0d1f3a'));
     assert.ok(text.includes('npm ci'));
     assert.match(text, /ERESOLVE/);
     assert.ok(text.includes(t('environment_failed_todo')));

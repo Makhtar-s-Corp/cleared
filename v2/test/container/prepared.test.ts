@@ -228,9 +228,9 @@ test('the cleanup keeps the two newest images of the service and removes nothing
   // What is not this service's: another service whose name starts the same, an image named as
   // this service's without the label, and one with this service's label under another name.
   fake.images.push(
-    { id: 'sha256:other', name: 'cleared-v2-prep-api-v2:0123456789abcdef', labels: { 'cleared.dev': 'v2', [SERVICE_LABEL]: 'api-v2', [PREPARED_LABEL]: '0123456789abcdef' } },
-    { id: 'sha256:unlabelled', name: 'cleared-v2-prep-api:fedcba9876543210', labels: {} },
-    { id: 'sha256:named', name: 'someone-else:1', labels: { 'cleared.dev': 'v2', [SERVICE_LABEL]: 'api', [PREPARED_LABEL]: 'fedcba9876543210' } },
+    { id: 'sha256:other', name: 'cleared-v2-prep-api-v2:9f2c4e6a8b0d1f3a', labels: { 'cleared.dev': 'v2', [SERVICE_LABEL]: 'api-v2', [PREPARED_LABEL]: '9f2c4e6a8b0d1f3a' } },
+    { id: 'sha256:unlabelled', name: 'cleared-v2-prep-api:f3e1d5c7b9a0e2c4', labels: {} },
+    { id: 'sha256:named', name: 'someone-else:1', labels: { 'cleared.dev': 'v2', [SERVICE_LABEL]: 'api', [PREPARED_LABEL]: 'f3e1d5c7b9a0e2c4' } },
   );
   const prepared = images(fake);
   const tags: string[] = [];
@@ -240,8 +240,8 @@ test('the cleanup keeps the two newest images of the service and removes nothing
   }
   const names = fake.images.map((image) => image.name).sort();
   assert.deepEqual(names, [
-    'cleared-v2-prep-api-v2:0123456789abcdef', `${tags[1]}`, `${tags[1]}-devcontainer`, `${tags[2]}`, `${tags[2]}-devcontainer`,
-    'cleared-v2-prep-api:fedcba9876543210', 'someone-else:1',
+    'cleared-v2-prep-api-v2:9f2c4e6a8b0d1f3a', `${tags[1]}`, `${tags[1]}-devcontainer`, `${tags[2]}`, `${tags[2]}-devcontainer`,
+    'cleared-v2-prep-api:f3e1d5c7b9a0e2c4', 'someone-else:1',
   ].sort());
   const removed = fake.calls.filter((call) => call.args[0] === 'image' && call.args[1] === 'rm');
   assert.equal(removed.length, 2, 'the oldest image and its devcontainer layer');
