@@ -148,8 +148,8 @@ test('the "Traité" group is folded under what waits, with its count, and opens 
     assert.deepEqual(await page.locator('#handled-items a.item .item-title').allInnerTexts(), ['Lancer les tests du projet', 'Lancer le script db:migrate']);
     const box = (selector: string) => page.locator(selector).first().evaluate((element: any) => element.getBoundingClientRect().top);
     assert.ok(await box('#handled-items') > await box(`#inbox-list section:first-of-type li:nth-child(${waiting})`), 'below what waits');
-    // The top bar names the screen; the list has no heading of its own.
-    assert.equal(await page.locator('#screen h1').count(), 0);
+    // The top bar names the screen; the list has no heading of its own drawn, the screen's one is read out (P224).
+    assert.deepEqual(await page.locator('#screen h1').evaluateAll((all: any[]) => all.map((h) => [h.textContent, h.getBoundingClientRect().height <= 1])), [['Réception', true]]);
   });
 });
 

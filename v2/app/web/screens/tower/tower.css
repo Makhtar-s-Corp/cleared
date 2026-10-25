@@ -131,6 +131,8 @@
 .recipe-param input { min-height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); }
 .recipe-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-3); }
 .recipe-note { margin: 0; min-width: 0; color: var(--text-muted); font-size: var(--text-md); }
+/* A link in a line of text is underlined (WCAG 1.4.1). */
+.recipe-note a { text-decoration: underline; }
 .recipe-bar .chip-button { flex: none; }
 
 /* a batch (requirement C6): one ticket per line, then a card per batch under way */
