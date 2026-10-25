@@ -165,3 +165,65 @@ A comment edited or deleted after it was mirrored; a screen of the app that show
 | --- | --- |
 | Whether GitHub records who changed an issue's description anywhere its REST API reads | closed by the real run of this lane, on the example repository: neither the issue's events nor its timeline hold an event for it, a new title is `renamed` |
 | Whether Linear's `Comment.botActor` names an integration's comment, and whether its history's `toTitle` and `updatedDescription` are filled as its schema says | the owner's real trial; until then an unnamed author reads as an agent's |
+
+## 7. The v2 service's heartbeat and status (`v2-j4-heartbeat`, issue #392)
+
+Section 4 is the cleanup lane's (pull request 388); the passkeys lane (pull request 391) writes its own section 5, so this lane takes 7 to leave 6 free for it.
+
+### 7.1 Context
+
+B2.1 keeps v1's heartbeat and `cleared status` (`keep-and-drop.md`: `lib/heartbeat.mjs`, `docs/heartbeat.md`). Pull request 388 keeps them as v1's modules, in TypeScript, run by v1's wake, and leaves out "the heartbeat and `cleared status` in the v2 service" (its section 4). v2 has neither: when its service stops, nobody hears it, and no command says what it is doing. This lane gives the v2 service a beat a push monitor listens to, and a status command that reads v2's ledger, in strict TypeScript, without touching v1's files that 388 rewrites.
+
+### 7.2 What exists at the end, and how it is proven
+
+- `src/heartbeat/settings.ts`: the settings, read from the environment, and the monitor's addresses, read from private files. `src/heartbeat/snapshot.ts`: what v2's ledger says of the service's health, read-only. `src/heartbeat/beat.ts`: the problems (`diagnose`, a pure function), each continuous problem recorded once, and the beat sent to the monitor. `src/heartbeat/status.ts` and `src/heartbeat/messages/heartbeat.{en,fr}.json`: the status's words and its JSON.
+- `src/cli/status.ts`, run as `npm run status` (`-- --json` for one JSON object): exit 0 when nothing is wrong, 1 with a problem (a notice never counts), 2 when the status cannot be collected.
+- The notify module (`modules/notify.ts`) starts the beat at the service's start, with or without a project, and stops it at its stop.
+- Proven by `test/heartbeat/diagnose.test.ts` (each problem, case by case), `test/heartbeat/settings.test.ts` (the files and the addresses refused), `test/heartbeat/beat.test.ts` (the beat against a fake monitor on loopback: success, failure, a problem recorded once, a failed delivery said once an hour, and never an address, a title or a path in what leaves or in the ledger), `test/heartbeat/snapshot.test.ts` (on the real tables), `test/heartbeat/cli.test.ts` (the command, in French and in English, its JSON and its exit codes, against a fake `/health`), `test/heartbeat/catalog.test.ts`, and `test/notify/module.test.ts` (the beat starts and stops with the service).
+
+### 7.3 What it watches, from what v2 has
+
+v2 has no per-minute wake: its service runs. The beat is the service's own timer, and what v1 read from its wake, its lanes and its processes is read from v2's tables.
+
+| Problem code | When | Read from |
+| --- | --- | --- |
+| `beat_missing` | no beat recorded (the status only) | `v2_heartbeat_state` |
+| `beat_late` | the last beat is older than three intervals (the status); the beat before this one was (the service) | `v2_heartbeat_state` |
+| `beat_failed` | the last beat could not read the ledger | `v2_heartbeat_state` |
+| `service_unreachable` | the service's `/health` does not answer (the status only) | `CLEARED_V2_HOST`, `CLEARED_V2_PORT` |
+| `session_stalled` | an author, reviewer or reader session alive and unmoved for more than two hours: the idle watchdog stops one at 15 minutes, so this one escaped it | `sessions`, `session_events` |
+| `tracker_stale` | a configured mirror whose last full pass is older than ten minutes | `mirror_trackers` |
+| `monitor_invalid` | a monitor address file the service refused | `v2_heartbeat_state` |
+
+A notice, never a failure: `monitor_off`, no success address is set, so nobody hears it when the service stops. The status also says, without a problem: the sessions running, what waits for the owner in the inbox (the oldest item, its kind and for how long), the subscription's two windows (`latestQuota`, percent only, no money), the mirrors' last reads and the release trains not landed.
+
+Not carried from v1, each for its reason: the wake's own records (`wake_failed`, `pending_stalled`), its lead (`lead_stuck`: v2's lead is a permanent session that waits by design, as the watchdog says), its lanes and orphan processes (`lane_idle`, `orphan_process`, `--reap`: v2's sessions are containers labelled `cleared.dev=v2`, stopped by the watchdog and the restart recovery), its forge and tracker probes (`forge_credential`, a `gh` or `tracker.sh` call: v2 runs neither for its status, and the mirrors' reads say a tracker's health), its shared-account and heavy-lock checks (v1's settings).
+
+### 7.4 Decisions this lane takes
+
+- **The beat.** Every `CLEARED_V2_HEARTBEAT_SECONDS` (60 by default, 15 to 3600), and once at the start. Each beat writes its time, finds the problems, records each continuous problem once (`v2_heartbeat_incidents`, and a `heartbeat_problem` row of the ledger's `events` with its code), then calls the success address with no problem, or the failure address with one. Without a failure address, the monitor sees the missing success.
+- **What leaves the host.** A GET with no body for a success; a POST whose body is `Cleared health: blocked` and the problems' codes, one per line, for a failure. Never a ticket, a title, a session id, a path or an address. A delivery that fails is a `heartbeat_delivery_failed` event, at most one an hour, with no address.
+- **The addresses are credentials.** `CLEARED_V2_HEARTBEAT_PING_URL_FILE` and `CLEARED_V2_HEARTBEAT_FAIL_URL_FILE` name files, as the mirrors' tokens do; never a variable holding the address. Each file is a regular file, not a link, owned by the service's account, readable by it alone (no group or other bit), outside the project's checkout. The address is HTTPS, or HTTP on loopback, without a user or a password. A refused file is said by its variable, never its content, and leaves the beat on without that address (`monitor_invalid`).
+- **The status reads no secret.** It reads the ledger read-only and the thresholds from the environment; whether the monitor is on, off or refused is what the service last wrote. It asks the service's own `/health` on its configured address, nothing else.
+- **Thresholds.** `CLEARED_V2_HEARTBEAT_SESSION_MINUTES` (120) and `CLEARED_V2_HEARTBEAT_TRACKER_MINUTES` (10), as v1's `lane_idle_minutes` and `service_minutes`.
+- **Tables.** `v2_heartbeat_state` and `v2_heartbeat_incidents`, of the notify module: v2's ledger is in v1's format and may be v1's own file, which has `heartbeat_state` and `heartbeat_incidents`.
+- **Where it starts.** In the notify module, the one whose job is what leaves the host for the owner, so neither `main.ts` nor `registry.ts` changes (388 changes the registry). A tenth module is the other way (question for the owner, default applied, in the log entry).
+- **JSON.** `schema: 1` and v1's stable keys where v2 has them (`schema`, `project`, `checkedAt`, `ok`, `problems`, `notices`, `waiting`, `quota`), with v2's own (`service`, `lastBeat`, `monitor`, `sessions`, `trackers`, `releases`). Each problem has `code`, `id`, `level` and a `message` in the status's language.
+- **Language.** `CLEARED_V2_APP_LANGUAGE`, French by default; every duration through `app/web/lib/time.ts` ("2 h", never "120 minutes").
+- **`cleared status`.** v1's root command keeps reading v1's state. Pointing it at v2's status waits for 388, which rewrites `cleared`; until then the v2 status is `npm run status` in `v2/`.
+- **Matrix lines.** P238 (the beat, the status, their settings); B2.1 updated.
+
+### 7.5 Out of scope
+
+v1's `lib/heartbeat.mjs`, `cleared`, `wake.sh` and `test/heartbeat.test.mjs` (388's); a screen of the app that shows the status; reaping processes; a real monitoring service (the tests' monitor is a fake on loopback); the lead's health.
+
+### 7.6 Files this lane owns
+
+`v2/src/heartbeat/`, `v2/src/cli/status.ts`, `v2/test/heartbeat/`; the `status` script in `v2/package.json`; the beat's start and stop and its tables in `modules/notify.ts` and their case in `test/notify/module.test.ts`; a row in `v2/README.md`; its lines of the matrix and its log entry.
+
+### 7.7 Unknowns, and who closes them
+
+| Unknown on 2026-10-25 | Closed by |
+| --- | --- |
+| Whether a monitoring service the owner picks accepts a POST body on its failure address | the owner's set-up; the body is plain text of a few lines, as v1's |
+| Whether the first piloted project's service runs the status under its own account | the owner; the status reads no secret, so another account reads it when it can read the ledger |
