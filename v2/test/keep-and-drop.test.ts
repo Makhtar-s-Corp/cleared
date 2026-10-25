@@ -30,7 +30,7 @@ function removed(): string[] {
 }
 
 // Still tracked, with why (each one is a step of the plan, or a question). None since the v1 passkeys went
-// (issue #389, section 5 of the plan).
+// (issue #389, section 6 of the plan).
 const STILL: ReadonlyMap<string, string> = new Map();
 
 const under = (path: string) => (file: string) => (path.endsWith('/') ? file.startsWith(path) : file === path);
