@@ -7051,23 +7051,25 @@ Tests first (`65ed443d`): a render case per value, a guess case, and a repositor
 4. **One build per service at a time** (`ensure`). A second caller (the step, the merge hook, a session's start) waits for the running build, then finds the image ready. Each build is recorded in `<state>/prepared/<service>.json` (mode 600): the service's checkout, its base and folder, the last ready image's hash, tag, time and build time, and the last build's hash, start and first line of failure. A session's start reads the hash again from the checkout that record names. The build's folder is a temporary one, removed after.
 5. **The two newest.** After a build, the images labelled with the service whose name is exactly `cleared-v2-prep-<service>:...` are grouped by hash, and the images of the two newest hashes are kept, with their `-devcontainer` layers; the others are removed by tag. An image of another service whose name starts the same (`api-v2` beside `api`), an image of that name without the label, and an image with the service's label under another name are left alone.
 6. **The session's start** (`session-runtime.ts`).
-   - An image the adapter's runtime names wins: Codex's and Cursor's carry their own programs.
+   - An image the adapter's runtime names wins. Only the Claude Code adapter passes the service: the Codex and Cursor adapters are unchanged, so their sessions never start on a prepared image, which is built from Cleared's session image and holds neither program.
    - A service with no record runs Cleared's image, as before.
    - Otherwise the ready image for the hash read now is used, and nothing is built.
    - When there is none, the session waits for the build. The Claude Code adapter emits `cleared.prepared_image` with `state: waiting` on the session, so the ticket's events say it, and the session starts on the new image.
    - A build that fails, or already failed for that hash, leaves Cleared's image with the reason (`build_failed`), and the start does not build again until the person fixes it (question 2).
 
-   The choice is made before any object of the session exists. `StartedSession.image` says which image ran, why, and how long it waited.
+   The choice is made before any object of the session exists. `StartedSession.image` says which image ran, why, and how long it waited. The event comes before the session's `RUN_STARTED`, and on a resume between two runs; nothing reads the stored order as AG-UI does, since the app sends the session screen snapshots (`app/web/copilot/agent.ts`), and a stored session already holds several runs.
 7. **After a merge** (`flow/runtime.ts`, `preparedAfterMerge`). The engine's `release_merged` event fetches each service that has a record (the one a train's merge names, else all), as the lead module fetches for the map, then calls `ensure`, which builds nothing when the hash did not move. A failure is one line of the service's log.
 8. **The environment step** (`src/setup/steps/environment.ts`, `Environment.tsx`):
    - each service of the workspace with its `.devcontainer` (none, an image, a Dockerfile), its install command, and its image ready, stale, building, failed or not built, in words beside the coloured bar;
    - a ready image with its tag, its build time and its age ("built in 3 min, 2h ago"), and a failed one with its first line and what to do;
+   - an image a `.devcontainer` names that is not Cleared's session image is named, with what a session needs in it: Node 24, Claude Code and Cleared's runner. Until now such a project ran Cleared's image, and its devcontainer was not read; from this lane on its sessions start on that image (question 4);
    - Build answers 202 at once and builds one service after the other; the page reads the view every 2 seconds while one runs, with Build disabled;
    - the builds count as the machine's time, and the step is done when every image is ready. No workspace yet is said, with no Build;
    - reading the view asks Docker nothing.
 9. **The doctor's `images` section** (`src/doctor/sections/images.ts`, not run by default since it starts a container):
    - each service's image, ready with its age and its build time, or not built, stale, being built, missing from Docker or failed, each with what to do;
-   - then one session started on the newest ready image through `startSession`, labelled as every session is (networks, egress proxy, container), running `node -e 'console.log("ready")'` with an empty file mounted where the login goes, timed from the call to its first line;
+   - then one session started on the newest ready image through `startSession`, labelled as every session is (networks, egress proxy, container), running one line of Node that prints `ready` when the image holds Cleared's runner (`/opt/cleared/runner/main.ts`) and `no runner` otherwise, a failure with what to do, with an empty file mounted where the login goes, timed from the call to its first line;
+   - its workdir, its empty login and its allow list are under the state folder (`<state>/doctor/images-<id>`, removed after): inside Compose the service's `/tmp` is not the host's, and Docker mounts a host path, so only the state folder, mounted at the same path, works there (plan, decision 1). The builds' folders stay in `/tmp`, since `docker build` sends its context from the client;
    - a pass under 10 seconds, a notice above, a failure with what to do, and everything it made removed by label.
 
    The measure covers the start of the networks, the proxy and the container, not the flow's checkout and briefing before it.
@@ -7083,6 +7085,7 @@ Tests first (`65ed443d`): a render case per value, a guess case, and a repositor
 1. A project that declares no install command: nothing is installed ahead (applied), as the plan says ("when it has one"). Or Cleared infers `npm ci` from a `package-lock.json` (and the like for pnpm and yarn), a project's sessions then faster without a line of settings. The guestbook declares none today, so its prepared image holds no dependency until it does.
 2. A build that failed for a hash is not tried again at each session's start (applied): the session runs Cleared's image at once, and the step and the doctor say the failure. Or each start tries again, and waits minutes each time it fails.
 3. The real run on this server (below): left to the rehearsal (applied). Or the orchestrator builds the session and egress images here, labelled, and runs `node scripts/doctor.ts images` on the guestbook with `install_command = npm ci`.
+4. A `.devcontainer` that names another image than Cleared's: its sessions start on it, built ahead (applied), as the README has said since milestone 1 ("a project image must carry what the runner needs"); the step names the image and what it needs, and the doctor's measure fails when the runner is missing. Or such an image is used only once a check of the runner passes in it, and Cleared's image otherwise, which a later lane can add to the build.
 
 **Not done here.**
 - **The real run.** The plan proves C15 also by the `images` section's real run, quoted with its times. This server holds no session or egress image (a labelled list found the guestbook's and the filter API's only), and building them pulls `node:24`, an unlabelled object, where the brief prefers no Docker at all. So no Docker command ran here beyond that list. The measured time, and so the 10-second target, wait for the rehearsal (lane `v2-j5-proof`) or question 3. C15 and P254 stay `partial` until then.
@@ -7103,9 +7106,10 @@ Changes that came with the code:
 
 **Captures** (`docs/v2/prepared-images/`): the step with two services ready, at 1440, 1280, 768 and 390 px, light and dark, in English, and at 1440 in French, taken by `app/test/setup/environment-browser.test.ts` with `CLEARED_V2_CAPTURES`, against a fake `docker` program that builds after a pause.
 
-**Checks.** See the pull request for the counts at its head.
+**Checks.** At `28a2e61f`, on `origin/v2` `3c27792`.
 - `npm run typecheck` passes.
-- `npm test`: see the pull request.
+- `npm test`: 2730 Node tests, 2611 pass, 119 skipped (the browser tests, without `CLEARED_V2_PLAYWRIGHT`), 0 fail; 386 Vitest tests pass.
+- Every browser test of `app/test/` with `CLEARED_V2_PLAYWRIGHT` set: 115, 114 pass. The one that fails is `app/test/notify/browser.test.ts`, which fails the same way without this lane: the notification button is never offered in this server's headless Chrome, as P249's entry says.
 - The setup's three browser tests (`environment-browser`, `setup-browser`, `checks-browser`) pass with `CLEARED_V2_PLAYWRIGHT` set, in both languages, axe finding nothing.
 - `npm run guard -- --base origin/v2`: nothing refused.
 - The guard does not read `docs/v2/`, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
