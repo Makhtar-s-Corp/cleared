@@ -4,7 +4,8 @@
 // POST /api/run and GET /api/run/:id take a person's API token as
 // `authorization: Bearer <value>`, and nothing else: no proof is read, so a
 // call from the app does not reach them, and no other route of the service
-// reads that header, so a token reaches nothing else (test/run/rights.test.ts).
+// takes an API token (POST /mcp reads that header for its own local token
+// only), so a token reaches nothing else (test/run/rights.test.ts).
 // A token that is not a live one is 401 with `www-authenticate: Bearer`; a
 // live one whose person is gone is 403.
 //
@@ -83,7 +84,7 @@ export function runRoutes(deps: RunRoutesDeps): Route[] {
 
   // The token's person, for the two run routes; the token is the only credential read.
   async function bearer(context: RouteContext): Promise<{ readonly user: UserId; readonly via: string }> {
-    const given = /^Bearer ([^\s]+)$/.exec(header(context.request, 'authorization') ?? '')?.[1];
+    const given = /^Bearer ([^\s]+)$/i.exec(header(context.request, 'authorization') ?? '')?.[1];
     const found = given === undefined ? undefined : store().verify(given);
     if (!found) throw new HttpError(401, 'unauthorized');
     if (!(await context.registry.users.get(found.user))) throw new HttpError(403, 'the token\'s person is not a person of this service');

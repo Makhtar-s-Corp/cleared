@@ -74,7 +74,8 @@ test('a valid token is taken by the two run routes alone: every other route of t
           assert.equal(answer.status, 503, `${route.key}: ${text}`);
           continue;
         }
-        assert.ok(answer.status >= 400 && answer.status < 500 && answer.status !== 409 && answer.status !== 400, `${route.key} answered ${answer.status} to ${Object.keys(headers).join(', ')}: ${text}`);
+        // Refused as unauthorized; the chat's command is off without its secret, and says not found.
+        assert.equal(answer.status, route.key === 'POST /hooks/chat' ? 404 : 401, `${route.key} answered ${answer.status} to ${Object.keys(headers).join(', ')}: ${text}`);
         assert.ok(!text.includes(made.value), `${route.key} answers no value back`);
       }
     }

@@ -154,7 +154,8 @@ test('a run made with a token: a ticket in the service\'s project by the token\'
 test('a template gives the ticket its type, a service its part; an unknown one, an empty title, a long one or another field is refused before any ticket', async () => {
   const s = await serve();
   const made = await madeToken(s);
-  const typed = await call(s.base, 'POST', RUN_PATH, { body: { title: 'The footer overlaps', template: 'bug', service: 'guestbook' }, headers: bearer(made.value) });
+  // The scheme is read in any case (RFC 7235).
+  const typed = await call(s.base, 'POST', RUN_PATH, { body: { title: 'The footer overlaps', template: 'bug', service: 'guestbook' }, headers: { authorization: `bearer ${made.value}` } });
   assert.equal(typed.status, 200, JSON.stringify(typed.json));
   const ticket = (await s.t.tickets.get(typed.json.ticket))!;
   assert.ok(ticket.labels.includes('type:bug'));
