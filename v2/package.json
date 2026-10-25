@@ -21,7 +21,8 @@
     "notify": "node src/cli/notify.ts",
     "repair-services": "node src/cli/repair-services.ts",
     "import-v1": "node src/cli/import-v1.ts",
-    "status": "node src/cli/status.ts"
+    "status": "node src/cli/status.ts",
+    "run": "node src/cli/run.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "5.104.1",

@@ -203,7 +203,7 @@ None beyond this server and the `gh` login's token for the forge line, as in sec
 
 ## 8. `cleared run`, as a command and an API (`v2-j5-run`)
 
-Matrix: C18. Wave 2. Effort M.
+Matrix: C18, and P253, the lane's own line, added when it delivered. Wave 2. Effort M.
 
 ### 8.1 Context
 
@@ -227,6 +227,10 @@ Approving or merging from the command; a token per project or with narrower righ
 ### 8.5 Real accounts and machines
 
 None: tickets run on the fake harness; a real session is the proof's.
+
+### 8.6 Delivered
+
+Matrix line P253 (issue #416). Three choices of the author, as the decisions log of 2026-10-25 says. The token routes are `/api/tokens`, beside `/api/run`, and the panel reaches them through the app's proxy, which never forwards an `authorization` header; `POST /api/run` and `GET /api/run/:id` read that header alone, so no other route can take a token. A run reaches the flow module's batches' runner through `batchesOf`, exported from `src/modules/flow.ts`, and the runner's `create` takes the run's service (`src/flow/batch.ts`): a second runner over the same tables could start a ticket twice. The token comes from a file of mode 600 (`CLEARED_V2_API_TOKEN_FILE`) or a variable, never from an argument, which `ps` and the shell's history would show.
 
 ## 9. Connect a workspace (`v2-j5-connect`)
 
