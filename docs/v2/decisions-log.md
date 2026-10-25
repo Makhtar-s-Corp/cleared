@@ -6179,3 +6179,38 @@ P224's axe test reads the phone's screens at 390 in both languages and themes, t
 
 - Pull request: 377, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-visual-redesign`.
+
+## 2026-10-25: the project's name whole in the phone's top bar (the author's choices, lane `j3-mobile-title`, P229, issue #380)
+
+**The problem.** At 390, with the sample-data pill shown (the fixtures), the project's name in the top bar was cut: "Guestbook" took 78 px and had 63 in English, 58 in French ("Guestb…"). The bar holds the mark, the name, the search, the quota gauge, the pill, the person and the bell. This entry replaces the choice of P227's entry of 12:20, which kept the name shortened with an ellipsis whenever the pill is shown.
+
+**The author's choices.**
+- **The name is the bar's title.** Below 768 px the product's mark is hidden. That gives the name 26 px, the width of the 18 px mark and its gap. On a phone the name says where the person is, as a native app's title does; the mark is still on the login page and on a computer. The mark is `aria-hidden`, so the link's name does not change: the project's name, a link to the tower, 44 px tall.
+- **The bar's foot keeps the bar's own gap.** The gauge, the pill and the person were 8 px apart, against 4 px between the bar's other items. They are now 4 px apart, which gives the name 8 px more. In French at 390, the name has 14 px to spare.
+- **Not a smaller gauge.** It is at its 44 px target already. Its percent, its bar and its name are unchanged.
+- **The pill keeps its ground and its word.** Taking off its fill would put muted text on the sidebar's ground, a new pair for contrast, and the room was not needed.
+- **A longer name** is still shortened with an ellipsis, and the link still reads it whole.
+- **Words.** No string changed, so neither catalog changed.
+- **Widths.** Nothing changes on a computer or a tablet: the rules are inside `max-width: 767px`. At 375 in English the name is whole too.
+
+**Tests first.** `5b9e229` commits two tests alone, in `app/test/redesign/redesign-browser.test.ts`, in English and in French at 390 on a touch screen. Both fail on the code before it ("Guestbook" is cut: 78 px in 63, and 78 px in 58). They check:
+- the project's name is whole and the link reads it alone;
+- the pill's word is whole;
+- the gauge is at least 44 by 44, and the name's link, the search, the person and the bell are 44 px tall;
+- the page has no sideways scroll.
+
+P227's test of the gauge on a phone still checks that nothing of the top bar overlaps, and P224's axe test reads the screens at 390 in both languages and themes.
+
+**Captures.** The 16 after captures at 390 (inbox, session, sessions and consumption; light and dark; English and French) were taken again at this head with `scripts/capture-screens.ts --widths 390`. They were compressed with `pngquant --quality=80-95 --skip-if-larger` then `optipng -o2`: from 1,007,716 bytes to 339,862, in place of 409,616. The other widths were not taken again. The French Consumption page is now 2,559 px tall where the committed capture was 2,475: `origin/v2` draws it at 2,559 too, so that comes from a change merged after that capture, not from this lane.
+
+**Checks** (at `origin/v2` `2cf78d4`):
+- `npm run typecheck` passes.
+- `npm test` runs 2178 Node tests: 2080 pass, 98 skipped, 0 fail. 349 Vitest tests pass.
+- With Playwright's Chromium, the CI's browser list passes 82 of 83 in one parallel run, under a load average of 15. The one failure is `app/test/session/tabs-browser.test.ts` ("the four tabs switch, and the Go of a waiting plan calls its route": "Go given by a teammate" where it waits for "by you"). That is a plan's Go and the user who gave it, which this lane's two CSS rules do not reach. Alone it passes 4 of 4, twice.
+- The budget runs alone at a p95 of 22.9 ms, with no document and no request per switch.
+- `npm run guard -- --base origin/v2`: nothing refused.
+
+**What was read.** `docs/v2/milestone-2-plan.md` ends at its section 8. The sections 9 and 10 read were the milestone 1 plan's (waves, conventions that keep lanes apart) and the interface overhaul plan's (questions for the owner: the phone's bar of four, the default kept; out of scope).
+
+- Pull request: PRNUM, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-mobile-title`.
