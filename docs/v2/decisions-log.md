@@ -6367,3 +6367,44 @@ The choice is one condition in `#goOut` (`src/tickets/mirror.ts`).
 
 - Pull request: 390, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-mirror-followups`.
+
+## 2026-10-25: the v2 service beats for a push monitor, and `npm run status` says its state (the author's choices, lane `v2-j4-heartbeat`, P238, issue #392)
+
+**The need.** Issue #392, B2.1: bring the heartbeat and `cleared status` from v1 into v2, as `keep-and-drop.md` keeps them, in strict TypeScript, with no bash, fakes only, French and English, durations a person reads, and tests. Pull request 388 (the cleanup, not merged yet) puts v1's own `lib/heartbeat.mjs` and `cleared` in TypeScript, run by v1's wake, and leaves out "the heartbeat and `cleared status` in the v2 service" (its plan, section 4). v2 had neither: when its service stopped nobody heard it, and no command said what it was doing. The plan is section 7 of [milestone-4-plan.md](milestone-4-plan.md), committed before the tests (`edfef39`); section 4 is the cleanup's, section 5 the mirrors' follow-ups', and the passkeys lane (pull request 391) writes a section 5 of its own, so this lane leaves 6 free. The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight, as earlier lanes noted; the conventions followed are those of sections 9 and 10 of `milestone-1-plan.md` (a lane changes its own module and its own files, never `main.ts`).
+
+**Decision.**
+1. **v2-native, v1 untouched.** The beat and the status read v2's ledger, under `v2/src/heartbeat/` and `v2/src/cli/status.ts`. No file 388 changes is touched here: not `lib/heartbeat.mjs`, `cleared`, `wake.sh`, `test/heartbeat.test.mjs`, `modules/registry.ts` or `store/ledger-events.ts`. Pointing the root `cleared status` at v2 waits for 388, which rewrites `cleared`.
+2. **The beat.** The service's own timer, since v2 has no per-minute wake: every `CLEARED_V2_HEARTBEAT_SECONDS` (60, from 15 to 3600) and once at the start, with or without a project. Each beat:
+   - writes its time and whether it could read the ledger;
+   - finds the problems;
+   - records each continuous problem once (`v2_heartbeat_incidents`, and a `heartbeat_problem` row in `events` with its code and id);
+   - GETs the success address with no problem, or POSTs `Cleared health: blocked` and the codes, one per line, to the failure address with one.
+
+   Without a failure address nothing is sent on a problem: the monitor sees the success missing. A delivery that fails is one `heartbeat_delivery_failed` event an hour, which names whether it was the success or the failure, never the address.
+3. **What v2 can see, and the codes.** `beat_missing`, `beat_late` (older than three of the intervals the service beat at; the service also says a late previous beat itself) and `beat_failed`, from the beat's own rows. `service_unreachable` is the status's call to the service's `/health`. `session_stalled` is an author, reviewer or reader session alive and unmoved for two hours, the time of v1's `lane_idle`: the idle watchdog stops one at 15 minutes, so this is one it missed. `tracker_stale` is a mirror the settings turn on whose last full pass (`mirror_trackers.read_at`) is ten minutes old, the time of v1's `service_unreachable`. `monitor_invalid` is a refused address file. The notice `monitor_off` (no success address) never fails the beat or the exit code.
+4. **Said, never a problem.** What waits for the owner in the inbox (the count, the oldest item, its kind and since when), the subscription's two windows through `latestQuota` (percent only: no money is read, so none is said), the mirrors' last reads, and the release trains not landed, a halted one included: the owner already sees that one in the inbox.
+5. **Not carried from v1.** The wake's own records (`wake_failed`, `pending_stalled`). The lead's time (`lead_stuck`): v2's lead is a permanent session that waits by design, and the watchdog leaves it alone. The lanes and orphan processes (`lane_idle`, `orphan_process`, `--reap`): v2's sessions are labelled containers that the watchdog and the restart recovery stop. The forge and tracker probes (`forge_credential`, a `gh` or `tracker.sh` call): the status runs neither, and the mirrors' reads say a tracker's health. The shared-account and heavy-lock checks, which are v1's settings.
+6. **The addresses are credentials.** As the mirrors' tokens: `CLEARED_V2_HEARTBEAT_PING_URL_FILE` and `CLEARED_V2_HEARTBEAT_FAIL_URL_FILE` name files, never the address. Each file must be regular, not a link, owned by the service's account, with no group or other bit, and outside the first service's checkout. It must hold HTTPS, or HTTP on `localhost`, `127.0.0.1` or `[::1]`, with no user or password. A refused file is named by its variable, never its content. The beat goes on with the other address and says `monitor_invalid`. Tests check that an address never reaches the ledger, the state table or the log, and that a ticket id, a session id and the project never leave the host.
+7. **The status reads no secret.** `npm run status` opens the ledger read-only (a test compares its bytes before and after) and never reads the address files: whether the monitor is on, off or refused is what the service last wrote in `v2_heartbeat_state`, with the refused variables. It calls nothing but the service's own `/health` on `CLEARED_V2_HOST` and `CLEARED_V2_PORT`. Exit 0, 1 with a problem, 2 when it cannot tell (no ledger, a bad setting, an unknown argument such as v1's `--reap`). With `--json`, a failure is still one schema 1 object, holding `status_error`.
+8. **Tables of their own.** `v2_heartbeat_state` and `v2_heartbeat_incidents`. v2's ledger is in v1's format and may be v1's own file, which already has `heartbeat_state` and `heartbeat_incidents` with other keys.
+9. **Where it starts.** In the notify module (`modules/notify.ts`, its new `start` and `stop`), the module for what leaves the host for the owner. So neither `main.ts` nor `registry.ts` changes, and 388 changes the registry. A bad setting is said in one line and leaves the beat off, as the mirror's.
+10. **JSON.** `schema: 1` and v1's stable keys where v2 has them (`schema`, `project`, `checkedAt`, `ok`, `waiting`, `quota`, `problems`, `notices`), plus v2's own (`service`, `lastBeat`, `monitor`, `sessions`, `trackers`, `releases`). Each problem has `code`, `id`, `level` and a `message` in the status's language.
+11. **Words.** `src/heartbeat/messages/heartbeat.{en,fr}.json`, in `CLEARED_V2_APP_LANGUAGE`, French by default. Every duration goes through `app/web/lib/time.ts`, so a stalled session reads "3h 5m" ("3 h 05"), never "185 minutes". What the ledger holds (ticket ids, tracker names) is printed without control characters.
+12. **Branch.** `v2/j4-heartbeat` cannot exist beside the local branch `v2` (git refuses a ref under another ref), so the branch is `v2-j4-heartbeat`, B4.1's form, as 384, 387 and 390 did.
+
+**Question for the owner** (default applied): where the beat starts. Options:
+- (a) in the notify module (recommended, applied): no change to `main.ts` or the registry while 388 is open;
+- (b) a tenth module, `modules/heartbeat.ts`: one line each in `main.ts` and `MODULE_NAMES`, as decisions 14 and 27 added modules, and a move of the `start` and `stop` written here.
+
+The behaviour is the same either way.
+
+**Tests first.** `806fdb2` committed the tests before any code: seven files under `test/heartbeat/` and three cases in `test/notify/module.test.ts`. On that commit the seven files failed to load their modules and the three new module cases failed; the module's three older cases passed. Two fixes of the tests came after, neither a change of expectation:
+- Before the commit, the guard refused a test address written with a user and a password. The test now builds it with `URL` and also checks an address with a user only.
+- After the code, two beat tests moved their clock an hour or more between beats, so the beat said `beat_late` too, which those tests are not about. They now beat hourly (`everyMs` of an hour).
+
+**Checks.** See the pull request. Before the READY: `npm run typecheck`, `npm test`, `npm run guard -- --base origin/v2`.
+
+**Resources.** No Docker object, no port opened outside the tests (port 0 on loopback, and a port the system gave and freed for the silent service), no tunnel, no secret. No real monitoring service was called.
+
+- Pull request: PR_NUMBER, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-heartbeat`.
