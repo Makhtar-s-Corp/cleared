@@ -6555,5 +6555,5 @@ The behaviour is the same either way.
 
 **Resources.** No Docker object, no Claude Code login read, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no port but the tests' own ephemeral loopback ones, no tunnel, no secret.
 
-- Pull request: against `v2`, named in the pull request's own commit.
+- Pull request: 399, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-weekly`.
