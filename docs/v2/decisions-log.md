@@ -5750,6 +5750,21 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 
 - Pull request: 366, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-ui-polish`.
+
+## 2026-10-25: the polish captures are compressed before v2 goes to main
+
+The 120 PNG captures of `docs/v2/ui-polish/` (P222, 366) weighed 11.3 MB. They were compressed once, on a workstation, with `pngquant --quality=80-95 --skip-if-larger --force --ext .png` then `optipng -o2` on each file (system tools; no script is committed, since `v2/` tracks no shell script): 11,267,957 bytes before, 4,003,907 after (-64 %). Lossless alone (`optipng -o2`) gave 9.3 MB (-18 %); the quantized captures read the same for UI review. No code changes; the history keeps the old files (no rewrite, no force push), so only checkouts get lighter. Future captures can go through the same two commands before they are committed.
+
+- Pull request: against `v2`, branch `amdiakhate/j3-png`.
+- Author: the night driver, approved by the product owner on 2026-10-25.
+
+## 2026-10-25: a milestone 3 report for the product owner
+
+`docs/v2/milestone-3-report.md`, in French, next to the plans of milestones 1 and 2: what the ten ideas (P210 to P219) and the passes after them (P221, P222, B2.2, B5.5b, issues #347 to #353 and #360) bring, how each change is checked, what keeps running, and what waits for the owner (the open or partial lines B6.1q, B5.10g, D21, D13, B5.1c, O6, P69, B6.3p, P71, B3.10, P7, P47, P51). It adds no matrix line: it is a summary of lines already there, and three lanes were picking the next free ids at the time. Every id it cites was checked against the matrix; the test counts come from the last checks in this log (2108 Node, 339 Vitest, 0 fail). The 4.0 MB of the captures is the size after PR 369.
+
+- Pull request: 370, against `v2`.
+- Author: the night driver.
+
 ## 2026-10-25: a screen switch does only the work of drawing the next screen, and the budget is measured alone (the author's choices, lane `j3-tab-perf`, P223, issue #367)
 
 **The need.** Pull request 366 saw `app/test/foundation/budget-browser.test.ts` fail in a full run of the browser job's files, which run in parallel, and pass alone at 31.9 and 35.9 ms. The brief asks for a reproducible measure of the p95 under load first, the real causes (renders, redundant reads, heavy work at the switch), fixes with no new feature and no visible change, and a budget test that does not flake. No issue existed: #367 was opened for this lane. The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight; the conventions followed are those of section 10 of `milestone-1-plan.md` (a lane changes its own files), as the earlier lanes did.
@@ -5800,6 +5815,8 @@ With the CPU slowed four times the budget is at its edge: what is left is the ne
 **Checks** (on `origin/v2` at `ac24420`). `npm run typecheck` passes. `npm test`: 2096 Node tests, 2025 pass, 71 skipped (the browser tests and the gated real-harness tests), 0 fail; 333 Vitest tests pass. The CI's browser step replayed three times: every test passes. `npm run guard -- --base origin/v2`: nothing refused.
 
 **The merge of 365 and 366** (lanes `j3-docs-slop` and `j3-ui-polish`, at `origin/v2` `c41101e`). The log keeps their entries, then this one; the matrix keeps P221 and P222, then P223, every id once; the browser list keeps 366's `phone-fit-browser.test.ts` beside this lane's file, the budget still alone after them. Neither lane touches the files this lane changed in `app/web/lib`, the shell or the Lead. After the merge: `npm run typecheck` passes; `npm test`: 2114 Node tests, 2035 pass, 79 skipped, 0 fail, and 342 Vitest tests pass. The CI's browser step replayed three times, during a load average of 23 to 40 from other lanes: the budget alone at 29.8, 47.3 and 26.3 ms, and 64 of 64, 63 of 64 and 64 of 64 in the parallel part; the one failure is `app/test/session/production-browser.test.ts` waiting more than 30 seconds for its card, which passes alone twice. `npm run guard -- --base origin/v2`: nothing refused.
+
+**The merge of 369 and 370** (the compressed captures and the milestone 3 report, at `origin/v2` `dbaeb4d`). The log keeps their entries, then this one. They change images and docs only, none of this lane's files. After the merge: `test/docs.test.ts`, `test/wording.test.ts` and the root tests that read the workflow pass; `npm run guard -- --base origin/v2`: nothing refused.
 
 **Resources.** No Docker object, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no port but the tests' loopback port 0, no secret.
 
