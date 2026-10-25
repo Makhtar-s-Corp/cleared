@@ -6587,7 +6587,11 @@ The behaviour is the same either way.
 - the French expectations quoted with `'` were broken by a mechanical rewrite to straight apostrophes, the catalogs' convention, and were quoted again;
 - the HTML test read `visibleText` as a string (it is a list), and wrote a no-break space as a space.
 
-**Checks.** See the pull request.
+**After the first full run.** Three pinned lists and two audits named what a new route, table and screen change, none an expectation of this lane's: `test/flow/api.test.ts` (the flow's routes but the lead module's) and `test/lead/module.test.ts` (the module's tables) name the map's; the wording test read `{items}` as a placeholder in milliseconds (it ends in "ms"), so it is `{list}`; the i18n audit records the link row's key, chosen a line above from five literals, and "Services" and "base {commit}", French words too. The axe pass found the Refresh button partly under the phone's top bar after Playwright's click scrolled the page: the step picks the service without scrolling, as the other places are read from the page's top. One test of `test/session/claude-code/adapter.test.ts`, which this lane does not touch, failed once under the full run's load and passed three times alone.
+
+**After the merge of 395 and 399.** `origin/v2` was merged in, not rebased. Conflicts, all appended by each lane: the plan keeps sections 9 and 10, then 11; the matrix P240 to P243, then P245; the log their entries, then this one; `api/types.ts`, its test (71 routes) and the fixtures' source keep both lanes' lines.
+
+**Checks** (after the merge, on `c160a3f` and the audit's two exceptions): `npm run typecheck` passes; `npm test` runs 2429 Node tests, 2320 pass, 109 skipped, 0 fail, and 359 Vitest tests pass; the browser files `app/test/services/services-browser.test.ts` and `app/test/a11y-browser.test.ts` with `CLEARED_V2_PLAYWRIGHT`, 13 tests, 13 pass, none skipped (axe: no WCAG 2.2 AA violation, French and English, light and dark, 1440 and 390 px); v1's `node --test test/*.test.ts` gives 405 tests, 403 pass, 2 skipped, 0 fail; `tsc -p .` at the root reports no error; `npm run guard -- --base origin/v2` refuses nothing. The captures at 1440, 1280, 768 and 390 px, light and dark, French and English, are in `docs/v2/service-map/` (528 KB).
 
 **Resources.** No Docker object; no port opened but port 0 on loopback in the tests; no tunnel, no secret. No real Slack, Cursor, Codex or Linear account; git repositories built by the tests in temporary folders.
 
