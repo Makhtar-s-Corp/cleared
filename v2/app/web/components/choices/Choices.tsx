@@ -140,7 +140,8 @@ export function Choices({ questions, status, t, requestId, free = true, send = '
       </fieldset>
     );
   });
-  const note = result.tooLong !== undefined ? <p className="choice-note" role="status">{t('choice_too_long', { n: FREE_MAX })}</p> : null;
+  // In the form from the start, empty: a status line drawn with its message is not read out by every reader.
+  const note = <p className="choice-note" role="status">{result.tooLong !== undefined ? t('choice_too_long', { n: FREE_MAX }) : ''}</p>;
   if (send === 'bar') return <div className="choices" data-choices data-request-id={requestId}>{body}{note}</div>;
   return (
     <form className="choices" data-choices data-request-id={requestId} noValidate onSubmit={submit}>

@@ -60,10 +60,12 @@ async function violations(page: any): Promise<Violation[]> {
   if (!await page.evaluate(() => typeof window.axe === 'object')) await page.evaluate(axeSource());
   return page.evaluate(async ({ tags, practices, rule, named }: { tags: string[]; practices: string[]; rule: string; named: string[] }) => {
     const options = { resultTypes: ['violations'] };
-    const all = await window.axe.run(document, { ...options, runOnly: { type: 'tag', values: tags }, rules: { [rule]: { enabled: false } } });
-    const best = await window.axe.run(document, { ...options, runOnly: { type: 'rule', values: practices } });
+    // The tags' rules as a run of them would pick them (none experimental or deprecated), and the practices, in one pass.
+    const rules = window.axe.getRules(tags).filter((r: { ruleId: string; tags: string[] }) => r.ruleId !== rule && !r.tags.some((tag) => tag === 'experimental' || tag === 'deprecated'))
+      .map((r: { ruleId: string }) => r.ruleId).concat(practices);
+    const all = await window.axe.run(document, { ...options, runOnly: { type: 'rule', values: rules } });
     const label = await window.axe.run({ include: [document], exclude: named.map((selector) => [selector]) }, { ...options, runOnly: { type: 'rule', values: [rule] } });
-    return [...all.violations, ...best.violations, ...label.violations].map((v: Violation) => ({
+    return [...all.violations, ...label.violations].map((v: Violation) => ({
       id: v.id, impact: v.impact, help: v.help, nodes: v.nodes.map((n) => ({ target: n.target, failureSummary: n.failureSummary })),
     }));
   }, { tags: TAGS, practices: PRACTICES, rule: LABEL_IN_NAME, named: NAMED_BY_LABEL });

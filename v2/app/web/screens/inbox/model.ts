@@ -397,6 +397,25 @@ export function decidedLine(local: Extract<Local, { kind: 'decided' }>, item: Co
   return t(`decided_${item.kind}_${local.decision}`, { time: clock(local.at) });
 }
 
+// What a gesture of this page left on an item, in words: on the detail's
+// line, and once on the inbox's live line. Undefined while the gesture is on
+// its way, asks a second step, or is in its grace.
+export function doneLine(item: Item, local: Local, t: Translate): string | undefined {
+  switch (local.kind) {
+    case 'settled': return t('settled');
+    case 'answered': return t(`answered_${local.decision}`);
+    case 'approved': return t('approved', { time: clock(local.at) });
+    case 'sent_back': return t('sent_back', { time: clock(local.at) });
+    case 'closed': return t('closed_done', { time: clock(local.at) });
+    case 'plan_approved': return t('approved_plan', { time: clock(local.at) });
+    case 'plan_go': return t('plan_go_done', { time: clock(local.at) });
+    case 'plan_changed': return t('plan_changed_done', { time: clock(local.at) });
+    case 'decided': return item.kind === 'contract' || item.kind === 'knowledge' ? decidedLine(local, item, t) : undefined;
+    case 'chosen': return t('variant_chosen_done', { n: local.position, time: clock(local.at) });
+    default: return undefined;
+  }
+}
+
 export type Gesture = 'approve' | 'undo' | 'send_back' | 'close' | 'answer' | 'approve_plan' | 'plan_go' | 'plan_change'
   | 'contract_approve' | 'contract_send_back' | 'knowledge_approve' | 'knowledge_reject' | 'variant_choose';
 
