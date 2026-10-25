@@ -1,0 +1,13 @@
+{
+  "chat_created": "Ticket {ticket} créé : {title}.",
+  "chat_created_link": "Ticket {ticket} créé : {title}. Il est dans la Tour : {link}",
+  "chat_waits_lanes": "Il attend une voie libre (en cours : {running}, permises : {lanes}).",
+  "chat_waits_seven_day": "Il attend : la fenêtre de sept jours est à {percent} % (l'arrêt est à {stop} %).",
+  "chat_waits_five_hour": "Il attend : la fenêtre de cinq heures est à {percent} % (l'arrêt est à {stop} %).",
+  "chat_started": "{ticket} a démarré.",
+  "chat_started_link": "{ticket} a démarré : {link}",
+  "chat_pr": "Pull request #{pr} de {ticket} : {url}. Elle attend une approbation dans la Réception.",
+  "chat_help": "Écrivez la tâche après la commande, par exemple : @cleared afficher la dernière entrée en premier.",
+  "chat_unknown_user": "Ce compte de chat n'est lié à aucun utilisateur de Cleared : demandez au propriétaire de l'ajouter à CLEARED_V2_CHAT_USERS.",
+  "chat_too_long": "La tâche fait au plus {max} caractères."
+}

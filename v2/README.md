@@ -106,6 +106,20 @@ An agent searches the sessions' history through it (issue 292): the sessions, th
 - **Words.** The tools' descriptions and errors are in `src/mcp/messages/ledger.en.json` and `.fr.json`, in the app's language (`CLEARED_V2_APP_LANGUAGE`, `fr` by default). A session's duration is said as the app says it (`app/web/lib/time.ts`: "1 h 30", "1h 30m").
 - **Protocol.** MCP over stdio, one JSON-RPC 2.0 message per line, written in `src/mcp/server.ts` without the SDK (the service has no runtime dependency). stdout carries only the protocol; anything else goes to stderr. No port is opened.
 
+## A ticket from a chat
+
+A slash command `@cleared <task>` posted to `POST /hooks/chat` creates a ticket in the service's project (P212, `src/flow/chat.ts`). It is tested with a fake chat client only (`test/flow/chat-client.ts`); no chat account is set up.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `CLEARED_V2_CHAT_SECRET_FILE` | none | A file holding the chat's signing secret (16 characters or more). Unset, the route answers `404`. A file that cannot be read, a bad user list or a bad origin is said once (at start when the flow is configured, else at the first command) and leaves the route off. |
+| `CLEARED_V2_CHAT_USERS` | none | `<chat user id>=<user id>,...`: who may launch, as which user of the service. Anyone else is told the account is not linked. |
+| `CLEARED_V2_CHAT_REPLY_ORIGINS` | `https://hooks.slack.com` | The origins a command's `response_url` may have. Another one is refused with `400` before any ticket. |
+
+- **The signature.** Slack's v0: `x-slack-signature` is `v0=` and the hex HMAC-SHA256 of `v0:<timestamp>:<body>`, `x-slack-request-timestamp` the timestamp in seconds. A missing or wrong signature, or a timestamp more than five minutes off, is `401`; the same signature twice is `409`. The body is form-encoded (`text`, `user_id`, `response_url`), 64 KB at most (`413`).
+- **The answers.** At once: the ticket's id, its title and the Tower's address. Then, posted to `response_url`: the author session's address when it starts, and the pull request's when the release waits for approval, each once, a restart included. The addresses are the app's (`CLEARED_V2_APP_ORIGIN`, else `http://127.0.0.1:8792`); the words are in `src/flow/messages/chat.en.json` and `.fr.json`, in the app's language.
+- **The limits.** The ticket is a batch of one: it starts within the Consumption screen's lanes and the week stop, and the answer says when it waits. The service listens on this machine only: how a chat platform reaches it is the owner's setup.
+
 ## The guard
 
 The guard checks every v2 file except the app's web fonts (`app/public/fonts/*.woff2`) and its three icons (`app/public/icons/icon-192.png`, `icon-512.png` and `apple-touch-icon.png`, by exact name), which are binary; it says how many it left out, and any other binary file is refused. The guard reads its private-term fingerprint lists from a project's committed `.cleared/agents.conf` (`[guard] salt`, `terms`, `allowed`), as v1 does. This repository commits no such list, so by default, and in CI, `npm run guard` checks secrets, private keys, IBANs, credentials in URLs, email addresses and phone numbers, and no private terms; it says so when it runs. This is a known gap: closing it in CI needs a fingerprint list the guard can read there, either a committed guard configuration with its lists or lists provided to the workflow. To check private terms too, point it at a project whose committed configuration names its lists: `CLEARED_REPO=<project checkout> [ORCH_GUARD_REF=<ref>] npm run guard`. The lines changed since `--base` leave out `package-lock.json`, which npm writes: the strict mode reads a dependency named `js-tokens` with a version range as an assigned secret. The tree check still reads the whole lock file. `app/dist/` is not checked: it is built, and git ignores it.
