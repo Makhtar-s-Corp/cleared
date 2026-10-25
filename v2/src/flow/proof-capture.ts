@@ -28,7 +28,7 @@
 import { mkdirSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
-import { SERVICE_PROOF_HEADER, type ProductionCheck } from '../api/types.ts';
+import { SERVICE_PROOF_HEADER } from '../api/types.ts';
 import type { PreviewTarget } from '../container/preview.ts';
 
 export const PROOF_FILES = { before: 'before.png', after: 'after.png', video: 'flow.webm' } as const;
@@ -246,18 +246,5 @@ export async function captureProduction(input: { readonly browser: ProofBrowser 
     const open = context;
     if (open) await quietly(() => open.close());
     await quietly(() => browser.close());
-  }
-}
-
-// What the ticket says of a check, in the service's words (its comments are English).
-export function productionComment(check: ProductionCheck): string {
-  const page = `The production page of ${check.service} (${check.url})`;
-  const landed = `after pull request #${check.pr} landed healthy`;
-  const own = 'Cleared did not deploy it: the deploy is yours or your CI\'s.';
-  switch (check.missing) {
-    case null: return `${page} was captured ${landed}; the capture is on the ticket's card. ${own}`;
-    case 'unwatched': return `The production page of ${check.service} was not opened after pull request #${check.pr} landed: the project has no health check, so Cleared cannot tell when the deploy is done. Set [release] health_url or health_command to have it captured.`;
-    case 'no_browser': return `${page} was not captured ${landed}: no browser is installed on the server (CLEARED_V2_PLAYWRIGHT in v2/README.md).`;
-    case 'failed': return `${page} could not be captured ${landed}. ${own}`;
   }
 }

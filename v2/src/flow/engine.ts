@@ -130,7 +130,8 @@ import { GIVEN_BACK, GIVEN_BACK_REVIEW, TAKEN_OVER } from './takeover.ts';
 import { NO_ANSWER, answerMessage, channelOf, channelPrompt, lastSaid, verdictsOf, type ChannelMessage } from './channel.ts';
 import { testComment, testLine, testRunOf } from './review-tests.ts';
 import type { ProductionCapture, ProofCapture } from './proof-capture.ts';
-import { PRODUCTION_FILE, PROOF_FILES, productionComment } from './proof-capture.ts';
+import { PRODUCTION_FILE, PROOF_FILES } from './proof-capture.ts';
+import { productionChecksOf, productionComment } from './production.ts';
 import type { ReceiptCapture, ReceiptData, ReceiptTest } from './receipt.ts';
 import { ticketCost } from '../consumption/ticket-cost.ts';
 import { CI_REPAIR_ATTEMPTS, onBase, repairComment, repairMessage, type CiFailures } from './ci-repair.ts';
@@ -2923,14 +2924,7 @@ export class FlowEngine {
   // undefined for a ticket the store does not know.
   async productionChecks(ticket: TicketId): Promise<ProductionCheck[] | undefined> {
     if (!(await this.registry.ticketStore.get(ticket))) return undefined;
-    const last = new Map<string, ProductionCheck>();
-    for (const row of this.#store.sessions.list({ ticket }))
-      for (const { event } of this.#store.events.after(row.id))
-        if (event.type === 'CUSTOM' && event.name === 'cleared.production_checked') {
-          const known = last.get(event.value.service);
-          if (!known || Date.parse(event.value.at) >= Date.parse(known.at)) last.set(event.value.service, event.value);
-        }
-    return this.#workspace.services.flatMap((s) => last.get(s.name) ?? []);
+    return productionChecksOf(this.#store, ticket, this.#workspace.services.map((s) => s.name));
   }
 
   // ---- a pass: publish, record, ask the lock -------------------------------
