@@ -82,11 +82,9 @@ export function sameFields(a: unknown, b: unknown): boolean {
 export function useKept<T>(name: string, initial: T): [T, (value: T) => void] {
   const [value, setValue] = useState<T>(() => (kept.has(name) ? kept.get(name) as T : initial));
   const set = useCallback((next: T) => {
-    setValue((current) => {
-      const value = sameFields(current, next) ? current : next;
-      kept.set(name, value);
-      return value;
-    });
+    if (kept.has(name) && sameFields(kept.get(name), next)) return;
+    kept.set(name, next);
+    setValue(next);
   }, [name]);
   return [value, set];
 }
