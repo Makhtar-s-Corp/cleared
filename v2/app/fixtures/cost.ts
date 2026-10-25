@@ -1,7 +1,9 @@
 // A resolved ticket's sessions (P211, issue #327): the tower's landed ticket
 // LOCAL-149 with its author's turn and its reviewer's, stored through the
 // cleaner in a ledger of their own, so the session screen of a Done ticket
-// draws the cost the service's own ticketCost reads from them. Its figures
+// draws the cost the service's own ticketCost reads from them, and the
+// production page checked once its release landed healthy (P218), as the
+// flow journals it on the reviewer's session. Its figures
 // are invented: no name, no path, no figure of a real account. The fixture
 // source adds it on request only (`resolved`), so the screens and counts
 // the other tests pin stay as they are.
@@ -62,6 +64,10 @@ export function resolvedStory(ticket: Ticket): { readonly store: Store; readonly
     { type: 'STEP_FINISHED', stepName: 'review' },
     snapshot('Done', 'review', at(30), at(38), reviewerUsage),
   );
+
+  // Its production page, captured once the release landed healthy. Stamped
+  // with the review's end, so the ticket's time P211's tests pin stays 38 minutes.
+  reviewer.play(at(38), { type: 'CUSTOM', name: 'cleared.production_checked', value: { service: project, pr: 7, url: 'https://guestbook.example.invalid/', at: at(38).toISOString(), file: 'production.png', missing: null } });
 
   const summary = (id: string, role: 'author' | 'reviewer', model: string, from: Date, to: Date): SessionSummary => {
     store.sessions.put({ id, project, ticket: RESOLVED_TICKET, role, harness: 'claude-code', model, status: 'done', createdAt: from.toISOString(), updatedAt: to.toISOString() });

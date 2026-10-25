@@ -4,6 +4,9 @@
 // opens it. The app's proof first, as every route of the service; then one
 // of the three names, of a service of the workspace, of a ticket the store
 // knows (FlowEngine.proofFile), and a plain file, never a link.
+// GET /api/tickets/:id/production (P218, issue #334): the production page's
+// checks of a ticket's landed release, which its card shows; the capture
+// itself is the file route's `production.png`.
 import { createReadStream, lstatSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import { SERVICE_PROOF_HEADER } from '../api/types.ts';
@@ -17,6 +20,7 @@ export type ProofRoutesDeps = {
 };
 
 const TYPES: Readonly<Record<string, string>> = { '.png': 'image/png', '.webm': 'video/webm' };
+const UNCONFIGURED = { error: 'the flow is not configured: see CLEARED_V2_PROJECT in v2/README.md' };
 
 const header = (request: IncomingMessage, name: string): string | undefined => {
   const value = request.headers[name];
@@ -35,7 +39,7 @@ export function proofRoutes(deps: ProofRoutesDeps): Route[] {
     handle: async (context) => {
       if (!sameProof(header(context.request, SERVICE_PROOF_HEADER), deps.proof())) return answer(context, 401, { error: 'unauthorized' });
       const engine = deps.engine(context.registry);
-      if (!engine) return answer(context, 503, { error: 'the flow is not configured: see CLEARED_V2_PROJECT in v2/README.md' });
+      if (!engine) return answer(context, 503, UNCONFIGURED);
       const { id, service, file } = context.params as { id: string; service: string; file: string };
       const path = await engine.proofFile(id, service, file);
       const stat = path ? lstatSync(path, { throwIfNoEntry: false }) : undefined;
@@ -46,6 +50,16 @@ export function proofRoutes(deps: ProofRoutesDeps): Route[] {
       });
       // A file gone between the check and the read ends the answer, never the process.
       createReadStream(path).on('error', () => context.response.destroy()).pipe(context.response);
+    },
+  }, {
+    method: 'GET', path: '/api/tickets/:id/production',
+    handle: async (context) => {
+      if (!sameProof(header(context.request, SERVICE_PROOF_HEADER), deps.proof())) return answer(context, 401, { error: 'unauthorized' });
+      const engine = deps.engine(context.registry);
+      if (!engine) return answer(context, 503, UNCONFIGURED);
+      const checks = await engine.productionChecks((context.params as { id: string }).id);
+      if (!checks) return answer(context, 404, { error: 'no such ticket' });
+      answer(context, 200, checks);
     },
   }];
 }
