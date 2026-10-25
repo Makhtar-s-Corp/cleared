@@ -7,11 +7,16 @@
 // GET /api/tickets/:id/production (P218, issue #334): the production page's
 // checks of a ticket's landed release, which its card shows; the capture
 // itself is the file route's `production.png`.
+// GET and POST /api/tickets/:id/captures (P226, issue #368): the human's
+// choice of the receipt's captures on the ticket, Auto, On or Off; a post
+// is a signed-in person's, as the editor's save is (terminal/routes.ts).
 import { createReadStream, lstatSync } from 'node:fs';
 import type { IncomingMessage } from 'node:http';
 import { SERVICE_PROOF_HEADER } from '../api/types.ts';
 import type { Registry, Route, RouteContext } from '../modules/registry.ts';
 import { sameProof } from '../modules/users.ts';
+import { HttpError, humanUser, readBody } from '../terminal/routes.ts';
+import { CAPTURE_CHOICES, type CaptureChoiceName } from './capture-need.ts';
 import type { FlowEngine } from './engine.ts';
 
 export type ProofRoutesDeps = {
@@ -60,6 +65,33 @@ export function proofRoutes(deps: ProofRoutesDeps): Route[] {
       const checks = await engine.productionChecks((context.params as { id: string }).id);
       if (!checks) return answer(context, 404, { error: 'no such ticket' });
       answer(context, 200, checks);
+    },
+  }, {
+    method: 'GET', path: '/api/tickets/:id/captures',
+    handle: async (context) => {
+      if (!sameProof(header(context.request, SERVICE_PROOF_HEADER), deps.proof())) return answer(context, 401, { error: 'unauthorized' });
+      const engine = deps.engine(context.registry);
+      if (!engine) return answer(context, 503, UNCONFIGURED);
+      const choice = await engine.captureChoice((context.params as { id: string }).id);
+      if (!choice) return answer(context, 404, { error: 'no such ticket' });
+      answer(context, 200, choice);
+    },
+  }, {
+    method: 'POST', path: '/api/tickets/:id/captures',
+    handle: async (context) => {
+      try {
+        const user = await humanUser(context, deps.proof());
+        const engine = deps.engine(context.registry);
+        if (!engine) return answer(context, 503, UNCONFIGURED);
+        const choice = (await readBody(context.request)).choice;
+        if (!CAPTURE_CHOICES.includes(choice as CaptureChoiceName)) throw new HttpError(400, `choice is ${CAPTURE_CHOICES.join(', ')}`);
+        const id = (context.params as { id: string }).id;
+        if (!(await engine.captureChoice(id))) return answer(context, 404, { error: 'no such ticket' });
+        answer(context, 200, await engine.chooseCaptures(id, choice as CaptureChoiceName, user));
+      } catch (error) {
+        if (error instanceof HttpError) return answer(context, error.status, { error: error.message });
+        throw error;
+      }
     },
   }];
 }

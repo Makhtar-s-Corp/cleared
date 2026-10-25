@@ -24,7 +24,7 @@ import {
   ArrowCounterClockwise, ArrowRight, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, Terminal, WarningCircle, X, type Icon,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react';
-import type { ConfirmableRule, EditorLinks, ProductionCheck, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketCost, TicketStep, Workspace } from '../../../../src/api/types.ts';
+import type { CaptureChoice, ConfirmableRule, EditorLinks, ProductionCheck, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketCost, TicketStep, Workspace } from '../../../../src/api/types.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import { Choices, OwnChoices } from '@/components/choices/Choices.tsx';
 import { sentText, type Answers } from '@/components/choices/model.ts';
@@ -57,7 +57,7 @@ import { CloseTicket } from './CloseTicket.tsx';
 import { BrowserTab, Confidence, Criteria, EditorTab, OpenInEditor, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown, type PlanAsk } from './Tabs.tsx';
 import { browserView, changeProblem, CHANGE_MAX, editorOffer, goLine, handoverFor, nextTab, planAskBody, planAskProblem, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import {
-  actingSession, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketCostFacts, productionFacts, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
+  CAPTURE_CHOICES, actingSession, chooseCaptures, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketCostFacts, productionFacts, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
   type Filter, type Handover, type ThreadEntry, type TicketPart,
 } from './ticket.ts';
 import { askFailure, askHref, startAsk } from '@/screens/ask/model.ts';
@@ -425,7 +425,30 @@ export function SessionHeading({ view }: { readonly view: SessionView }) {
 // A ticket that shipped, or is approved, is not closed.
 const closable = (ticket: Ticket | undefined): boolean => ticket !== undefined && ticket.status !== 'Done' && ticket.status !== 'Ready to Ship';
 
-export function LeftCards({ view, t, onPlan, close }: { readonly view: SessionView; readonly t: Translate; readonly onPlan?: () => void; readonly close?: ReactNode }) {
+// The proof receipt's captures, forced on or off from the ticket (P226,
+// issue #368): Auto lets the service's rule decide from the change. Drawn
+// once the choice is read, on a ticket that has not shipped.
+function CaptureSwitch({ choice, t, busy, note, onCaptures }: {
+  readonly choice: CaptureChoice['choice']; readonly t: Translate; readonly busy?: boolean; readonly note?: string; readonly onCaptures?: (choice: CaptureChoice['choice']) => void;
+}) {
+  return (
+    <div className="ticket-captures" data-ticket-captures="">
+      <h3 className="card-label sub-label" id="captures-label">{t('captures_label')}</h3>
+      <div className="mode scope" role="group" aria-labelledby="captures-label">
+        {CAPTURE_CHOICES.map((option) => (
+          <button key={option} type="button" data-captures={option} aria-pressed={choice === option} disabled={busy} onClick={() => onCaptures?.(option)}>{t(`captures_${option}`)}</button>
+        ))}
+      </div>
+      <p className="faint small">{t(`captures_${choice}_hint`)}</p>
+      {note ? <p className="composer-note" role="status">{note}</p> : null}
+    </div>
+  );
+}
+
+export function LeftCards({ view, t, onPlan, close, onCaptures, capturesBusy, capturesNote }: {
+  readonly view: SessionView; readonly t: Translate; readonly onPlan?: () => void; readonly close?: ReactNode;
+  readonly onCaptures?: (choice: CaptureChoice['choice']) => void; readonly capturesBusy?: boolean; readonly capturesNote?: string;
+}) {
   const parsed = parseCriteria(view.ticket?.body ?? '');
   const plan = ticketPlan(partsOf(view)) ?? view.thread.plan;
   const service = serviceLine(view.summary.service, t, stepsView(view.steps, view.summary.id));
@@ -448,6 +471,9 @@ export function LeftCards({ view, t, onPlan, close }: { readonly view: SessionVi
               : <span key={index} className="fact">{fact.text}</span>))}
           </p>
         ) : null}
+        {view.captures && closable(view.ticket)
+          ? <CaptureSwitch choice={view.captures.choice} t={t} busy={capturesBusy ?? false} {...(capturesNote ? { note: capturesNote } : {})} {...(onCaptures ? { onCaptures } : {})} />
+          : null}
         {close}
       </section>
       {parsed.criteria.length > 0 ? (
@@ -745,6 +771,9 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const [steps, setSteps] = useState<readonly TicketStep[] | null>(null);
   const [cost, setCost] = useState<TicketCost | null>(null);
   const [production, setProduction] = useState<readonly ProductionCheck[] | null>(null);
+  const [captures, setCaptures] = useState<CaptureChoice | null>(null);
+  const [capturesBusy, setCapturesBusy] = useState(false);
+  const [capturesNote, setCapturesNote] = useState('');
   const [editing, setEditing] = useState<EditorState | null>(null);
   const [generation, setGeneration] = useState(0);
   const [editable, setEditable] = useState<{ readonly file: SessionFile; readonly why: ReadOnlyWhy | undefined } | null>(null);
@@ -799,8 +828,23 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     catch { /* the next change tries again */ }
   }, [context, ticketId]);
   useEffect(() => { if (resolved) void readProduction(); }, [resolved, readProduction]);
+  // The choice of the receipt's captures (P226), read again at each change: another tab may have made it.
+  const readCaptures = useCallback(async () => {
+    try { setCaptures(await context.api<CaptureChoice>(`/tickets/${encodeURIComponent(ticketId)}/captures`)); }
+    catch { /* the next change tries again */ }
+  }, [context, ticketId]);
+  useEffect(() => { if (!resolved) void readCaptures(); }, [resolved, readCaptures]);
+  const onCaptures = useCallback(async (choice: CaptureChoice['choice']) => {
+    setCapturesBusy(true);
+    try {
+      setCaptures(await chooseCaptures(context.api, ticketId, choice));
+      setCapturesNote('');
+    } catch { setCapturesNote(t('captures_failed')); }
+    setCapturesBusy(false);
+  }, [context, ticketId, t]);
   useLive(() => {
     if (resolved) void readProduction();
+    else void readCaptures();
     if (shown) void refresh();
     else missed.current = true;
   });
@@ -869,10 +913,10 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const actingThread = threads.get(id);
   const actingDetail = details.get(id);
   const view: SessionView = useMemo(() => ({
-    summary: acting, ticket: loaded.ticket, siblings: sessions, me: context.me.user.id, language: context.me.language, now, busy, answers, takenOver: actingTaken, steps, cost, production,
+    summary: acting, ticket: loaded.ticket, siblings: sessions, me: context.me.user.id, language: context.me.language, now, busy, answers, takenOver: actingTaken, steps, cost, production, captures,
     thread: actingThread ?? { lastSeq: 0, lastAt: undefined, state: actingDetail?.state, rows: [], turns: [], pending: [], interrupts: [], steps: [], plan: null, checkpoints: [] },
     parts, filter, unfolded,
-  }), [acting, loaded.ticket, sessions, context.me, now, busy, answers, actingTaken, steps, cost, production, actingThread, actingDetail, parts, filter, unfolded]);
+  }), [acting, loaded.ticket, sessions, context.me, now, busy, answers, actingTaken, steps, cost, production, captures, actingThread, actingDetail, parts, filter, unfolded]);
   const ended = ENDED.has(phaseOf(view));
   // Asked again when the session changes or ends; 403, 409 and the rest: no button.
   useEffect(() => {
@@ -1158,7 +1202,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
       {sessions.map((summary) => <Feed key={summary.id} summary={summary} detail={details.get(summary.id)} open={open(summary)} onThread={onThread} />)}
       <div className="session" ref={root} aria-busy={actingThread ? undefined : 'true'}>
         <SessionHeading view={view} />
-        <aside className="s-left" id="s-left" aria-label={t('left_label')}><LeftCards view={view} t={t} onPlan={() => select('plan', true)} close={closable(view.ticket) ? <CloseTicket ticket={view.summary.ticket} api={context.api} now={context.now} t={t} onClosed={() => context.inboxChanged()} /> : undefined} /></aside>
+        <aside className="s-left" id="s-left" aria-label={t('left_label')}><LeftCards view={view} t={t} onPlan={() => select('plan', true)} onCaptures={(choice) => void onCaptures(choice)} capturesBusy={capturesBusy} capturesNote={capturesNote} close={closable(view.ticket) ? <CloseTicket ticket={view.summary.ticket} api={context.api} now={context.now} t={t} onClosed={() => context.inboxChanged()} /> : undefined} /></aside>
         <section className="panel" aria-label={t('timeline_label')}>
           <TabStrip tab={tab} t={t} onSelect={(next) => select(next)} onKey={onKey} />
           <div className="panel-head" id="status">
