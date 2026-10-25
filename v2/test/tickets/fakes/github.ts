@@ -1,6 +1,8 @@
 // A fake of the part of GitHub's REST API the GitHub mirror reads and
 // writes, on loopback, port 0. Each token is an account; a test acts on an
 // issue as a person or a bot through the methods, the mirror through HTTP.
+// As GitHub's, its issue events say a change of the title (`renamed`) and
+// nothing of a change of the body.
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
@@ -10,16 +12,21 @@ type Issue = {
   number: number; title: string; body: string | null; state: 'open' | 'closed'; state_reason: string | null;
   labels: Label[]; created_at: string; updated_at: string; html_url: string; user: FakeAccount; pull_request?: { url: string };
 };
-type Event = { id: number; event: string; actor: FakeAccount | null; created_at: string; label?: Label; state_reason?: string | null; performed_via_github_app: unknown };
+type Event = {
+  id: number; event: string; actor: FakeAccount | null; created_at: string; label?: Label; state_reason?: string | null;
+  rename?: { from: string; to: string }; performed_via_github_app: unknown;
+};
+export type FakeComment = { id: number; body: string; user: FakeAccount; created_at: string; updated_at: string; issue_url: string; performed_via_github_app: unknown };
 
 export class FakeGitHub {
   readonly requests: { method: string; path: string; auth: string | undefined }[] = [];
-  readonly comments = new Map<number, { body: string; user: string }[]>();
+  readonly comments = new Map<number, FakeComment[]>();
   #server: Server | undefined;
   #accounts = new Map<string, FakeAccount>();
   #repos = new Map<string, { issues: Map<number, Issue>; events: Map<number, Event[]> }>();
   #next = 1;
   #event = 1;
+  #comment = 1;
   #clock: () => string;
 
   constructor(options: { readonly clock: () => string; readonly accounts: Record<string, FakeAccount>; readonly repos: readonly string[] }) {
@@ -110,6 +117,33 @@ export class FakeGitHub {
     this.#record(repo, number, by, 'reopened');
   }
 
+  // A change of the title or the body, as GitHub's page makes it.
+  edit(repo: string, number: number, by: FakeAccount, fields: { title?: string; body?: string }): void {
+    const issue = this.issue(repo, number);
+    if (fields.title !== undefined && fields.title !== issue.title) {
+      const from = issue.title;
+      issue.title = fields.title;
+      this.#record(repo, number, by, 'renamed', { rename: { from, to: fields.title } });
+    }
+    if (fields.body !== undefined && fields.body !== issue.body) {
+      issue.body = fields.body;
+      issue.updated_at = this.#clock();
+    }
+  }
+
+  comment(repo: string, number: number, by: FakeAccount, body: string): FakeComment {
+    const at = this.#clock();
+    const comment: FakeComment = {
+      id: 9000 + this.#comment++, body, user: by, created_at: at, updated_at: at,
+      issue_url: `https://api.github.com/repos/${repo}/issues/${number}`, performed_via_github_app: null,
+    };
+    const list = this.comments.get(number) ?? [];
+    list.push(comment);
+    this.comments.set(number, list);
+    this.issue(repo, number).updated_at = at;
+    return comment;
+  }
+
   async #serve(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const url = new URL(request.url ?? '/', 'http://fake');
     const auth = request.headers.authorization;
@@ -126,6 +160,17 @@ export class FakeGitHub {
     const body = chunks.length > 0 ? JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown> : {};
     const method = request.method;
     if (method === 'GET' && url.pathname === '/user') return send(200, { login: account.login, type: account.type });
+    const listed = /^\/repos\/([^/]+\/[^/]+)\/issues\/comments$/.exec(url.pathname);
+    if (listed && method === 'GET') {
+      const held = this.#repos.get(listed[1] as string);
+      if (!held) return send(404, { message: 'Not Found' });
+      const since = url.searchParams.get('since');
+      const all = [...held.issues.keys()].flatMap((n) => this.comments.get(n) ?? [])
+        .filter((c) => !since || c.updated_at >= since).sort((a, b) => a.updated_at.localeCompare(b.updated_at) || a.id - b.id);
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const perPage = Number(url.searchParams.get('per_page') ?? '30');
+      return send(200, all.slice((page - 1) * perPage, page * perPage));
+    }
     const match = /^\/repos\/([^/]+\/[^/]+)\/issues(?:\/(\d+)(?:\/(labels|events|comments)(?:\/([^/]+))?)?)?$/.exec(url.pathname);
     if (!match || !this.#repos.has(match[1] as string)) return send(404, { message: 'Not Found' });
     const repo = match[1] as string;
@@ -154,6 +199,7 @@ export class FakeGitHub {
     if (part === undefined) {
       if (method === 'GET') return send(200, issue);
       if (method === 'PATCH') {
+        this.edit(repo, number, account, { ...(typeof body.title === 'string' ? { title: body.title } : {}), ...(typeof body.body === 'string' ? { body: body.body } : {}) });
         if (body.state === 'closed' && issue.state === 'open') this.close_(repo, number, account, (body.state_reason as 'completed' | undefined) ?? 'completed');
         if (body.state === 'open' && issue.state === 'closed') this.reopen(repo, number, account);
         return send(200, issue);
@@ -171,13 +217,7 @@ export class FakeGitHub {
       return send(405, {});
     }
     if (part === 'events' && method === 'GET') return send(200, paged(this.events(repo, number)));
-    if (part === 'comments' && method === 'POST') {
-      const list = this.comments.get(number) ?? [];
-      list.push({ body: String(body.body), user: account.login });
-      this.comments.set(number, list);
-      issue.updated_at = this.#clock();
-      return send(201, { id: list.length, body: body.body });
-    }
+    if (part === 'comments' && method === 'POST') return send(201, this.comment(repo, number, account, String(body.body)));
     return send(405, {});
   }
 }
