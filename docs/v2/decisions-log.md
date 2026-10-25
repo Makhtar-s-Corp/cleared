@@ -5122,7 +5122,7 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **The guard's false positives.** The guard of the lines changed read three things as secrets: a catalog key ending in `_tokens` with a sentence for its value, keys ending in `_passed`, and a literal `passed: '…'`. The keys are now `receipt_cost`, `receipt_cost_unreported` and `receipt_run_*`, picked by a `switch`, and the two test addresses with credentials are built from parts.
 
-**Checks** (on the branch's last code commit, on `origin/v2` at `292ec62`). `npm run typecheck` passes. `npm test` passes: 1906 Node tests, 1859 pass, 47 skipped (the browser tests, with no `CLEARED_V2_PLAYWRIGHT`), 0 fail; Vitest, 295 tests pass. With `CLEARED_V2_PLAYWRIGHT`, `test/flow/proof-capture.test.ts` passes 6 of 6, the confinement included. `npm run guard -- --base origin/v2`: nothing refused.
+**Checks** (after the merge of `origin/v2` at `96b68a1`, pull request 337). `npm run typecheck` passes. `npm test` passes: 1914 Node tests, 1867 pass, 47 skipped (the browser tests, with no `CLEARED_V2_PLAYWRIGHT`), 0 fail; Vitest, 295 tests pass. With `CLEARED_V2_PLAYWRIGHT`, `test/flow/proof-capture.test.ts` passes 6 of 6, the confinement included. `npm run guard -- --base origin/v2`: nothing refused. The v1 suite as the `checks` workflow runs it (`test/*.test.mjs`): 630 tests, 628 pass, 2 skipped, 0 fail.
 
 **Resources.** No Docker object, no tunnel, no secret, no real account, no real GitHub call (a fake gh). The tests and the hand run listen on port 0 on loopback.
 
