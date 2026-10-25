@@ -5121,4 +5121,5 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Resources.** No Docker object, no port opened outside the tests (port 0 on loopback), no tunnel, no secret, no real account; the browser tests run the fixtures source in Chromium.
 
+- Pull request: 339, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-ticket-cost`.
