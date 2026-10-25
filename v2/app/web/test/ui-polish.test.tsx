@@ -125,3 +125,19 @@ test('the template row does not repeat its chip\'s word', () => {
     assert.ok(!visibleText(row).includes(t('bar_template')), `${language}: "${t('bar_template')}" is said by the chip only`);
   }
 });
+
+test('Consumption\'s figures have their unit, its footer shows no internal word, and its levers say their state plainly (the art director\'s pass)', () => {
+  const words = {
+    en: { unit: /tokens per day on average/, internal: /\bharness\b|\bledger\b/, self: /One click each/, model: /Default model: Opus 5\.5/, lanes: /Set by each plan/ },
+    fr: { unit: /jetons par jour en moyenne/, internal: /\bharnais\b|\bregistre\b/, self: /Un clic chacun/, model: /Modèle par défaut\s: Opus 5\.5/, lanes: /Fixée par chaque plan/ },
+  };
+  for (const language of LANGUAGES) {
+    const text = shown(html(<ConsumptionView data={consumption()} t={of('consumption', language)} language={language} now={FIXTURE_NOW} />));
+    const w = words[language];
+    assert.match(text, w.unit, `${language}: the average has its unit`);
+    assert.doesNotMatch(text, w.internal, `${language}: no internal word`);
+    assert.doesNotMatch(text, w.self, `${language}: nothing explains the interface to itself`);
+    assert.match(text, w.model, `${language}: the default model is said as the default`);
+    assert.match(text, w.lanes, `${language}: the plans' limit said plainly`);
+  }
+});
