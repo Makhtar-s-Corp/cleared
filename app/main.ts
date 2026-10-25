@@ -35,7 +35,7 @@ const demo = flag('--demo');
 const conf = demo ? { sections: {} } as Conf : loadConfForCommand();
 const settings = section(conf, 'app');
 // Passkeys are gone (decisions log, 2026-10-25): the command says so, in the owner's language, and starts nothing.
-if (passkeyCommand) { console.error(message('cli_app_passkey_gone', section(conf, 'owner').language || 'en')); process.exit(2); }
+if (passkeyCommand) { console.error(message('cli_app_session_confirms', section(conf, 'owner').language || 'en')); process.exit(2); }
 const port = Number(value('--port') || settings.port || 8788);
 const publicHttps = /^https:\/\//.test(settings.public_origin || '');
 // Behind a TLS proxy on this machine (tailscale serve) the app listens on this machine only: the proxy's address is what says the connection is encrypted.

@@ -224,7 +224,7 @@
   "app_act_insecure": "Clear to land and Send back need a secure address (https). Set [app] public_origin and open the app through it.",
   "app_err_failed": "It did not go through. Nothing was written; try again.",
   "app_err_insecure": "This needs a secure address (https). Nothing was written.",
-  "cli_app_passkey_gone": "cleared app passkey: passkeys are gone. Clear to land, Send back and notifications are confirmed by your signed-in session in the app; see docs/app.md.",
+  "cli_app_session_confirms": "cleared app passkey: passkeys are gone. Clear to land, Send back and notifications are confirmed by your signed-in session in the app; see docs/app.md.",
   "app_err_new_version": "A newer version arrived. Review it again; nothing was written.",
   "app_err_not_waiting": "This ticket no longer waits for you. Nothing was written.",
   "app_err_challenge": "The confirmation expired. Try again.",

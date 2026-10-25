@@ -223,7 +223,7 @@
   "app_act_insecure": "Autoriser la mise en ligne et Renvoyer demandent une adresse sécurisée (https). Réglez [app] public_origin et ouvrez l’app par cette adresse.",
   "app_err_failed": "Cela n’a pas abouti. Rien n’a été écrit ; réessayez.",
   "app_err_insecure": "Il faut une adresse sécurisée (https). Rien n’a été écrit.",
-  "cli_app_passkey_gone": "cleared app passkey : les clés d’accès n’existent plus. Autoriser la mise en ligne, Renvoyer et les notifications sont confirmés par votre session ouverte dans l’app ; voir docs/app.md.",
+  "cli_app_session_confirms": "cleared app passkey : les clés d’accès n’existent plus. Autoriser la mise en ligne, Renvoyer et les notifications sont confirmés par votre session ouverte dans l’app ; voir docs/app.md.",
   "app_err_new_version": "Une version plus récente est arrivée. Revoyez-la ; rien n’a été écrit.",
   "app_err_not_waiting": "Ce ticket n’attend plus rien de vous. Rien n’a été écrit.",
   "app_err_challenge": "La confirmation a expiré. Réessayez.",

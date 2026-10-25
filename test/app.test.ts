@@ -268,11 +268,11 @@ test('`cleared app passkey` says that passkeys are gone, in the owner\'s languag
   const en = run('en');
   assert.equal(en.status, 2, en.stderr);
   assert.equal(en.stdout, '');
-  assert.equal(en.stderr, `${message('cli_app_passkey_gone', 'en')}\n`);
+  assert.equal(en.stderr, `${message('cli_app_session_confirms', 'en')}\n`);
   assert.match(en.stderr, /passkeys are gone/);
   const fr = run('fr');
   assert.equal(fr.status, 2, fr.stderr);
-  assert.equal(fr.stderr, `${message('cli_app_passkey_gone', 'fr')}\n`);
+  assert.equal(fr.stderr, `${message('cli_app_session_confirms', 'fr')}\n`);
   assert.match(fr.stderr, /clés d’accès/);
   assert.ok(!existsSync(socket), 'no socket, no server');
 });
