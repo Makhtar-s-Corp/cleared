@@ -1,5 +1,5 @@
 /* The Consumption screen (O15), on top of styles/app.css: the agents' cards
-   on the left, the limits, the cost and the levers on the right, one column
+   and the harness pick's wins on the left, the limits, the cost and the levers on the right, one column
    under 1000 px. Same tokens, flat colours. A harness keeps its
    own colour (--harness-*); amber is for what waits for the person, so the
    limit that will be reached is drawn in the danger text colour. */
@@ -13,6 +13,7 @@
 .consumption-period { margin: 0; color: var(--text-muted); font-size: var(--text-md); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .consumption-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 16px; align-items: start; }
+.main-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .harnesses { display: flex; flex-direction: column; gap: 12px; }
 .side { display: flex; flex-direction: column; gap: 12px; }
 
@@ -88,6 +89,18 @@
 .choice:disabled { cursor: default; opacity: 0.6; }
 .choice:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .levers-note { margin: 10px 0 0; color: var(--danger-text); font-size: var(--text-sm); }
+
+/* The harness pick's wins (issue #329), under the agents' cards: a table
+   that scrolls in its own box on a phone rather than the page. */
+.wins-sub { margin: 2px 0 12px; color: var(--text-muted); font-size: var(--text-sm); text-wrap: pretty; }
+.wins-scroll { overflow-x: auto; }
+.wins-table { width: 100%; border-collapse: collapse; font-size: var(--text-md); }
+.wins-table th { padding: 6px 12px 6px 0; color: var(--text-muted); font-size: var(--text-sm); font-weight: var(--weight-regular); text-align: left; border-bottom: 1px solid var(--hairline); }
+.wins-table td { padding: 8px 12px 8px 0; border-bottom: 1px solid var(--hairline); white-space: nowrap; }
+.wins-table tr:last-child td { border-bottom: 0; }
+.wins-table .n { text-align: right; }
+.wins-table .num { font-variant-numeric: tabular-nums; }
+.wins-empty { margin: 0; color: var(--text-muted); font-size: var(--text-md); }
 
 .consumption-foot { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 8px 16px; margin-top: 20px; padding-top: 12px; border-top: 1px solid var(--hairline); color: var(--text-muted); font-size: var(--text-sm); }
 .consumption-foot p { margin: 0; }

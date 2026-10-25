@@ -15,13 +15,15 @@
 // The variants are `ticket_variants` rows, one run (`round`) per start with
 // variants; this file holds the table, the store, what the author is told
 // and the two routes. The engine (flow/engine.ts) runs them, since it owns
-// the sessions.
+// the sessions. A harness pick (issue #329, flow/harness-pick.ts) is a run
+// whose variants each name a harness, and whose kept variant the flow
+// chooses by itself.
 import type { IncomingMessage } from 'node:http';
 import type { DatabaseSync } from 'node:sqlite';
-import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, VARIANT_DIFF_MAX, VARIANTS_MAX, VARIANTS_MIN, type TicketVariant, type VariantState } from '../api/types.ts';
+import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER, VARIANT_DIFF_MAX, VARIANTS_MAX, VARIANTS_MIN, type TestOutcome, type TicketType, type TicketVariant, type VariantState } from '../api/types.ts';
 import type { Registry, Route, RouteContext } from '../modules/registry.ts';
 import { sameProof } from '../modules/users.ts';
-import type { SessionId, UserId } from '../session/contract.ts';
+import type { Harness, SessionId, UserId } from '../session/contract.ts';
 import type { TicketId } from '../tickets/contract.ts';
 import { FlowError, type FlowEngine } from './engine.ts';
 
@@ -35,6 +37,8 @@ export const VARIANTS_TABLE = `CREATE TABLE IF NOT EXISTS ticket_variants (
   id TEXT PRIMARY KEY, ticket TEXT NOT NULL, project TEXT NOT NULL, round INTEGER NOT NULL, position INTEGER NOT NULL,
   state TEXT NOT NULL, session TEXT, workdir TEXT, files TEXT NOT NULL, added INTEGER NOT NULL, removed INTEGER NOT NULL,
   diff TEXT NOT NULL, cut INTEGER NOT NULL, cost REAL, minutes REAL, note TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+  harness TEXT NOT NULL DEFAULT 'claude-code', pick INTEGER NOT NULL DEFAULT 0, kind TEXT NOT NULL DEFAULT 'other',
+  tests TEXT, tokens INTEGER, work_ms INTEGER, won INTEGER NOT NULL DEFAULT 0,
   UNIQUE (ticket, round, position)
 )`;
 
@@ -56,7 +60,17 @@ export type Variant = VariantKey & {
   readonly cost: number | null;
   readonly minutes: number | null;
   readonly note: string | null;
+  readonly harness: Harness;
+  readonly pick: boolean;                    // a harness pick's run (issue #329)
+  readonly kind: TicketType;                 // the ticket's type when the run started
+  readonly tests: TestOutcome | null;        // its own last run of the declared test command, once it ended
+  readonly tokens: number | null;
+  readonly workMs: number | null;
+  readonly won: boolean;                     // kept by the pick, not by the owner
 };
+
+// What a new run names: as many variants on Claude Code (a number is that count), or one per harness of a pick.
+export type VariantRun = { readonly count: number } | { readonly harnesses: readonly Harness[]; readonly kind: TicketType };
 
 // The folder of a variant's checkout under the workdirs.
 export function variantFolder(ticket: TicketId, key: VariantKey): string {
@@ -105,17 +119,24 @@ export class VariantStore {
       state: String(row.state) as VariantState, session: str(row, 'session'), workdir: str(row, 'workdir'), files: JSON.parse(String(row.files)) as string[],
       added: Number(row.added), removed: Number(row.removed), diff: String(row.diff), cut: Number(row.cut) === 1,
       cost: num(row, 'cost'), minutes: num(row, 'minutes'), note: str(row, 'note'),
+      harness: (str(row, 'harness') ?? 'claude-code') as Harness, pick: Number(row.pick) === 1, kind: (str(row, 'kind') ?? 'other') as TicketType,
+      tests: str(row, 'tests') as TestOutcome | null, tokens: num(row, 'tokens'), workMs: num(row, 'work_ms'), won: Number(row.won) === 1,
     };
   }
 
-  // A new run of `count` variants of the ticket, all waiting.
-  create(ticket: TicketId, project: string, count: number): Variant[] {
+  // A new run of the ticket's variants, all waiting.
+  create(ticket: TicketId, project: string, spec: number | VariantRun): Variant[] {
+    const run = typeof spec === 'number' ? { count: spec } : spec;
+    const harnesses = 'harnesses' in run ? run.harnesses : Array.from({ length: run.count }, (): Harness => 'claude-code');
+    const count = harnesses.length;
     if (!Number.isInteger(count) || count < VARIANTS_MIN || count > VARIANTS_MAX) throw new FlowError('invalid', `variants is a whole number from ${VARIANTS_MIN} to ${VARIANTS_MAX}`);
     const last = Number((this.#db.prepare('SELECT MAX(round) AS n FROM ticket_variants WHERE ticket = ?').get(ticket) as Row).n ?? 0);
     const round = last + 1;
     const at = this.#now().toISOString();
-    const insert = this.#db.prepare("INSERT INTO ticket_variants (id, ticket, project, round, position, state, files, added, removed, diff, cut, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'waiting', '[]', 0, 0, '', 0, ?, ?)");
-    for (let position = 1; position <= count; position++) insert.run(`${ticket}:r${round}:v${position}`, ticket, project, round, position, at, at);
+    const pick = 'harnesses' in run ? 1 : 0;
+    const kind = 'harnesses' in run ? run.kind : 'other';
+    const insert = this.#db.prepare("INSERT INTO ticket_variants (id, ticket, project, round, position, state, files, added, removed, diff, cut, created_at, updated_at, harness, pick, kind) VALUES (?, ?, ?, ?, ?, 'waiting', '[]', 0, 0, '', 0, ?, ?, ?, ?, ?)");
+    harnesses.forEach((harness, i) => insert.run(`${ticket}:r${round}:v${i + 1}`, ticket, project, round, i + 1, at, at, harness, pick, kind));
     return this.list(ticket, round);
   }
 
@@ -136,13 +157,13 @@ export class VariantStore {
     return row ? this.#variant(row) : undefined;
   }
 
-  update(id: string, change: Partial<Pick<Variant, 'state' | 'session' | 'workdir' | 'files' | 'added' | 'removed' | 'diff' | 'cut' | 'cost' | 'minutes' | 'note'>>): Variant {
+  update(id: string, change: Partial<Pick<Variant, 'state' | 'session' | 'workdir' | 'files' | 'added' | 'removed' | 'diff' | 'cut' | 'cost' | 'minutes' | 'note' | 'tests' | 'tokens' | 'workMs' | 'won'>>): Variant {
     const v = this.get(id);
     if (!v) throw new FlowError('not_found', `unknown variant ${id}`);
     const next = { ...v, ...change };
-    this.#db.prepare('UPDATE ticket_variants SET state = ?, session = ?, workdir = ?, files = ?, added = ?, removed = ?, diff = ?, cut = ?, cost = ?, minutes = ?, note = ?, updated_at = ? WHERE id = ?').run(
+    this.#db.prepare('UPDATE ticket_variants SET state = ?, session = ?, workdir = ?, files = ?, added = ?, removed = ?, diff = ?, cut = ?, cost = ?, minutes = ?, note = ?, tests = ?, tokens = ?, work_ms = ?, won = ?, updated_at = ? WHERE id = ?').run(
       next.state, next.session, next.workdir, JSON.stringify(next.files), next.added, next.removed, next.diff, next.cut ? 1 : 0, next.cost, next.minutes, next.note,
-      this.#now().toISOString(), id,
+      next.tests, next.tokens, next.workMs, next.won ? 1 : 0, this.#now().toISOString(), id,
     );
     return this.get(id) as Variant;
   }
@@ -161,6 +182,7 @@ export function publicVariant(v: Variant): TicketVariant {
   return {
     position: v.position, state: v.state, session: v.session, files: v.files, added: v.added, removed: v.removed,
     diff: v.diff.slice(0, VARIANT_DIFF_MAX), cut, costUsd: v.cost, minutes: v.minutes, note: v.note,
+    harness: v.harness, tests: v.tests, tokens: v.tokens,
   };
 }
 

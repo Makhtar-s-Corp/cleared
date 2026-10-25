@@ -30,7 +30,7 @@ import {
   CHANGE_MAX, CHECKS, GRACE_MS, SEND_BACK_MAX, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approveContract, approveKnowledge, approvePlan,
   changeMessage, chooseVariant, chosen, chosenLine, clock, deadlineLine, decidedLine, decisionFor, detailKey, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
   kept, known, ordered, outcomeLine, pausedLine, planChange, planGo, planOf, readPlan, rejectKnowledge, releaseSession, sameOrigin, sendBack, sendBackContract, sendBackMessage,
-  repairLine, sessionLink, sessionOf, sessionsLine, shareLine, short, variantFacts,
+  repairLine, sessionLink, sessionOf, sessionsLine, shareLine, short, variantFacts, variantHarness, variantTests,
   ticketTitle, trainLine, stopState, undoApproval, type Gesture, type InboxView, type Item, type Local,
 } from './model.ts';
 import './inbox.css';
@@ -462,23 +462,27 @@ function VariantsBody({ item, view, t, busy, onAct }: { readonly item: VariantsI
       <Eyebrow item={item} kind={t(item.state === 'waiting' ? 'eyebrow_variants' : 'kind_variants')} open={undefined} openKey="open_session" t={t} />
       <h2 className="d-title">{title ?? item.ticket}</h2>
       <p className="d-ticket">{t('variants_of', { n: item.variants.length })}</p>
-      {waits ? <p className="decide-rule">{t('variants_rule')}</p> : null}
+      {waits ? <p className="decide-rule">{t(item.pick ? 'variants_pick_rule' : 'variants_rule')}</p> : null}
       <div className="variants" data-count={item.variants.length}>
-        {item.variants.map((variant) => <VariantColumn key={variant.position} variant={variant} view={view} t={t} choosable={waits && variant.state === 'done'} busy={busy} onAct={onAct} />)}
+        {item.variants.map((variant) => <VariantColumn key={variant.position} variant={variant} view={view} t={t} pick={item.pick === true} choosable={waits && variant.state === 'done'} busy={busy} onAct={onAct} />)}
       </div>
     </>
   );
 }
 
-function VariantColumn({ variant, view, t, choosable, busy, onAct }: { readonly variant: TicketVariant; readonly view: InboxView; readonly t: Translate; readonly choosable: boolean; readonly busy: boolean; readonly onAct?: Act | undefined }) {
+// In a harness pick (issue #329), a column also names its agent and says its own run of the tests.
+function VariantColumn({ variant, view, t, pick, choosable, busy, onAct }: { readonly variant: TicketVariant; readonly view: InboxView; readonly t: Translate; readonly pick: boolean; readonly choosable: boolean; readonly busy: boolean; readonly onAct?: Act | undefined }) {
   const name = t('variant_name', { n: variant.position });
   const id = `variant-${variant.position}`;
+  const tests = pick ? variantTests(variant, t) : null;
   return (
     <section className="variant" data-state={variant.state} aria-labelledby={id}>
       <header className="variant-head">
         <h3 className="d-sub" id={id}>{name}</h3>
         <span className={`variant-state ${variant.state}`}>{variant.state === 'running' ? <CircleNotch size={12} aria-hidden="true" /> : variant.state === 'failed' ? <WarningCircle size={12} aria-hidden="true" /> : variant.state === 'chosen' ? <CheckCircle size={12} aria-hidden="true" /> : null}{t(`variant_${variant.state}`)}</span>
       </header>
+      {pick ? <p className="variant-harness" data-harness={variant.harness}>{variantHarness(variant, t)}</p> : null}
+      {tests ? <p className={`variant-tests ${variant.tests}`} data-tests={variant.tests}>{tests}</p> : null}
       {variant.session ? <a className="d-link" href={sessionLink(variant.session)}>{t('open_session')}</a> : null}
       {variant.state === 'done' || variant.state === 'chosen' || (variant.state === 'dropped' && variant.diff !== '') ? (
         <>

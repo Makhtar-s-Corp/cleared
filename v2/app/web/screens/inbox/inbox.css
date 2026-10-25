@@ -330,6 +330,11 @@ a.btn, a.btn:hover { text-decoration: none; }
 .variant-state.done, .variant-state.chosen { color: var(--ok-text); }
 .variant-state.failed { color: var(--danger-text); }
 .variant-facts, .variant-note { margin: 0; font: var(--weight-regular) var(--text-sm)/1.5 var(--sans); color: var(--text-secondary); }
+/* A harness pick's column (issue #329): its agent, then its own run of the tests. */
+.variant-harness { margin: 0; font: var(--weight-strong) var(--text-sm)/1.4 var(--sans); color: var(--text); }
+.variant-tests { margin: 0; font: var(--weight-regular) var(--text-sm)/1.4 var(--sans); color: var(--text-secondary); }
+.variant-tests.passed { color: var(--ok-text); }
+.variant-tests.failed { color: var(--danger-text); }
 .variant-files { margin: 0; padding: 0; list-style: none; font-size: var(--text-sm); }
 .variant .diff { max-height: 420px; overflow: auto; }
 .variant .btn { align-self: flex-start; }

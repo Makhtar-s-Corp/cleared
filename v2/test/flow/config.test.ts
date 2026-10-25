@@ -115,11 +115,13 @@ const M1_ENV = {
 test('the milestone 1 variables make a one-service workspace, and the flow configuration is the one milestone 1 had', () => {
   const config = loadFlowConfig(M1_ENV);
   assert.ok(config);
-  const { workspace, authorTools, steps, questionTimeoutMs, questionLeadMs, ...rest } = config;
+  const { workspace, authorTools, steps, questionTimeoutMs, questionLeadMs, pickHarnesses, ...rest } = config;
   // The author's host tools and the session plan's gate (lane 17), and the
   // ticket's steps (lane 23), on in every configuration the service reads;
-  // so is a team's question's delay (issue #290).
+  // so is a team's question's delay (issue #290), and the harness pick's
+  // gate, Claude Code alone unless the owner names more (issue #329).
   assert.equal(authorTools, true);
+  assert.deepEqual(pickHarnesses, [{ harness: 'claude-code' }]);
   assert.equal(steps, true);
   assert.equal(questionTimeoutMs, 30 * 60_000);
   assert.equal(questionLeadMs, 10 * 60_000);

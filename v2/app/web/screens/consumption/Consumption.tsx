@@ -13,7 +13,7 @@ import type { Translate } from '@/lib/i18n.ts';
 import { useLive } from '@/lib/query.tsx';
 import {
   REFRESH_MS, averagePerDay, browserZone, chartOf, costView, dayInitial, dayLong, harnessMaker, harnessName, headline, leverFailure, leverViews, measuredAt, percentText,
-  periodText, projectionLines, quotaOf, readConsumption, readingLines, readFailure, resetIn, setLevers, tokensText, verdictOf, type LeverId, type LeverView,
+  periodText, projectionLines, quotaOf, readConsumption, readingLines, readFailure, resetIn, setLevers, tokensText, verdictOf, winRows, type LeverId, type LeverView,
 } from './model.ts';
 import './consumption.css';
 
@@ -117,6 +117,44 @@ function Lever({ lever, busy, onLever }: { readonly lever: LeverView; readonly b
   );
 }
 
+// The harness pick's wins per ticket type (issue #329): a table once a pick
+// has ended, else a line that says none has.
+function Wins({ data, t, language }: { readonly data: Consumption; readonly t: Translate; readonly language: Language }) {
+  const rows = winRows(data.wins, t, language);
+  return (
+    <section className="panel wins" aria-labelledby="wins-title" data-wins={rows.length > 0 ? 'shown' : 'empty'}>
+      <h2 id="wins-title">{t('consumption_wins_title')}</h2>
+      <p className="wins-sub">{t('consumption_wins_sub')}</p>
+      {rows.length > 0 ? (
+        <div className="wins-scroll">
+          <table className="wins-table">
+            <thead>
+              <tr>
+                <th scope="col">{t('consumption_wins_type')}</th>
+                <th scope="col">{t('consumption_wins_agent')}</th>
+                <th scope="col" className="n">{t('consumption_wins_runs')}</th>
+                <th scope="col" className="n">{t('consumption_wins_green')}</th>
+                <th scope="col" className="n">{t('consumption_wins_kept')}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr data-win={row.key} key={row.key}>
+                  <td>{row.type}</td>
+                  <td>{row.harness}</td>
+                  <td className="n num">{row.runs}</td>
+                  <td className="n num">{row.green}</td>
+                  <td className="n num">{row.wins}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : <p className="wins-empty">{t('consumption_wins_empty')}</p>}
+    </section>
+  );
+}
+
 export function ConsumptionView({ data, t, language, now, busy = false, note = '', onLever }: {
   readonly data: Consumption; readonly t: Translate; readonly language: Language; readonly now: Date;
   readonly busy?: boolean; readonly note?: string; readonly onLever?: (change: LeversChange) => void;
@@ -135,8 +173,11 @@ export function ConsumptionView({ data, t, language, now, busy = false, note = '
         <p className="consumption-period">{periodText(data.days, language)}</p>
       </header>
       <div className="consumption-grid">
-        <div className="harnesses" role="list" aria-label={t('consumption_harnesses_label')}>
-          {data.harnesses.map((h) => <div role="listitem" key={h.harness}><HarnessCard h={h} data={data} t={t} language={language} /></div>)}
+        <div className="main-col">
+          <div className="harnesses" role="list" aria-label={t('consumption_harnesses_label')}>
+            {data.harnesses.map((h) => <div role="listitem" key={h.harness}><HarnessCard h={h} data={data} t={t} language={language} /></div>)}
+          </div>
+          <Wins data={data} t={t} language={language} />
         </div>
         <aside className="side" aria-labelledby="limits-title">
           <section className="panel limits">

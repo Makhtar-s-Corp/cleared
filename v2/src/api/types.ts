@@ -306,19 +306,34 @@ export type TicketVariant = {
   readonly costUsd: number | null;
   readonly minutes: number | null;                          // how long its session ran
   readonly note: string | null;
+  // The harness pick (issue #329): the variant's harness, its own last run
+  // of the declared test command (null before it ended, or in plain
+  // variants), and its tokens (null when the harness reports none).
+  readonly harness: Harness;
+  readonly tests: TestOutcome | null;
+  readonly tokens: number | null;
 };
+export type TestOutcome = 'passed' | 'failed' | 'unclear' | 'not_run';
 export const VARIANTS_MIN = 2;
 export const VARIANTS_MAX = 4;
 export const VARIANT_DIFF_MAX = 64 * 1024;
 
 // The variants waiting for the owner's choice: added once one is done,
-// updated as the others end. `outcome` says which one the owner chose.
+// updated as the others end. `outcome` says which one the owner chose; in
+// a harness pick (`pick`, issue #329), the one the flow kept by itself,
+// `by` the service and `measure` what made it the cheapest.
 export type VariantsItem = InboxBase & {
   readonly kind: 'variants';
   readonly round: number;                                   // the ticket's run of variants, from 1
   readonly variants: readonly TicketVariant[];
-  readonly outcome: { readonly chosen: number; readonly by: UserId; readonly at: string } | null;
+  readonly pick?: boolean;
+  readonly outcome: { readonly chosen: number; readonly by: UserId; readonly at: string; readonly measure?: 'tokens' | 'time' } | null;
 };
+
+// The harness pick's wins (issue #329), per ticket type and harness, on the
+// Consumption screen: the variants that ran, those whose tests passed, those kept.
+export type TicketType = 'bug' | 'review' | 'ci' | 'question' | 'other';
+export type HarnessWins = { readonly type: TicketType; readonly harness: Harness; readonly runs: number; readonly green: number; readonly wins: number };
 
 export type InboxItem = PermissionItem | QuestionItem | ReleaseItem | PlanItemInbox;
 // The kinds of the replanned milestone 2, which the inbox store keeps and
@@ -624,7 +639,8 @@ export type SendMessageBody = { readonly text: string };
 export type AnswerBody = { readonly decision: Decision };
 // services: the names of the workspace's services the ticket touches (lane 14).
 // `variants`: 2 to 4 authors at once on a one-service ticket (issue #271); absent or 1, one author.
-export type CreateTicketBody = { readonly title: string; readonly body?: string; readonly labels?: readonly string[]; readonly project: string; readonly services?: readonly string[]; readonly variants?: number };
+// `harnesses`: the harness pick (issue #329), a variant per harness named, 2 to 4; `variants`, if given, says as many.
+export type CreateTicketBody = { readonly title: string; readonly body?: string; readonly labels?: readonly string[]; readonly project: string; readonly services?: readonly string[]; readonly variants?: number; readonly harnesses?: readonly Harness[] };
 export type ChooseVariantBody = { readonly variant: number };   // the position of the variant to review
 
 // A batch of tickets (requirement C6, flow/batch.ts): 2 to 20 new tickets
