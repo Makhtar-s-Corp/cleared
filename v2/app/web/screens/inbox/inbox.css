@@ -5,7 +5,7 @@
 .inbox { --ok-text: #15803D; --after-ring: rgba(22,163,74,.6); --device-ring: rgba(0,0,0,.1); --awaiting-highlight: #FCE2B3; --field-ring: 0 0 0 1px rgba(0,0,0,.42); --option-ring: 0 0 0 1px rgba(0,0,0,.24); }
 :root[data-theme="dark"] .inbox { --ok-text: var(--success); --after-ring: rgba(61,208,104,.6); --device-ring: rgba(255,255,255,.16); --awaiting-highlight: #4A3612; --field-ring: 0 0 0 1px rgba(255,255,255,.4); --option-ring: 0 0 0 1px rgba(255,255,255,.26); }
 
-.inbox { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: 20px; align-items: start; padding: 20px 28px 28px; }
+.inbox { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: var(--space-4); align-items: start; padding: var(--space-3) var(--space-4) var(--space-4); }
 .inbox.empty-inbox { grid-template-columns: minmax(0, 560px); }
 .inbox-loading { min-height: 60vh; }
 .inbox-error { padding: 20px 28px; max-width: 560px; }
@@ -31,15 +31,19 @@
 /* the keyboard's ring inside the row, so it never crosses the row's answers under it */
 .items a.item:focus-visible { outline-offset: -2px; }
 .item-head { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
-.chip { color: var(--awaiting-text); font-weight: var(--weight-strong); white-space: nowrap; }   /* one amber signal: the kind of what waits */
+/* The kind of what waits, in words, and one amber dot before it: the column is calm, the dot still says it waits
+   (P227, the critique: every row's word in amber made the whole list amber). */
+.chip { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-weight: var(--weight-strong); white-space: nowrap; }
+.item:not(.handled) .chip:not([class*="train-chip"])::before { content: ""; width: 6px; height: 6px; border-radius: 50%; flex: none; background: var(--awaiting); }
 .since { margin-left: auto; color: var(--text-faint); white-space: nowrap; }
 .item-title { font-size: var(--text-md); font-weight: var(--weight-strong); line-height: 1.35; overflow-wrap: anywhere; }
 .item-line { font-size: var(--text-sm); color: var(--text-muted); overflow-wrap: anywhere; }
 /* a request that waits, from 1280 px: its three answers under its line, on the row's left edge */
 .items > li.with-answers { padding-bottom: var(--space-2); }
 .row-answers { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: 0 var(--space-2); }
-.row-answer { min-height: 28px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); color: var(--text); font-size: var(--text-sm); cursor: pointer; white-space: nowrap; }
-.row-answer:hover { background: var(--tab-fill); }
+.row-answer { min-height: 28px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--tab-fill); color: var(--text-secondary); font-size: var(--text-sm); cursor: pointer; white-space: nowrap; }
+.row-answer:hover { background: var(--selected); color: var(--text); }
+@media (pointer: coarse) { .row-answer { min-height: 44px; } }
 /* what no longer waits: folded under what does, lighter once opened */
 .group-toggle { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 28px; margin-left: calc(-1 * var(--space-1)); padding: 0 var(--space-1); border: 0; border-radius: var(--radius); background: transparent; color: inherit; font: inherit; cursor: pointer; }
 .group-toggle:hover { background: var(--tab-fill); color: var(--text); }
@@ -51,7 +55,7 @@
 
 /* the detail */
 .detail:focus { outline: 2px solid transparent; }
-.detail { position: sticky; top: 76px; display: flex; flex-direction: column; height: calc(100vh - 96px); min-height: 520px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); overflow: hidden; min-width: 0; }
+.detail { position: sticky; top: 72px; display: flex; flex-direction: column; height: calc(100vh - 88px); min-height: 520px; border-radius: 12px; background: var(--surface); box-shadow: var(--e-card); overflow: hidden; min-width: 0; }
 .back { display: none; }
 .d-body { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-3) var(--space-4) var(--space-4); }
 .d-eyebrow { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-1); font-size: var(--text-sm); }
@@ -69,7 +73,7 @@
 .d-deadline { margin: var(--space-2) 0 0; color: var(--awaiting-text); font-size: var(--text-md); }
 .d-ticket.for-question::before { content: ""; display: block; width: 56px; height: 3px; margin-bottom: 8px; background: var(--awaiting); }
 .d-body > .facts:last-child { padding-top: 14px; border-top: 1px solid var(--hairline); }
-.announce { padding: 12px 14px; border-radius: 10px; background: var(--canvas); box-shadow: var(--e-outline); color: var(--text-secondary); }
+.announce { padding: 12px 14px; border-radius: var(--radius); background: var(--sunken); color: var(--text); }
 
 .shots-head { display: flex; align-items: center; gap: 8px; margin: 22px 0 10px; }
 .shots-head h3 { font-size: var(--text-md); font-weight: var(--weight-strong); }
@@ -240,7 +244,7 @@
 .knowledge-text { margin-top: 4px; color: var(--text); font-size: var(--text-md); }
 
 /* the gestures */
-.d-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px 22px 18px; border-top: 1px solid var(--hairline); background: var(--surface); flex: none; }
+.d-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 12px var(--space-4); border-top: 1px solid var(--hairline); background: var(--surface); flex: none; }
 .signed { font-size: var(--text-sm); color: var(--text-faint); }
 .d-buttons { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; }
 .btn { display: inline-flex; flex-direction: column; align-items: center; justify-content: center; min-width: 160px; min-height: 44px; padding: 4px 18px; border: 0; border-radius: 10px; background: var(--surface); box-shadow: var(--e-control); color: var(--text); cursor: pointer; line-height: 1.25; }
@@ -263,6 +267,17 @@ a.btn, a.btn:hover { text-decoration: none; }
 .grace-fill { height: 100%; background: var(--ink); transform-origin: left center; transition: transform 1s linear; }
 .grace-text { min-width: 110px; font-size: var(--text-md); color: var(--text-secondary); white-space: nowrap; }
 .grace .btn { min-width: 120px; }
+
+/* A computer with a mouse (lane j3-visual-redesign, P227): the detail's buttons are a computer's, 36 px, each label
+   on one line with Approve's commit beside it; the touch screens and every width under 1024 keep 44. */
+@media (min-width: 1024px) and (pointer: fine) {
+  .d-buttons { gap: var(--space-2); }
+  .btn { flex-direction: row; gap: var(--space-2); min-width: 0; min-height: 36px; padding: 0 var(--space-3); border-radius: var(--radius); }
+  .btn[data-act="approve"], .btn[data-act="approve_plan"] { min-width: 0; }
+  .grace .btn { min-width: 0; }
+  .row-answer { min-height: 28px; }
+  .d-actions .deny-reason input { height: 36px; }
+}
 
 /* tablet and phone: the detail is a page of its own */
 @media (max-width: 1023px) {

@@ -9,7 +9,8 @@
 // every screen's translator holds. Pure, so the tests run it under Node;
 // app/test/time.test.ts is its table, and web/test/durations.test.tsx reads
 // every screen for a duration in minutes above 59. The app's numbers go
-// through here too (fixed, count, decimal). Two dates do not: the tower's
+// through here too (fixed, count, decimal), and a moment of the coming week,
+// its weekday and its clock ("mar. 9 h 59", "Tue 9:59"). Two dates do not: the tower's
 // next scheduled run names its weekday through Date.toLocaleDateString and
 // the Lead's thread its day and month through Intl.DateTimeFormat, in the
 // page's language, Intl as well, but outside this file.
@@ -97,6 +98,27 @@ export function ago(at: string, now: Date, t: Translate): string {
   if (days <= 0) return t('time_ago', { time: t('time_hours', { h: number(Math.floor(minutes / HOUR), t) }) });
   if (days === 1) return yesterday(locale(t));
   return t('time_ago', { time: t('time_days', { d: number(days, t) }) });
+}
+
+// A moment of the coming week in the person's zone: its weekday and its clock, "mar. 9 h 59" in French,
+// "Tue 9:59" in English (the sidebar's quota gauge, P227). One formatter per language and zone; an unknown
+// zone reads as UTC.
+const weekdays = new Map<string, Intl.DateTimeFormat>();
+function weekdayFormat(language: 'en' | 'fr', zone: string): Intl.DateTimeFormat {
+  const key = `${language} ${zone}`;
+  let made = weekdays.get(key);
+  if (!made) {
+    const options: Intl.DateTimeFormatOptions = { weekday: 'short', hour: 'numeric', minute: '2-digit', hourCycle: 'h23' };
+    try { made = new Intl.DateTimeFormat(language, { ...options, timeZone: zone }); }
+    catch { made = new Intl.DateTimeFormat(language, { ...options, timeZone: 'UTC' }); }
+    weekdays.set(key, made);
+  }
+  return made;
+}
+export function weekdayClock(iso: string, zone: string, t: Translate): string {
+  const parts = weekdayFormat(locale(t), zone).formatToParts(new Date(iso));
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((p) => p.type === type)?.value ?? '';
+  return t('time_weekday_clock', { day: part('weekday'), h: String(Number(part('hour'))), m: part('minute') });
 }
 
 // 09:05.

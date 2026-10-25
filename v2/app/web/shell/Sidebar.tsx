@@ -2,11 +2,11 @@
 // workspace at the head with the button that folds it ([), the search that
 // opens the palette, the four screens with the inbox's count, the lead's
 // dot and their chords, the live sessions grouped by state, and at the foot
-// the sample-data line, the person, the notifications and the theme. Open
+// the quota gauge, the sample-data line, the person, the notifications and the theme. Open
 // on a computer, a rail of icons on a tablet or when folded, a top bar and
 // a bottom bar on a phone (styles/app.css).
 import { Broadcast, Gauge, ListChecks, MagnifyingGlass, Moon, SidebarSimple, Sun, TerminalWindow, Tray, type Icon } from '@phosphor-icons/react';
-import { memo } from 'react';
+import { memo, useState } from 'react';
 import { Button } from '@/components/ui/button.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.tsx';
 import { Toggle } from '@/components/ui/toggle.tsx';
@@ -19,6 +19,8 @@ import { keyLabel } from './keys.ts';
 import { Logo } from './Logo.tsx';
 import { inboxBadge, NAV, type LeadDot, type SessionGroup, type SidebarMode, type Theme } from './model.ts';
 import { NotifyButton } from './NotifyButton.tsx';
+import type { WeeklyQuota } from './quota.ts';
+import { weekdayClock } from '@/lib/time.ts';
 
 const LANGUAGES: readonly Language[] = ['fr', 'en'];
 
@@ -39,6 +41,8 @@ export type SidebarProps = {
   readonly waiting: number | null;
   readonly lead: LeadDot;
   readonly groups: readonly SessionGroup[];
+  readonly quota?: WeeklyQuota | null;                    // the week's quota, null until the shell has read it
+  readonly zone?: string;                                 // the person's time zone, for the reset
   readonly theme: Theme;
   readonly onTheme?: () => void;
   readonly language?: Language;
@@ -57,8 +61,37 @@ export function ThemeButton({ t, theme, onFlip }: { readonly t: Translate; reado
   );
 }
 
+// The week's quota at the sidebar's foot (the product owner's decision of 2026-10-25, 11:14, P227): its percent in
+// the Consumption screen's verdict colour, its reset as a weekday and a clock, the whole a link to Consumption, read
+// out with its percent and its reset. Folded, the bar alone, its words in its tooltip. On a phone (the owner's answer
+// of 12:20), in the top bar: the percent alone over the bar, a 44 px target; the gauge's icon when nothing is measured.
+export function QuotaGauge({ t, quota, zone, current, onPick }: { readonly t: Translate; readonly quota: WeeklyQuota; readonly zone: string; readonly current: boolean; readonly onPick?: (href: string) => void }) {
+  const when = quota.kind === 'measured' ? weekdayClock(quota.resetsAt, zone, t) : '';
+  const name = quota.kind === 'measured' ? t('quota_name', { percent: quota.percent, when }) : t('quota_name_none');
+  return (
+    <a className="quota-gauge" id="quota-gauge" href="/consumption" data-verdict={quota.kind === 'measured' ? quota.verdict : 'none'} aria-label={name} data-tip={name}
+      aria-current={current ? 'page' : undefined} onClick={() => onPick?.('/consumption')}>
+      {/* Its words are its name's own, in the same order (WCAG 2.5.3, label in name). */}
+      <span className="quota-gauge-head" aria-hidden="true">
+        <span className="quota-gauge-label">{t('quota_label')}</span>{' '}
+        <span className="quota-gauge-percent">{quota.kind === 'measured' ? t('quota_percent', { percent: quota.percent }) : t('quota_none')}</span>
+      </span>
+      {quota.kind === 'measured'
+        ? <span className="quota-gauge-short" aria-hidden="true">{t('quota_short', { percent: quota.percent })}</span>
+        : <Gauge className="quota-gauge-icon" size={16} aria-hidden="true" />}
+      {quota.kind === 'measured' ? (
+        <>
+          <progress className="quota-gauge-bar" max={100} value={Math.min(100, quota.percent)} aria-hidden="true" />{' '}
+          <span className="quota-gauge-reset" aria-hidden="true">{t('quota_resets', { when })}</span>
+        </>
+      ) : null}
+    </a>
+  );
+}
+
 export const Sidebar = memo(function Sidebar(props: SidebarProps) {
   const { t, mode, screen } = props;
+  const [menu, setMenu] = useState(false);
   const badge = inboxBadge(props.waiting);
   const signedIn = t('signed_in_as', { name: props.userName });
   const folded = mode === 'rail';
@@ -123,11 +156,12 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
         </div>
       ) : null}
       <div className="side-foot">
+        {props.quota ? <QuotaGauge t={t} quota={props.quota} zone={props.zone ?? 'UTC'} current={screen === 'consumption'} onPick={props.onPick} /> : null}
         {/* The lead's state in words: its dot beside Plans alone read as a plan running (art director, item 14). */}
         {props.lead === 'unknown' ? null : <p className="lead-status" id="lead-status"><span className="lead-dot" data-lead={props.lead} aria-hidden="true" />{t(`side_lead_${props.lead}`)}</p>}
         {props.source === 'fixtures' ? <p className="source-pill"><span className="long">{t('source_fixtures')}</span><span className="short">{t('source_fixtures_short')}</span></p> : null}
         <div className="side-foot-row">
-          <Popover>
+          <Popover open={menu} onOpenChange={setMenu}>
             <PopoverTrigger asChild>
               <button type="button" className="person" id="person" aria-label={signedIn} data-tip={signedIn}>
                 <span className="avatar" aria-hidden="true">{props.userName.slice(0, 1).toUpperCase()}</span><span className="name">{props.userName}</span>
@@ -143,6 +177,8 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
                   <Toggle key={language} lang={language} data-language={language} pressed={props.language === language} onPressedChange={() => props.onLanguage?.(language)}>{t(`language_${language}`)}</Toggle>
                 ))}
               </div>
+              {/* Consumption, from the settings too: it left the sidebar's screens (P227). */}
+              <a className="plain menu-link" href="/consumption" onClick={() => setMenu(false)}>{t('nav_consumption')}</a>
               <Button className="plain" id="sign-out" onClick={props.onSignOut}>{t('sign_out')}</Button>
             </PopoverContent>
           </Popover>

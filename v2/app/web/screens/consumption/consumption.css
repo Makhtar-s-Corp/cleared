@@ -4,24 +4,34 @@
    own colour (--harness-*); amber is for what waits for the person, so the
    limit that will be reached is drawn in the danger text colour. */
 
-.consumption { max-width: 1120px; margin: 0 auto; padding: 24px 32px 48px; }
+.consumption { max-width: 1120px; margin: 0 auto; padding: var(--space-4) 32px 48px; }
 
-.consumption-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: 20px; }
-.consumption-eyebrow { margin: 0 0 6px; color: var(--text-muted); font-size: var(--text-sm); text-transform: uppercase; letter-spacing: 0.04em; }
+/* The period, the title, the line under it; the dates at the right (the product owner's reference). The period is a
+   line of the head in sentence case, never capitals spaced out (DESIGN.md, section 3; P227). */
+.consumption-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: var(--space-4); }
+.consumption-eyebrow { margin: 0 0 var(--space-1); color: var(--text-muted); font-size: var(--text-sm); }
 .consumption-head h1 { margin: 0; font-size: var(--text-lg); font-weight: var(--weight-strong); letter-spacing: -0.035em; line-height: 1.25; text-wrap: balance; }
 .consumption-sub { margin: 4px 0 0; color: var(--text-muted); font-size: var(--text-md); }
 .consumption-period { margin: 0; color: var(--text-muted); font-size: var(--text-md); font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-.consumption-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr); gap: 16px; align-items: start; }
+.consumption-grid { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
 .main-col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .harnesses { display: flex; flex-direction: column; gap: 12px; }
 .side { display: flex; flex-direction: column; gap: 12px; }
 
-.harness, .panel { padding: 16px 18px; border-radius: 12px; background: var(--surface); box-shadow: var(--e-card); }
-.harness-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: 12px; }
+.harness, .main-col > .panel { padding: 16px 18px; border-radius: 12px; background: var(--sunken); }
+/* The right column: the limits, the cost and the levers as sections of the page, a hairline between them. */
+.side > .panel { padding: 0; }
+.side > .panel + .panel { padding-top: var(--space-3); border-top: 1px solid var(--hairline); }
+.harness-head { display: flex; flex-direction: column; gap: 2px; margin-bottom: var(--space-3); }
 .harness-name { display: flex; align-items: center; gap: 8px; margin: 0; font-size: var(--text-md); font-weight: var(--weight-strong); }
 .harness-maker { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
 .harness-body { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; }
+/* The figures on the left, the curve beside them from the card's top (the reference). */
+.harness[data-used="yes"] { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.2fr); column-gap: var(--space-4); }
+.harness[data-used="yes"] .harness-body { display: contents; }
+.harness[data-used="yes"] .harness-figures { align-self: end; }
+.harness[data-used="yes"] .curve { grid-column: 2; grid-row: 1 / span 2; }
 .harness-tokens { margin: 0; display: flex; align-items: baseline; gap: 6px; }
 .harness-tokens .num { font-size: var(--text-lg); font-weight: var(--weight-strong); letter-spacing: -0.03em; font-variant-numeric: tabular-nums; }
 .harness-tokens .unit { color: var(--text-muted); font-size: var(--text-md); }
@@ -41,7 +51,7 @@
 .panel h2 { margin: 0; font-size: var(--text-md); font-weight: var(--weight-strong); }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .chip { display: inline-flex; align-items: center; min-height: 24px; padding: 0 10px; border-radius: 999px; box-shadow: var(--e-outline); color: var(--text-secondary); font-size: var(--text-sm); white-space: nowrap; }
-.chip.warn { color: var(--danger-text); }
+.chip.warn { background: var(--sunken); box-shadow: none; color: var(--danger-text); }
 .headline { margin: 0 0 14px; color: var(--text); line-height: 1.5; text-wrap: pretty; }
 
 .quotas { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; padding-top: 12px; border-top: 1px solid var(--hairline); }
@@ -49,12 +59,12 @@
 .quota-head { display: flex; justify-content: space-between; gap: 8px; margin: 0; font-size: var(--text-sm); }
 .quota-name { margin: 0; font-weight: var(--weight-strong); }
 .quota-used { color: var(--text-muted); font-variant-numeric: tabular-nums; }
-.quota-bar { appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 6px; border: 0; border-radius: 999px; background: var(--surface-muted); overflow: hidden; }
-.quota-bar::-webkit-progress-bar { background: var(--surface-muted); }
+.quota-bar { appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 4px; border: 0; border-radius: 999px; background: var(--hairline); overflow: hidden; }
+.quota-bar::-webkit-progress-bar { background: var(--hairline); }
 .quota-bar::-webkit-progress-value { background: var(--stage-progress); border-radius: 999px; }
 .quota-bar::-moz-progress-bar { background: var(--stage-progress); border-radius: 999px; }
-.quota[data-verdict="hit"] .quota-bar::-webkit-progress-value { background: var(--danger); }
-.quota[data-verdict="hit"] .quota-bar::-moz-progress-bar { background: var(--danger); }
+.quota[data-verdict="hit"] .quota-bar::-webkit-progress-value { background: var(--danger-text); }
+.quota[data-verdict="hit"] .quota-bar::-moz-progress-bar { background: var(--danger-text); }
 .quota-reset { display: flex; gap: 6px; margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
 .quota-line { margin: 0; font-size: var(--text-sm); line-height: 1.45; color: var(--text-secondary); text-wrap: pretty; }
 .quota[data-verdict="hit"] .quota-line[data-projection="before"] { color: var(--danger-text); }
@@ -75,17 +85,24 @@
 .cost-source { margin: 10px 0 0; padding-top: 10px; border-top: 1px solid var(--hairline); color: var(--text-faint); font-size: var(--text-sm); text-wrap: pretty; }
 
 .levers-label { margin: 2px 0 12px; color: var(--text-muted); font-size: var(--text-sm); }
-.lever-list { display: flex; flex-direction: column; gap: 8px; margin: 0; padding: 0; list-style: none; }
-.lever { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; padding: 12px 14px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); }
-.lever[data-active="yes"] { box-shadow: 0 0 0 1px var(--ink); }
+.lever-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+.lever { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 4px 12px; padding: var(--space-3) 0; }
+.lever + .lever { border-top: 1px solid var(--hairline); }
+.lever:first-child { padding-top: var(--space-1); }
+.lever:last-child { padding-bottom: 0; }
 .lever-icon { grid-row: 1; display: inline-flex; align-items: center; color: var(--text-secondary); padding-top: 2px; }
 .lever-title { margin: 0; font-weight: var(--weight-strong); }
 .lever-detail { margin: 2px 0 0; color: var(--text-muted); font-size: var(--text-sm); text-wrap: pretty; }
 .lever-state { margin: 6px 0 0; color: var(--text-secondary); font-size: var(--text-sm); }
 .lever-choices { grid-column: 2; display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.choice { display: inline-flex; align-items: center; min-height: 32px; padding: 0 12px; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); color: var(--text); font-size: var(--text-md); }
-.choice:hover:not(:disabled) { background: var(--surface-muted); }
-.choice[aria-pressed="true"], .choice[data-state="on"] { background: var(--ink); color: var(--on-ink); box-shadow: none; }
+.choice { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 32px; padding: 0 12px 0 10px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); color: var(--text); font-size: var(--text-md); }
+.choice::before { content: ""; flex: none; width: 14px; height: 14px; border-radius: 50%; box-shadow: inset 0 0 0 1.5px var(--dashed); }
+.choice:hover:not(:disabled) { background: var(--tab-fill); }
+.choice[aria-pressed="true"], .choice[data-state="on"] { box-shadow: 0 0 0 1.5px var(--ink); }
+/* A lever of one button (Pause, Resume) is an action, not a choice among options: no mark. */
+.choice:only-child { padding: 0 12px; }
+.choice:only-child::before { content: none; }
+.choice[aria-pressed="true"]::before, .choice[data-state="on"]::before { background: var(--ink); box-shadow: inset 0 0 0 1.5px var(--ink), inset 0 0 0 3.5px var(--surface); }
 .choice:disabled { cursor: default; opacity: 0.6; }
 .choice:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .levers-note { margin: 10px 0 0; color: var(--danger-text); font-size: var(--text-sm); }
@@ -112,9 +129,13 @@
 @media (max-width: 1000px) {
   .consumption-grid { grid-template-columns: minmax(0, 1fr); }
 }
+@media (pointer: coarse) { .choice { min-height: 44px; } }
 @media (max-width: 767px) {
   .consumption { padding: 16px 16px 40px; }
   .consumption-head { flex-direction: column; align-items: flex-start; gap: 6px; }
+  .harness[data-used="yes"] { display: block; }
+  .harness[data-used="yes"] .harness-body { display: flex; }
+  .harness[data-used="yes"] .harness-figures { align-self: auto; }
   .harness-body { flex-direction: column; align-items: stretch; }
   .curve { flex-basis: auto; }
   .choice { min-height: 44px; }

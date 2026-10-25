@@ -7,7 +7,7 @@
 :root[data-theme="dark"] .session { --code-keyword: #C9A2FF; --code-string: #7EE2A0; --code-comment: #8F8F8F; --code-number: #F7B955; --code-function: #79B8FF; --code-definition: #EDEDED; --code-property: #B8B8B8; }
 
 
-.session { display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; gap: 18px; padding: 16px 28px 24px; align-items: start; }
+.session { display: grid; grid-template-columns: 260px minmax(0, 1fr) 300px; gap: var(--space-4); padding: var(--space-3) var(--space-4) var(--space-4); align-items: start; }
 /* The Editor open on a wide screen (lane 38, the critique): the ticket's column steps aside and the diff takes its
    width, as a review pane would; Changes and Checks stay on the right. */
 @container screen (min-width: 1160px) {
@@ -17,8 +17,13 @@
 /* The screen's own width decides the columns, since the sidebar (lane 35) takes
    its share of the window, open or folded: three from 1160 px, then two. */
 #screen:has(> [data-session-view] .session, > .session) { container: screen / inline-size; }
-.s-left, .s-right { display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.s-left, .s-right { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding-top: var(--space-2); }
 .card { padding: 16px; border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); }
+/* Beside the thread, the ticket and its facts lie on the page, as a review pane's sections: a hairline parts them,
+   and the thread is the one framed surface (lane j3-visual-redesign, P227). */
+:is(.s-left, .s-right) > .card { padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
+:is(.s-left, .s-right) > .card + .card { padding-top: var(--space-3); border-top: 1px solid var(--hairline); }
+.s-left > .card:first-child .card-title { font-size: var(--text-lg); letter-spacing: -.02em; line-height: 1.3; }
 .eyebrow { margin-bottom: 4px; font-size: var(--text-sm); color: var(--text-faint); }
 .card-title { text-wrap: balance; margin-bottom: 8px; font-size: var(--text-md); font-weight: var(--weight-strong); line-height: 1.35; letter-spacing: -.01em; overflow-wrap: anywhere; }
 .desc { font-size: var(--text-md); color: var(--text-secondary); } .desc + .desc { margin-top: 8px; }
@@ -60,7 +65,7 @@
 .changes .link-button:hover { color: var(--link); }
 
 /* the conversation */
-.panel { container: panel / inline-size; display: flex; flex-direction: column; min-height: 520px; height: calc(100vh - 96px); border-radius: 10px; background: var(--surface); box-shadow: var(--e-outline); overflow: hidden; }
+.panel { container: panel / inline-size; display: flex; flex-direction: column; min-height: 520px; height: calc(100vh - 96px); border-radius: 12px; background: var(--surface); box-shadow: var(--e-card); overflow: hidden; }
 .panel-head { display: grid; grid-template-columns: 8px minmax(0, 1fr) auto; align-items: center; column-gap: 8px; row-gap: 2px; padding: 12px 16px; border-bottom: 1px solid var(--hairline); flex: none; }
 /* The status's phrase, its meta under it, Take over beside both (lane 36's art director). */
 .panel-head .phrase-title { min-width: 0; }
@@ -152,20 +157,23 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .request-fold .request-why { margin: var(--space-2) 0 0; }
 @media (max-width: 767px) { .request-fold > summary { min-height: 44px; align-items: center; } }
 .request-actions .btn { flex: 1 1 auto; }
-.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 36px; padding: 0 14px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); font-size: var(--text-md); cursor: pointer; white-space: nowrap; }
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); font-size: var(--text-md); cursor: pointer; white-space: nowrap; }
 .btn:hover:not(:disabled) { background: var(--tab-fill); }
 .btn.primary { background: var(--ink); color: var(--on-ink); box-shadow: none; font-weight: var(--weight-strong); }
 .btn.primary:hover:not(:disabled) { background: var(--ink); opacity: .88; }
 .btn:disabled { opacity: .45; cursor: default; }
+/* Send with nothing to send: a quiet button, not a faded ink block (P227, the critique). */
+.btn.primary:disabled { opacity: 1; background: var(--surface-muted); box-shadow: var(--e-outline); color: var(--text-faint); }
 .btn[aria-disabled="true"] { color: var(--text-secondary); cursor: default; }
 .btn[aria-disabled="true"]:hover { background: var(--surface); }
 .panel-foot { padding: 12px 16px; border-top: 1px solid var(--hairline); flex: none; }
 .composer { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.composer input { flex: 1 1 200px; min-width: 0; height: 40px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); }
+.composer input { flex: 1 1 100%; min-width: 0; height: 40px; padding: 0 12px; border: 0; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); }
+#send { margin-left: auto; }
 .composer input::placeholder { color: var(--text-faint); }   /* 4.5:1 at least in both themes (lane 36's audit) */
 .composer input:focus { outline: 2px solid transparent; box-shadow: 0 0 0 2px var(--link); }
 .composer input:disabled { background: var(--sunken); }
-.composer .btn { min-height: 40px; }
+.composer .btn { min-height: 32px; }
 /* Interrupt is a word on a computer and an icon on a phone, its word read out (lane 38, the critique). */
 .composer #interrupt { gap: 6px; }
 .composer #interrupt svg { display: none; }
@@ -383,11 +391,10 @@ details.row .what > .sub { margin: 0 0 0 auto; }
   .view-tab, .file-pick, .thread-filter .filter, .checks summary, .checks > li:not(:has(details)) { min-height: 44px; }
   /* The thread is pinned to the window down to 1101 px; below, the panel is a column of the page. */
   .panel { height: auto; max-height: calc(100vh - 132px); }
-  .view-tabs { flex: 1; }
+  .view-tabs { flex: 0 1 auto; }
   .link-button { display: inline-flex; align-items: center; min-height: 44px; }
   .mode button { min-height: 36px; }
   .composer input { height: 44px; flex-basis: 100%; }
-  #send { margin-left: auto; }
 }
 @media (max-width: 767px) {
   .session { grid-template-columns: minmax(0, 1fr); grid-template-areas: "panel" "left" "right"; padding: 12px 16px 28px; }
@@ -471,6 +478,8 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 /* Touch: the file links and the step details' links are 44 px tall, the rows kept tight (lane 38's art director). */
 @media (pointer: coarse) {
   .link-button { display: inline-flex; align-items: center; min-height: 44px; margin-block: -10px; }
+  /* A touch screen at any width: the computer's 32 px buttons are 44 (P227, the art director). */
+  .btn, .composer .btn { min-height: 44px; }
 }
 
 /* Close, on the ticket card (issue #249) */
