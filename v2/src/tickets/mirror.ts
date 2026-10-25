@@ -57,11 +57,14 @@ export type Side = { readonly status: string; readonly kind: 'human' | 'agents';
 export type Verdict = 'none' | 'agree' | 'push' | 'pull';
 
 // push: the app's state is written on the tracker; pull: the tracker's in
-// the app. A remote of null is a state the app does not have: no change.
+// the app. A remote of null is a state the app does not have (closed as not
+// planned, Canceled): it is never written in the app, and since a person
+// may have put it there, only the owner's change is written over it.
 export function decide(input: { readonly agreed: string; readonly local: Side; readonly remote: Side | null }): Verdict {
   const { agreed, local, remote } = input;
   const localChanged = local.status !== agreed;
-  const remoteChanged = remote !== null && remote.status !== agreed;
+  if (remote === null) return localChanged && local.kind === 'human' ? 'push' : 'none';
+  const remoteChanged = remote.status !== agreed;
   if (!remoteChanged) return localChanged ? 'push' : 'none';
   if (!localChanged) return 'pull';
   if (local.status === remote.status) return 'agree';

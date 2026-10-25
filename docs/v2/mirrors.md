@@ -41,8 +41,9 @@ Not mirrored: later edits of a title or a body, comments, assignees, Linear's la
 6. **What a tracker never does through the mirror**, whoever makes the change:
    - It never approves. Moving an issue to `Ready to Ship` is not the owner's approval, which is given in the app only, so it is not applied. The tracker is put back to the app's state, and a comment on the issue says why.
    - It never moves a ticket the owner approved, or one whose release is landing. The answer is the same: put back, with a comment.
-   - It never starts a session. A ticket moved to `Todo` on the tracker waits in the app's Todo until someone starts it in the app.
-7. **A ticket the flow is working on.** A person's move on the tracker wins here too. The flow first sets the ticket aside, as the app's Set aside does: its sessions stop and nothing of it waits in the Inbox. Then the person's state is written. The note on the ticket names who moved it and where.
+   - It never starts a session by itself. A ticket moved to `Todo` on the tracker waits in the app's Todo until someone starts it in the app. A ticket of a plan the owner approved goes on as that plan says: the plan's runner may start it again once it is back in Todo, as it does after a move in the app.
+7. **A tracker in a state the app does not have.** Closed as not planned, Canceled, Backlog: a person may have put it there, so an agent's change in the app is not written over it. The owner's change is. The app's state does not change either, since it has no such state.
+8. **A ticket the flow is working on.** A person's move on the tracker wins here too. The flow first sets the ticket aside, as the app's Set aside does: its sessions stop and nothing of it waits in the Inbox. Then the person's state is written. The note on the ticket names who moved it and where.
 
 Times are compared as each side stamps them: the app with this server's clock, the tracker with its own. A gap between the two clocks bigger than the time between two people's changes can change who wins.
 
@@ -61,4 +62,6 @@ The tables are in the service's ledger: `mirror_trackers` (each tracker's first 
 - Tests: `v2/test/tickets/mirror-rule.test.ts` (the rule), `mirror.test.ts` (the pass on the real ticket store), `mirror-github.test.ts` and `mirror-linear.test.ts` (each tracker against a fake of its API), and `mirror-proof.test.ts` (milestone 4's proof, the mirrors' steps, on both).
 - GitHub ran for real once, on the example repository: the pull request of issue #381 quotes the run.
 - Linear has run against a fake only. A real trial needs a Linear account and a key, and that trial is the owner's to run. Until it has run, one thing is unknown: how Linear shows an OAuth application acting as itself (`actor=app`) in an issue's history. Such a change reads as an agent's.
+- The real GitHub run was a one-off script; there is no `doctor` section for the mirrors yet.
+- An open page of the app does not redraw on a mirror's change: the app's change stream follows the flow's events, and the mirror writes in the store. The change shows at the next redraw (another change, or a reload).
 - Known limit: if the service stops between the tracker's creation of an issue and the mirror's record of it, the next pass creates the issue again.

@@ -190,10 +190,10 @@ test('a person who put the issue in a state the app does not have is not undone 
   assert.equal(s.tracker.status(issue), null);
   assert.deepEqual(s.tracker.calls.filter((c) => c.startsWith('move')), []);
   s.clock.tick();
-  await s.store.move(ticket.id, 'Todo', HUMAN);
+  await s.store.move(ticket.id, 'In Progress', HUMAN);
   s.clock.tick();
   await s.mirror.pass();
-  assert.equal(s.tracker.status(issue), 'Todo');
+  assert.equal(s.tracker.status(issue), 'In Progress');
 });
 
 test('a stale read of the mirror\'s own earlier write is not a change on the tracker', async () => {

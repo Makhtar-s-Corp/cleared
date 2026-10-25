@@ -6233,7 +6233,8 @@ P227's test of the gauge on a phone still checks that nothing of the top bar ove
 5. **Never through a tracker.**
    - An approval: a move to Ready to Ship is put back, with a comment in `CLEARED_V2_APP_LANGUAGE`.
    - A move of an approved ticket, or of one whose release is landing: put back, with a comment.
-   - A session started: a ticket moved to Todo there waits in the app's Todo, since starting one needs a user of the app.
+   - A session started: a ticket moved to Todo there waits in the app's Todo, since starting one needs a user of the app. A ticket of a plan the owner approved goes on as the plan says: the plan runner (`lead/plans/runner.ts`, `#reconcile`) marks such a ticket ready again, as after a move in the app.
+   - An agent's change over a person's state the app does not have: a tracker closed as not planned, or in Linear's Canceled or Backlog, reads as no state, and only the owner's change is written over it. Found in review: before, an agent's next move reopened the issue.
    - A signed row: the mirror writes as `agents`, `cleared-mirror`. Who made the change on the tracker is kept in `mirror_applied`, and the rule reads it from there.
    - A person's move of a ticket the flow works on goes through `FlowEngine.setAside`, which takes the mirror's words (an optional third argument, the one change to `flow/engine.ts`), then the state is written. When the engine refuses (a landing train), the tracker is put back.
 6. **GitHub.**
@@ -6251,6 +6252,8 @@ P227's test of the gauge on a phone still checks that nothing of the top bar ove
 **Tests first.** `9e35567` committed the tests before any code: the rule, the pass on the real ticket store with a tracker in memory, the two trackers against fakes of GitHub's REST API and Linear's GraphQL API on loopback (port 0), B6.4p's steps 1 to 3 on both, the catalog, and Set aside with given words. On the old code the mirror's files failed to load, and the Set aside test failed: the owner's note was written whatever was given. Two test mistakes were found when the code ran, and fixed in the code's commit:
 - one case of `mirror-rule.test.ts` expected `none` where its own comment described `push`;
 - the Linear test of a long list counted one issue of the test before it, made at the same instant.
+
+After review, `4f0312d` changed one more expectation of the tests first: the rule's case of a tracker in a state the app does not have expected `push` for an agent's move, and now expects `none` (the owner's move still pushes), with a test of the pass beside it; both failed on the code before. That test's last step was itself wrong (the owner moved the ticket back to the agreed state, which is no change) and is corrected in the fix's commit, where it still fails on the code before.
 
 The pinned list of the tickets module's tables in `test/tickets/services.test.ts` now has the mirror's tables after the others.
 
