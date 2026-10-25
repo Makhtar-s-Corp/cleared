@@ -18,8 +18,8 @@ import { ORCH_HOME, expandHome, loadConf, projectDir, section, stateDir } from '
 export const SYSTEM_ROOTS = ['/home/', '/root/', '/srv/', '/tmp/', '/var/', '/etc/', '/opt/', '/usr/', '/mnt/', '/proc/', '/run/'];
 // The folders of this installation, as given and as resolved: Cleared, the project, its state, its lanes, the home folder.
 export function machineFolders() {
-  const out = new Set();
-  const add = (path) => {
+  const out = new Set<string>();
+  const add = (path: unknown) => {
     if (!path || typeof path !== 'string' || !path.startsWith('/') || path === '/') return;
     out.add(path.replace(/\/+$/, ''));
     try { out.add(realpathSync(path).replace(/\/+$/, '')); } catch { /* not there: as given */ }
@@ -30,15 +30,15 @@ export function machineFolders() {
   }
   return [...out].sort((a, b) => b.length - a.length);
 }
-const escape = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const escape = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 const MAX_LINES = 80, MAX_CHARS = 6000;
-export function prReport(text, { folders = machineFolders() } = {}) {
+export function prReport(text: unknown, { folders = machineFolders() }: { folders?: string[] } = {}): string {
   const all = String(text ?? '');
   // A folder of this machine, alone or followed by more of its path; a system root with its slash.
   const roots = [...folders.map((f) => `${escape(f)}(?![\\w.-])`), ...SYSTEM_ROOTS.map(escape)].join('|');
   // The same folders reached by climbing out of a worktree: ../../<name of the checkout>/…
-  const names = [...new Set(folders.map((f) => f.split('/').pop()).filter((n) => n && n.length >= 3))];
+  const names = [...new Set(folders.map((f) => f.split('/').pop()).filter((n) => n && n.length >= 3))] as string[];
   const climbs = names.length ? `|(?:\\.\\./)+(?:${names.map(escape).join('|')})(?![\\w.-])` : '';
   // A path that starts with one of them, with ~/, or a file:// address (always a file of some machine), up to the next blank or closing mark.
   const machine = new RegExp(`(?:\\bfile://|~/|(?<![\\w.~:/\\]-])(?:${roots}${climbs}))[^\\s'"\`)\\]]*`, 'gi');
@@ -57,5 +57,5 @@ export function prReport(text, { folders = machineFolders() } = {}) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  try { process.stdout.write(prReport(readFileSync(process.argv[2], 'utf8'))); } catch { /* no report: nothing */ }
+  try { process.stdout.write(prReport(readFileSync(process.argv[2] as string, 'utf8'))); } catch { /* no report: nothing */ }
 }

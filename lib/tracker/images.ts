@@ -2,7 +2,9 @@ import { readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { resolve, sep } from 'node:path';
 
-export function checkedImage(path, roots) {
+export type CheckedImage = { file: string; bytes: Buffer; mime: 'image/png' | 'image/jpeg'; extension: 'png' | 'jpg' };
+
+export function checkedImage(path: string, roots: string | undefined): CheckedImage {
   const file = realpathSync(path);
   const allowed = (roots || '').split(',').map((item) => item.trim()).filter(Boolean).some((root) => {
     const expanded = root.startsWith('~/') ? resolve(homedir(), root.slice(2)) : resolve(root);

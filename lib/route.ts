@@ -12,8 +12,12 @@
 //   still differs from the author ([review] differs_from_author).
 //   route.ts configured        the models the configuration can start (configuredModels)
 import { loadConf, runAsCommand, section } from './conf.ts';
+import type { Condition, Conf, Model } from './conf.ts';
 
-function known(conf, alias, where) {
+type Task = { role: string; labels: string[]; project: string | null; paths: string[]; prLines: number | null;
+  authorModel: string | null; forced: string | null; lane: string | null };
+
+function known(conf: Conf, alias: string, where: string) {
   const model = conf.models[alias];
   if (!model) {
     throw new Error(`${where}: unknown model "${alias}". Add a line in [models] of agents.conf (and an adapter if the provider is new).`);
@@ -21,7 +25,7 @@ function known(conf, alias, where) {
   return model;
 }
 
-function holds(condition, task) {
+function holds(condition: Condition, task: Task) {
   const { key, op, value } = condition;
   if (key === 'path') {
     return op === '=' && task.paths.some((path) => path.startsWith(value));
@@ -35,17 +39,17 @@ function holds(condition, task) {
   throw new Error(`agents.conf [rules]: unknown condition "${key}" in "${condition.key}${op}${value}"`);
 }
 
-function sameModel(conf, alias, other) {
+function sameModel(conf: Conf, alias: string, other: string | null | undefined) {
   if (!other) return false;
   const model = conf.models[alias];
   return alias === other || model?.model === other || conf.models[other]?.model === model?.model;
 }
 
-export function route(conf, task) {
+export function route(conf: Conf, task: Task) {
   if (conf.missingRules) throw new Error('Missing required [rules] section in project agents.conf');
-  const notes = [];
-  let alias;
-  let rule;
+  const notes: string[] = [];
+  let alias: string | undefined;
+  let rule: string;
   const fast = section(conf, 'fast_lane');
   const authorRole = section(conf, 'review').author_role || 'dev';
   const light = task.lane === 'fast' ? (task.role === 'review' ? fast.review_model : task.role === authorRole ? fast.author_model : '') : '';
@@ -83,9 +87,9 @@ export function route(conf, task) {
     known(conf, alias, '[review] when_same');
   }
 
-  const chain = [];
-  const seen = new Set();
-  let next = alias;
+  const chain: Model[] = [];
+  const seen = new Set<string>();
+  let next: string | undefined = alias;
   while (next && !seen.has(next)) {
     seen.add(next);
     const model = known(conf, next, `[fallbacks] of ${alias}`);
@@ -101,17 +105,17 @@ export function route(conf, task) {
 // each. An alias nothing names is left out; a named alias missing from
 // [models] is listed apart, with where it is named. serve/check-harness.sh
 // probes each pair once.
-export function configuredModels(conf) {
-  const named = [];
+export function configuredModels(conf: Conf) {
+  const named: [string | undefined, string][] = [];
   for (const [role, alias] of Object.entries(conf.roles)) named.push([alias, `[roles] ${role}`]);
   for (const rule of conf.rules) named.push([rule.alias, `[rules] ${rule.line}`]);
   for (const [role, alias] of Object.entries(section(conf, 'harness'))) named.push([alias, `[harness] ${role}`]);
   named.push([section(conf, 'review').when_same, '[review] when_same']);
   for (const key of ['author_model', 'review_model']) named.push([section(conf, 'fast_lane')[key], `[fast_lane] ${key}`]);
-  const models = new Map();
-  const unknown = new Map();
+  const models = new Map<string, { adapter: string; model: string; aliases: string[] }>();
+  const unknown = new Map<string, string>();
   for (const [first, where] of named) {
-    const seen = new Set();
+    const seen = new Set<string>();
     let next = first;
     let from = where;
     while (next && !seen.has(next)) {
@@ -123,7 +127,7 @@ export function configuredModels(conf) {
       }
       const key = `${model.adapter}:${model.model}`;
       if (!models.has(key)) models.set(key, { adapter: model.adapter, model: model.model, aliases: [] });
-      if (!models.get(key).aliases.includes(next)) models.get(key).aliases.push(next);
+      if (!models.get(key)!.aliases.includes(next)) models.get(key)!.aliases.push(next);
       from = `[fallbacks] ${next}`;
       next = conf.fallbacks[next];
     }
@@ -131,8 +135,8 @@ export function configuredModels(conf) {
   return { models: [...models.values()], unknown: [...unknown].map(([alias, where]) => ({ alias, where })) };
 }
 
-function parseArgs(argv) {
-  const task = { role: null, labels: [], project: null, paths: [], prLines: null, authorModel: null, forced: null, lane: null };
+function parseArgs(argv: string[]) {
+  const task: Omit<Task, 'role'> & { role: string | null } = { role: null, labels: [], project: null, paths: [], prLines: null, authorModel: null, forced: null, lane: null };
   for (let i = 0; i < argv.length; i += 2) {
     const value = argv[i + 1];
     if (value === undefined) throw new Error(`missing value for ${argv[i]}`);
@@ -149,7 +153,7 @@ function parseArgs(argv) {
     }
   }
   if (!task.role) throw new Error('--role is required');
-  return task;
+  return task as Task;
 }
 
 if (runAsCommand(import.meta.url) && process.argv[2] === 'configured') {
@@ -161,14 +165,14 @@ if (runAsCommand(import.meta.url) && process.argv[2] === 'configured') {
     for (const m of models) process.stdout.write(`model\t${m.adapter}\t${m.model}\t${m.aliases.join(',')}\n`);
     for (const u of unknown) process.stdout.write(`unknown\t${u.alias}\t${u.where}\n`);
   } catch (error) {
-    process.stderr.write(`route: ${error.message}\n`);
+    process.stderr.write(`route: ${(error as Error).message}\n`);
     process.exit(1);
   }
 } else if (runAsCommand(import.meta.url)) {
   try {
     process.stdout.write(`${JSON.stringify(route(loadConf(), parseArgs(process.argv.slice(2))))}\n`);
   } catch (error) {
-    process.stderr.write(`route: ${error.message}\n`);
+    process.stderr.write(`route: ${(error as Error).message}\n`);
     process.exit(1);
   }
 }

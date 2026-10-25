@@ -14,7 +14,7 @@ The human is told on his phone as soon as something waits for him, with no outsi
 
 The language is `[owner] language`. A health notification names the problem by a fixed sentence for a known code, and "a health problem was detected" otherwise; the name of the team, path or service that a ledger detail may hold is never said.
 
-How long it takes: the wake runs the dispatcher last, after the board snapshot and the health are written. A card that appears is told at the next wake (a minute with the default timer). A rollback recorded by the release watch between two wakes is told at the next one. The dispatcher runs inside the wake's lock, so it is kept short: the adapters of one notification are called together, Web Push tells four browsers at a time (each call cut after 10 seconds), and after `CLEARED_NOTIFY_DEADLINE_SECONDS` (30 by default, 50 at most) what is still on its way is given up and waits for the next wake, not counted as a try and not recorded as sent. `wake.sh` stops it after 60 seconds whatever happens.
+How long it takes: the wake runs the dispatcher last, after the board snapshot and the health are written. A card that appears is told at the next wake (a minute with the default timer). A rollback recorded by the release watch between two wakes is told at the next one. The dispatcher runs inside the wake's lock, so it is kept short: the adapters of one notification are called together, Web Push tells four browsers at a time (each call cut after 10 seconds), and after `CLEARED_NOTIFY_DEADLINE_SECONDS` (30 by default, 50 at most) what is still on its way is given up and waits for the next wake, not counted as a try and not recorded as sent. `wake.ts` stops it after 60 seconds whatever happens.
 
 What is held, and what is dropped:
 
@@ -31,7 +31,7 @@ All in the project's `.cleared/agents.conf`, section [`[notify]`](configuration.
 
 ### Service environment (systemd drop-in)
 
-A stock install sets none of these variables, and the units do not read the shell that ran `serve/install.sh`. Without `CLEARED_NOTIFY_LINK_BASE` a notification has no link, and Web Push reports `no_subject` (the push services need a contact: the https link address, or `[notify] vapid_subject`). `serve/install.sh` warns about it, and refuses, before writing anything, a link in these drop-ins that is not `http(s)://host[:port]` or that is on port 80 or 443 (`https://host` with no port is 443). Set the variables with a drop-in on each unit, as the service account, then reload:
+A stock install sets none of these variables, and the units do not read the shell that ran `serve/install.ts`. Without `CLEARED_NOTIFY_LINK_BASE` a notification has no link, and Web Push reports `no_subject` (the push services need a contact: the https link address, or `[notify] vapid_subject`). `serve/install.ts` warns about it, and refuses, before writing anything, a link in these drop-ins that is not `http(s)://host[:port]` or that is on port 80 or 443 (`https://host` with no port is 443). Set the variables with a drop-in on each unit, as the service account, then reload:
 
 ```sh
 mkdir -p ~/.config/systemd/user/cleared-wake.service.d ~/.config/systemd/user/cleared-app.service.d
@@ -84,7 +84,7 @@ Create a bot with @BotFather, send it one message from your account, and read yo
 
 ### The private directory
 
-`[notify] secrets_dir` (default `~/.config/cleared/notify` of the service account) is created by the app, mode `0700`, and must stay owned by the service account, outside the project and the Cleared checkout. Every read refuses a looser directory or file, a link, or a place inside a repository; `serve/install.sh` probes, as `[security] agent_user`, that the agents' account can reach none of it.
+`[notify] secrets_dir` (default `~/.config/cleared/notify` of the service account) is created by the app, mode `0700`, and must stay owned by the service account, outside the project and the Cleared checkout. Every read refuses a looser directory or file, a link, or a place inside a repository; `serve/install.ts` probes, as `[security] agent_user`, that the agents' account can reach none of it.
 
 | File | Holds | Written by |
 | --- | --- | --- |

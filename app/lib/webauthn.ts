@@ -4,27 +4,27 @@
 // and Node's own crypto.
 import { createHash, createPublicKey, randomBytes, timingSafeEqual, verify } from 'node:crypto';
 
-const sha256 = (data) => createHash('sha256').update(data).digest();
-export const b64u = (bytes) => Buffer.from(bytes).toString('base64url');
+const sha256 = (data: string | Buffer) => createHash('sha256').update(data).digest();
+export const b64u = (bytes: Uint8Array) => Buffer.from(bytes).toString('base64url');
 export const challenge = () => b64u(randomBytes(32));
 
 // CBOR (RFC 8949), definite lengths only, which is all an authenticator sends.
-export function cbor(bytes, start = 0, depth = 0) {
+export function cbor(bytes: Buffer, start = 0, depth = 0): { value: unknown; end: number } {
   if (depth > 8) throw new Error('cbor: too deep');
   let at = start;
   const head = bytes[at++];
   if (head === undefined) throw new Error('cbor: truncated');
   const major = head >> 5;
   let extra = head & 31;
-  const need = (n) => { if (at + n > bytes.length) throw new Error('cbor: truncated'); };
-  const take = (n) => { need(n); const out = Buffer.from(bytes.subarray(at, at + n)); at += n; return out; };
+  const need = (n: number) => { if (at + n > bytes.length) throw new Error('cbor: truncated'); };
+  const take = (n: number) => { need(n); const out = Buffer.from(bytes.subarray(at, at + n)); at += n; return out; };
   if (major === 7) {
     if (extra === 20) return { value: false, end: at };
     if (extra === 21) return { value: true, end: at };
     if (extra === 22) return { value: null, end: at };
     throw new Error('cbor: unsupported simple value');
   }
-  let length;
+  let length: number;
   if (extra < 24) length = extra;
   else if (extra === 24) length = take(1).readUInt8();
   else if (extra === 25) length = take(2).readUInt16BE();
@@ -39,9 +39,9 @@ export function cbor(bytes, start = 0, depth = 0) {
     const items = major === 4 ? [] : new Map();
     for (let i = 0; i < length; i++) {
       const first = cbor(bytes, at, depth + 1); at = first.end;
-      if (major === 4) { items.push(first.value); continue; }
+      if (major === 4) { (items as unknown[]).push(first.value); continue; }
       const second = cbor(bytes, at, depth + 1); at = second.end;
-      items.set(first.value, second.value);
+      (items as Map<unknown, unknown>).set(first.value, second.value);
     }
     return { value: items, end: at };
   }
@@ -49,10 +49,11 @@ export function cbor(bytes, start = 0, depth = 0) {
 }
 
 const FLAG = { up: 0x01, uv: 0x04, at: 0x40 };
-const same = (a, b) => a.length === b.length && timingSafeEqual(a, b);
+const same = (a: Buffer, b: Buffer) => a.length === b.length && timingSafeEqual(a, b);
 
-function clientData(raw, { type, expectedChallenge, origin }) {
-  let data;
+type Expected = { expectedChallenge: string; origin: string; rpId: string };
+function clientData(raw: string, { type, expectedChallenge, origin }: { type: string; expectedChallenge: string; origin: string }) {
+  let data: { type?: unknown; challenge?: unknown; origin?: unknown; crossOrigin?: unknown };
   try { data = JSON.parse(Buffer.from(raw, 'base64url').toString('utf8')); } catch { throw new Error('client data unreadable'); }
   if (data.type !== type) throw new Error('wrong ceremony');
   if (typeof data.challenge !== 'string' || !same(Buffer.from(data.challenge), Buffer.from(expectedChallenge))) throw new Error('challenge mismatch');
@@ -60,17 +61,17 @@ function clientData(raw, { type, expectedChallenge, origin }) {
   if (data.crossOrigin === true) throw new Error('cross-origin ceremony');
   return Buffer.from(raw, 'base64url');
 }
-function authenticatorData(bytes, rpId) {
+function authenticatorData(bytes: Buffer, rpId: string) {
   if (bytes.length < 37) throw new Error('authenticator data too short');
   if (!same(bytes.subarray(0, 32), sha256(rpId))) throw new Error('relying party mismatch');
-  const flags = bytes[32];
+  const flags = bytes[32]!;
   if (!(flags & FLAG.up)) throw new Error('user presence missing');
   if (!(flags & FLAG.uv)) throw new Error('user verification missing');
   return { flags, signCount: bytes.readUInt32BE(33) };
 }
 
 // The browser's create() answer: { id, response: { clientDataJSON, attestationObject } }, all base64url.
-export function verifyRegistration(answer, { expectedChallenge, origin, rpId }) {
+export function verifyRegistration(answer: { id?: unknown; clientDataJSON: string; attestationObject: string }, { expectedChallenge, origin, rpId }: Expected) {
   const raw = clientData(answer.clientDataJSON, { type: 'webauthn.create', expectedChallenge, origin });
   void raw;
   const object = cbor(Buffer.from(answer.attestationObject, 'base64url')).value;
@@ -92,7 +93,7 @@ export function verifyRegistration(answer, { expectedChallenge, origin, rpId }) 
 }
 
 // The browser's get() answer: { id, response: { clientDataJSON, authenticatorData, signature } }.
-export function verifyAssertion(answer, credential, { expectedChallenge, origin, rpId }) {
+export function verifyAssertion(answer: { id?: unknown; clientDataJSON: string; authenticatorData: string; signature: string }, credential: { publicKey: string; signCount: number }, { expectedChallenge, origin, rpId }: Expected) {
   const raw = clientData(answer.clientDataJSON, { type: 'webauthn.get', expectedChallenge, origin });
   const auth = Buffer.from(answer.authenticatorData, 'base64url');
   const { signCount } = authenticatorData(auth, rpId);

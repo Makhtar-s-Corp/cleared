@@ -15,7 +15,7 @@ import { dirname, join, resolve } from 'node:path';
 // --- shared with lib/guard/private-terms.ts (copied there word for word; test/git-checkout.test.ts keeps them identical) ---
 // Settings of the repository that run a program or write into it, and the
 // value a read gives them instead.
-export const READ_OVERRIDES = [
+export const READ_OVERRIDES: [string, string][] = [
   ['core.fsmonitor', 'false'], // ls-files, status, diff with the worktree run the fsmonitor hook
   ['core.hooksPath', '/dev/null'], // no hook is found, .git/hooks included (post-index-change, reference-transaction)
   ['core.pager', 'cat'], // with GIT_PAGER below, which also wins over pager.<command>
@@ -41,10 +41,10 @@ export class CheckoutPathError extends Error {}
 // with a subdirectory such as <repo>/.cleared. Found without running git on
 // the repository. No `.git` anywhere above: the path itself (a bare
 // repository, or not a repository: git says so).
-export function checkoutTopLevel(checkout) {
+export function checkoutTopLevel(checkout: string): string {
   if (typeof checkout !== 'string' || !checkout) throw new CheckoutPathError('the checkout path is empty');
   if (checkout.startsWith('~')) throw new CheckoutPathError(`the checkout path ${checkout} starts with "~", which Cleared does not expand: give the absolute path`);
-  let path;
+  let path: string;
   try { path = realpathSync(resolve(checkout)); }
   catch { throw new CheckoutPathError(`the checkout ${checkout} does not exist or cannot be reached`); }
   for (let dir = path; ; dir = dirname(dir)) {
@@ -56,10 +56,10 @@ export function checkoutTopLevel(checkout) {
 // `env` plus, for one git command reading `checkout`: safe.directory for its
 // top level only, the overrides above, no optional lock (a read never writes
 // the index of the repository), no pager, no editor, no prompt.
-export function checkoutReadEnv(checkout, env = process.env) {
-  const entries = [['safe.directory', checkoutTopLevel(checkout)], ...READ_OVERRIDES];
-  const count = Math.max(0, Number.parseInt(env.GIT_CONFIG_COUNT, 10) || 0);
-  const out = { ...env, GIT_OPTIONAL_LOCKS: '0', GIT_PAGER: 'cat', GIT_EDITOR: 'false', GIT_TERMINAL_PROMPT: '0' };
+export function checkoutReadEnv(checkout: string, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const entries: [string, string][] = [['safe.directory', checkoutTopLevel(checkout)], ...READ_OVERRIDES];
+  const count = Math.max(0, Number.parseInt(env.GIT_CONFIG_COUNT as string, 10) || 0);
+  const out: NodeJS.ProcessEnv = { ...env, GIT_OPTIONAL_LOCKS: '0', GIT_PAGER: 'cat', GIT_EDITOR: 'false', GIT_TERMINAL_PROMPT: '0' };
   // The caller's `git -c` settings (GIT_CONFIG_PARAMETERS) are read after the overrides and would beat them: dropped, as lib/forge.ts does.
   delete out.GIT_CONFIG_PARAMETERS;
   entries.forEach(([key, value], i) => {
@@ -84,7 +84,7 @@ function trustedProjectConfig() {
   return { project, ref, source };
 }
 const trusted = trustedProjectConfig();
-export function guardValue(key) {
+export function guardValue(key: string): string {
   let guard = false;
   for (const line of trusted.source.split('\n')) {
     const trimmed = line.trim();
@@ -98,13 +98,13 @@ const MAX_WORDS = 4;
 const WRONG_SALT = 'These fingerprints were made with another salt. Set [guard] salt to the salt that made them, or rebuild the list.';
 export const saltId = (salt = SALT) => createHash('sha256').update(salt).digest('hex').slice(0, 12);
 
-export const fingerprint = (term) => {
+export const fingerprint = (term: string): string => {
   if (!SALT) throw new Error('Missing [guard] salt');
   return createHash('sha256').update(SALT + term).digest('hex');
 };
 
 /** Lowercase, accent-free words; digit groups ("12 345", "1_234_567") are joined. */
-export function normalizeWords(text) {
+export function normalizeWords(text: string): string[] {
   return String(text)
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
@@ -115,7 +115,7 @@ export function normalizeWords(text) {
 }
 
 /** Every run of one to four consecutive words, as the text would be fingerprinted. */
-export function* candidates(text) {
+export function* candidates(text: string): Generator<string> {
   const words = normalizeWords(text);
   for (let start = 0; start < words.length; start++)
     for (let size = 1; size <= MAX_WORDS && start + size <= words.length; size++)
@@ -127,12 +127,12 @@ export function* candidates(text) {
 // (`node lib/guard/private-terms.ts allow <term>`): the guard and every scan
 // then skip it, and the term never appears in clear in the repository.
 export const loadFingerprints = (
-  path = new URL("./private-terms.json", import.meta.url),
-  allowPath = new URL("./codex-guard-allow.json", import.meta.url),
-) => {
+  path: URL | string = new URL("./private-terms.json", import.meta.url),
+  allowPath: URL | string = new URL("./codex-guard-allow.json", import.meta.url),
+): Set<string> => {
   if (!trusted.source) throw new Error(`The committed project configuration (.cleared/agents.conf at ${trusted.ref}) could not be read.`);
-  const readList = (file) => {
-    let source;
+  const readList = (file: URL | string): string[] => {
+    let source: string;
     if (existsSync(file)) source = readFileSync(file, 'utf8');
     else {
       const key = String(file).includes('codex-guard-allow') ? 'allowed' : 'terms';
@@ -140,12 +140,12 @@ export const loadFingerprints = (
       if (!name || name === 'none') source = '{"disabled":true,"hashes":[]}';
       else source = execFileSync('git', ['-C', trusted.project, 'show', `${trusted.ref}:${name}`], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], env: checkoutReadEnv(trusted.project) });
     }
-    const data = JSON.parse(source);
+    const data = JSON.parse(source) as string[] | { disabled?: unknown; hashes?: unknown; salt_id?: unknown } | null;
     if (data && !Array.isArray(data) && data.disabled === true && Array.isArray(data.hashes) && data.hashes.length === 0) return [];
     const hashes = Array.isArray(data) ? data : data?.hashes;
     if (!Array.isArray(hashes) || !hashes.every((hash) => typeof hash === 'string')) throw new Error(`Invalid fingerprint list: ${file}`);
     if (!SALT) throw new Error('Missing committed [guard] salt: add [guard] salt = <random value> to the project agents.conf and commit it.');
-    if (Array.isArray(data) || data.salt_id !== saltId()) throw new Error(WRONG_SALT);
+    if (Array.isArray(data) || data!.salt_id !== saltId()) throw new Error(WRONG_SALT);
     return hashes;
   };
   const allowed = new Set(readList(allowPath));
@@ -153,8 +153,8 @@ export const loadFingerprints = (
 };
 
 /** Returns the distinct candidates of `text` whose fingerprint is listed. */
-export function findPrivateTerms(text, fingerprints = loadFingerprints()) {
-  const found = new Set();
+export function findPrivateTerms(text: string, fingerprints: Set<string> = loadFingerprints()): string[] {
+  const found = new Set<string>();
   if (fingerprints.size === 0) return [];
   for (const candidate of candidates(text))
     if (fingerprints.has(fingerprint(candidate))) found.add(candidate);

@@ -24,9 +24,25 @@ import { execFileSync } from 'node:child_process';
 import { chmodSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { dirname, isAbsolute, join } from 'node:path';
 import { GithubAppTokens } from './tracker/adapters/github-auth.ts';
+import type { InstallationToken, TokenRequest } from './tracker/adapters/github-auth.ts';
 import { loadConf, ORCH_HOME, projectDir, runAsCommand, section, stateDir } from './conf.ts';
+import type { ConfSections, Section } from './conf.ts';
 import { addEvent, openLedger } from './ledger.ts';
 import { checkoutReadEnv } from './git-checkout.ts';
+
+export type ForgeIdentity = { name: string; email: string };
+export type ForgeSettings = {
+  source: 'forge' | 'tracker';
+  app_id: string;
+  installation_id: string;
+  app_private_key_file: string;
+  login: string;
+  identity: ForgeIdentity | null;
+};
+export type ForgeMode = { mode: 'error' | 'ambient' | 'app'; error?: string; login?: string; identity?: boolean };
+export type ForgeTokenOptions = { state?: string; now?: () => number; request?: TokenRequest; record?: boolean };
+type ForgeGit = { env: NodeJS.ProcessEnv; problem: string | null; ambient?: boolean };
+type FailedCall = { message?: unknown; code?: unknown; stderr?: unknown } | null | undefined;
 
 const APP_KEYS = ['app_id', 'installation_id', 'app_private_key_file'];
 // Debug switches of gh and git that print request headers, Authorization
@@ -41,24 +57,25 @@ export const AMBIENT = 'ambient credential';
 // an installation of the GitHub tracker keeps its ambient forge credential
 // until its owner opts in. Throws, naming the key, when what is configured
 // cannot work.
-export function forgeSettings(conf) {
+export function forgeSettings(conf: ConfSections): ForgeSettings | null {
   const forge = section(conf, 'forge');
   const tracker = section(conf, 'tracker');
   if (forge.adapter && forge.adapter !== 'github') throw new Error(`unknown [forge] adapter "${forge.adapter}" (known: github)`);
   if (forge.use_tracker_app && !['yes', 'no'].includes(forge.use_tracker_app)) throw new Error('[forge] use_tracker_app must be yes or no');
-  let source = null;
+  let source: 'forge' | 'tracker' | null = null;
   if (APP_KEYS.some((key) => forge[key])) source = 'forge';
   else if (forge.use_tracker_app === 'yes') {
     if (tracker.adapter !== 'github') throw new Error('[forge] use_tracker_app = yes needs [tracker] adapter = github and its app keys');
     source = 'tracker';
   }
   if (!source) return null;
-  const keys = source === 'forge' ? forge : tracker;
+  // The loop below throws unless the three keys are set.
+  const keys = (source === 'forge' ? forge : tracker) as Section & { app_id: string; installation_id: string; app_private_key_file: string };
   for (const key of APP_KEYS) if (!keys[key]) throw new Error(`[forge] is configured but [${source}] ${key} is missing`);
   if (!/^[0-9]+$/.test(keys.app_id)) throw new Error(`[${source}] app_id must be the numeric GitHub App ID`);
   if (!/^[0-9]+$/.test(keys.installation_id)) throw new Error(`[${source}] installation_id must be the numeric installation ID`);
   if (!isAbsolute(keys.app_private_key_file)) throw new Error(`[${source}] app_private_key_file must be an absolute path`);
-  let project = null;
+  let project: string | null = null;
   try { project = realpathSync(projectDir()); } catch { /* no checkout to compare with */ }
   let key = keys.app_private_key_file;
   try { key = realpathSync(key); } catch { /* checked again when it is read */ }
@@ -81,28 +98,28 @@ export function forgeSettings(conf) {
 // What forge calls run as, for `cleared status`: the app (its login, and
 // whether its commit identity is complete), the ambient credential, or the
 // configuration error that stops them.
-export function forgeMode(conf) {
-  let settings;
+export function forgeMode(conf: ConfSections): ForgeMode {
+  let settings: ForgeSettings | null;
   try { settings = forgeSettings(conf); }
-  catch (error) { return { mode: 'error', error: error.message }; }
+  catch (error) { return { mode: 'error', error: (error as Error).message }; }
   if (!settings) return { mode: 'ambient' };
   const { problem } = forgeGit(conf);
   if (problem) return { mode: 'error', error: problem };
   return { mode: 'app', login: settings.login || `app ${settings.app_id}`, identity: Boolean(settings.identity) };
 }
 
-const cachePath = (state) => join(state, 'forge', 'installation-token.json');
-function readCache(file, settings) {
+const cachePath = (state: string): string => join(state, 'forge', 'installation-token.json');
+function readCache(file: string, settings: ForgeSettings): InstallationToken | null {
   try {
     const info = lstatSync(file);
     // Only a file this account wrote for itself is believed.
-    if (!info.isFile() || info.uid !== process.getuid() || (info.mode & 0o077) !== 0) return null;
-    const kept = JSON.parse(readFileSync(file, 'utf8'));
+    if (!info.isFile() || info.uid !== process.getuid!() || (info.mode & 0o077) !== 0) return null;
+    const kept = JSON.parse(readFileSync(file, 'utf8')) as { app_id?: unknown; installation_id?: unknown; token?: unknown; expires_at: string };
     if (kept.app_id !== settings.app_id || kept.installation_id !== settings.installation_id) return null;
     return typeof kept.token === 'string' && kept.token ? { token: kept.token, expiresAt: kept.expires_at } : null;
   } catch { return null; }
 }
-function writeCache(file, settings, current) {
+function writeCache(file: string, settings: ForgeSettings, current: InstallationToken): void {
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   chmodSync(dirname(file), 0o700);
   // Written aside, then renamed: a reader never takes half a token. Two
@@ -116,18 +133,18 @@ function writeCache(file, settings, current) {
 
 // The reason a token could not be had, naming the setting to look at, never
 // the token, the key or the JSON web token.
-function reasonOf(error, settings) {
+function reasonOf(error: FailedCall, settings: ForgeSettings): string {
   const said = String(error?.message || error);
   if (said.includes(`[${settings.source}]`)) return said;
   if (error?.code === 'ENOENT' || error?.code === 'EACCES') return `[${settings.source}] app_private_key_file cannot be read`;
   if (/nearly expired/.test(said)) return `GitHub gave no usable installation token for [${settings.source}] installation_id`;
-  const curl = String(error?.stderr || '').trim().split('\n').filter(Boolean).at(-1) || said.split('\n').at(-1);
+  const curl = String(error?.stderr || '').trim().split('\n').filter(Boolean).at(-1) || said.split('\n').at(-1)!;
   return `GitHub refused or did not answer the installation token request for [${settings.source}] app_id and installation_id (app suspended or uninstalled, wrong IDs, or network): ${curl.slice(0, 160)}`;
 }
 
 // A failure is written to the ledger once an hour per reason: forge calls
 // whose errors a script discards still leave a trace.
-function recordFailure(reason, state) {
+function recordFailure(reason: string, state: string): void {
   try {
     const db = openLedger(join(state, 'ledger.db'));
     try {
@@ -142,10 +159,10 @@ export class ForgeError extends Error {}
 
 // The installation token, reused from the cache while more than five minutes
 // remain, minted otherwise. null for the ambient credential.
-export function forgeToken(conf = loadConf(), { state = stateDir(), now, request, record = true } = {}) {
-  let settings;
+export function forgeToken(conf: ConfSections = loadConf(), { state = stateDir(), now, request, record = true }: ForgeTokenOptions = {}): InstallationToken | null {
+  let settings: ForgeSettings | null;
   try { settings = forgeSettings(conf); }
-  catch (error) { throw new ForgeError(`forge credential: ${error.message}; forge calls stop, the ambient credential is not used`); }
+  catch (error) { throw new ForgeError(`forge credential: ${(error as Error).message}; forge calls stop, the ambient credential is not used`); }
   if (!settings) return null;
   const file = cachePath(state);
   const tokens = new GithubAppTokens(settings, { now, request, section: settings.source });
@@ -153,23 +170,23 @@ export function forgeToken(conf = loadConf(), { state = stateDir(), now, request
   const before = tokens.current?.token;
   try { tokens.get(); }
   catch (error) {
-    const reason = reasonOf(error, settings);
+    const reason = reasonOf(error as FailedCall, settings);
     if (record) recordFailure(reason, state);
     throw new ForgeError(`forge credential: ${reason}; forge calls stop, the ambient credential is not used`);
   }
-  if (tokens.current.token !== before) writeCache(file, settings, tokens.current);
-  return { token: tokens.current.token, expiresAt: tokens.current.expiresAt };
+  if (tokens.current!.token !== before) writeCache(file, settings, tokens.current!);
+  return { token: tokens.current!.token, expiresAt: tokens.current!.expiresAt };
 }
 
 // Single-quoted for a POSIX shell (git runs a `!` helper through sh).
-const quoted = (value) => `'${String(value).replace(/'/g, `'\\''`)}'`;
-export const credentialHelper = () => `!${quoted(process.execPath)} --no-warnings ${quoted(join(ORCH_HOME, 'lib', 'forge.ts'))} credential`;
+const quoted = (value: unknown): string => `'${String(value).replace(/'/g, `'\\''`)}'`;
+export const credentialHelper = (): string => `!${quoted(process.execPath)} --no-warnings ${quoted(join(ORCH_HOME, 'lib', 'forge.ts'))} credential`;
 
 // The git settings that make every https://github.com/ remote ask this file
 // for its credential, and only this file (the empty value drops the helpers
 // of the user's own git config for that host). A remote written for SSH is
 // sent through https, so a push cannot leave with a key of the account.
-export function gitEntries() {
+export function gitEntries(): [string, string][] {
   return [[`credential.https://${HOST}.helper`, ''], [`credential.https://${HOST}.helper`, credentialHelper()],
     [`url.https://${HOST}/.insteadOf`, `git@${HOST}:`], [`url.https://${HOST}/.insteadOf`, `ssh://git@${HOST}/`],
     // An Authorization header configured for github.com (the repository's own included) is dropped.
@@ -186,8 +203,8 @@ export function gitEntries() {
 // the files themselves are no longer read (GIT_CONFIG_GLOBAL, NOSYSTEM).
 // An unscoped credential.helper is kept for other hosts; the forge's empty
 // helper for github.com drops it there.
-const touchesGithub = (text) => /github\.com/i.test(text);
-export function keptEntry(key, value) {
+const touchesGithub = (text: string): boolean => /github\.com/i.test(text);
+export function keptEntry(key: string, value: string): boolean {
   const lower = key.toLowerCase();
   if (/^(include|includeif)\./.test(lower)) return false; // what they include is listed already
   if (lower.startsWith('url.')) return !touchesGithub(key) && !touchesGithub(value);
@@ -195,7 +212,7 @@ export function keptEntry(key, value) {
   if (lower.startsWith('http.') && lower.endsWith('.extraheader')) return lower !== 'http.extraheader' && !touchesGithub(key);
   return true;
 }
-function carriedEntries(env, repo) {
+function carriedEntries(env: NodeJS.ProcessEnv, repo: string): [string, string][] {
   const clean = Object.fromEntries(Object.entries(env).filter(([name]) => !/^GIT_(DIR|WORK_TREE|CONFIG_(COUNT|KEY_[0-9]+|VALUE_[0-9]+|PARAMETERS))$/.test(name)));
   let listed = '';
   let cwd = '/';
@@ -207,13 +224,13 @@ function carriedEntries(env, repo) {
       { cwd, env: cwd === repo ? checkoutReadEnv(repo, clean) : clean, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], maxBuffer: 4_000_000 });
   } catch { /* nothing set, or no git */ }
   const parts = listed.split('\0');
-  const kept = [];
+  const kept: [string, string][] = [];
   for (let i = 0; i + 1 < parts.length; i += 2) {
-    if (!['system', 'global'].includes(parts[i])) continue;
-    const entry = parts[i + 1];
+    if (!['system', 'global'].includes(parts[i]!)) continue;
+    const entry = parts[i + 1]!;
     const end = entry.indexOf('\n');
     // A key written without a value means true.
-    const [key, value] = end < 0 ? [entry, 'true'] : [entry.slice(0, end), entry.slice(end + 1)];
+    const [key, value]: [string, string] = end < 0 ? [entry, 'true'] : [entry.slice(0, end), entry.slice(end + 1)];
     if (keptEntry(key, value)) kept.push([key, value]);
   }
   return kept;
@@ -224,8 +241,8 @@ function carriedEntries(env, repo) {
 // null when it is https://github.com/ (or a local path, which needs no
 // credential), the reason otherwise. A rewrite to SSH would push with the
 // account's key around the app.
-function originProblem(env, repo) {
-  const urls = [];
+function originProblem(env: NodeJS.ProcessEnv, repo: string): string | null {
+  const urls: string[] = [];
   for (const args of [['remote', 'get-url', 'origin'], ['remote', 'get-url', '--push', 'origin']]) {
     try { urls.push(execFileSync('git', ['-C', repo, ...args], { env: checkoutReadEnv(repo, env), encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim()); }
     catch { return null; } // no checkout or no origin: nothing leaves through it
@@ -239,11 +256,11 @@ function originProblem(env, repo) {
 // that cannot work, or an origin that does not lead to github.com over https.
 // Either way the forge's helper is installed and SSH refuses, so nothing
 // falls back to an ambient credential.
-function forgeGit(conf, env = process.env, repo = projectDir()) {
-  let settings;
-  let problem = null;
+function forgeGit(conf: ConfSections, env: NodeJS.ProcessEnv = process.env, repo: string = projectDir()): ForgeGit {
+  let settings: Pick<ForgeSettings, 'identity'> | null;
+  let problem: string | null = null;
   try { settings = forgeSettings(conf); }
-  catch (error) { settings = { identity: null }; problem = error.message; }
+  catch (error) { settings = { identity: null }; problem = (error as Error).message; }
   if (!settings) return { env: { ...env }, problem: null, ambient: true };
   const out = forgeEnvOf(settings, env, repo);
   problem ||= originProblem(out, repo);
@@ -258,11 +275,11 @@ function forgeGit(conf, env = process.env, repo = projectDir()) {
 // configuration files are not read (GIT_CONFIG_GLOBAL, GIT_CONFIG_NOSYSTEM):
 // a url.<ssh>.insteadOf or pushInsteadOf there would send a push to SSH, with
 // the account's key, around the app.
-export function forgeEnv(conf = loadConf(), env = process.env) {
+export function forgeEnv(conf: ConfSections = loadConf(), env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
   return forgeGit(conf, env).env;
 }
-function forgeEnvOf(settings, env, repo) {
-  const out = { ...env, GIT_TERMINAL_PROMPT: '0' };
+function forgeEnvOf(settings: Pick<ForgeSettings, 'identity'>, env: NodeJS.ProcessEnv, repo: string): NodeJS.ProcessEnv {
+  const out: NodeJS.ProcessEnv = { ...env, GIT_TERMINAL_PROMPT: '0' };
   for (const name of DEBUG_VARIABLES) delete out[name];
   let count = Number(env.GIT_CONFIG_COUNT) || 0;
   const present = Array.from({ length: count }, (_, i) => env[`GIT_CONFIG_VALUE_${i}`]);
@@ -288,15 +305,15 @@ function forgeEnvOf(settings, env, repo) {
 // The environment of one gh call: forgeEnv plus the token. The ambient
 // environment as it is when no app is configured. Throws when one is and
 // no token can be had.
-export function forgeGhEnv(conf = loadConf(), options = {}) {
+export function forgeGhEnv(conf: ConfSections = loadConf(), options: ForgeTokenOptions = {}): NodeJS.ProcessEnv {
   const git = forgeGit(conf);
   if (git.ambient) return { ...process.env };
   if (git.problem) throw new ForgeError(`forge credential: ${git.problem}; forge calls stop, the ambient credential is not used`);
   const minted = forgeToken(conf, options);
-  return { ...git.env, GH_TOKEN: minted.token, GITHUB_TOKEN: minted.token };
+  return { ...git.env, GH_TOKEN: minted!.token, GITHUB_TOKEN: minted!.token };
 }
 
-function shellLines(conf) {
+function shellLines(conf: ConfSections): string[] {
   const git = forgeGit(conf, process.env);
   if (git.ambient) return ['CLEARED_FORGE_MODE=ambient'];
   const lines = [`CLEARED_FORGE_MODE=${git.problem ? 'error' : 'app'}`];
@@ -312,10 +329,10 @@ function shellLines(conf) {
   return lines;
 }
 
-async function credential(action) {
+async function credential(action: string | undefined): Promise<number> {
   if (action !== 'get') return 0;
   const asked = Object.fromEntries(readFileSync(0, 'utf8').split('\n').filter((line) => line.includes('='))
-    .map((line) => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
+    .map((line): [string, string] => [line.slice(0, line.indexOf('=')), line.slice(line.indexOf('=') + 1)]));
   if (asked.protocol !== 'https' || asked.host !== HOST) return 0;
   const minted = forgeToken();
   if (!minted) return 0;
@@ -341,7 +358,7 @@ if (runAsCommand(import.meta.url)) {
     }
     else { console.error('usage: forge.ts shell | token | credential <get|store|erase>'); process.exitCode = 64; }
   } catch (error) {
-    console.error(`cleared ${error instanceof ForgeError ? error.message : `forge credential: ${error.message}`}`);
+    console.error(`cleared ${error instanceof ForgeError ? error.message : `forge credential: ${(error as Error).message}`}`);
     process.exitCode = 1;
   }
 }

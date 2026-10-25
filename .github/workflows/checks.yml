@@ -28,6 +28,15 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+      # The v1 core is TypeScript run by Node itself; the type check uses the
+      # TypeScript and Node types v2/ installs (no install script runs).
+      - name: Types
+        env:
+          SCARF_ANALYTICS: 'false'
+          DO_NOT_TRACK: '1'
+        run: |
+          npm ci --prefix v2 --ignore-scripts
+          v2/node_modules/.bin/tsc -p .
       - name: Syntax of the browser's scripts
         run: |
           for script in app/public/*.js; do node --check "$script"; done

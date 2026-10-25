@@ -2,6 +2,7 @@
 // a virtual authenticator (the browser's own test facility) holds the passkey, and every
 // click goes through the same routes as on a phone. Nothing here bypasses the server.
 //   npm install && node screenshots-actions.ts [output folder]
+// @ts-ignore playwright-core is a devDependency of app/ that may not be installed here: the little used is typed below.
 import { chromium } from 'playwright-core';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -10,38 +11,47 @@ import { join } from 'node:path';
 import { appServer } from './server.ts';
 import { createActions } from './lib/actions.ts';
 import { demoSource } from './sources/demo.ts';
+import type { AddressInfo } from 'node:net';
+import type { Passkey } from './lib/credentials.ts';
+
+type Page = { goto(url: string): Promise<unknown>; waitForSelector(selector: string, options?: { timeout?: number }): Promise<unknown>; waitForTimeout(ms: number): Promise<void>;
+  screenshot(options: { path: string }): Promise<unknown>; click(selector: string): Promise<void>; fill(selector: string, value: string): Promise<void> };
+type Context = { addCookies(cookies: { name: string; value: string; url: string }[]): Promise<void>; newPage(): Promise<Page>; newCDPSession(page: Page): Promise<{ send(method: string, params?: object): Promise<unknown> }> };
+type Browser = { newContext(options: { viewport: { width: number; height: number }; deviceScaleFactor: number; isMobile: boolean; hasTouch: boolean }): Promise<Context>; close(): Promise<void> };
+type Chromium = { launch(options: { executablePath: string; args: string[] }): Promise<Browser> };
+type Scene = { page: Page; shot: (name: string) => Promise<unknown>; registerPasskey: () => Promise<void>; open: (id: string) => Promise<void>; source: ReturnType<typeof demoSource>; origin: string };
 
 const out = process.argv[2] ?? new URL('./screenshots', import.meta.url).pathname;
 mkdirSync(out, { recursive: true });
 const token = 'e'.repeat(64);
-const freePort = () => new Promise((resolve) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => resolve(port)); }); });
+const freePort = () => new Promise<number>((resolve) => { const s = net.createServer().listen(0, '127.0.0.1', () => { const { port } = s.address() as AddressInfo; s.close(() => resolve(port)); }); });
 
-async function scenario(graceMs, run) {
+async function scenario(graceMs: number, run: (scene: Scene) => Promise<void>) {
   const port = await freePort();
   const origin = `http://localhost:${port}`;
   const source = demoSource();
-  let keys = [];
+  let keys: Passkey[] = [];
   const actions = createActions({ source, origin, owner: 'alex', graceMs, readPasskeys: () => keys, writePasskeys: (list) => { keys = list; }, run: async () => ({ ok: true, author: 'alex', verified: true }) });
   const server = appServer({ source, token, ranges: ['127.0.0.0/8', '::1/128'], pollMs: 500, heartbeatMs: 2000, actions, origin, owner: 'alex' });
-  await new Promise((r) => server.listen(port, '127.0.0.1', r));
+  await new Promise<void>((r) => server.listen(port, '127.0.0.1', r));
   const signIn = await fetch(`http://127.0.0.1:${port}/session`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
-  const session = /cleared_app=([^;]+)/.exec(signIn.headers.get('set-cookie'))[1];
+  const session = /cleared_app=([^;]+)/.exec(signIn.headers.get('set-cookie')!)![1]!;
   const cache = join(process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), '.cache', 'ms-playwright'));
   const bundled = existsSync(cache) ? readdirSync(cache).filter((d) => d.startsWith('chromium-')).map((d) => join(cache, d, 'chrome-linux64', 'chrome')).find(existsSync) : null;
-  const browser = await chromium.launch({ executablePath: process.env.CHROME_PATH || bundled || '/usr/bin/google-chrome', args: ['--no-sandbox'] });
+  const browser = await (chromium as Chromium).launch({ executablePath: process.env.CHROME_PATH || bundled || '/usr/bin/google-chrome', args: ['--no-sandbox'] });
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   await context.addCookies([{ name: 'cleared_app', value: session, url: origin }]);
   const page = await context.newPage();
   const cdp = await context.newCDPSession(page);
   await cdp.send('WebAuthn.enable');
   await cdp.send('WebAuthn.addVirtualAuthenticator', { options: { protocol: 'ctap2', transport: 'internal', hasResidentKey: true, hasUserVerification: true, isUserVerified: true, automaticPresenceSimulation: true } });
-  const shot = (name) => page.screenshot({ path: join(out, `${name}.png`) });
+  const shot = (name: string) => page.screenshot({ path: join(out, `${name}.png`) });
   const registerPasskey = async () => {
     await page.goto(`${origin}/register#${actions.mintGrant().grant}`);
     await page.click('#go');
     await page.waitForSelector('#err.success');
   };
-  const open = async (id) => { await page.goto(`${origin}/`); await page.waitForSelector('.card'); await page.click(`.card[data-id="${id}"] button`); await page.waitForSelector('#ph-actions:not([hidden])'); await page.waitForTimeout(250); };
+  const open = async (id: string) => { await page.goto(`${origin}/`); await page.waitForSelector('.card'); await page.click(`.card[data-id="${id}"] button`); await page.waitForSelector('#ph-actions:not([hidden])'); await page.waitForTimeout(250); };
   try { await run({ page, shot, registerPasskey, open, source, origin }); } finally { await browser.close(); server.close(); server.closeAllConnections(); }
 }
 

@@ -25,16 +25,34 @@
 //   fast-lane.ts tests-done <lane key> <commit> <exit code | skipped>
 //   fast-lane.ts measure <ticket> <pr> <fast|full>   one ticket_measured event, once its pull request is merged
 import { execFileSync } from 'node:child_process';
+import type { ExecFileSyncOptionsWithBufferEncoding } from 'node:child_process';
 import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import type { DatabaseSync } from 'node:sqlite';
 import { ORCH_HOME, loadConf, projectDir, runAsCommand, section, stateDir } from './conf.ts';
+import type { Conf } from './conf.ts';
 import { checkoutReadEnv, gitFirstLine } from './git-checkout.ts';
 import { addEvent, ledgerPath, openLedger } from './ledger.ts';
 
-const list = (text) => String(text ?? '').split(',').map((item) => item.trim()).filter(Boolean);
-const yes = (value) => ['yes', 'true'].includes(String(value ?? '').trim().toLowerCase());
+type Match = (path: string) => boolean;
+type Actor = { kind?: string; id?: string };
+type Actors = { labels?: Record<string, Actor | null | undefined>; project?: Actor | null };
+type Issue = { labels?: unknown; project?: unknown; identifier?: string };
+type Counts = { binary: boolean; added: number | null; deleted: number | null };
+type RawEntry = { oldMode: string; newMode: string; oldBlob: string; newBlob: string; status: string; path: string; from: string | null };
+type DiffEntry = { path: string; status: string; oldMode: string; newMode: string; binary?: boolean; added?: number | null; deleted?: number | null;
+  size?: number | null; addedLines?: (string | null)[] | null };
+type Diff = { head: string; entries: DiffEntry[] };
+type LaneRecord = { fast_lane?: { opening?: string; state?: string; reasons?: unknown; head?: string; lines?: number; files?: number; at?: string;
+  demoted_at?: string; tests?: unknown }; todo_at?: string };
+type Decision = { state: string; reasons: string[]; keep: false; problem?: string; head?: undefined; lines?: undefined; files?: undefined;
+    offending?: undefined; entries?: undefined }
+  | { state: string; reasons: string[]; keep: true; problem?: string; head: string; lines: number; files: number; offending: Record<string, string>; entries: DiffEntry[] };
+
+const list = (text: unknown) => String(text ?? '').split(',').map((item) => item.trim()).filter(Boolean);
+const yes = (value: unknown) => ['yes', 'true'].includes(String(value ?? '').trim().toLowerCase());
 
 // A path the rules can read: plain ASCII segments, none empty, none "." or
 // "..", none beginning with "-" (a file name a test runner would take for an
@@ -42,7 +60,7 @@ const yes = (value) => ['yes', 'true'].includes(String(value ?? '').trim().toLow
 // a backslash, an accent, a look-alike letter, a control character) is not
 // judged: the full circuit.
 const SEGMENT = /^[A-Za-z0-9_][A-Za-z0-9._@+-]*$|^\.[A-Za-z0-9_][A-Za-z0-9._@+-]*$/;
-export const pathFormOk = (path) => typeof path === 'string' && path.length > 0 && path.length <= 300
+export const pathFormOk = (path: unknown) => typeof path === 'string' && path.length > 0 && path.length <= 300
   && path.split('/').every((part) => SEGMENT.test(part) && part !== '.' && part !== '..');
 
 // Never fast, whatever the settings say: Cleared's own settings and prompts,
@@ -97,21 +115,21 @@ const CONFIG_NAMES = new Set(['vercel.json', 'now.json', 'netlify.json', 'fireba
 const CONFIG_FORMS = [/^(?:ts|js)config(?:\.[^.]+)*\.json$/i, /\.config\.json$/i, /^appsettings\.[^.]+\.json$/i, /^\.?(?:eslint|prettier|babel|swc|stylelint|markdownlint)rc(?:\..+)?$/i];
 // A type as the settings may name one: lower-case letters and digits only.
 const TYPE_FORM = /^[a-z0-9]{1,16}$/;
-export function fileTypeOk(path, types) {
-  const name = String(path ?? '').split('/').at(-1);
+export function fileTypeOk(path: unknown, types: Set<string>) {
+  const name = String(path ?? '').split('/').at(-1)!;
   // Plain ASCII, as the path rule says, checked here again on its own.
   if (!/^[A-Za-z0-9._@+-]+$/.test(name)) return false;
   const parts = name.split('.');
   // A name with no extension (a hook, a script), a dotfile (a tool's settings), an empty part ("a..md", "x.md."): not judged.
   if (parts.length < 2 || parts.some((part) => part === '')) return false;
-  const extension = parts.at(-1);
+  const extension = parts.at(-1)!;
   if (!types.has(extension) || CODE_TYPES.has(extension)) return false;
   // Every inner part too, in any case: "notes.sh.md", "x.PHP.md".
   if (parts.slice(1, -1).some((part) => CODE_TYPES.has(part.toLowerCase()))) return false;
   if (CONFIG_NAMES.has(name.toLowerCase()) || CONFIG_FORMS.some((form) => form.test(name))) return false;
   return true;
 }
-const fileTypes = (narrow, extra) => {
+const fileTypes = (narrow: unknown, extra: unknown) => {
   const chosen = list(narrow);
   const widened = list(extra);
   for (const type of [...chosen, ...widened]) {
@@ -131,26 +149,26 @@ const fileTypes = (narrow, extra) => {
 // dotfile, a dot directory) is matched only by a pattern segment that begins
 // with "." too: "*" and "**" never take it, so "docs/" holds no docs/.env.
 const GLOB_FORM = /^[A-Za-z0-9._@+*?/-]+$/;
-export function globMatcher(pattern) {
+export function globMatcher(pattern: unknown): Match {
   const text = String(pattern ?? '').trim();
   if (!GLOB_FORM.test(text) || text.startsWith('/')) throw new Error(`[fast_lane] unreadable path pattern "${text}"`);
   // "dir/" is what lies under dir, at one segment or more: never a file named dir.
   const parts = (text.endsWith('/') ? `${text}*/**` : text).split('/');
   if (parts.some((part) => part === '' || part === '.' || part === '..' || (part.includes('**') && part !== '**'))) throw new Error(`[fast_lane] unreadable path pattern "${text}"`);
-  const compiled = parts.map((part) => (part === '**' ? '**' : {
+  const compiled = parts.map((part): '**' | { dot: boolean; re: RegExp } => (part === '**' ? '**' : {
     dot: part.startsWith('.'),
     re: new RegExp(`^${part.replace(/[.+]/g, '\\$&').replace(/\*/g, '[^/]*').replace(/\?/g, '[^/]')}$`),
   }));
   return (path) => {
     const segments = path.split('/');
-    const seen = new Map();
-    const at = (i, j) => {
+    const seen = new Map<number, boolean>();
+    const at = (i: number, j: number): boolean => {
       const key = i * 4096 + j;
-      if (seen.has(key)) return seen.get(key);
-      let result;
+      if (seen.has(key)) return seen.get(key)!;
+      let result: boolean;
       if (i === compiled.length) result = j === segments.length;
-      else if (compiled[i] === '**') result = at(i + 1, j) || (j < segments.length && !segments[j].startsWith('.') && at(i, j + 1));
-      else result = j < segments.length && compiled[i].re.test(segments[j]) && (compiled[i].dot || !segments[j].startsWith('.')) && at(i + 1, j + 1);
+      else if (compiled[i] === '**') result = at(i + 1, j) || (j < segments.length && !segments[j]!.startsWith('.') && at(i, j + 1));
+      else result = j < segments.length && compiled[i]!.re.test(segments[j]!) && (compiled[i]!.dot || !segments[j]!.startsWith('.')) && at(i + 1, j + 1);
       seen.set(key, result);
       return result;
     };
@@ -158,7 +176,7 @@ export function globMatcher(pattern) {
   };
 }
 
-const whole = (raw, key, fallback, min, max) => {
+const whole = (raw: unknown, key: string, fallback: number, min: number, max: number) => {
   const text = String(raw ?? fallback).trim();
   const n = Number(text);
   if (!/^\d+$/.test(text) || n < min || n > max) throw new Error(`[fast_lane] ${key} must be a whole number from ${min} to ${max}`);
@@ -170,21 +188,21 @@ const whole = (raw, key, fallback, min, max) => {
 // The signs a shell would read are refused, so that nobody believes they
 // work. {files} must be one whole word, once: it becomes the changed files,
 // one argument each.
-export function commandWords(command) {
+export function commandWords(command: unknown) {
   const text = String(command ?? '').trim();
   if (!text) return [];
   if (/[;|&$`<>()\\\n\r]/.test(text)) throw new Error('[fast_lane] tests_command runs without a shell: no ; | & $ ` < > ( ) \\ in it');
-  const words = [];
+  const words: string[] = [];
   const re = /'([^']*)'|"([^"]*)"|(\S+)/g;
   let match;
-  while ((match = re.exec(text))) words.push(match[1] ?? match[2] ?? match[3]);
+  while ((match = re.exec(text))) words.push((match[1] ?? match[2] ?? match[3])!);
   if (words.some((word) => /['"]/.test(word))) throw new Error('[fast_lane] tests_command has an unbalanced quote');
   const placeholders = words.filter((word) => word.includes('{files}'));
   if (placeholders.length !== 1 || placeholders[0] !== '{files}') throw new Error('[fast_lane] tests_command must hold {files} once, as a word of its own');
   if (words[0] === '{files}') throw new Error('[fast_lane] tests_command must start with a program, not {files}');
   return words;
 }
-export function targetedArgv(command, files) {
+export function targetedArgv(command: unknown, files: string[]) {
   const words = commandWords(command);
   if (!words.length) return [];
   if (!files.length || !files.every(pathFormOk)) throw new Error('the changed files cannot be handed to the targeted tests');
@@ -200,18 +218,18 @@ const FAST_KEYS = new Set(['enabled', 'labels', 'projects', 'author_model', 'rev
 
 // Literal texts the content rule refuses on top of its own (compared without
 // case): never a pattern, so that nothing in them can be slow or clever.
-const forbiddenText = (raw) => list(raw).map((text) => {
+const forbiddenText = (raw: unknown) => list(raw).map((text) => {
   if (text.length > 200 || /[\u0000-\u001F\u007F]/.test(text)) throw new Error('[fast_lane] forbidden_text holds comma-separated texts of at most 200 characters');
   return text.toLowerCase();
 });
 
 // The settings, checked whole: one that cannot be read makes nothing fast.
-export function fastSettings(conf) {
+export function fastSettings(conf: Conf) {
   const s = section(conf, 'fast_lane');
   const unknown = Object.keys(s).find((key) => !FAST_KEYS.has(key));
   if (unknown !== undefined) throw new Error(`[fast_lane] unknown key "${unknown}": the fast lane is off for every ticket until it is removed or spelled as the docs say`);
   const words = commandWords(s.tests_command);
-  const migrations = list(section(conf, 'release').migration_paths).map((p) => p.replace(/^\.\//, '').replace(/\/+$/, '').toLowerCase());
+  const migrations = list(section(conf, 'release').migration_paths).map((p: string) => p.replace(/^\.\//, '').replace(/\/+$/, '').toLowerCase());
   return {
     enabled: yes(s.enabled),
     labels: list(s.labels),
@@ -223,11 +241,11 @@ export function fastSettings(conf) {
     dependencies: list(s.dependency_files).map(globMatcher),
     types: fileTypes(s.file_types, s.extra_file_types),
     migrations,
-    guarded: list(section(conf, 'merge').guarded_paths).map((p) => p.toLowerCase()),
+    guarded: list(section(conf, 'merge').guarded_paths).map((p: string) => p.toLowerCase()),
     maxLines: whole(s.max_lines, 'max_lines', 40, 1, 2000),
     maxFiles: whole(s.max_files, 'max_files', 10, 1, 200),
     maxBytes: whole(s.max_file_bytes, 'max_file_bytes', 100000, 1, 5000000),
-    testsCommand: words.length ? s.tests_command.trim() : '',
+    testsCommand: words.length ? s.tests_command!.trim() : '',
     testsTimeoutMinutes: whole(s.tests_timeout_minutes, 'tests_timeout_minutes', 10, 1, 120),
     captureScreen: s.capture_screen || '',
     forbidden: forbiddenText(s.forbidden_text),
@@ -249,39 +267,41 @@ export function fastSettings(conf) {
 // "unverified", which counts only with the same opt-in. An agent it names is
 // refused in every case.
 const UNVERIFIED = 'unverified';
-export function openingDecision(settings, issue, actors = null) {
+type OpeningSettings = Pick<FastSettings, 'enabled' | 'labels' | 'projects' | 'trustLabelWithoutActor'>;
+type Mark = { what: string; name: string; by: Actor | null | undefined };
+export function openingDecision(settings: OpeningSettings, issue: Issue | null | undefined, actors: Actors | null = null) {
   if (!settings.enabled) return { lane: 'full', ignored: [] };
   const labels = Array.isArray(issue?.labels) ? issue.labels.map(String) : [];
   const project = issue?.project == null ? '' : String(issue.project);
-  const marks = [
+  const marks: Mark[] = [
     ...labels.filter((label) => settings.labels.includes(label)).map((label) => ({ what: 'label', name: label, by: actors?.labels?.[label] })),
     ...(project !== '' && settings.projects.includes(project) ? [{ what: 'project', name: project, by: actors?.project }] : []),
   ];
   const known = actors && typeof actors === 'object';
-  const trusted = (mark) => (!known ? settings.trustLabelWithoutActor
+  const trusted = (mark: Mark) => (!known ? settings.trustLabelWithoutActor
     : mark.by?.kind === 'human' || (mark.by?.kind === UNVERIFIED && settings.trustLabelWithoutActor));
-  const why = (mark) => (!known ? 'the tracker cannot say who set it'
+  const why = (mark: Mark) => (!known ? 'the tracker cannot say who set it'
     : mark.by?.kind === UNVERIFIED ? 'set under the key the agents share with the user: the tracker cannot say who set it ([merge] separate_identity)'
       : `set by ${mark.by?.kind ?? 'nobody known'}`);
   const ignored = marks.filter((mark) => !trusted(mark)).map((mark) => `${mark.what} ${mark.name} (${why(mark)})`);
   return { lane: marks.some(trusted) ? 'fast' : 'full', ignored };
 }
-export const openingLane = (settings, issue, actors = null) => openingDecision(settings, issue, actors).lane;
+export const openingLane = (settings: OpeningSettings, issue: Issue | null | undefined, actors: Actors | null = null) => openingDecision(settings, issue, actors).lane;
 
 // Can the tracker tell the user from an agent? As merge-pr.ts reads it before
 // it takes any agreement from the tracker: no when the scripts act under the
 // key of a person (tracker.ts identity is not "app"), unless the owner says
 // he accepts that ([merge] separate_identity = no). An identity that cannot
 // be read is not an application's.
-export const sharedIdentity = (conf, identity) => section(conf, 'merge').separate_identity !== 'no' && identity !== 'app';
+export const sharedIdentity = (conf: Conf, identity: string) => section(conf, 'merge').separate_identity !== 'no' && identity !== 'app';
 export function trackerIdentity() {
   try { return execFileSync(join(ORCH_HOME, 'tracker.ts'), ['identity'], { encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'ignore'] }).trim(); } catch { return 'unknown'; }
 }
 // What the tracker says of who set each mark, with the user's own marks made
 // unverified when it cannot tell him from an agent.
-export const unverifiedActors = (actors) => {
+export const unverifiedActors = (actors: Actors | null | undefined) => {
   if (!actors || typeof actors !== 'object') return null;
-  const blur = (by) => (by?.kind === 'human' ? { ...by, kind: UNVERIFIED } : by);
+  const blur = (by: Actor | null | undefined) => (by?.kind === 'human' ? { ...by, kind: UNVERIFIED } : by);
   return { ...actors, labels: Object.fromEntries(Object.entries(actors.labels ?? {}).map(([name, by]) => [name, blur(by)])), project: blur(actors.project ?? null) };
 };
 
@@ -290,36 +310,40 @@ export const unverifiedActors = (actors) => {
 // ticket that carries a fast mark. Even opted in (trust_label_without_actor),
 // a mark the tracker says an agent set is refused: the opt-in only covers a
 // tracker that cannot say.
-export function openingFor(conf, settings, issue, { identity = trackerIdentity, actorsOf = labelActors } = {}) {
+export function openingFor(conf: Conf, settings: OpeningSettings, issue: Issue | null | undefined,
+  { identity = trackerIdentity, actorsOf = labelActors }: { identity?: () => string; actorsOf?: (ticket: string | undefined) => Actors | null } = {}) {
   if (openingDecision({ ...settings, trustLabelWithoutActor: true }, issue).lane !== 'fast') return openingDecision(settings, issue, null);
   const actors = actorsOf(issue?.identifier);
   return openingDecision(settings, issue, sharedIdentity(conf, identity()) ? unverifiedActors(actors) : actors);
 }
 
 // Who set the labels and the project of a ticket, from the tracker; null when it cannot say.
-export function labelActors(ticket) {
+export function labelActors(ticket: string | undefined): Actors | null {
   if (!/^[A-Z][A-Z0-9]*-[0-9]+$/.test(String(ticket ?? ''))) return null;
   try {
-    const actors = JSON.parse(execFileSync(join(ORCH_HOME, 'tracker.ts'), ['label-actors', ticket], { encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'ignore'] }));
+    const actors = JSON.parse(execFileSync(join(ORCH_HOME, 'tracker.ts'), ['label-actors', ticket!], { encoding: 'utf8', timeout: 30000, stdio: ['ignore', 'pipe', 'ignore'] }));
     return actors && typeof actors === 'object' && actors.labels && typeof actors.labels === 'object' ? actors : null;
   } catch { return null; }
 }
 
-const protectedPath = (path, settings) => {
+type FastSettings = ReturnType<typeof fastSettings>;
+type DiffRules = Pick<FastSettings, 'maxFiles' | 'maxBytes' | 'maxLines' | 'guarded' | 'never' | 'dependencies' | 'migrations' | 'safe'>
+  & Partial<Pick<FastSettings, 'types' | 'forbidden'>>;
+const protectedPath = (path: string, settings: DiffRules) => {
   const lower = path.toLowerCase();
   const segments = lower.split('/');
   if (segments.some((part) => PROTECTED_SEGMENTS.has(part) || part.startsWith('.git'))) return true;
-  if (PROTECTED_NAMES.has(segments.at(-1)) || PROTECTED_FORMS.some((form) => form.test(segments.at(-1)))) return true;
+  if (PROTECTED_NAMES.has(segments.at(-1)!) || PROTECTED_FORMS.some((form) => form.test(segments.at(-1)!))) return true;
   // Compared without case: a checkout on a disk that ignores it would take
   // ".Cleared/" for ".cleared/".
   if (settings.guarded.some((prefix) => lower.startsWith(prefix))) return true;
   return settings.never.some((match) => match(path) || match(lower));
 };
-const dependencyPath = (path, settings) => {
-  const name = path.split('/').at(-1);
+const dependencyPath = (path: string, settings: DiffRules) => {
+  const name = path.split('/').at(-1)!;
   return DEPENDENCY_NAMES.has(name.toLowerCase()) || DEPENDENCY_FORMS.some((form) => form.test(name)) || settings.dependencies.some((match) => match(path));
 };
-const migrationPath = (path, settings) => {
+const migrationPath = (path: string, settings: DiffRules) => {
   const lower = path.toLowerCase();
   return lower.split('/').some((part) => MIGRATION_SEGMENTS.has(part)) || MIGRATION_FORMS.some((form) => form.test(lower))
     || settings.migrations.some((prefix) => lower === prefix || lower.startsWith(`${prefix}/`));
@@ -329,10 +353,10 @@ const migrationPath = (path, settings) => {
 // words; lib/i18n app_srv_fast_reason_<code>). The first path that broke a
 // rule is kept for the project lead, never shown on the card.
 export const RULE_REASONS = ['empty', 'too_many_files', 'too_many_lines', 'too_large', 'unusual_change', 'binary', 'path_form', 'protected', 'dependency', 'migration', 'outside_safe', 'file_type', 'content', 'link', 'asked'];
-export function judgeDiff(entries, settings) {
-  const reasons = [];
-  const offending = {};
-  const add = (code, path = null) => {
+export function judgeDiff(entries: DiffEntry[], settings: DiffRules) {
+  const reasons: string[] = [];
+  const offending: Record<string, string> = {};
+  const add = (code: string, path: string | null = null) => {
     if (!reasons.includes(code)) reasons.push(code);
     if (path && !offending[code]) offending[code] = path;
   };
@@ -352,8 +376,8 @@ export function judgeDiff(entries, settings) {
     // executable (100755), an unmerged or unknown status: not judged here.
     if (!['A', 'M'].includes(entry.status) || entry.newMode !== '100644' || (entry.status === 'M' && entry.oldMode !== '100644')) add('unusual_change', entry.path);
     if (entry.binary) add('binary', entry.path);
-    if (!(Number.isSafeInteger(entry.size) && entry.size <= settings.maxBytes)) add('too_large', entry.path);
-    if (Number.isSafeInteger(entry.added) && Number.isSafeInteger(entry.deleted)) lines += entry.added + entry.deleted;
+    if (!(Number.isSafeInteger(entry.size) && (entry.size as number) <= settings.maxBytes)) add('too_large', entry.path);
+    if (Number.isSafeInteger(entry.added) && Number.isSafeInteger(entry.deleted)) lines += (entry.added as number) + (entry.deleted as number);
     if (protectedPath(entry.path, settings)) add('protected', entry.path);
     if (dependencyPath(entry.path, settings)) add('dependency', entry.path);
     if (migrationPath(entry.path, settings)) add('migration', entry.path);
@@ -372,31 +396,31 @@ export function judgeDiff(entries, settings) {
 // `git diff-tree --raw -z` and `--numstat -z`, read into one entry a path.
 // Anything that does not read as expected throws: the caller takes the
 // full circuit.
-export function parseRaw(buffer) {
+export function parseRaw(buffer: Buffer) {
   const parts = buffer.toString('latin1').split('\0');
   if (parts.at(-1) === '') parts.pop();
-  const entries = [];
+  const entries: RawEntry[] = [];
   for (let i = 0; i < parts.length;) {
-    const meta = /^:(\d{6}) (\d{6}) ([0-9a-f]{40,64}) ([0-9a-f]{40,64}) ([A-Z])(\d*)$/.exec(parts[i]);
+    const meta = /^:(\d{6}) (\d{6}) ([0-9a-f]{40,64}) ([0-9a-f]{40,64}) ([A-Z])(\d*)$/.exec(parts[i]!);
     if (!meta) throw new Error('unreadable raw diff');
-    const status = meta[5];
+    const status = meta[5]!;
     const paths = ['R', 'C'].includes(status) ? 2 : 1;
     const named = parts.slice(i + 1, i + 1 + paths);
     if (named.length !== paths || named.some((path) => !path)) throw new Error('unreadable raw diff');
     // Names are read as bytes: one that is not plain ASCII never matches a rule.
-    entries.push({ oldMode: meta[1], newMode: meta[2], oldBlob: meta[3], newBlob: meta[4], status, path: named.at(-1), from: paths === 2 ? named[0] : null });
+    entries.push({ oldMode: meta[1]!, newMode: meta[2]!, oldBlob: meta[3]!, newBlob: meta[4]!, status, path: named.at(-1)!, from: paths === 2 ? named[0]! : null });
     i += 1 + paths;
   }
   return entries;
 }
-export function parseNumstat(buffer) {
+export function parseNumstat(buffer: Buffer) {
   const parts = buffer.toString('latin1').split('\0');
   if (parts.at(-1) === '') parts.pop();
-  const out = new Map();
+  const out = new Map<string, Counts>();
   for (const part of parts) {
     const match = /^(\d+|-)\t(\d+|-)\t(.+)$/s.exec(part);
-    if (!match || out.has(match[3])) throw new Error('unreadable numstat');
-    out.set(match[3], { binary: match[1] === '-' || match[2] === '-', added: match[1] === '-' ? null : Number(match[1]), deleted: match[2] === '-' ? null : Number(match[2]) });
+    if (!match || out.has(match[3]!)) throw new Error('unreadable numstat');
+    out.set(match[3]!, { binary: match[1] === '-' || match[2] === '-', added: match[1] === '-' ? null : Number(match[1]), deleted: match[2] === '-' ? null : Number(match[2]) });
   }
   return out;
 }
@@ -407,18 +431,18 @@ export function parseNumstat(buffer) {
 // caller takes the full circuit. A gained line that is not valid UTF-8 is
 // kept as null: the content rule refuses it.
 const utf8 = new TextDecoder('utf-8', { fatal: true });
-export function parsePatch(buffer) {
+export function parsePatch(buffer: Buffer) {
   const lines = buffer.toString('latin1').split('\n');
   if (lines.at(-1) === '') lines.pop();
-  const files = new Map();
-  let current = null;
-  let path = null;
+  const files = new Map<string, { added: (string | null)[]; deleted: number; binary: boolean }>();
+  let current: { added: (string | null)[]; deleted: number; binary: boolean } | null = null;
+  let path: string | null = null;
   let hunk = false;
   for (const line of lines) {
     const opened = /^diff --git a\/(\S+) b\/(\S+)$/.exec(line);
     if (opened) {
-      if (opened[1] !== opened[2] || files.has(opened[2])) throw new Error('unreadable patch');
-      path = opened[2];
+      if (opened[1] !== opened[2] || files.has(opened[2]!)) throw new Error('unreadable patch');
+      path = opened[2]!;
       current = { added: [], deleted: 0, binary: false };
       files.set(path, current);
       hunk = false;
@@ -428,7 +452,7 @@ export function parsePatch(buffer) {
     if (/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(line)) { hunk = true; continue; }
     if (hunk) {
       if (line.startsWith('+')) {
-        let text;
+        let text: string | null;
         try { text = utf8.decode(Buffer.from(line.slice(1), 'latin1')); } catch { text = null; }
         current.added.push(text);
       } else if (line.startsWith('-')) current.deleted += 1;
@@ -458,7 +482,7 @@ export function parsePatch(buffer) {
 // reviewer (controls, zero-width, bidi, the tag block). Each line is read as it is and as NFKC folds it. One
 // scan for every file, prose included: Markdown carries raw HTML, MDX and
 // Jekyll run what is in it. [fast_lane] forbidden_text adds literal texts.
-const CONTENT_PATTERNS = [
+const CONTENT_PATTERNS: [string, RegExp][] = [
   ['markup', /<|%3c|&#|&[a-z][a-z0-9]*;/i],
   ['load', /url\s*\(|@import|@font-face|@namespace|\bdata\s*:|javascript\s*:|vbscript\s*:|expression\s*\(|behavior\s*:|-moz-binding|image-set\s*\(|image\s*\(|src\s*\(|cross-fade\s*\(|element\s*\(|paint\s*\(/i],
   ['template', /\{\{|\{%|\$\{|#\{/],
@@ -472,7 +496,7 @@ const CONTENT_PATTERNS = [
   // invisible fillers and look-alikes that hide text or carry an instruction to a reviewer.
   ['hidden', /(?!\t)(?!\r$)\p{Cc}|\p{Cf}|\p{Zl}|\p{Zp}|[\u{34F}\u{61C}\u{115F}\u{1160}\u{180E}\u{2800}\u{3164}\u{FFA0}\u{FE00}-\u{FE0F}\u{E0000}-\u{E007F}]/u],
 ];
-export function contentFinding(added, extra = []) {
+export function contentFinding(added: unknown, extra: string[] = []) {
   if (!Array.isArray(added)) return 'unread';
   for (const line of added) {
     if (typeof line !== 'string') return 'encoding';
@@ -500,29 +524,29 @@ export function contentFinding(added, extra = []) {
 // A merge that conflicts is not judged either. The trees the merge writes go
 // to a scratch object directory, never into the checkout's.
 const MAX_ENTRIES = 500;
-const READ = { maxBuffer: 8 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] };
+const READ: ExecFileSyncOptionsWithBufferEncoding = { maxBuffer: 8 * 1024 * 1024, stdio: ['pipe', 'pipe', 'pipe'] };
 const HEX = /^[0-9a-f]{40,64}$/;
-export function readDiff(repo, base, commit) {
+export function readDiff(repo: string, base: string, commit: string): Diff {
   if (!/^[A-Za-z0-9._/-]+$/.test(base) || !/^[A-Za-z0-9._/-]+$/.test(commit) || commit.startsWith('-') || base.startsWith('-')) throw new Error('unreadable commit');
-  const rev = (ref) => execFileSync('git', ['-C', repo, 'rev-parse', '--verify', '--quiet', '--end-of-options', ref], { ...READ, env: checkoutReadEnv(repo) }).toString().trim();
+  const rev = (ref: string) => execFileSync('git', ['-C', repo, 'rev-parse', '--verify', '--quiet', '--end-of-options', ref], { ...READ, env: checkoutReadEnv(repo) }).toString().trim();
   const head = rev(`${commit}^{commit}`);
   const tip = rev(`${base}^{commit}`);
   if (!HEX.test(head) || !HEX.test(tip)) throw new Error('unreadable commit');
   const bases = execFileSync('git', ['-C', repo, 'merge-base', '--all', '--end-of-options', tip, head], { ...READ, env: checkoutReadEnv(repo) }).toString().split('\n').filter(Boolean);
-  if (bases.length !== 1 || !HEX.test(bases[0])) throw new Error(bases.length > 1 ? 'more than one merge base (criss-cross history)' : 'no merge base');
+  if (bases.length !== 1 || !HEX.test(bases[0]!)) throw new Error(bases.length > 1 ? 'more than one merge base (criss-cross history)' : 'no merge base');
   const baseTree = rev(`${tip}^{tree}`);
   const objects = execFileSync('git', ['-C', repo, 'rev-parse', '--path-format=absolute', '--git-common-dir'], { ...READ, env: checkoutReadEnv(repo) }).toString().trim();
   const scratchObjects = mkdtempSync(join(tmpdir(), 'cleared-fast-lane-objects-'));
   // The read environment, with the objects the merge writes kept in the scratch directory.
-  const git = (args, options = {}) => execFileSync('git', ['-C', repo].concat(args),
+  const git = (args: string[], options: ExecFileSyncOptionsWithBufferEncoding = {}) => execFileSync('git', ['-C', repo].concat(args),
     { ...READ, env: { ...checkoutReadEnv(repo), GIT_OBJECT_DIRECTORY: scratchObjects, GIT_ALTERNATE_OBJECT_DIRECTORIES: join(objects, 'objects') }, ...options });
   try {
-    let merged;
-    try { merged = git(['merge-tree', '--write-tree', '--no-messages', tip, head]).toString().split('\n')[0]; }
+    let merged: string;
+    try { merged = git(['merge-tree', '--write-tree', '--no-messages', tip, head]).toString().split('\n')[0]!; }
     catch (error) {
-      if (error.status === 1) throw new Error('the merge conflicts');
+      if ((error as { status?: number }).status === 1) throw new Error('the merge conflicts');
       const said = gitFirstLine(error);
-      throw new Error(/unknown option|usage: git merge-tree/i.test(String(error.stderr ?? '')) ? `git cannot compute the merge (git merge-tree --write-tree needs git 2.38 or later): ${said}` : `the merge cannot be computed: ${said}`);
+      throw new Error(/unknown option|usage: git merge-tree/i.test(String((error as { stderr?: unknown }).stderr ?? '')) ? `git cannot compute the merge (git merge-tree --write-tree needs git 2.38 or later): ${said}` : `the merge cannot be computed: ${said}`);
     }
     if (!HEX.test(merged)) throw new Error('unreadable merge');
     const raw = parseRaw(git(['diff-tree', '-r', '-z', '--raw', '--no-renames', '--no-abbrev', '--no-ext-diff', '--no-textconv', baseTree, merged]));
@@ -533,12 +557,12 @@ export function readDiff(repo, base, commit) {
     // two others, file by file and line by line. One that does not read, or
     // does not agree, leaves the content unread: the content rule refuses
     // it, and the other rules still say what they see.
-    let patch = null;
+    let patch: ReturnType<typeof parsePatch> | null = null;
     try {
       patch = parsePatch(git(['diff-tree', '-r', '-p', '-U0', '--no-renames', '--no-ext-diff', '--no-textconv', '--no-color', '--src-prefix=a/', '--dst-prefix=b/', baseTree, merged]));
       const agrees = patch.size === raw.length && raw.every((entry) => {
-        const read = patch.get(entry.path);
-        const counted = counts.get(entry.path);
+        const read = patch!.get(entry.path);
+        const counted = counts.get(entry.path)!;
         return read && (counted.binary || (read.added.length === counted.added && read.deleted === counted.deleted));
       });
       if (!agrees) patch = null;
@@ -552,7 +576,7 @@ export function readDiff(repo, base, commit) {
         if (match) sizes.set(match[1], match[2] === 'blob' ? Number(match[3]) : null);
       }
     }
-    return { head, entries: raw.map((entry) => ({ ...entry, ...counts.get(entry.path), addedLines: patch ? patch.get(entry.path).added : null, size: sizes.get(entry.newBlob) ?? null })) };
+    return { head, entries: raw.map((entry) => ({ ...entry, ...counts.get(entry.path), addedLines: patch ? patch.get(entry.path)!.added : null, size: sizes.get(entry.newBlob) ?? null })) };
   } finally { rmSync(scratchObjects, { recursive: true, force: true }); }
 }
 
@@ -561,16 +585,17 @@ export function readDiff(repo, base, commit) {
 // never comes back to the fast lane. What says nothing of the change (the
 // settings unreadable or the fast lane off, git that cannot answer now)
 // gives the full circuit for this call and is not kept as a demotion.
-export function decideLane({ conf, repo, base, commit, record, read = readDiff }) {
+export function decideLane({ conf, repo, base, commit, record, read = readDiff }:
+  { conf: Conf; repo: string; base: string; commit: string; record: LaneRecord | null; read?: (repo: string, base: string, commit: string) => Diff }): Decision {
   const kept = record?.fast_lane;
   if (!kept || kept.opening !== 'fast') return { state: 'full', reasons: ['not_fast_at_opening'], keep: false };
   if (kept.state !== 'fast') return { state: 'full', reasons: Array.isArray(kept.reasons) && kept.reasons.length ? kept.reasons : ['earlier'], keep: false };
-  let settings;
-  try { settings = fastSettings(conf); } catch (error) { return { state: 'full', reasons: ['settings'], keep: false, problem: error.message }; }
+  let settings: FastSettings;
+  try { settings = fastSettings(conf); } catch (error) { return { state: 'full', reasons: ['settings'], keep: false, problem: (error as Error).message }; }
   if (!settings.enabled) return { state: 'full', reasons: ['disabled'], keep: false };
-  let diff;
+  let diff: Diff;
   // A git too old to compute the merge is said (once a round, as the settings are): nothing is fast until it is updated.
-  try { diff = read(repo, base, commit); } catch (error) { return { state: 'full', reasons: ['unreadable'], keep: false, ...(/git 2\.38/.test(error?.message) ? { problem: error.message } : {}) }; }
+  try { diff = read(repo, base, commit); } catch (error) { return { state: 'full', reasons: ['unreadable'], keep: false, ...(/git 2\.38/.test((error as Error)?.message) ? { problem: (error as Error).message } : {}) }; }
   const judged = judgeDiff(diff.entries, settings);
   return { state: judged.fast ? 'fast' : 'full', reasons: judged.reasons, head: diff.head, lines: judged.lines, files: judged.files, offending: judged.offending, keep: true, entries: diff.entries };
 }
@@ -578,27 +603,27 @@ export function decideLane({ conf, repo, base, commit, record, read = readDiff }
 // Only the service writes what is decided: the state is its own, and a
 // process of another account (the agents') is refused before it reads
 // anything, even where the file system would refuse it anyway.
-export function assertService({ uid = process.getuid(), owner = statSync(stateDir()).uid } = {}) {
+export function assertService({ uid = process.getuid!(), owner = statSync(stateDir()).uid }: { uid?: number; owner?: number } = {}) {
   if (uid !== owner) throw new Error('only the service account decides the lane of a ticket');
 }
 
-const recordPath = (key) => {
+const recordPath = (key: string) => {
   if (!/^[A-Z][A-Z0-9]*-[0-9]+(?:\.2)?$/.test(String(key))) throw new Error(`"${key}" is not a lane`);
   return join(stateDir(), 'lanes', `${key}.json`);
 };
-const readRecord = (key) => {
+const readRecord = (key: string): LaneRecord | null => {
   try { const value = JSON.parse(readFileSync(recordPath(key), 'utf8')); return value && typeof value === 'object' && !Array.isArray(value) ? value : null; } catch { return null; }
 };
 // The fast-lane fields of a record, changed by a patch that is merged into
 // them. The read and the rewrite of the whole file happen under the record's
 // lock, the one the shell writers take too (lane_write in lib/common.sh): a
 // flock held by the command that runs the rewrite, for as long as it runs.
-const writeRecord = (key, patch) => {
+const writeRecord = (key: string, patch: Record<string, unknown>) => {
   const path = recordPath(key);
   execFileSync('flock', ['-w', '30', `${path}.lock`, process.execPath, fileURLToPath(import.meta.url), 'record-write', String(key)],
     { input: JSON.stringify(patch), stdio: ['pipe', 'ignore', 'pipe'] });
 };
-const rewriteRecord = (key, patch) => {
+const rewriteRecord = (key: string, patch: Record<string, unknown>) => {
   const path = recordPath(key);
   const current = readRecord(key) ?? {};
   const next = { ...current, fast_lane: { ...(current.fast_lane ?? {}), ...patch } };
@@ -606,13 +631,14 @@ const rewriteRecord = (key, patch) => {
   renameSync(`${path}.fast.part`, path);
   return next;
 };
-const ticketOf = (key) => String(key).replace(/\.2$/, '');
-const event = (kind, ticket, detail, value = null) => {
+const ticketOf = (key: string) => String(key).replace(/\.2$/, '');
+const event = (kind: string, ticket: string, detail: unknown, value: number | null = null) => {
   const db = openLedger(ledgerPath());
   try { addEvent(db, { kind, ticket, detail: typeof detail === 'string' ? detail : JSON.stringify(detail), value }); } finally { db.close(); }
 };
 
-export function decide(key, commit, { conf = loadConf(), repo = projectDir(), read = readDiff, write = true } = {}) {
+export function decide(key: string, commit: string, { conf = loadConf(), repo = projectDir(), read = readDiff, write = true }:
+  { conf?: Conf; repo?: string; read?: (repo: string, base: string, commit: string) => Diff; write?: boolean } = {}) {
   if (write) assertService();
   const record = readRecord(key);
   const base = section(conf, 'lanes').base || 'origin/main';
@@ -620,7 +646,7 @@ export function decide(key, commit, { conf = loadConf(), repo = projectDir(), re
   // The settings that cannot be read are said, once per round, not swallowed.
   if (result.problem) process.stderr.write(`fast-lane: ${result.problem}\n`);
   if (!result.keep || !write) return result;
-  const kept = record.fast_lane;
+  const kept = record!.fast_lane!;
   const at = new Date().toISOString();
   if (result.state === 'fast') {
     if (kept.head !== result.head) {
@@ -636,7 +662,7 @@ export function decide(key, commit, { conf = loadConf(), repo = projectDir(), re
   return result;
 }
 
-export function demote(key, reason) {
+export function demote(key: string, reason: string) {
   assertService();
   if (!RULE_REASONS.includes(reason)) throw new Error(`unknown reason "${reason}"`);
   const record = readRecord(key);
@@ -648,7 +674,8 @@ export function demote(key, reason) {
 }
 
 // The targeted tests of a commit the rules just found fast, never of another.
-export function targeted(key, commit, { conf = loadConf(), repo = projectDir(), read = readDiff } = {}) {
+export function targeted(key: string, commit: string, { conf = loadConf(), repo = projectDir(), read = readDiff }:
+  { conf?: Conf; repo?: string; read?: (repo: string, base: string, commit: string) => Diff } = {}) {
   const settings = fastSettings(conf);
   if (!settings.testsCommand) return null;
   const record = readRecord(key);
@@ -660,7 +687,7 @@ export function targeted(key, commit, { conf = loadConf(), repo = projectDir(), 
 
 // The targeted tests of a commit: their exit code, or "skipped" when they could
 // not run there (no command line, no room to run them): the card says which.
-export function testsDone(key, commit, code) {
+export function testsDone(key: string, commit: string, code: string | number) {
   assertService();
   if (!/^[0-9a-f]{40,64}$/.test(commit) || !(code === 'skipped' || /^\d+$/.test(String(code)))) throw new Error('usage: tests-done <lane key> <commit> <exit code|skipped>');
   if (code === 'skipped') {
@@ -679,94 +706,95 @@ export function testsDone(key, commit, code) {
 // union of their times), the human's wait (from the notification that told
 // him, else from the moment the card asked him, to his gesture), and the
 // machine's wait (the rest: checks, queues, the host). Minutes, one decimal.
-export function measureTicket({ todoAt, doneAt, runs = [], cardAt = null, notifiedAt = null, gestureAt = null }) {
+export function measureTicket({ todoAt, doneAt, runs = [], cardAt = null, notifiedAt = null, gestureAt = null }: { todoAt: string; doneAt: string;
+  runs?: { started_at: string; ended_at?: string | null }[]; cardAt?: string | null; notifiedAt?: string | null; gestureAt?: string | null }) {
   const start = Date.parse(todoAt);
   const end = Date.parse(doneAt);
   if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) return null;
-  const clip = (t) => Math.min(end, Math.max(start, t));
-  const spans = runs.map((run) => [clip(Date.parse(run.started_at)), clip(Date.parse(run.ended_at ?? doneAt))])
+  const clip = (t: number) => Math.min(end, Math.max(start, t));
+  const spans = runs.map((run): [number, number] => [clip(Date.parse(run.started_at)), clip(Date.parse(run.ended_at ?? doneAt))])
     .filter(([a, b]) => Number.isFinite(a) && Number.isFinite(b) && b > a).sort((x, y) => x[0] - y[0]);
-  const union = (list) => {
-    let total = 0, from = null, to = null;
+  const union = (list: [number, number][]) => {
+    let total = 0, from: number | null = null, to: number | null = null;
     for (const [a, b] of [...list].sort((x, y) => x[0] - y[0])) {
-      if (from === null || a > to) { if (from !== null) total += to - from; from = a; to = b; } else to = Math.max(to, b);
+      if (from === null || a > to!) { if (from !== null) total += to! - from; from = a; to = b; } else to = Math.max(to!, b);
     }
-    return from === null ? 0 : total + (to - from);
+    return from === null ? 0 : total + (to! - from);
   };
   const working = union(spans);
-  const askedFrom = Number.isFinite(Date.parse(notifiedAt)) ? Date.parse(notifiedAt) : Date.parse(cardAt);
-  const gesture = Date.parse(gestureAt);
-  const human = Number.isFinite(askedFrom) && Number.isFinite(gesture) && gesture >= askedFrom ? [clip(askedFrom), clip(gesture)] : null;
+  const askedFrom = Number.isFinite(Date.parse(notifiedAt as string)) ? Date.parse(notifiedAt as string) : Date.parse(cardAt as string);
+  const gesture = Date.parse(gestureAt as string);
+  const human: [number, number] | null = Number.isFinite(askedFrom) && Number.isFinite(gesture) && gesture >= askedFrom ? [clip(askedFrom), clip(gesture)] : null;
   const busy = union(human ? [...spans, human] : spans);
-  const minutes = (ms) => Math.round(ms / 6000) / 10;
+  const minutes = (ms: number) => Math.round(ms / 6000) / 10;
   return {
     total: minutes(end - start),
     working: minutes(working),
     humanWait: human ? minutes(human[1] - human[0]) : null,
     machineWait: minutes(Math.max(0, end - start - busy)),
-    humanFrom: human ? (Number.isFinite(Date.parse(notifiedAt)) ? 'notification' : 'card') : null,
+    humanFrom: human ? (Number.isFinite(Date.parse(notifiedAt as string)) ? 'notification' : 'card') : null,
   };
 }
 
-export const median = (values) => {
+export const median = (values: number[]) => {
   const sorted = values.filter(Number.isFinite).sort((a, b) => a - b);
   if (!sorted.length) return null;
   const mid = sorted.length >> 1;
-  return sorted.length % 2 ? sorted[mid] : Math.round(((sorted[mid - 1] + sorted[mid]) / 2) * 10) / 10;
+  return sorted.length % 2 ? sorted[mid]! : Math.round(((sorted[mid - 1]! + sorted[mid]!) / 2) * 10) / 10;
 };
 
 // The median time from Todo to Done of the tickets merged in the last days,
 // by lane, from the ticket_measured events.
-export function lanesMedian(db, { now = Date.now(), days = 7 } = {}) {
+export function lanesMedian(db: DatabaseSync, { now = Date.now(), days = 7 } = {}) {
   // The stamps are compared as dates: the ledger holds more than one ISO form.
-  const rows = db.prepare("SELECT value, detail, at FROM events WHERE kind = 'ticket_measured'").all()
+  const rows = (db.prepare("SELECT value, detail, at FROM events WHERE kind = 'ticket_measured'").all() as { value: number | null; detail: string | null; at: string }[])
     .filter((row) => Date.parse(row.at) >= now - days * 86400e3).sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
-  const by = { fast: [], full: [] };
+  const by: Record<'fast' | 'full', number[]> = { fast: [], full: [] };
   for (const row of rows) {
-    let lane = 'full';
+    let lane: 'fast' | 'full' = 'full';
     try { lane = JSON.parse(row.detail ?? '{}').lane === 'fast' ? 'fast' : 'full'; } catch { /* an unreadable detail counts as full */ }
-    if (Number.isFinite(row.value)) by[lane].push(row.value);
+    if (Number.isFinite(row.value)) by[lane].push(row.value!);
   }
   return { days, fast: { minutes: median(by.fast), count: by.fast.length }, full: { minutes: median(by.full), count: by.full.length } };
 }
 
 // Stamps are compared as dates, never as text: the ledger holds more than one ISO form.
-const since = (rows, after) => rows.filter((row) => !Number.isFinite(Date.parse(after)) || Date.parse(row.at) >= Date.parse(after))
+const since = <T extends { at: string }>(rows: T[], after: string | null) => rows.filter((row) => !Number.isFinite(Date.parse(after as string)) || Date.parse(row.at) >= Date.parse(after as string))
   .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
 
-function gestureTime(db, ticket, after, conf) {
-  const clears = since(db.prepare("SELECT at, detail FROM events WHERE kind = 'app_gesture' AND ticket = ?").all(ticket), after);
+function gestureTime(db: DatabaseSync, ticket: string, after: string, conf: Conf) {
+  const clears = since(db.prepare("SELECT at, detail FROM events WHERE kind = 'app_gesture' AND ticket = ?").all(ticket) as { at: string; detail: string | null }[], after);
   for (const row of clears) {
     try { const detail = JSON.parse(row.detail ?? '{}'); if (detail.gesture === 'clear' && detail.result === 'written') return row.at; } catch { /* not one */ }
   }
   // His move in the tracker's history, where the tracker keeps one.
   try {
     const go = section(conf, 'tracker').go_state;
-    const history = JSON.parse(execFileSync(join(ORCH_HOME, 'tracker.ts'), ['history', ticket], { encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'ignore'] }));
+    const history: { status?: string; by?: Actor; at: string }[] = JSON.parse(execFileSync(join(ORCH_HOME, 'tracker.ts'), ['history', ticket], { encoding: 'utf8', timeout: 20000, stdio: ['ignore', 'pipe', 'ignore'] }));
     const move = [...history].reverse().find((entry) => entry.status === go && entry.by?.kind === 'human' && (!after || entry.at >= after));
     if (move) return move.at;
   } catch { /* a tracker that keeps no history: the human's wait is not measured */ }
   return null;
 }
 
-export function measure(ticket, pr, lane, { conf = loadConf(), now = () => new Date().toISOString() } = {}) {
+export function measure(ticket: string, pr: string | number, lane: string, { conf = loadConf(), now = () => new Date().toISOString() }: { conf?: Conf; now?: () => string } = {}) {
   assertService();
   const db = openLedger(ledgerPath());
   try {
-    const record = readRecord(ticket) ?? {};
+    const record: LaneRecord = readRecord(ticket) ?? {};
     // Known only from the tracker's own stamp (todo_at): an unknown Todo is not guessed from the opening.
     const todoAt = record.todo_at ?? null;
-    const merges = db.prepare("SELECT at FROM events WHERE kind = 'merged_by_script' AND ticket = ? AND value = ?").all(ticket, Number(pr))
+    const merges = (db.prepare("SELECT at FROM events WHERE kind = 'merged_by_script' AND ticket = ? AND value = ?").all(ticket, Number(pr)) as { at: string }[])
       .sort((x, y) => Date.parse(y.at) - Date.parse(x.at));
     const doneAt = merges[0]?.at ?? now();
-    let cardAt = null;
+    let cardAt: string | null = null;
     try { cardAt = JSON.parse(readFileSync(join(stateDir(), 'validations', `${ticket}.json`), 'utf8')).at ?? null; } catch { /* never asked: a change that needed no agreement */ }
-    let notifiedAt = null;
-    for (const row of cardAt ? since(db.prepare("SELECT at, detail FROM events WHERE kind = 'notification_sent' AND ticket = ?").all(ticket), cardAt) : []) {
+    let notifiedAt: string | null = null;
+    for (const row of cardAt ? since(db.prepare("SELECT at, detail FROM events WHERE kind = 'notification_sent' AND ticket = ?").all(ticket) as { at: string; detail: string | null }[], cardAt) : []) {
       try { if (JSON.parse(row.detail ?? '{}').event === 'approval') { notifiedAt = row.at; break; } } catch { /* not one */ }
     }
     const gestureAt = cardAt ? gestureTime(db, ticket, cardAt, conf) : null;
-    const runs = todoAt ? since(db.prepare('SELECT started_at, ended_at FROM runs WHERE ticket = ?').all(ticket).map((run) => ({ ...run, at: run.started_at })), todoAt) : [];
+    const runs = todoAt ? since((db.prepare('SELECT started_at, ended_at FROM runs WHERE ticket = ?').all(ticket) as { started_at: string; ended_at: string | null }[]).map((run) => ({ ...run, at: run.started_at })), todoAt) : [];
     const measured = todoAt ? measureTicket({ todoAt, doneAt, runs, cardAt, notifiedAt, gestureAt }) : null;
     if (!measured) return null;
     addEvent(db, { kind: 'ticket_measured', ticket, value: measured.total, detail: JSON.stringify({ lane: lane === 'fast' ? 'fast' : 'full', pr: Number(pr), todo_at: todoAt, done_at: doneAt,
@@ -782,40 +810,40 @@ if (runAsCommand(import.meta.url)) {
       // The lane on the first line; on a second, the marks set by somebody
       // else than the user, which picked nothing (spawn-lane.sh keeps them in the ledger).
       let lane = 'full';
-      let ignored = [];
+      let ignored: string[] = [];
       try {
         const conf = loadConf();
         const settings = fastSettings(conf);
         const issue = JSON.parse(readFileSync(0, 'utf8'));
         ({ lane, ignored } = openingFor(conf, settings, issue));
-      } catch (error) { process.stderr.write(`fast-lane: ${error.message}: the ticket takes the full circuit\n`); }
+      } catch (error) { process.stderr.write(`fast-lane: ${(error as Error).message}: the ticket takes the full circuit\n`); }
       process.stdout.write(`${lane}\n${ignored.length ? `not set by the user, so not fast: ${ignored.join('; ')}\n` : ''}`);
     } else if (command === 'decide') {
       if (args.length !== 2) throw new Error('usage: fast-lane.ts decide <lane key> <commit>');
-      process.stdout.write(`${decide(args[0], args[1]).state}\n`);
+      process.stdout.write(`${decide(args[0]!, args[1]!).state}\n`);
     } else if (command === 'check') {
       if (args.length !== 2) throw new Error('usage: fast-lane.ts check <lane key> <commit>');
-      process.stdout.write(`${decide(args[0], args[1], { write: false }).state}\n`);
+      process.stdout.write(`${decide(args[0]!, args[1]!, { write: false }).state}\n`);
     } else if (command === 'demote') {
       if (args.length !== 2) throw new Error('usage: fast-lane.ts demote <lane key> <reason>');
-      demote(args[0], args[1]);
+      demote(args[0]!, args[1]!);
     } else if (command === 'targeted') {
       if (args.length !== 2) throw new Error('usage: fast-lane.ts targeted <lane key> <commit>');
-      const argv = targeted(args[0], args[1]);
+      const argv = targeted(args[0]!, args[1]!);
       if (!argv) process.exitCode = 3;
       else process.stdout.write(argv.map((word) => `${word}\0`).join(''));
     } else if (command === 'record-write') {
       // Internal: the rewrite writeRecord runs under the lock it holds.
       assertService();
-      rewriteRecord(args[0], JSON.parse(readFileSync(0, 'utf8')));
+      rewriteRecord(args[0]!, JSON.parse(readFileSync(0, 'utf8')));
     } else if (command === 'tests-done') {
-      testsDone(args[0], args[1], args[2]);
+      testsDone(args[0]!, args[1]!, args[2]!);
     } else if (command === 'measure') {
       if (args.length !== 3 || !existsSync(stateDir())) throw new Error('usage: fast-lane.ts measure <ticket> <pr> <fast|full>');
-      measure(args[0], args[1], args[2]);
+      measure(args[0]!, args[1]!, args[2]!);
     } else throw new Error('usage: fast-lane.ts opening | decide | check | demote | targeted | tests-done | measure');
   } catch (error) {
-    process.stderr.write(`fast-lane: ${error.message}\n`);
+    process.stderr.write(`fast-lane: ${(error as Error).message}\n`);
     process.exitCode = 1;
   }
 }

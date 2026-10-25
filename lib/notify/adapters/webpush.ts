@@ -8,18 +8,23 @@
 // browsers' subscriptions live there too. Neither is ever written to the
 // ledger, a log or an error.
 import { createECDH, createHash, createHmac, createCipheriv, createPrivateKey, randomBytes, sign } from 'node:crypto';
+import type { ECDH } from 'node:crypto';
+import type { Adapter, NotifyMessage, SendOptions, Transport } from '../contract.ts';
 
-const b64u = (bytes) => Buffer.from(bytes).toString('base64url');
-const hmac = (key, data) => createHmac('sha256', key).update(data).digest();
+export type Subscription = { endpoint: string; keys: { p256dh: string; auth: string }; device?: string; at?: string };
+export type VapidKeys = { publicKey: string; privateKey: string };
+
+const b64u = (bytes: Uint8Array | string) => Buffer.from(bytes).toString('base64url');
+const hmac = (key: Uint8Array, data: Uint8Array) => createHmac('sha256', key).update(data).digest();
 // HKDF (RFC 5869) with one block of output: all Web Push needs.
-const hkdf = (salt, ikm, info, length) => hmac(hmac(salt, ikm), Buffer.concat([info, Buffer.from([1])])).subarray(0, length);
+const hkdf = (salt: Uint8Array, ikm: Uint8Array, info: Uint8Array, length: number) => hmac(hmac(salt, ikm), Buffer.concat([info, Buffer.from([1])])).subarray(0, length);
 
 // The push services a browser may hand us, by host. Anything else is refused at
 // subscription and again at sending: the service never posts to an address of
 // someone's choosing. [notify] push_hosts adds to it (a self-hosted service).
 export const PUSH_HOSTS = ['fcm.googleapis.com', 'updates.push.services.mozilla.com', 'web.push.apple.com', '*.push.apple.com', '*.notify.windows.com'];
-export function pushHostAllowed(endpoint, extra = []) {
-  let url;
+export function pushHostAllowed(endpoint: string, extra: string[] = []): boolean {
+  let url: URL;
   try { url = new URL(endpoint); } catch { return false; }
   if (url.protocol !== 'https:' || url.username || url.password || url.port) return false;
   const host = url.hostname.toLowerCase();
@@ -29,7 +34,7 @@ export function pushHostAllowed(endpoint, extra = []) {
 // A subscription as the browser gives it: an https endpoint of a known push
 // service and the browser's two keys. Returns the cleaned copy, or null.
 // extra = null checks the shape only (the host is checked again at sending).
-export function validSubscription(input, extra = []) {
+export function validSubscription(input: { endpoint?: unknown; keys?: { p256dh?: unknown; auth?: unknown } | null } | null | undefined, extra: string[] | null = []): Subscription | null {
   const endpoint = input?.endpoint;
   const p256dh = input?.keys?.p256dh, auth = input?.keys?.auth;
   if (typeof endpoint !== 'string' || endpoint.length > 1000 || !/^https:\/\//.test(endpoint) || (extra !== null && !pushHostAllowed(endpoint, extra))) return null;
@@ -41,24 +46,24 @@ export function validSubscription(input, extra = []) {
 
 // The private scalar on its 32 bytes: Node drops leading zero bytes (about one key in 256),
 // which a JWK refuses; such a key, kept for good, would never sign.
-const scalar = (bytes) => Buffer.concat([Buffer.alloc(Math.max(0, 32 - bytes.length)), bytes]);
+const scalar = (bytes: Buffer) => Buffer.concat([Buffer.alloc(Math.max(0, 32 - bytes.length)), bytes]);
 // The service's VAPID key pair: the raw public key (what the browser is given) and the private scalar.
-export function vapidKeysFrom(ecdh) {
+export function vapidKeysFrom(ecdh: ECDH): VapidKeys {
   return { publicKey: b64u(ecdh.getPublicKey()), privateKey: b64u(scalar(ecdh.getPrivateKey())) };
 }
-export function newVapidKeys() {
+export function newVapidKeys(): VapidKeys {
   const ecdh = createECDH('prime256v1');
   ecdh.generateKeys();
   return vapidKeysFrom(ecdh);
 }
-const privateJwk = ({ publicKey, privateKey }) => {
+const privateJwk = ({ publicKey, privateKey }: VapidKeys) => {
   const raw = Buffer.from(publicKey, 'base64url');
   return { kty: 'EC', crv: 'P-256', x: b64u(raw.subarray(1, 33)), y: b64u(raw.subarray(33, 65)), d: b64u(scalar(Buffer.from(privateKey, 'base64url'))) };
 };
 
 // RFC 8291: the message for one browser. `ephemeral` and `salt` are drawn here;
 // a test may give its own to check the RFC's example.
-export function encrypt(payload, { p256dh, auth }, { ephemeral, salt = randomBytes(16) } = {}) {
+export function encrypt(payload: Uint8Array | string, { p256dh, auth }: { p256dh: string; auth: string }, { ephemeral, salt = randomBytes(16) }: { ephemeral?: string; salt?: Uint8Array } = {}): Buffer {
   const uaPublic = Buffer.from(p256dh, 'base64url');
   const authSecret = Buffer.from(auth, 'base64url');
   const ecdh = createECDH('prime256v1');
@@ -79,8 +84,8 @@ export function encrypt(payload, { p256dh, auth }, { ephemeral, salt = randomByt
 }
 
 // RFC 8292: the Authorization header for one push service (its origin is the audience).
-export function vapidHeader(endpoint, keys, subject, now = Date.now()) {
-  const encoded = (value) => b64u(JSON.stringify(value));
+export function vapidHeader(endpoint: string, keys: VapidKeys, subject: string, now = Date.now()): string {
+  const encoded = (value: unknown) => b64u(JSON.stringify(value));
   const claims = { aud: new URL(endpoint).origin, exp: Math.floor(now / 1000) + 12 * 3600, sub: subject };
   const unsigned = `${encoded({ typ: 'JWT', alg: 'ES256' })}.${encoded(claims)}`;
   const key = createPrivateKey({ key: privateJwk(keys), format: 'jwk' });
@@ -93,21 +98,23 @@ export function vapidHeader(endpoint, keys, subject, now = Date.now()) {
 // browsers are told a few at a time (`parallel`), each call cut after
 // `timeoutMs`, and none is started once `signal` (the dispatcher's deadline) is aborted.
 export const PARALLEL = 4;
-export function webpushAdapter({ store, subject, extraHosts = [], transport = fetch, timeoutMs = 10000, parallel = PARALLEL }) {
+export type PushStore = { vapid(): VapidKeys; subscriptions(): Subscription[]; forget(endpoint: string): unknown };
+export function webpushAdapter({ store, subject, extraHosts = [], transport = fetch, timeoutMs = 10000, parallel = PARALLEL }:
+  { store: PushStore; subject: string; extraHosts?: string[]; transport?: Transport; timeoutMs?: number; parallel?: number }): Adapter {
   return {
     name: 'webpush',
     ready() {
       if (!/^(?:mailto:[^\s@]+@[^\s@]+|https:\/\/\S+)$/.test(subject || '')) return 'no_subject';
       return store.subscriptions().length ? null : 'no_subscription';
     },
-    async send(message, { signal } = {}) {
-      let keys;
+    async send(message: NotifyMessage, { signal }: SendOptions = {}) {
+      let keys: VapidKeys;
       try { keys = store.vapid(); } catch { throw new Error('no keys'); }
       const payload = JSON.stringify({ title: message.title, body: message.body, url: message.url ?? null, tag: message.group });
       // A newer message for the same ticket replaces one the push service still holds.
       const topic = createHash('sha256').update(String(message.group)).digest('base64url').slice(0, 32);
       let delivered = 0, failed = 0;
-      const one = async (subscription) => {
+      const one = async (subscription: Subscription) => {
         if (!pushHostAllowed(subscription.endpoint, extraHosts)) { failed += 1; return; }
         try {
           // A redirect is a failure: the request is never sent again to an address the service did not name.
@@ -121,7 +128,7 @@ export function webpushAdapter({ store, subject, extraHosts = [], transport = fe
       };
       const queue = store.subscriptions();
       let next = 0;
-      const worker = async () => { while (next < queue.length && !signal?.aborted) await one(queue[next++]); };
+      const worker = async () => { while (next < queue.length && !signal?.aborted) await one(queue[next++]!); };
       await Promise.all(Array.from({ length: Math.max(1, Math.min(parallel, queue.length)) }, worker));
       // Said by a code only: never the endpoint, never what the push service answered.
       if (!delivered) throw new Error(failed ? 'push service refused' : 'no subscription left');

@@ -6,13 +6,28 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { homedir } from 'node:os';
 import { checkoutReadEnv, gitRefusal } from './git-checkout.ts';
 
+export type Section = Record<string, string>;
+export type Sections = Record<string, Section>;
+export type Model = { alias: string; adapter: string; model: string };
+export type Condition = { key: string; op: string; value: string };
+export type Rule = { role: string | undefined; conditions: Condition[]; alias: string; line: string };
+export type Conf = {
+  sections: Sections;
+  models: Record<string, Model>;
+  fallbacks: Section;
+  roles: Section;
+  rules: Rule[];
+  readonly missingRules?: boolean;
+};
+export type ConfSections = Pick<Conf, 'sections'>;
+
 for (const [name, value] of Object.entries(process.env)) {
   if (name.startsWith('CLEARED_')) process.env[`ORCH_${name.slice(8)}`] = value;
 }
 
 export const ORCH_HOME = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const examplePath = () => join(ORCH_HOME, 'agents.example.conf');
-const SAFE_DEFAULTS = {
+const SAFE_DEFAULTS: Sections = {
   policy: { guard_refusal: 'stop' },
   lead: { live: 'no', terminals_kept: '3', max_minutes: '20', report_hours: '6', messages_per_lane_per_hour: '6' },
   review: { differs_from_author: 'yes', per_hour: '8' },
@@ -30,43 +45,43 @@ const SAFE_DEFAULTS = {
     lane_idle_minutes: '120', orphan_hours: '6' },
   notify: { adapters: 'webpush', events: 'approval, question, rollback, health, blocked', coalesce_minutes: '10', blocked_minutes: '30' },
 };
-const REQUIRED = {
+const REQUIRED: Record<string, string[]> = {
   merge: ['tooling_paths', 'guarded_paths', 'code_paths', 'verdict'],
   tracker: ['adapter', 'team', 'validate_state', 'go_state', 'done_state', 'progress_state', 'review_state', 'todo_state'],
   lanes: ['root', 'base', 'push_roles', 'busy_states', 'closed_states', 'archives'],
   lead: ['report_on'],
 };
-export function defaultValue(name, key) { return SAFE_DEFAULTS[name]?.[key]; }
-export function requiredValue(name, key) { return REQUIRED[name]?.includes(key) ?? false; }
-export function requireSetting(conf, name, key) {
+export function defaultValue(name: string, key: string): string | undefined { return SAFE_DEFAULTS[name]?.[key]; }
+export function requiredValue(name: string, key: string): boolean { return REQUIRED[name]?.includes(key) ?? false; }
+export function requireSetting(conf: ConfSections, name: string, key: string): string {
   const value = conf.sections[name]?.[key];
   if (value === undefined || value === '') throw new Error(`Missing required [${name}] ${key} in project agents.conf`);
   return value;
 }
-export const ignoredConfigs = new Set();
-export const duplicateConfigKeys = new Set();
+export const ignoredConfigs = new Set<string>();
+export const duplicateConfigKeys = new Set<string>();
 // Whether `relative` is tracked in the project checkout. git answers "not
 // tracked" with exit code 1: that config is ignored (and recorded as such).
 // Any other failure (git refused the checkout, could not run, the path is
 // not a repository) is not an answer: confPath throws instead of reading the
 // defaults, and nothing is recorded as an untracked config.
 export class ConfigUnreadable extends Error {}
-function trackedProjectConfig(project, relative) {
+function trackedProjectConfig(project: string, relative: string): boolean {
   try {
     execFileSync('git', ['-C', project, 'ls-files', '--error-unmatch', '--', relative],
       { env: checkoutReadEnv(project), stdio: ['ignore', 'ignore', 'pipe'] });
     return true;
   } catch (error) {
-    if (error.status === 1) return false;
+    if ((error as { status?: number }).status === 1) return false;
     throw new ConfigUnreadable(gitRefusal(project, error));
   }
 }
 
 // True when the module at `url` is the script node was started with, whatever
 // the path looks like (a space, an accent, a symbolic link).
-export function runAsCommand(url) {
+export function runAsCommand(url: string): boolean {
   try {
-    return Boolean(process.argv[1]) && url === pathToFileURL(realpathSync(process.argv[1])).href;
+    return Boolean(process.argv[1]) && url === pathToFileURL(realpathSync(process.argv[1]!)).href;
   } catch {
     return false;
   }
@@ -76,34 +91,34 @@ export function runAsCommand(url) {
 // it (ORCH_REPO), else once for the machine (first line of
 // ~/.config/cleared/project), else the repository the tool sits in (a project
 // that carries its own copy of it). The same order as lib/common.sh.
-export function projectDir() {
-  if (process.env.CLEARED_REPO || process.env.ORCH_REPO) return process.env.CLEARED_REPO || process.env.ORCH_REPO;
+export function projectDir(): string {
+  if (process.env.CLEARED_REPO || process.env.ORCH_REPO) return (process.env.CLEARED_REPO || process.env.ORCH_REPO) as string;
   try {
     const root = process.env.XDG_CONFIG_HOME || join(homedir(), '.config');
-    const named = readFileSync(join(root, 'cleared', 'project'), 'utf8').split('\n')[0].trim();
+    const named = readFileSync(join(root, 'cleared', 'project'), 'utf8').split('\n')[0]!.trim();
     if (named) return named;
   } catch { /* no project named for the machine */ }
   const out = execFileSync('git', ['-C', ORCH_HOME, 'worktree', 'list', '--porcelain'], { encoding: 'utf8', env: checkoutReadEnv(ORCH_HOME) });
-  return out.split('\n')[0].replace(/^worktree /, '');
+  return out.split('\n')[0]!.replace(/^worktree /, '');
 }
 
 // Why the project checkout cannot be used at all (a path Cleared does not
 // expand, a checkout that is not there), or null. Not checked when the
 // settings file is named by the environment.
-export function checkoutProblem() {
+export function checkoutProblem(): string | null {
   if (process.env.CLEARED_CONF || process.env.ORCH_CONF) return null;
   try {
     const project = projectDir();
     if (project.startsWith('~')) return `the project path ${project} starts with "~", which Cleared does not expand: give the absolute path`;
     if (!existsSync(project)) return `the project checkout ${project} does not exist`;
     return null;
-  } catch (error) { return error.message; }
+  } catch (error) { return (error as Error).message; }
 }
 
 // Project settings must be tracked in .cleared/agents.conf. Throws
 // ConfigUnreadable when git cannot say whether it is.
-export function confPath() {
-  if (process.env.CLEARED_CONF || process.env.ORCH_CONF) return process.env.CLEARED_CONF || process.env.ORCH_CONF;
+export function confPath(): string {
+  if (process.env.CLEARED_CONF || process.env.ORCH_CONF) return (process.env.CLEARED_CONF || process.env.ORCH_CONF) as string;
   const project = projectDir();
   const current = join(project, '.cleared', 'agents.conf');
   if (existsSync(current) && trackedProjectConfig(project, '.cleared/agents.conf')) return current;
@@ -114,48 +129,50 @@ export function confPath() {
   return current;
 }
 
-export function expandHome(p) {
+export function expandHome(p: string): string;
+export function expandHome(p: string | undefined): string | undefined;
+export function expandHome(p: string | undefined): string | undefined {
   return p && p.startsWith('~/') ? join(homedir(), p.slice(2)) : p;
 }
 
 // One ledger for every lane, kept on the machine outside the repositories:
 // one folder per project, named after its checkout.
-export function stateDir() {
-  if (process.env.CLEARED_STATE_DIR || process.env.ORCH_STATE_DIR) return process.env.CLEARED_STATE_DIR || process.env.ORCH_STATE_DIR;
+export function stateDir(): string {
+  if (process.env.CLEARED_STATE_DIR || process.env.ORCH_STATE_DIR) return (process.env.CLEARED_STATE_DIR || process.env.ORCH_STATE_DIR) as string;
   const root = process.env.XDG_STATE_HOME || join(homedir(), '.local', 'state');
   const name = basename(projectDir());
   return join(root, 'cleared', name);
 }
 
-function tokens(line) {
-  const out = [];
+function tokens(line: string): string[] {
+  const out: string[] = [];
   const re = /(?:[^\s"]+|"[^"]*")+/g;
-  let m;
+  let m: RegExpExecArray | null;
   while ((m = re.exec(line))) out.push(m[0].replace(/"/g, ''));
   return out;
 }
 
-function parseRule(line, lineNumber) {
+function parseRule(line: string, lineNumber: number): Rule {
   const [left, alias] = line.split('->').map((part) => part.trim());
   if (!alias || !left) throw new Error(`agents.conf line ${lineNumber}: a rule reads "<role> <conditions> -> <alias>"`);
   const [role, ...rest] = tokens(left);
   const conditions = rest.map((token) => {
     const m = token.match(/^([a-z_]+)(=|>|<)(.+)$/);
     if (!m) throw new Error(`agents.conf line ${lineNumber}: unreadable condition "${token}"`);
-    return { key: m[1], op: m[2], value: m[3] };
+    return { key: m[1]!, op: m[2]!, value: m[3]! };
   });
   return { role, conditions, alias, line: line.replace(/\s+/g, ' ') };
 }
 
-export function parseConf(text) {
-  const conf = { models: {}, fallbacks: {}, roles: {}, rules: [], sections: {} };
-  let section = null;
+export function parseConf(text: string): Conf {
+  const conf: Conf = { models: {}, fallbacks: {}, roles: {}, rules: [], sections: {} };
+  let section: string | null = null;
   text.split('\n').forEach((raw, index) => {
     const line = raw.trim();
     if (!line || line.startsWith('#')) return;
     const header = line.match(/^\[([^\]]+)\]$/);
     if (header) {
-      section = header[1];
+      section = header[1]!;
       conf.sections[section] ??= {};
       return;
     }
@@ -167,11 +184,11 @@ export function parseConf(text) {
     const eq = line.indexOf('=');
     if (eq < 0) throw new Error(`agents.conf line ${index + 1}: expected "key = value"`);
     const key = line.slice(0, eq).trim();
-    if (Object.hasOwn(conf.sections[section], key)) {
+    if (Object.hasOwn(conf.sections[section]!, key)) {
       duplicateConfigKeys.add(`[${section}] ${key}`);
       return;
     }
-    conf.sections[section][key] = line.slice(eq + 1).trim();
+    conf.sections[section]![key] = line.slice(eq + 1).trim();
   });
   for (const [alias, target] of Object.entries(conf.sections.models || {})) {
     const colon = target.indexOf(':');
@@ -183,13 +200,13 @@ export function parseConf(text) {
   return conf;
 }
 
-export function loadConf(path = confPath()) {
+export function loadConf(path: string = confPath()): Conf {
   if (path === examplePath()) return parseConf(readFileSync(path, 'utf8'));
   const project = parseConf(existsSync(path) ? readFileSync(path, 'utf8') : '');
-  const sections = {};
+  const sections: Sections = {};
   for (const [name, values] of Object.entries(SAFE_DEFAULTS)) sections[name] = { ...values };
   for (const [name, values] of Object.entries(project.sections)) sections[name] = { ...sections[name], ...values };
-  const loaded = {
+  const loaded: Conf = {
     sections,
     models: project.models,
     fallbacks: project.fallbacks,
@@ -203,7 +220,7 @@ export function loadConf(path = confPath()) {
 // For a command's entry point: the project settings, or, when git cannot say
 // whether they are committed, that reason on one line and exit code 2 (not a
 // default config that would blame a missing setting).
-export function loadConfForCommand() {
+export function loadConfForCommand(): Conf {
   try { return loadConf(); }
   catch (error) {
     if (!(error instanceof ConfigUnreadable)) throw error;
@@ -212,12 +229,12 @@ export function loadConfForCommand() {
   }
 }
 
-export function section(conf, name) {
+export function section(conf: ConfSections, name: string): Section {
   return conf.sections[name] || {};
 }
 
 if (runAsCommand(import.meta.url)) {
-  const [command, name, key] = process.argv.slice(2);
+  const [command, name, key] = process.argv.slice(2) as [string, string, string];
   if (command === 'default') {
     const value = defaultValue(name, key);
     if (value !== undefined) process.stdout.write(`${value}\n`);

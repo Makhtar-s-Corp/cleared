@@ -11,24 +11,31 @@
 import { humanAdapters, humanClient } from '../../lib/tracker/adapters/human.ts';
 import { approvalOf, sameVersions } from '../../lib/validation-record.ts';
 import { validText } from './text.ts';
+import type { Conf, Section } from '../../lib/conf.ts';
+import type { readCredentials } from './credentials.ts';
 
-const refused = (code, message) => Object.assign(new Error(message), { code });
+type Actor = { kind: string; id: string } | null;
+type HumanClient = { whoAmI(): Promise<{ kind: string; id: string }>; state(ticket: string): Promise<string | null>; move(ticket: string, status: string | undefined): Promise<void>;
+  comment(ticket: string, body: string): Promise<void>; lastMoveBy(ticket: string, status: string | undefined): Promise<Actor>; close(): void };
+type Request = { op?: string; ticket: string; versions?: unknown; text?: string; at?: string };
 
-export function targetStates(conf, settings = {}) {
-  const t = conf.sections.tracker;
+const refused = (code: string, message: string) => Object.assign(new Error(message), { code });
+
+export function targetStates(conf: Pick<Conf, 'sections'>, settings: Section = {}) {
+  const t = conf.sections.tracker!;
   const back = settings.sent_back_state || t.progress_state;
   if (!back || [t.go_state, t.done_state, t.validate_state].includes(back)) throw refused('config', '[app] sent_back_state must be a working status, never the approval, the agreement or done');
   return { validate: t.validate_state, go: t.go_state, back };
 }
 
 // request: { op: 'approve' | 'sendback' | 'answer', ticket, versions?, text? }
-export async function perform(request, { conf, creds, settings = {}, project }) {
+export async function perform(request: Request, { conf, creds, settings = {}, project }: { conf: Conf; creds: ReturnType<typeof readCredentials>; settings?: Section; project: { state: string } }) {
   const adapter = conf.sections.tracker?.adapter;
-  if (!humanAdapters.includes(adapter)) throw refused('config', 'Unknown tracker adapter');
-  if (!conf.sections.tracker.owner_id) throw refused('config', '[tracker] owner_id (the human) is required for app gestures');
+  if (!humanAdapters.includes(adapter as string)) throw refused('config', 'Unknown tracker adapter');
+  if (!conf.sections.tracker!.owner_id) throw refused('config', '[tracker] owner_id (the human) is required for app gestures');
   if (!/^[A-Z][A-Z0-9]*-[0-9]+$/.test(String(request.ticket))) throw refused('input', 'Invalid ticket');
   const states = targetStates(conf, settings);
-  const client = humanClient(adapter, { conf, creds, settings });
+  const client = humanClient(adapter, { conf, creds, settings }) as HumanClient;
   try {
     const who = await client.whoAmI();
     if (who.kind !== 'human') throw refused('identity', 'The tracker does not see this access as the human: nothing written');

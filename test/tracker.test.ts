@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createVerify, generateKeyPairSync } from 'node:crypto';
-import { chmodSync, copyFileSync, mkdtempSync, readFileSync as readFile, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, symlinkSync, mkdtempSync, readFileSync as readFile, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -22,7 +22,7 @@ test('runtime and provider-neutral tests contain no provider name or query', () 
       || file === 'agents.example.conf' || file.startsWith('test/')) return false;
     // npm's lock files list registry packages by name: v2's names graphql (a package CopilotKit pulls in), not a tracker.
     if (file.endsWith('package-lock.json')) return false;
-    return file === 'cleared' || /\.(?:sh|mjs|jq|json|service|timer|yml|yaml)$/.test(file);
+    return file === 'cleared' || /\.(?:sh|mjs|ts|jq|json|service|timer|yml|yaml)$/.test(file);
   });
   for (const file of checked) {
     const contents = readFileSync(join(ORCH_HOME, file), 'utf8');
@@ -101,7 +101,8 @@ test('local comment creation and editing remain visible to later wakes', () => {
 
 test('the local ticket CLI creates, reads, comments, and moves without a network service', () => {
   const box = sandbox();
-  copyFileSync(join(ORCH_HOME, 'cleared'), join(box.home, 'cleared'));
+  copyFileSync(join(ORCH_HOME, 'cleared.ts'), join(box.home, 'cleared.ts'));
+  symlinkSync('cleared.ts', join(box.home, 'cleared'));
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, readFile(confPath, 'utf8').replace('adapter = local',
     `adapter = local\nowner_id = alice\nagents_uid = ${process.getuid()}`));
@@ -132,7 +133,8 @@ test('the local ticket CLI creates, reads, comments, and moves without a network
 
 test('generic tracker comments keep the agent marker and hourly limit', () => {
   const box = sandbox();
-  copyFileSync(join(ORCH_HOME, 'cleared'), join(box.home, 'cleared'));
+  copyFileSync(join(ORCH_HOME, 'cleared.ts'), join(box.home, 'cleared.ts'));
+  symlinkSync('cleared.ts', join(box.home, 'cleared'));
   copyFileSync(join(ORCH_HOME, 'tracker.ts'), join(box.home, 'tracker.ts'));
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, readFile(confPath, 'utf8').replace('adapter = local',

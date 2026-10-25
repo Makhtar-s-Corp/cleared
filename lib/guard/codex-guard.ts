@@ -9,19 +9,19 @@ import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { findPrivateTerms, guardValue, loadFingerprints } from "./private-terms.ts";
 
-let fingerprints;
+let fingerprints: Set<string>;
 try { fingerprints = loadFingerprints(); }
-catch (error) { console.error(error.message); process.exit(1); }
+catch (error) { console.error((error as Error).message); process.exit(1); }
 // Fingerprints of values checked by hand as fictitious test fixtures
 // (example IBANs, fake keys): `node scripts/codex-guard.mjs --allow <value>`.
 const allowPath = new URL("./codex-guard-allow.json", import.meta.url);
 const allowedData = JSON.parse(readFileSync(allowPath, 'utf8'));
 const allowed = new Set(Array.isArray(allowedData) ? allowedData : allowedData.hashes);
-const valueFingerprint = (value) =>
+const valueFingerprint = (value: string): string =>
   createHash("sha256").update("codex-guard:v1:" + value).digest("hex");
 // Text = valid UTF-8 without NUL bytes; anything else (images, PDFs, office
 // documents, archives, databases) is never exposed.
-const isText = (buffer) => {
+const isText = (buffer: Buffer): boolean => {
   if (buffer.includes(0)) return false;
   try {
     new TextDecoder("utf-8", { fatal: true }).decode(buffer);
@@ -31,7 +31,7 @@ const isText = (buffer) => {
   }
 };
 // High-confidence patterns, checked everywhere.
-const always = [
+const always: [string, RegExp][] = [
   ["API key", /\bsk-(?:ant-|proj-)?[A-Za-z0-9_-]{20,}/],
   ["private key", /BEGIN [A-Z ]*PRIVATE KEY/],
   ["IBAN", /\b[A-Z]{2}\d{2}(?:[ ]?[A-Z0-9]{4}){3,7}(?:[ ]?[A-Z0-9]{1,3})?\b/],
@@ -57,7 +57,7 @@ for (const prefix of guardValue('token_patterns').split(',').map((part) => part.
 }
 // Direct inputs only (diff, brief, commits, task): looser forms that code
 // legitimately uses for field names and UI labels.
-const directOnly = [
+const directOnly: [string, RegExp][] = [
   [
     "assigned secret",
     /(?:pass(?:word)?|secret|token|api[_-]?key|pepper)\w*["']?\s*[:=]\s*["'][^"']*\s[^"']*["']/i,
@@ -77,7 +77,7 @@ const directOnly = [
 // Markdown, env…) keep every pattern.
 const CODE_FILE = /\.(?:m?js|cjs|jsx|ts|tsx)$/;
 // Unquoted assignments of secret-looking values, as in .env files.
-const envAssignments = [
+const envAssignments: [string, RegExp][] = [
   [
     "assigned secret",
     /^\s*(?:export\s+)?(?=[A-Z])[A-Z0-9_]*(?:PASS(?:WORD)?|SECRET|TOKEN|API_?KEY|PEPPER)[A-Z0-9_]*=[^\s"'$(#]{8,}/,
@@ -86,7 +86,7 @@ const envAssignments = [
 
 // Never follows symbolic links: a snapshot's links are removed by --prune,
 // and a link met while checking is reported, not read.
-const files = (dir, withDirs = false) =>
+const files = (dir: string, withDirs = false): string[] =>
   readdirSync(dir).flatMap((name) => {
     const path = join(dir, name);
     const stat = lstatSync(path);
@@ -100,13 +100,13 @@ if (mode === "--allow") {
   for (const value of args) console.log(valueFingerprint(value));
   process.exit(0);
 }
-const targets = mode === "--tree" ? files(args[0], true) : args;
+const targets = mode === "--tree" ? files(args[0] as string, true) : args;
 if (mode === "--prune") {
-  for (const file of files(args[0]))
+  for (const file of files(args[0] as string))
     if (lstatSync(file).isSymbolicLink() || !isText(readFileSync(file)))
       rmSync(file);
   // Directories left empty go too, so only text files' paths remain.
-  for (const dir of files(args[0], true).reverse())
+  for (const dir of files(args[0] as string, true).reverse())
     if (lstatSync(dir).isDirectory() && readdirSync(dir).length === 0)
       rmSync(dir, { recursive: true });
   process.exit(0);
@@ -120,7 +120,7 @@ const problems = [];
 for (const file of targets) {
   // File and directory names are exposed too. A flagged name is never
   // printed, in any diagnostic of that file: only its position is.
-  const name = mode === "--tree" ? file.slice(args[0].length) : "";
+  const name = mode === "--tree" ? file.slice(args[0]!.length) : "";
   const nameProblems = [];
   if (name && findPrivateTerms(name, fingerprints).length)
     nameProblems.push("private term in name");

@@ -1,6 +1,6 @@
 // Provider-owned capture hosts. Reject redirects and credentials before the
 // collector downloads anything from a ticket comment.
-export function captureUrl(adapter, input) {
+export function captureUrl(adapter: string, input: string): URL {
   const url = new URL(input);
   const host = url.hostname.toLowerCase();
   if (url.protocol !== 'https:' || url.port || url.username || url.password) throw new Error('Invalid capture URL');
@@ -17,7 +17,7 @@ export function captureUrl(adapter, input) {
   return url;
 }
 
-export async function remoteCapture(tracker, adapter, input) {
+export async function remoteCapture(tracker: { downloadCapture?: (url: string) => Buffer | Promise<Buffer> }, adapter: string, input: string): Promise<Buffer> {
   captureUrl(adapter, input);
   if (typeof tracker.downloadCapture !== 'function') throw new Error('Tracker capture reader is unavailable');
   return tracker.downloadCapture(input);

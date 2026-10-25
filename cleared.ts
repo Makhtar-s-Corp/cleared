@@ -15,21 +15,21 @@ const [area, action, ...args] = process.argv.slice(2);
 // is not there, or git refusing the service-owned checkout (lib/conf.ts).
 const demo = area === 'app' && [action, ...args].includes('--demo');
 // (status checks this itself, so that --json keeps its document: lib/heartbeat.ts)
-if (['app', 'rollback', 'ticket'].includes(area) && !demo && !process.env.CLEARED_CONF && !process.env.ORCH_CONF) {
+if (['app', 'rollback', 'ticket'].includes(area as string) && !demo && !process.env.CLEARED_CONF && !process.env.ORCH_CONF) {
   const problem = checkoutProblem();
   if (problem) { console.error(`cleared: ${problem}`); process.exit(2); }
   loadConfForCommand(); // says why and exits 2 when git cannot read it
 }
 if (area === 'status') {
-  if ([action, ...args].filter(Boolean).some((flag) => !['--json', '--reap'].includes(flag))) {
+  if (([action, ...args].filter(Boolean) as string[]).some((flag) => !['--json', '--reap'].includes(flag))) {
     console.error('usage: cleared status [--json] [--reap]'); process.exit(64);
   }
   const result = spawnSync(process.execPath, [new URL('./lib/heartbeat.ts', import.meta.url).pathname,
-    'status', ...[action, ...args].filter(Boolean)], { stdio: 'inherit' });
+    'status', ...[action, ...args].filter(Boolean) as string[]], { stdio: 'inherit' });
   process.exit(result.status ?? 1);
 }
 if (area === 'app') {
-  const result = spawnSync(process.execPath, [new URL('./app/main.ts', import.meta.url).pathname, ...[action, ...args].filter(Boolean)], { stdio: 'inherit' });
+  const result = spawnSync(process.execPath, [new URL('./app/main.ts', import.meta.url).pathname, ...[action, ...args].filter(Boolean) as string[]], { stdio: 'inherit' });
   process.exit(result.status ?? 1);
 }
 if (area === 'rollback') {
@@ -46,7 +46,7 @@ if (area === 'rollback') {
     let db;
     try {
       db = openLedger(undefined, { readOnly: true });
-      const row = db.prepare('SELECT merge_sha,title FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get(ticket);
+      const row = db.prepare('SELECT merge_sha,title FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get(ticket) as { merge_sha: string; title: string } | undefined;
       if (!row) throw new Error(`No Cleared release recorded for ${ticket}`);
       const repo = process.env.CLEARED_REPO || process.env.ORCH_REPO || process.cwd();
       let files;
@@ -59,14 +59,14 @@ if (area === 'rollback') {
       try { answer = await prompt.question('Type "rollback" to confirm: '); }
       finally { prompt.close(); }
       if (answer.trim() !== 'rollback') { console.error('Rollback cancelled'); process.exit(1); }
-    } catch (error) { console.error(`cleared: ${error.message}`); process.exit(1); }
+    } catch (error) { console.error(`cleared: ${(error as Error).message}`); process.exit(1); }
     finally { db?.close(); }
   }
   const result = spawnSync(process.execPath, [new URL('./release-request.ts', import.meta.url).pathname,
     'request_rollback', ticket, ...(force ? ['--force-with-migrations'] : [])], { stdio: 'inherit' });
   process.exit(result.status ?? 1);
 }
-if (area !== 'ticket' || !['new', 'show', 'comment', 'move'].includes(action)) {
+if (area !== 'ticket' || !['new', 'show', 'comment', 'move'].includes(action as string)) {
   console.error('usage: cleared ticket new <title> [body file] | show <id> | comment <id> <body file> | move <id> <status> | rollback <ticket> [--yes]');
   process.exit(64);
 }
@@ -82,14 +82,14 @@ if (!process.env.CLEARED_STATE_DIR && !process.env.ORCH_STATE_DIR) {
 const tracker = createTracker(conf);
 try {
   let result;
-  if (action === 'new') result = tracker.createTicket({ title: args[0], body: args[1] ? readFileSync(args[1], 'utf8') : '' });
+  if (action === 'new') result = tracker.createTicket({ title: args[0] as string, body: args[1] ? readFileSync(args[1], 'utf8') : '' });
   else if (action === 'show') {
-    const ticket = tracker.getTicket(args[0]);
+    const ticket = tracker.getTicket(args[0] as string);
     if (!ticket) throw new Error(`No such ticket: ${args[0]}`);
-    result = { ...ticket, comments: tracker.comments(args[0]), history: tracker.history(args[0]) };
+    result = { ...ticket, comments: tracker.comments(args[0] as string), history: tracker.history(args[0] as string) };
   }
-  else if (action === 'comment') result = tracker.comment(args[0], readFileSync(args[1], 'utf8'));
-  else result = tracker.moveTicket(args[0], args[1]);
+  else if (action === 'comment') result = tracker.comment(args[0] as string, readFileSync(args[1] as string, 'utf8'));
+  else result = tracker.moveTicket(args[0] as string, args[1] as string);
   console.log(JSON.stringify(result, null, 2));
-} catch (error) { console.error(`cleared: ${error.message}`); process.exitCode = 1; }
+} catch (error) { console.error(`cleared: ${(error as Error).message}`); process.exitCode = 1; }
 finally { tracker.close?.(); }

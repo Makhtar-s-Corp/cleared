@@ -2,29 +2,41 @@
 // Release monitoring and exact-merge rollback. The project deployment system
 // observes pushes to the configured base branch; Cleared never deploys it.
 import { execFileSync, spawn } from 'node:child_process';
+import type { ExecFileSyncOptionsWithStringEncoding } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createInterface } from 'node:readline/promises';
+import type { DatabaseSync } from 'node:sqlite';
 import { loadConf, projectDir, runAsCommand, stateDir } from './conf.ts';
+import type { Conf, Section } from './conf.ts';
 import { openLedger, addEvent } from './ledger.ts';
 import { createTracker } from './tracker/contract.ts';
 import { message } from './i18n.ts';
 import { forgeEnv, forgeGhEnv } from './forge.ts';
 import { checkoutReadEnv } from './git-checkout.ts';
 
+type ReleaseRow = { id: number; ticket: string; pr: number; merge_sha: string; title: string; merged_at: string; status: string; failures: number;
+  last_health: string | null; rollback_sha: string | null; planned_rollback_sha: string | null; rollback_pushed_at: string | null;
+  ended_at: string | null; notified_at: string | null; watch_pid: number | null; lane: string | null; first_failure_at: string | null };
+type Health = { ok: boolean; detail: string };
+type Announce = (conf: Conf, ticket: string, body: string) => void;
+type Tracker = { getTicket?: (id: string) => { status?: string } | null | undefined; moveTicket: (id: string, status: string) => unknown; close?: () => void };
+type TrackerFactory = (conf: Conf) => Tracker;
+type Pull = { number?: number; title: string; mergeCommit?: { oid?: string } | null; mergedAt?: string | null };
+
 const here = new URL('.', import.meta.url).pathname;
 const now = () => new Date().toISOString();
-const productMessage = (conf, key, values) => message(key, conf.sections?.owner?.language || 'en', values);
-const minutes = (value, key, min = 0) => {
+const productMessage = (conf: Conf, key: string, values: Record<string, unknown>) => message(key, conf.sections?.owner?.language || 'en', values);
+const minutes = (value: string, key: string, min = 0) => {
   const n = Number(value);
   if (!Number.isInteger(n) || n < min || n > 10080) throw new Error(`[release] ${key} must be an integer from ${min} to 10080`);
   return n;
 };
-export function releaseSettings(conf) {
-  const s = conf.sections?.release || {};
+export function releaseSettings(conf: Conf) {
+  const s: Section = conf.sections?.release || {};
   const watchMinutes = minutes(s.watch_minutes ?? '15', 'watch_minutes', 1);
   const deployGraceMinutes = minutes(s.deploy_grace_minutes ?? '5', 'deploy_grace_minutes');
   if (deployGraceMinutes >= watchMinutes) throw new Error('[release] deploy_grace_minutes must be less than watch_minutes');
@@ -48,20 +60,21 @@ export function releaseSettings(conf) {
     deployGraceMinutes, failuresToRollback, autoRollback, reopenState: s.reopen_state || '',
     migrationPaths };
 }
-export const shouldRollback = (settings, failures) => settings.autoRollback && failures >= settings.failuresToRollback;
-export const canAutoRollback = (settings, row, at = Date.now()) => Boolean(
+export const shouldRollback = (settings: ReleaseSettings, failures: number) => settings.autoRollback && failures >= settings.failuresToRollback;
+type ReleaseSettings = ReturnType<typeof releaseSettings>;
+export const canAutoRollback = (settings: ReleaseSettings, row: ReleaseRow | null | undefined, at = Date.now()) => Boolean(
   row?.status === 'watching' && shouldRollback(settings, row.failures)
   && row.last_health && row.last_health !== 'HTTP 200' && row.last_health !== 'exit 0'
   && at >= Date.parse(row.merged_at) + settings.deployGraceMinutes * 60000
   && at < Date.parse(row.merged_at) + settings.watchMinutes * 60000,
 );
-export const touchesMigrations = (files, paths) => files.some((file) => paths.some((path) => {
+export const touchesMigrations = (files: string[], paths: string[]) => files.some((file) => paths.some((path) => {
   const normalized = path.replace(/^\.\//, '').replace(/\/+$/, '').toLocaleLowerCase('en');
   const candidate = file.toLocaleLowerCase('en');
   return candidate === normalized || candidate.startsWith(`${normalized}/`);
 }));
-export const rollbackPreview = (row, files) => `Ticket: ${row.ticket} — ${row.title}\nMerge to revert: ${row.merge_sha}\nFiles:\n${files.map((f) => `  ${f}`).join('\n')}`;
-export const confirmedRollback = (input, yes = false) => yes || input.trim() === 'rollback';
+export const rollbackPreview = (row: ReleaseRow, files: string[]) => `Ticket: ${row.ticket} — ${row.title}\nMerge to revert: ${row.merge_sha}\nFiles:\n${files.map((f) => `  ${f}`).join('\n')}`;
+export const confirmedRollback = (input: string, yes = false) => yes || input.trim() === 'rollback';
 
 const schema = `CREATE TABLE IF NOT EXISTS releases (
   id INTEGER PRIMARY KEY AUTOINCREMENT, ticket TEXT NOT NULL, pr INTEGER NOT NULL,
@@ -76,7 +89,7 @@ CREATE INDEX IF NOT EXISTS releases_ticket ON releases(ticket, id);`;
 // When the health of a release began failing, for the run of failures that
 // is going on (cleared by a check that passes): the watch of a later release
 // does not take the blame for a failure first seen before it went live.
-function ensureSchema(db) {
+function ensureSchema(db: DatabaseSync) {
   db.exec(schema);
   const columns = db.prepare('PRAGMA table_info(releases)').all().map((column) => column.name);
   if (!columns.includes('lane')) db.exec('ALTER TABLE releases ADD COLUMN lane TEXT');
@@ -93,10 +106,10 @@ function ensureSchema(db) {
 //   - an earlier release whose health was failing when last seen (its watch
 //     failed or ended on a failure), with no release since whose watch ended
 //     healthy: the failure may be its own, and older than this release.
-export function overlappingRelease(db, row, settings) {
+export function overlappingRelease(db: DatabaseSync, row: ReleaseRow, settings: ReleaseSettings) {
   ensureSchema(db);
   const merged = Date.parse(row.merged_at);
-  const earlier = db.prepare('SELECT * FROM releases WHERE id < ? ORDER BY id DESC').all(row.id);
+  const earlier = db.prepare('SELECT * FROM releases WHERE id < ? ORDER BY id DESC').all(row.id) as ReleaseRow[];
   for (const other of earlier) {
     if (['watching', 'rolling_back', 'verifying_rollback'].includes(other.status)) return { row: other, why: 'watched' };
     if (!(Date.parse(other.merged_at) + settings.watchMinutes * 60000 <= merged)) return { row: other, why: 'window' };
@@ -110,45 +123,45 @@ export function overlappingRelease(db, row, settings) {
 // Fetches and the revert push go through the forge credential, and the
 // revert is committed under the app's identity when one is configured
 // (lib/forge.ts); the ambient git otherwise.
-let gitEnv;
+let gitEnv: NodeJS.ProcessEnv | undefined;
 const forge = () => (gitEnv ??= forgeEnv(loadConf()));
-const OUTPUT = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] };
+const OUTPUT: ExecFileSyncOptionsWithStringEncoding = { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] };
 // Reads of the project checkout (rev-list, rev-parse, merge-base, show -s,
 // remote get-url): the read environment of lib/git-checkout.ts over the
 // forge's, which neutralises what the checkout's own configuration could run.
-const git = (repo, ...args) => execFileSync('git', ['-C', repo, ...args], { ...OUTPUT, env: checkoutReadEnv(repo, forge()) }).trim();
+const git = (repo: string, ...args: string[]) => execFileSync('git', ['-C', repo, ...args], { ...OUTPUT, env: checkoutReadEnv(repo, forge()) }).trim();
 // The fetch of the project checkout and every command in the revert's
 // scratch repository need the forge's credential helper and transport, which
 // the read environment turns off. This file runs them under the service
 // account only (the release broker, which checks the UID, merge-pr.ts it
 // starts, the watch), on the service's own checkout or on a directory this
 // process just made: never under the human's account.
-const serviceGit = (dir, ...args) => execFileSync('git', ['-C', dir, ...args],
+const serviceGit = (dir: string, ...args: string[]) => execFileSync('git', ['-C', dir, ...args],
   { ...OUTPUT, env: forge() /* git-env: the service account, on its own checkout or its scratch repository */ }).trim();
-export function retryFetch(action, pause = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)) {
-  let failure;
+export function retryFetch<T>(action: () => T, pause = (ms: number): unknown => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)) {
+  let failure: unknown;
   for (let attempt = 0; attempt < 3; attempt++) {
     try { return action(); }
     catch (error) { failure = error; if (attempt < 2) pause((attempt + 1) * 1000); }
   }
-  throw new Error(`Git fetch failed after three attempts: ${failure.message}`);
+  throw new Error(`Git fetch failed after three attempts: ${(failure as Error).message}`);
 }
-const gh = (repo, ...args) => JSON.parse(execFileSync('gh', args, { cwd: repo, encoding: 'utf8', env: forgeGhEnv(loadConf()) }));
-const record = (db, kind, row, detail = '') => addEvent(db, { kind, ticket: row?.ticket, detail, value: row?.pr });
-const baseName = (conf) => {
+const gh = (repo: string, ...args: string[]) => JSON.parse(execFileSync('gh', args, { cwd: repo, encoding: 'utf8', env: forgeGhEnv(loadConf()) }));
+const record = (db: DatabaseSync, kind: string, row: ReleaseRow | null | undefined, detail = '') => addEvent(db, { kind, ticket: row?.ticket, detail, value: row?.pr });
+const baseName = (conf: Conf) => {
   const base = conf.sections?.lanes?.base;
   if (!base || !/^(?:origin\/)?[A-Za-z0-9._/-]+$/.test(base)) throw new Error('Missing or invalid [lanes] base');
   return base.replace(/^origin\//, '');
 };
-const paths = (repo, sha) => execFileSync('git', ['-C', repo, 'diff', '-z', '--name-only', '--no-renames', '--no-ext-diff', '--no-textconv', `${sha}^1`, sha], { env: checkoutReadEnv(repo) })
+const paths = (repo: string, sha: string) => execFileSync('git', ['-C', repo, 'diff', '-z', '--name-only', '--no-renames', '--no-ext-diff', '--no-textconv', `${sha}^1`, sha], { env: checkoutReadEnv(repo) })
   .toString('utf8').split('\0').filter(Boolean);
-function ensureMerge(repo, sha) {
+function ensureMerge(repo: string, sha: string) {
   if (!/^[0-9a-f]{40}$/.test(sha)) throw new Error('Invalid merge commit');
   const parents = git(repo, 'rev-list', '--parents', '-n', '1', sha).split(' ');
   if (parents.length !== 3 || parents[0] !== sha) throw new Error(`${sha} is not a two-parent merge commit`);
 }
-function load(db, id) {
-  const row = db.prepare('SELECT * FROM releases WHERE id = ?').get(id);
+function load(db: DatabaseSync, id: number) {
+  const row = db.prepare('SELECT * FROM releases WHERE id = ?').get(id) as ReleaseRow | undefined;
   if (!row) throw new Error(`Unknown release ${id}`);
   return row;
 }
@@ -158,25 +171,26 @@ function load(db, id) {
 // one back (docs/fast-lane.md): a release after it makes an automatic
 // rollback of it ambiguous, which is said to the user (rollback_ambiguous_base)
 // and left to a manual rollback.
-export function activeRelease(db) {
+export function activeRelease(db: DatabaseSync) {
   ensureSchema(db);
-  return db.prepare("SELECT * FROM releases WHERE status IN ('rolling_back', 'verifying_rollback') OR (status = 'watching' AND COALESCE(lane, 'full') != 'fast') ORDER BY id DESC LIMIT 1").get();
+  return db.prepare("SELECT * FROM releases WHERE status IN ('rolling_back', 'verifying_rollback') OR (status = 'watching' AND COALESCE(lane, 'full') != 'fast') ORDER BY id DESC LIMIT 1").get() as ReleaseRow | undefined;
 }
 // What holds the next merge back (merge-pr.ts, through `release.ts active`):
 // the release above, and also a fast-lane release whose health is failing: a
 // merge on top of a failing site would only make every rollback a guess.
 // Only the merge gate: a merge that already went live is always watched
 // (startRelease), whatever another release's health says.
-export function holdsMerge(db) {
+export function holdsMerge(db: DatabaseSync) {
   ensureSchema(db);
-  return activeRelease(db) ?? db.prepare("SELECT * FROM releases WHERE status = 'watching' AND (failures > 0 OR first_failure_at IS NOT NULL) ORDER BY id DESC LIMIT 1").get();
+  return activeRelease(db) ?? db.prepare("SELECT * FROM releases WHERE status = 'watching' AND (failures > 0 OR first_failure_at IS NOT NULL) ORDER BY id DESC LIMIT 1").get() as ReleaseRow | undefined;
 }
-function setStatus(db, id, status, extra = {}) {
+function setStatus(db: DatabaseSync, id: number, status: string, extra: { failures?: number; lastHealth?: string; rollbackSha?: string | null } = {}) {
   db.prepare('UPDATE releases SET status = ?, failures = COALESCE(?, failures), last_health = COALESCE(?, last_health), rollback_sha = COALESCE(?, rollback_sha), ended_at = ? WHERE id = ?')
     .run(status, extra.failures ?? null, extra.lastHealth ?? null, extra.rollbackSha ?? null,
       ['watching', 'rolling_back', 'verifying_rollback'].includes(status) ? null : now(), id);
 }
-function deliverRollback(conf, db, row, { trackerFactory = createTracker, announce = notify } = {}) {
+function deliverRollback(conf: Conf, db: DatabaseSync, row: ReleaseRow,
+  { trackerFactory = createTracker, announce = notify }: { trackerFactory?: TrackerFactory; announce?: Announce } = {}) {
   if (row.notified_at) return;
   const tracker = trackerFactory(conf);
   try {
@@ -189,26 +203,27 @@ function deliverRollback(conf, db, row, { trackerFactory = createTracker, announ
   }));
   db.prepare('UPDATE releases SET notified_at = ? WHERE id = ?').run(now(), row.id);
 }
-export function reconcileNotifications(conf, db, options = {}) {
-  for (const row of db.prepare("SELECT * FROM releases WHERE status IN ('rolled_back', 'verifying_rollback') AND notified_at IS NULL ORDER BY id").all()) {
+export function reconcileNotifications(conf: Conf, db: DatabaseSync, options: { trackerFactory?: TrackerFactory; announce?: Announce } = {}) {
+  for (const row of db.prepare("SELECT * FROM releases WHERE status IN ('rolled_back', 'verifying_rollback') AND notified_at IS NULL ORDER BY id").all() as ReleaseRow[]) {
     try { deliverRollback(conf, db, row, options); }
-    catch (error) { record(db, 'rollback_notification_failed', row, error.message); }
+    catch (error) { record(db, 'rollback_notification_failed', row, (error as Error).message); }
   }
 }
-function sleep(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
-async function probe(settings, repo) {
+function sleep(ms: number): Promise<void> { return new Promise((resolve) => setTimeout(resolve, ms)); }
+async function probe(settings: ReleaseSettings, repo: string): Promise<Health> {
   if (settings.healthUrl) {
     try {
       const response = await fetch(settings.healthUrl, { signal: AbortSignal.timeout(10000), redirect: 'error' });
       return { ok: response.status === 200, detail: `HTTP ${response.status}` };
-    } catch (error) { return { ok: false, detail: `health URL: ${error.message}` }; }
+    } catch (error) { return { ok: false, detail: `health URL: ${(error as Error).message}` }; }
   }
   try {
     const output = execFileSync('sh', ['-c', settings.healthCommand], { cwd: repo, timeout: 10000, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
     return { ok: true, detail: output.trim().slice(0, 300) || 'exit 0' };
-  } catch (error) { return { ok: false, detail: `health command exit ${error.status ?? 'timeout'}: ${String(error.stderr || '').slice(0, 300)}` }; }
+  } catch (error) { return { ok: false, detail: `health command exit ${(error as { status?: number }).status ?? 'timeout'}: ${String((error as { stderr?: unknown }).stderr || '').slice(0, 300)}` }; }
 }
-async function verifyRollback(conf, db, repo, id, { wait, check, currentTime, announce }) {
+type Watching = { wait: (ms: number) => unknown; check: (settings: ReleaseSettings, repo: string) => Health | Promise<Health>; currentTime: () => number; announce: Announce };
+async function verifyRollback(conf: Conf, db: DatabaseSync, repo: string, id: number, { wait, check, currentTime, announce }: Watching) {
   const row = load(db, id);
   if (row.status !== 'verifying_rollback') return;
   const readyAt = Date.parse(row.rollback_pushed_at || now()) + releaseSettings(conf).deployGraceMinutes * 60000;
@@ -219,17 +234,17 @@ async function verifyRollback(conf, db, repo, id, { wait, check, currentTime, an
   setStatus(db, id, 'rolled_back', { lastHealth: after.detail });
   if (!after.ok) alertOwner(conf, db, row, productMessage(conf, 'rollback_health_still_failing', { title: row.title, reason: after.detail }), announce);
 }
-function notify(conf, ticket, body) {
+function notify(conf: Conf, ticket: string, body: string) {
   const file = join(mkdtempSync(join(tmpdir(), 'cleared-release-message-')), 'message.md');
   try {
     writeFileSync(file, body);
     execFileSync(join(here, '..', 'tracker.ts'), ['comment', ticket, file, 'Cleared'], { stdio: ['ignore', 'pipe', 'pipe'] });
   } finally { rmSync(dirname(file), { recursive: true, force: true }); }
 }
-function alertOwner(conf, db, row, body, announce = notify) {
+function alertOwner(conf: Conf, db: DatabaseSync, row: ReleaseRow, body: string, announce: Announce = notify) {
   try { announce(conf, row.ticket, body); }
   catch (error) {
-    record(db, 'rollback_notification_failed', row, error.message);
+    record(db, 'rollback_notification_failed', row, (error as Error).message);
     const outbox = join(stateDir(), 'tracker-outbox');
     mkdirSync(outbox, { recursive: true });
     const filename = `${row.ticket.replace(/[^A-Za-z0-9-]/g, '_')}--release-alert-${row.id}-${randomUUID().slice(0, 8)}.md`;
@@ -243,8 +258,8 @@ function alertOwner(conf, db, row, body, announce = notify) {
 // v2 workspace of several services share one ledger, so a ticket has a row
 // per repository, and its newest row may be another repository's merge: a
 // rollback asked of this repository's broker reverts this repository's own.
-export function ownRelease(conf, db, repo, ticket) {
-  const rows = db.prepare('SELECT * FROM releases WHERE ticket = ? ORDER BY id DESC').all(ticket);
+export function ownRelease(conf: Conf, db: DatabaseSync, repo: string, ticket: string) {
+  const rows = db.prepare('SELECT * FROM releases WHERE ticket = ? ORDER BY id DESC').all(ticket) as ReleaseRow[];
   if (rows.length === 0) return undefined;
   const base = baseName(conf);
   retryFetch(() => serviceGit(repo, 'fetch', '--quiet', 'origin', base));
@@ -255,7 +270,7 @@ export function ownRelease(conf, db, repo, ticket) {
     catch { return false; }                          // not an ancestor (exit 1), or a commit this repository does not have
   });
 }
-function plan(conf, repo, row) {
+function plan(conf: Conf, repo: string, row: ReleaseRow) {
   const base = baseName(conf);
   const remote = git(repo, 'remote', 'get-url', 'origin');
   retryFetch(() => serviceGit(repo, 'fetch', '--quiet', 'origin', base));
@@ -265,8 +280,8 @@ function plan(conf, repo, row) {
   const files = paths(repo, row.merge_sha);
   return { base, remote, remoteHead, files, migrations: touchesMigrations(files, releaseSettings(conf).migrationPaths) };
 }
-export function rollbackRelease(conf, db, repo, row, { automatic = false, forceWithMigrations = false,
-  trackerFactory = createTracker, announce = notify } = {}) {
+export function rollbackRelease(conf: Conf, db: DatabaseSync, repo: string, row: ReleaseRow, { automatic = false, forceWithMigrations = false,
+  trackerFactory = createTracker, announce = notify }: { automatic?: boolean; forceWithMigrations?: boolean; trackerFactory?: TrackerFactory; announce?: Announce } = {}) {
   if (row.rollback_sha || row.status === 'rolled_back') throw new Error('This release was already rolled back');
   const p = plan(conf, repo, row);
   if (automatic && p.remoteHead !== row.merge_sha)
@@ -301,16 +316,16 @@ export function rollbackRelease(conf, db, repo, row, { automatic = false, forceW
     record(db, 'rollback_pushed', row, `${row.merge_sha} reverted by ${sha}`);
     try {
       deliverRollback(conf, db, load(db, row.id), { trackerFactory, announce });
-    } catch (error) { record(db, 'rollback_notification_failed', row, error.message); }
+    } catch (error) { record(db, 'rollback_notification_failed', row, (error as Error).message); }
     return sha;
   } catch (error) {
-    if (!pushed && !db.prepare('SELECT rollback_sha FROM releases WHERE id = ?').get(row.id)?.rollback_sha) setStatus(db, row.id, 'failed');
+    if (!pushed && !(db.prepare('SELECT rollback_sha FROM releases WHERE id = ?').get(row.id) as Pick<ReleaseRow, 'rollback_sha'> | undefined)?.rollback_sha) setStatus(db, row.id, 'failed');
     throw error;
   } finally { rmSync(temp, { recursive: true, force: true }); }
 }
 
-export async function watchRelease(conf, db, repo, id, { wait = sleep, check = probe,
-  currentTime = Date.now, announce = notify, performRollback } = {}) {
+export async function watchRelease(conf: Conf, db: DatabaseSync, repo: string, id: number, { wait = sleep, check = probe,
+  currentTime = Date.now, announce = notify, performRollback }: Partial<Watching> & { performRollback?: (row: ReleaseRow) => unknown } = {}) {
   const settings = releaseSettings(conf);
   let row = load(db, id);
   if (row.status === 'verifying_rollback') return verifyRollback(conf, db, repo, id, { wait, check, currentTime, announce });
@@ -359,7 +374,7 @@ export async function watchRelease(conf, db, repo, id, { wait = sleep, check = p
             new URL(import.meta.url).pathname, 'auto', String(id)], { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'] });
         } catch (error) {
           if (load(db, id).status === 'watching' && load(db, id).failures === 0) continue;
-          throw new Error(`Rollback attempt failed: ${String(error.stderr || error.message).trim()}`);
+          throw new Error(`Rollback attempt failed: ${String((error as { stderr?: unknown }).stderr || (error as Error).message).trim()}`);
         }
       }
       await verifyRollback(conf, db, repo, id, { wait, check, currentTime, announce });
@@ -380,7 +395,7 @@ export async function watchRelease(conf, db, repo, id, { wait = sleep, check = p
   }
 }
 
-function scheduleWatch(repo, id) {
+function scheduleWatch(repo: string, id: number) {
   const executable = new URL(import.meta.url).pathname;
   const env = { ...process.env, CLEARED_REPO: repo, CLEARED_STATE_DIR: stateDir() };
   try {
@@ -397,14 +412,14 @@ function scheduleWatch(repo, id) {
     child.unref();
   }
 }
-function unitRunning(id) {
+function unitRunning(id: number) {
   try {
     const state = execFileSync('systemctl', ['--user', 'show', '-p', 'ActiveState', '--value', `cleared-release-watch-${id}.service`],
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
     return state === 'active' || state === 'activating';
   } catch { return false; }
 }
-function watcherRunning(row) {
+function watcherRunning(row: ReleaseRow) {
   if (unitRunning(row.id)) return true;
   if (!row.watch_pid) return false;
   try {
@@ -412,12 +427,12 @@ function watcherRunning(row) {
     return cmd.includes('release.ts') && cmd.includes(`watch ${row.id} `);
   } catch { return false; }
 }
-export function resumeWatches(conf, db, repo, { running = watcherRunning, schedule = scheduleWatch,
+export function resumeWatches(conf: Conf, db: DatabaseSync, repo: string, { running = watcherRunning, schedule = scheduleWatch,
   announce = notify, lockAvailable = () => {
     try { execFileSync('flock', ['-n', join(stateDir(), 'merge.lock'), 'true'], { stdio: 'ignore' }); return true; }
     catch { return false; }
-  } } = {}) {
-  for (const row of db.prepare("SELECT * FROM releases WHERE status IN ('watching','rolling_back','verifying_rollback') ORDER BY id").all()) {
+  } }: { running?: (row: ReleaseRow) => boolean; schedule?: (repo: string, id: number) => void; announce?: Announce; lockAvailable?: () => boolean } = {}) {
+  for (const row of db.prepare("SELECT * FROM releases WHERE status IN ('watching','rolling_back','verifying_rollback') ORDER BY id").all() as ReleaseRow[]) {
     if (running(row)) continue;
     if (row.status === 'rolling_back') {
       if (!lockAvailable()) continue; // A revert process still holds the merge lock.
@@ -430,7 +445,7 @@ export function resumeWatches(conf, db, repo, { running = watcherRunning, schedu
           try { git(repo, 'merge-base', '--is-ancestor', candidate, `origin/${base}`); pushed = true; }
           catch { /* the exact planned commit is absent */ }
         }
-        const body = pushed ? git(repo, 'show', '-s', '--format=%B', candidate) : '';
+        const body = pushed ? git(repo, 'show', '-s', '--format=%B', candidate!) : '';
         if (pushed && body.includes(`Cleared-Rollback-Release: ${row.id}`) && body.includes(`Cleared-Reverted-Merge: ${row.merge_sha}`)) {
           setStatus(db, row.id, 'verifying_rollback', { rollbackSha: candidate });
           db.prepare('UPDATE releases SET rollback_pushed_at = ? WHERE id = ?').run(now(), row.id);
@@ -442,7 +457,7 @@ export function resumeWatches(conf, db, repo, { running = watcherRunning, schedu
           continue;
         }
       } catch (error) {
-        record(db, 'release_watch_failed', row, `Rollback recovery: ${error.message}`);
+        record(db, 'release_watch_failed', row, `Rollback recovery: ${(error as Error).message}`);
         continue;
       }
     }
@@ -453,12 +468,13 @@ export function resumeWatches(conf, db, repo, { running = watcherRunning, schedu
       continue;
     }
     try { schedule(repo, row.id); }
-    catch (error) { record(db, 'release_watch_failed', row, `Monitor restart: ${error.message}`); }
+    catch (error) { record(db, 'release_watch_failed', row, `Monitor restart: ${(error as Error).message}`); }
   }
   reconcileNotifications(conf, db, { announce });
 }
-export function startRelease(conf, db, repo, ticket, pr, { readPull = () =>
-  gh(repo, 'pr', 'view', String(pr), '--json', 'number,title,mergeCommit,mergedAt'), schedule = scheduleWatch, lane = 'full' } = {}) {
+export function startRelease(conf: Conf, db: DatabaseSync, repo: string, ticket: string, pr: number, { readPull = (): Pull =>
+  gh(repo, 'pr', 'view', String(pr), '--json', 'number,title,mergeCommit,mergedAt'), schedule = scheduleWatch, lane = 'full' }:
+  { readPull?: () => Pull; schedule?: (repo: string, id: number) => void; lane?: string } = {}) {
   const settings = releaseSettings(conf);
   if (!['fast', 'full'].includes(lane)) throw new Error('The lane of a release is fast or full');
   const mergedByCleared = db.prepare("SELECT 1 FROM events WHERE kind = 'merged_by_script' AND ticket = ? AND value = ? LIMIT 1").get(ticket, pr);
@@ -469,7 +485,7 @@ export function startRelease(conf, db, repo, ticket, pr, { readPull = () =>
   if (!sha || !pull.mergedAt) throw new Error(`PR #${pr} has no merge commit; monitoring cannot start`);
   retryFetch(() => serviceGit(repo, 'fetch', '-q', 'origin', baseName(conf)));
   ensureMerge(repo, sha);
-  const existing = db.prepare('SELECT * FROM releases WHERE merge_sha = ?').get(sha);
+  const existing = db.prepare('SELECT * FROM releases WHERE merge_sha = ?').get(sha) as ReleaseRow | undefined;
   if (existing) {
     if (existing.ticket !== ticket || existing.pr !== pr) throw new Error('The merge commit is already recorded for another release');
     if (existing.status === 'watching' && !watcherRunning(existing)) schedule(repo, existing.id);
@@ -478,12 +494,12 @@ export function startRelease(conf, db, repo, ticket, pr, { readPull = () =>
   if (activeRelease(db)) throw new Error('Another release is already being monitored');
   db.prepare('INSERT INTO releases(ticket,pr,merge_sha,title,merged_at,status,lane) VALUES (?,?,?,?,?,?,?)')
     .run(ticket, pr, sha, pull.title, pull.mergedAt, settings.healthUrl || settings.healthCommand ? 'watching' : 'complete', lane);
-  const row = db.prepare('SELECT * FROM releases WHERE merge_sha = ?').get(sha);
+  const row = db.prepare('SELECT * FROM releases WHERE merge_sha = ?').get(sha) as ReleaseRow;
   if (!settings.healthUrl && !settings.healthCommand) { record(db, 'release_health_unconfigured', row, 'No [release] health_url or health_command'); return; }
   schedule(repo, row.id);
 }
 
-async function main([command, ...args]) {
+async function main([command, ...args]: string[]) {
   const conf = loadConf();
   const lockEnabled = Boolean(conf.sections.security?.agent_user || conf.sections.security?.allow_shared_uid === 'true');
   const lockMessage = 'Release lock requires [security] agent_user; create a separate agent account and run serve/install.ts, or explicitly set [security] allow_shared_uid = true';
@@ -494,7 +510,7 @@ async function main([command, ...args]) {
     if (command === 'check') { releaseSettings(conf); return; }
     if (command === 'reconcile') return resumeWatches(conf, db, repo);
     if (command === 'active') { if (holdsMerge(db)) process.exitCode = 3; return; }
-    if (command === 'start') return startRelease(conf, db, repo, args[0], Number(args[1]), { lane: args[2] || 'full' });
+    if (command === 'start') return startRelease(conf, db, repo, args[0]!, Number(args[1]), { lane: args[2] || 'full' });
     if (command === 'watch') {
       if (!lockEnabled) {
         conf.sections.release ||= {};
@@ -505,9 +521,9 @@ async function main([command, ...args]) {
       catch (error) {
         const row = load(db, Number(args[0]));
         if (row.status === 'watching' || (row.status === 'rolling_back' && !row.planned_rollback_sha)) setStatus(db, row.id, 'failed');
-        const rollbackError = error.message.startsWith('Rollback attempt failed:');
-        record(db, rollbackError ? 'rollback_failed' : 'release_watch_failed', row, error.message);
-        alertOwner(conf, db, row, productMessage(conf, rollbackError ? 'rollback_failed' : 'release_watch_failed', { title: row.title, reason: error.message }));
+        const rollbackError = (error as Error).message.startsWith('Rollback attempt failed:');
+        record(db, rollbackError ? 'rollback_failed' : 'release_watch_failed', row, (error as Error).message);
+        alertOwner(conf, db, row, productMessage(conf, rollbackError ? 'rollback_failed' : 'release_watch_failed', { title: row.title, reason: (error as Error).message }));
         throw error;
       } finally {
         db.prepare('UPDATE releases SET watch_pid = NULL WHERE id = ? AND watch_pid = ?').run(Number(args[0]), process.pid);
@@ -531,13 +547,13 @@ async function main([command, ...args]) {
     }
     if (command === 'rollback') {
       if (!lockEnabled) throw new Error(lockMessage);
-      if (process.getuid() !== statSync(fileURLToPath(import.meta.url)).uid) throw new Error('Only the service account can execute a manual rollback');
+      if (process.getuid!() !== statSync(fileURLToPath(import.meta.url)).uid) throw new Error('Only the service account can execute a manual rollback');
       if (!process.env.ORCH_BROKER_SECRET || process.env.ORCH_BROKER_SECRET !== readFileSync(join(stateDir(), 'release-broker.secret'), 'utf8')) throw new Error('Only the release broker can execute a manual rollback');
       const [ticket, ...flags] = args;
       const usage = 'usage: cleared rollback <ticket> [--yes] [--force-with-migrations]';
       if (!ticket) throw new Error(usage);
       for (let i = 0; i < flags.length; i++) {
-        if (!['--yes', '--force-with-migrations'].includes(flags[i])) throw new Error(usage);
+        if (!['--yes', '--force-with-migrations'].includes(flags[i]!)) throw new Error(usage);
       }
       if (!db.prepare('SELECT 1 FROM releases WHERE ticket = ?').get(ticket)) throw new Error(`No Cleared release recorded for ${ticket}`);
       const row = ownRelease(conf, db, repo, ticket);
@@ -548,7 +564,7 @@ async function main([command, ...args]) {
       if (p.migrations && !flags.includes('--force-with-migrations')) throw new Error('This merge touches declared migrations; add --force-with-migrations after reviewing database effects');
       if (!flags.includes('--yes')) {
         const prompt = createInterface({ input: process.stdin, output: process.stdout });
-        let input;
+        let input: string;
         try { input = await prompt.question('Type "rollback" to confirm: '); }
         finally { prompt.close(); }
         if (!confirmedRollback(input)) throw new Error('Rollback cancelled');

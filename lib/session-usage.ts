@@ -9,9 +9,10 @@ import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { runAsCommand } from './conf.ts';
 
-export function sessionUsage(lines, model = null) {
+type LoggedMessage = { id?: string; model?: string; usage: { input_tokens?: number; output_tokens?: number; cache_read_input_tokens?: number; cache_creation_input_tokens?: number } };
+export function sessionUsage(lines: string[], model: string | null = null) {
   // A message is logged once per content block, with the same usage.
-  const messages = new Map();
+  const messages = new Map<unknown, LoggedMessage>();
   for (const line of lines) {
     let entry;
     try { entry = JSON.parse(line); } catch { continue; }

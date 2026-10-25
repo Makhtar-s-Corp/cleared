@@ -15,27 +15,28 @@ import { chmodSync, closeSync, constants, fstatSync, lstatSync, mkdirSync, openS
 import { isAbsolute, join } from 'node:path';
 import { ORCH_HOME } from '../conf.ts';
 import { newVapidKeys, validSubscription } from './adapters/webpush.ts';
+import type { Subscription, VapidKeys } from './adapters/webpush.ts';
 
-const inside = (path, root) => path === root || path.startsWith(`${root}/`);
+const inside = (path: string, root: string) => path === root || path.startsWith(`${root}/`);
 export const MAX_SUBSCRIPTIONS = 10;
 
-function privateDir(dir, { project, create }) {
+function privateDir(dir: string, { project, create }: { project: string | undefined; create: boolean }) {
   if (!isAbsolute(dir)) throw new Error('[notify] secrets_dir must be an absolute path');
   if (create) mkdirSync(dir, { recursive: true, mode: 0o700 });
   const info = lstatSync(dir);
-  if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid() || (info.mode & 0o077) !== 0)
+  if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== process.getuid!() || (info.mode & 0o077) !== 0)
     throw new Error('The notification secrets directory must be a private directory (mode 0700) owned by the service account');
   const real = realpathSync(dir);
   for (const root of [project, ORCH_HOME]) if (root && inside(real, realpathSync(root))) throw new Error('The notification secrets directory must be outside the project and the Cleared checkout');
   return real;
 }
-function privateRead(path) {
+function privateRead(path: string): unknown {
   const info = lstatSync(path);
-  if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid() || (info.mode & 0o077) !== 0)
+  if (!info.isFile() || info.isSymbolicLink() || info.uid !== process.getuid!() || (info.mode & 0o077) !== 0)
     throw new Error('A notification secret must be a private regular file (mode 0600) owned by the service account');
   return JSON.parse(readFileSync(path, 'utf8'));
 }
-function privateWrite(path, value, { exclusive = false } = {}) {
+function privateWrite(path: string, value: unknown, { exclusive = false } = {}) {
   if (exclusive) {
     const fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
     try { fstatSync(fd); writeFileSync(fd, JSON.stringify(value)); } finally { closeSync(fd); }
@@ -54,7 +55,7 @@ function privateWrite(path, value, { exclusive = false } = {}) {
 // flock: flock(1) takes it on a descriptor it inherits from this process, and
 // the lock, which belongs to the open file, stays held until it is closed here.
 export const LOCK_WAIT_SECONDS = 5;
-function withLock(dir, change) {
+function withLock<T>(dir: string, change: () => T): T {
   const fd = openSync(join(dir, 'subscriptions.lock'), constants.O_RDWR | constants.O_CREAT | constants.O_NOFOLLOW, 0o600);
   try {
     const held = spawnSync('flock', ['-x', '-w', String(LOCK_WAIT_SECONDS), '3'], { stdio: ['ignore', 'ignore', 'ignore', fd], timeout: (LOCK_WAIT_SECONDS + 5) * 1000 });
@@ -64,29 +65,29 @@ function withLock(dir, change) {
 }
 
 // create: make the directory and the keys when missing (the app, when the human asks for notifications).
-export function notifyStore(dir, { project, create = false, now = () => Date.now() } = {}) {
+export function notifyStore(dir: string, { project, create = false, now = () => Date.now() }: { project?: string; create?: boolean; now?: () => number } = {}) {
   const root = () => privateDir(dir, { project, create });
-  const file = (name) => join(root(), name);
-  const missing = (error) => error?.code === 'ENOENT';
+  const file = (name: string) => join(root(), name);
+  const missing = (error: unknown) => (error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT';
   return {
     // The key pair; made once, never replaced (a new one would void every subscription).
-    vapid() {
+    vapid(): VapidKeys {
       const path = file('vapid.json');
-      try { return privateRead(path); }
+      try { return privateRead(path) as VapidKeys; }
       catch (error) { if (!missing(error) || !create) throw error; }
       try { privateWrite(path, newVapidKeys(), { exclusive: true }); }
-      catch (error) { if (error.code !== 'EEXIST') throw error; }
-      return privateRead(path);
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error; }
+      return privateRead(path) as VapidKeys;
     },
     publicKey() { return this.vapid().publicKey; },
-    subscriptions() {
+    subscriptions(): Subscription[] {
       try {
         const list = privateRead(file('subscriptions.json'));
         return Array.isArray(list) ? list.filter((s) => validSubscription(s, null)) : [];
       } catch { return []; }
     },
     // One per browser (its endpoint); the oldest go beyond MAX_SUBSCRIPTIONS.
-    subscribe(subscription, device = '') {
+    subscribe(subscription: Subscription, device: unknown = '') {
       return withLock(root(), () => {
         const kept = this.subscriptions().filter((s) => s.endpoint !== subscription.endpoint);
         kept.push({ ...subscription, device: String(device).slice(0, 40), at: new Date(now()).toISOString() });
@@ -94,7 +95,7 @@ export function notifyStore(dir, { project, create = false, now = () => Date.now
         return kept.length;
       });
     },
-    forget(endpoint) {
+    forget(endpoint: string) {
       return withLock(root(), () => {
         const all = this.subscriptions();
         const kept = all.filter((s) => s.endpoint !== endpoint);
@@ -103,8 +104,8 @@ export function notifyStore(dir, { project, create = false, now = () => Date.now
       });
     },
     // What one adapter needs, or undefined.
-    credentials(adapter) {
-      try { return privateRead(file('credentials.json'))?.[adapter]; } catch { return undefined; }
+    credentials(adapter: string): unknown {
+      try { return (privateRead(file('credentials.json')) as Record<string, unknown> | null)?.[adapter]; } catch { return undefined; }
     },
   };
 }

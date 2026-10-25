@@ -21,6 +21,13 @@ import { webpushAdapter } from './adapters/webpush.ts';
 import { ntfyAdapter } from './adapters/ntfy.ts';
 import { emailAdapter, sendmailDefault } from './adapters/email.ts';
 import { telegramAdapter } from './adapters/telegram.ts';
+import type { SendmailRun } from './adapters/email.ts';
+import type { PushStore } from './adapters/webpush.ts';
+
+export type NotifyMessage = { kind: string; ticket: string | null; group: string; title: string; body: string; url: string | null; urgent: boolean };
+export type SendOptions = { signal?: AbortSignal };
+export type Adapter = { name: string; ready(): string | null; send(message: NotifyMessage, options?: SendOptions): Promise<unknown> };
+export type Transport = (url: string, init: RequestInit) => Promise<{ ok: boolean; status: number }>;
 
 // The events that notify. More may come (a kind is added here, to the catalog
 // and to the dispatcher's sources); a kind nobody knows is never sent.
@@ -49,14 +56,14 @@ export const defaultSecretsDir = () => join(process.env.XDG_CONFIG_HOME || join(
 // .py and .rs are domains, so mycorp.sh or ntfy.sh is a host).
 const FILE_EXTENSION = /\.(?:exe|mjs|cjs|js|jsx|tsx|ts|json|conf|cfg|ini|txt|yml|yaml|log|pdf|png|jpe?g|svg|lock|env|toml|html|css|csv|rb|go|sql|bash|zsh)$/i;
 const USUAL_FILE = /^(?:readme|changelog|contributing|license|security|authors|todo|notes|install|setup|build|deploy|test|tests|run|start|main|index|lib|mod|init|wake|conftest|manage|cargo)\.(?:md|sh|py|rs)$/i;
-const fileName = (name) => FILE_EXTENSION.test(name) || USUAL_FILE.test(name);
+const fileName = (name: string) => FILE_EXTENSION.test(name) || USUAL_FILE.test(name);
 
 // Text from outside (a ticket's title) as a notification may carry it: no
 // link, path, address, key, token, password, e-mail, amount or long number,
 // no invisible or direction-changing character, on one line, cut short.
 // pairs = false: the second pass over a rendered sentence, where a title ending
 // in "token" is followed by the catalog's own colon, not by a value.
-export function sanitize(text, max = 80, { pairs = true } = {}) {
+export function sanitize(text: unknown, max = 80, { pairs = true }: { pairs?: boolean } = {}): string {
   // Cut before any pattern runs: a title of many kilobytes costs nothing, and what is past 500 characters is never shown.
   const flat = scrub(String(text ?? '').slice(0, 500).normalize('NFKC').replace(/\u3002/g, '.'), 500)
     .replace(/\s*\[amount\]\s*/g, ' [amount] ')
@@ -88,18 +95,18 @@ export function sanitize(text, max = 80, { pairs = true } = {}) {
   return flat.length > max ? `${flat.slice(0, max - 1).trimEnd()}…` : flat;
 }
 
-const minutes = (value, key, fallback, low = 0, high = 1440) => {
+const minutes = (value: unknown, key: string, fallback: number, low = 0, high = 1440) => {
   const n = Number(value ?? fallback);
   if (!Number.isInteger(n) || n < low || n > high) throw new Error(`[notify] ${key} must be a whole number of minutes from ${low} to ${high}`);
   return n;
 };
-const list = (value) => String(value ?? '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
-const clock = (text) => {
+const list = (value: unknown) => String(value ?? '').split(/[\s,]+/).map((x) => x.trim()).filter(Boolean);
+const clock = (text: string) => {
   const m = /^([01]?\d|2[0-3]):([0-5]\d)$/.exec(text);
   return m ? Number(m[1]) * 60 + Number(m[2]) : null;
 };
 // "22:00-07:00": the minutes of the day they start and end, or null when unset.
-export function quietHours(value) {
+export function quietHours(value: string | undefined): { start: number; end: number } | null {
   if (!value || value === 'none') return null;
   const [from, to, extra] = String(value).split('-').map((x) => x.trim());
   const start = clock(from ?? ''), end = clock(to ?? '');
@@ -110,15 +117,21 @@ export function quietHours(value) {
 // point, which push hosts are trusted and which mail program runs. They come
 // from the service's environment (CLEARED_NOTIFY_*, as CLEARED_NOTIFY_TELEGRAM_API),
 // never from agents.conf, which a project's agent can change.
-const serviceEnv = (env, name) => env[`CLEARED_NOTIFY_${name}`] || env[`ORCH_NOTIFY_${name}`] || '';
+type Env = Record<string, string | undefined>;
+const serviceEnv = (env: Env, name: string): string => env[`CLEARED_NOTIFY_${name}`] || env[`ORCH_NOTIFY_${name}`] || '';
 // The settings of [notify]. Nothing here is a secret: those stay in the private directory.
-export function notifySettings(conf, env = process.env) {
-  const s = section(conf, 'notify');
+export type NotifySettings = {
+  adapters: string[]; events: string[]; quiet: { start: number; end: number } | null; timezone: string; coalesceMinutes: number; blockedMinutes: number;
+  linkBase: string; secretsDir: string; subject: string; pushHosts: string[]; sendmail: string | null; deadlineMs: number; language: 'fr' | 'en';
+};
+type Section = Record<string, string>;
+export function notifySettings(conf: Parameters<typeof section>[0], env: Env = process.env): NotifySettings {
+  const s = section(conf, 'notify') as Section;
   const adapters = list(s.adapters ?? 'webpush').filter((a) => a !== 'none');
   for (const name of adapters) if (!ADAPTERS.includes(name)) throw new Error(`[notify] adapters: unknown adapter "${name}" (known: ${ADAPTERS.join(', ')})`);
   const events = list(s.events ?? KINDS.join(','));
   for (const kind of events) if (!KINDS.includes(kind) && kind !== 'none') throw new Error(`[notify] events: unknown event "${kind}" (known: ${KINDS.join(', ')})`);
-  const timezone = s.timezone || section(conf, 'dashboard').timezone || 'UTC';
+  const timezone = s.timezone || (section(conf, 'dashboard') as Section).timezone || 'UTC';
   try { new Intl.DateTimeFormat('en', { timeZone: timezone }); } catch { throw new Error(`[notify] timezone: unknown time zone "${timezone}"`); }
   const linkBase = serviceEnv(env, 'LINK_BASE').replace(/\/+$/, '');
   let base = '';
@@ -148,7 +161,7 @@ export function notifySettings(conf, env = process.env) {
 }
 
 // Whether `at` falls in the quiet hours, read on the configured clock.
-export function isQuiet(settings, at = Date.now()) {
+export function isQuiet(settings: Pick<NotifySettings, 'quiet' | 'timezone'>, at = Date.now()): boolean {
   if (!settings.quiet) return false;
   const parts = Object.fromEntries(new Intl.DateTimeFormat('en-GB', { timeZone: settings.timezone, hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
     .formatToParts(new Date(at)).map((p) => [p.type, p.value]));
@@ -161,15 +174,16 @@ export function isQuiet(settings, at = Date.now()) {
 // kind, ticket, title, code, minutes, from. Anything else it carries is
 // ignored. from = 'lead': a question of the project lead, which has its own
 // sentence (it is no team's, and has no ticket).
-export function render({ kind, ticket, title, code, minutes: waited, from }, { language = 'en', linkBase = '' } = {}) {
+export type Occurrence = { kind: string; ticket?: unknown; title?: unknown; code?: unknown; minutes?: unknown; from?: unknown; [field: string]: unknown };
+export function render({ kind, ticket, title, code, minutes: waited, from }: Occurrence, { language = 'en', linkBase = '' }: { language?: string; linkBase?: string } = {}): NotifyMessage {
   if (!KINDS.includes(kind)) throw new Error(`unknown notification kind ${kind}`);
   const id = TICKET.test(String(ticket ?? '')) ? String(ticket) : '';
   const name = sanitize(title, 80);
   const subject = id ? (name ? `${id} · ${name}` : id) : name;
-  const health = HEALTH_CODES.includes(code) ? code : 'other';
-  const values = { subject: subject || catalog('notify_no_subject', language), minutes: Number.isSafeInteger(waited) && waited >= 0 ? waited : '',
+  const health = HEALTH_CODES.includes(code as string) ? code : 'other';
+  const values = { subject: subject || catalog('notify_no_subject', language), minutes: Number.isSafeInteger(waited) && (waited as number) >= 0 ? waited : '',
     problem: catalog(`notify_health_${health}`, language) };
-  const text = (key) => catalog(key, language, values);
+  const text = (key: string) => catalog(key, language, values);
   const lead = kind === 'question' && from === 'lead';
   const heading = text(lead ? 'notify_question_lead_title' : `notify_${kind}_title`);
   const body = text(lead ? 'notify_question_lead_body' : kind === 'health' ? (subject ? 'notify_health_body_ticket' : 'notify_health_body') : `notify_${kind}_body`);
@@ -183,12 +197,14 @@ export function render({ kind, ticket, title, code, minutes: waited, from }, { l
 }
 
 // The one notification nothing caused: `notify.ts test`, to check a setup. Fixed words, no ticket.
-export function testMessage({ language = 'en', linkBase = '' } = {}) {
+export function testMessage({ language = 'en', linkBase = '' }: { language?: string; linkBase?: string } = {}): NotifyMessage {
   return { kind: 'test', ticket: null, group: 'test', urgent: false, title: catalog('notify_test_title', language), body: catalog('notify_test_body', language), url: linkBase ? `${linkBase}/` : null };
 }
 
 // The adapters [notify] adapters names, each with what it needs injected.
-export function createAdapters(settings, { store, transport = fetch, run } = {}) {
+type AdapterStore = PushStore & { credentials(adapter: string): unknown };
+type AdapterOptions = { store: AdapterStore; transport?: Transport; run?: SendmailRun };
+export function createAdapters(settings: NotifySettings, { store, transport = fetch, run }: AdapterOptions = {} as AdapterOptions): Adapter[] {
   return settings.adapters.map((name) => {
     if (name === 'webpush') return webpushAdapter({ store, subject: settings.subject, extraHosts: settings.pushHosts, transport });
     if (name === 'ntfy') return ntfyAdapter({ credentials: () => store.credentials('ntfy'), transport });

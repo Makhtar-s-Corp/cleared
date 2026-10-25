@@ -30,7 +30,7 @@ import { dirname, join, resolve } from 'node:path';
 // --- shared with lib/guard/private-terms.ts (copied there word for word; test/git-checkout.test.ts keeps them identical) ---
 // Settings of the repository that run a program or write into it, and the
 // value a read gives them instead.
-export const READ_OVERRIDES = [
+export const READ_OVERRIDES: [string, string][] = [
   ['core.fsmonitor', 'false'], // ls-files, status, diff with the worktree run the fsmonitor hook
   ['core.hooksPath', '/dev/null'], // no hook is found, .git/hooks included (post-index-change, reference-transaction)
   ['core.pager', 'cat'], // with GIT_PAGER below, which also wins over pager.<command>
@@ -56,10 +56,10 @@ export class CheckoutPathError extends Error {}
 // with a subdirectory such as <repo>/.cleared. Found without running git on
 // the repository. No `.git` anywhere above: the path itself (a bare
 // repository, or not a repository: git says so).
-export function checkoutTopLevel(checkout) {
+export function checkoutTopLevel(checkout: string): string {
   if (typeof checkout !== 'string' || !checkout) throw new CheckoutPathError('the checkout path is empty');
   if (checkout.startsWith('~')) throw new CheckoutPathError(`the checkout path ${checkout} starts with "~", which Cleared does not expand: give the absolute path`);
-  let path;
+  let path: string;
   try { path = realpathSync(resolve(checkout)); }
   catch { throw new CheckoutPathError(`the checkout ${checkout} does not exist or cannot be reached`); }
   for (let dir = path; ; dir = dirname(dir)) {
@@ -71,10 +71,10 @@ export function checkoutTopLevel(checkout) {
 // `env` plus, for one git command reading `checkout`: safe.directory for its
 // top level only, the overrides above, no optional lock (a read never writes
 // the index of the repository), no pager, no editor, no prompt.
-export function checkoutReadEnv(checkout, env = process.env) {
-  const entries = [['safe.directory', checkoutTopLevel(checkout)], ...READ_OVERRIDES];
-  const count = Math.max(0, Number.parseInt(env.GIT_CONFIG_COUNT, 10) || 0);
-  const out = { ...env, GIT_OPTIONAL_LOCKS: '0', GIT_PAGER: 'cat', GIT_EDITOR: 'false', GIT_TERMINAL_PROMPT: '0' };
+export function checkoutReadEnv(checkout: string, env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const entries: [string, string][] = [['safe.directory', checkoutTopLevel(checkout)], ...READ_OVERRIDES];
+  const count = Math.max(0, Number.parseInt(env.GIT_CONFIG_COUNT as string, 10) || 0);
+  const out: NodeJS.ProcessEnv = { ...env, GIT_OPTIONAL_LOCKS: '0', GIT_PAGER: 'cat', GIT_EDITOR: 'false', GIT_TERMINAL_PROMPT: '0' };
   // The caller's `git -c` settings (GIT_CONFIG_PARAMETERS) are read after the overrides and would beat them: dropped, as lib/forge.ts does.
   delete out.GIT_CONFIG_PARAMETERS;
   entries.forEach(([key, value], i) => {
@@ -87,15 +87,16 @@ export function checkoutReadEnv(checkout, env = process.env) {
 // --- end of the shared part ---
 
 // The first line of what git (or the spawn) said, for a message to a human.
-export function gitFirstLine(error) {
-  const text = String(error?.stderr || error?.message || '');
+type CommandError = { stderr?: unknown; message?: unknown } | null | undefined;
+export function gitFirstLine(error: unknown): string {
+  const text = String((error as CommandError)?.stderr || (error as CommandError)?.message || '');
   return text.split('\n').map((line) => line.trim()).find(Boolean) || 'no message';
 }
 
 // The sentence that replaces a failed read of a checkout (a path that cannot
 // be used keeps its own sentence).
 // Not a repository is said as that, not as a refusal.
-export const gitRefusal = (checkout, error) => {
+export const gitRefusal = (checkout: string, error: unknown): string => {
   if (error instanceof CheckoutPathError) return error.message;
   const line = gitFirstLine(error);
   if (/not a git repository/.test(line)) return `${checkout} is not a git repository: ${line}`;

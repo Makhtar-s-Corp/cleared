@@ -10,6 +10,8 @@
 // gestures that change a ticket's course or turn a device's notifications on
 // or off a passkey confirmation.
 import { createServer } from 'node:http';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { TLSSocket } from 'node:tls';
 import { readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -19,10 +21,14 @@ import { originInfo } from './lib/actions.ts';
 import { diffSnapshots, envelope, frame } from './lib/events.ts';
 import { message } from '../lib/i18n.ts';
 import { readFileSync } from 'node:fs';
+import type { Board } from './lib/events.ts';
+import type { Session } from './lib/session.ts';
+import type { createActions } from './lib/actions.ts';
+import type { createNotifications } from './lib/notifications.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const PUBLIC = join(here, 'public');
-const FILES = {
+const FILES: Record<string, [string, string]> = {
   '/': ['index.html', 'text/html; charset=utf-8'],
   '/app.js': ['app.js', 'text/javascript; charset=utf-8'],
   '/actions.js': ['actions.js', 'text/javascript; charset=utf-8'],
@@ -32,10 +38,10 @@ const FILES = {
   '/notify.js': ['notify.js', 'text/javascript; charset=utf-8'],
 };
 // The only things served without the token: the sign-in page and its two files.
-const OPEN = {
+const OPEN: Record<string, [string, string]> = {
   '/login': ['login.html', 'text/html; charset=utf-8'],
   '/login.js': ['login.js', 'text/javascript; charset=utf-8'],
-  '/style.css': FILES['/style.css'],
+  '/style.css': FILES['/style.css']!,
   // The two typefaces, served by the app itself (nothing is loaded from another site). No data in them.
   '/fonts/Geist-Variable.woff2': ['fonts/Geist-Variable.woff2', 'font/woff2'],
   '/fonts/GeistMono-Variable.woff2': ['fonts/GeistMono-Variable.woff2', 'font/woff2'],
@@ -60,18 +66,18 @@ export const WRITES = ['POST /session', 'POST /session/logout', 'POST /api/actio
 
 // A page carries no text of its own: every element marked data-i takes its words from the catalog, in the language
 // the owner chose, and so do data-i-aria / data-i-title / data-i-placeholder for the attributes a screen reader or a tooltip shows.
-const escape = (value) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
-const ATTRIBUTES = { aria: 'aria-label', title: 'title', placeholder: 'placeholder' };
-export function page(html, language) {
-  const words = (key) => escape(message(key, language));
+const escape = (value: string) => value.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const ATTRIBUTES: Record<string, string> = { aria: 'aria-label', title: 'title', placeholder: 'placeholder' };
+export function page(html: string, language: string) {
+  const words = (key: string) => escape(message(key, language));
   return html
     .replace(/<html lang="[a-z-]+">/, `<html lang="${language === 'fr' ? 'fr' : 'en'}">`)
-    .replace(/(<([a-z0-9]+)\b[^>]*\sdata-i="(app_[a-z_]+)"[^>]*>)([^<]*)(<\/\2>)/g, (_, open, tag, key, old, close) => `${open}${words(key)}${close}`)
-    .replace(/\sdata-i-(aria|title|placeholder)="(app_[a-z_]+)"/g, (_, kind, key) => ` ${ATTRIBUTES[kind]}="${words(key)}"`);
+    .replace(/(<([a-z0-9]+)\b[^>]*\sdata-i="(app_[a-z_]+)"[^>]*>)([^<]*)(<\/\2>)/g, (_: string, open: string, tag: string, key: string, old: string, close: string) => `${open}${words(key)}${close}`)
+    .replace(/\sdata-i-(aria|title|placeholder)="(app_[a-z_]+)"/g, (_: string, kind: string, key: string) => ` ${ATTRIBUTES[kind]}="${words(key)}"`);
 }
 
-const MESSAGE_KEYS = (language) => {
-  const out = {};
+const MESSAGE_KEYS = (language: string) => {
+  const out: Record<string, unknown> = {};
   for (const name of ['en', 'fr']) {
     if (name !== 'en' && name !== language) continue;
     const catalog = JSON.parse(readFileSync(join(here, '..', 'lib', 'i18n', `${name}.json`), 'utf8'));
@@ -80,34 +86,39 @@ const MESSAGE_KEYS = (language) => {
   return out;
 };
 
-export function appServer({ source, token, ranges = TAILSCALE, language = 'en', hosts = [], pollMs = 2000, heartbeatMs = 15000, actions = null, notifications = null, origin = '', owner = '', now = () => Date.now() }) {
-  const text = (response, status, body, type = 'text/plain; charset=utf-8', extra = {}) =>
+type Source = { snapshot(): Promise<Board>; ticket(id: string): Promise<unknown>; media?(id: string): Promise<{ mime: string; body: Buffer } | null>; watch?(onChange: () => void): () => void };
+type Options = { source: Source; token: string; ranges?: string[]; language?: string; hosts?: string[]; pollMs?: number; heartbeatMs?: number;
+  actions?: ReturnType<typeof createActions> | null; notifications?: ReturnType<typeof createNotifications> | null; origin?: string; owner?: string; now?: () => number };
+type Handlers = Record<string, (session: Session, input: unknown) => unknown>;
+type Failure = { status?: number; code: string } | null | undefined;
+export function appServer({ source, token, ranges = TAILSCALE, language = 'en', hosts = [], pollMs = 2000, heartbeatMs = 15000, actions = null, notifications = null, origin = '', owner = '', now = () => Date.now() }: Options) {
+  const text = (response: ServerResponse, status: number, body?: string | Buffer, type = 'text/plain; charset=utf-8', extra: Record<string, string> = {}) =>
     response.writeHead(status, { ...HEADERS, 'content-type': type, ...extra }).end(body);
-  const json = (response, status, value) => text(response, status, JSON.stringify(value), 'application/json; charset=utf-8');
-  const send = async (response, request, [file, type]) => {
+  const json = (response: ServerResponse, status: number, value: unknown) => text(response, status, JSON.stringify(value), 'application/json; charset=utf-8');
+  const send = async (response: ServerResponse, request: IncomingMessage, [file, type]: [string, string]) => {
     try {
       const body = await readFile(join(PUBLIC, file));
       text(response, 200, request.method === 'HEAD' ? undefined : type.startsWith('text/html') ? page(body.toString('utf8'), language) : body, type, type === 'font/woff2' ? { 'cache-control': 'public, max-age=86400' } : {}); }
     catch { text(response, 503, message('http_unavailable', language)); }
   };
-  const streams = new Set();
+  const streams = new Set<{ response: ServerResponse; tick: () => Promise<void>; stop: () => void }>();
   const unwatch = source.watch?.(() => { cached = null; for (const entry of streams) entry.tick(); }) ?? (() => {});
   const sessions = sessionStore({ now });
   const failures = attempts({ now });
   const configured = originInfo(origin);
-  const loopback = (address) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address);
+  const loopback = (address: string | undefined) => ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(address as string);
   // Secure whenever the browser's connection is encrypted: TLS here, or a proxy on this machine (tailscale serve) that says so.
-  const encrypted = (request) => Boolean(request.socket.encrypted) || (loopback(request.socket.remoteAddress) && request.headers['x-forwarded-proto'] === 'https');
-  const expectedOrigin = (request) => configured?.origin ?? `${encrypted(request) ? 'https' : 'http'}://${request.headers.host}`;
-  const body = (request) => new Promise((resolve, reject) => {
+  const encrypted = (request: IncomingMessage) => Boolean((request.socket as TLSSocket).encrypted) || (loopback(request.socket.remoteAddress) && request.headers['x-forwarded-proto'] === 'https');
+  const expectedOrigin = (request: IncomingMessage) => configured?.origin ?? `${encrypted(request) ? 'https' : 'http'}://${request.headers.host}`;
+  const body = (request: IncomingMessage) => new Promise<unknown>((resolve, reject) => {
     let data = '', size = 0;
     request.setEncoding('utf8');
-    request.on('data', (chunk) => { size += chunk.length; if (size > 16384) { reject(Object.assign(new Error('big'), { status: 413, code: 'too_big' })); request.destroy(); } else data += chunk; });
+    request.on('data', (chunk: string) => { size += chunk.length; if (size > 16384) { reject(Object.assign(new Error('big'), { status: 413, code: 'too_big' })); request.destroy(); } else data += chunk; });
     request.on('end', () => { try { resolve(data ? JSON.parse(data) : {}); } catch { reject(Object.assign(new Error('json'), { status: 400, code: 'json' })); } });
     request.on('error', reject);
   });
   // One read at a time, shared by every page: a slow source is never asked twice at once.
-  let reading = null, readAt = 0, cached = null;
+  let reading: Promise<Board> | null = null, readAt = 0, cached: Board | null = null;
   const read = () => {
     if (cached && Date.now() - readAt < pollMs / 2) return Promise.resolve(cached);
     reading ??= Promise.resolve().then(() => source.snapshot()).then((value) => { cached = value; readAt = Date.now(); return value; }).finally(() => { reading = null; });
@@ -118,9 +129,9 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
     if (!allowed(request.socket.remoteAddress, ranges)) return text(response, 403, message('http_forbidden', language), undefined, { connection: 'close' });
     if (!hostAllowed(request.headers.host, hosts)) return text(response, 421, message('http_forbidden', language), undefined, { connection: 'close' });
     // Reads, and the few writes in WRITES. Anything else is refused before any routing happens.
-    if (!['GET', 'HEAD', 'POST'].includes(request.method)) return text(response, 405, 'Method not allowed', undefined, { allow: 'GET, HEAD, POST' });
-    let url;
-    try { url = new URL(request.url, 'http://x'); } catch { return text(response, 400, message('http_bad_request', language)); }
+    if (!['GET', 'HEAD', 'POST'].includes(request.method as string)) return text(response, 405, 'Method not allowed', undefined, { allow: 'GET, HEAD, POST' });
+    let url: URL;
+    try { url = new URL(request.url!, 'http://x'); } catch { return text(response, 400, message('http_bad_request', language)); }
     const path = url.pathname;
     const mine = sessions.get(cookieValue(request.headers.cookie, COOKIE));
     const signedIn = Boolean(mine) || sameToken(bearerToken(request.headers.authorization), token);
@@ -147,12 +158,12 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
       }
       const ticket = /^\/api\/tickets\/([A-Za-z0-9._-]{1,40})$/.exec(path);
       if (ticket) {
-        const detail = await source.ticket(ticket[1]);
+        const detail = await source.ticket(ticket[1]!);
         return detail ? json(response, 200, detail) : text(response, 404, message('http_not_found', language));
       }
       const media = /^\/media\/([a-f0-9]{64})$/.exec(path);
       if (media) {
-        const image = await source.media?.(media[1]);
+        const image = await source.media?.(media[1]!);
         return image ? text(response, 200, request.method === 'HEAD' ? undefined : image.body, image.mime) : text(response, 404, message('http_not_found', language));
       }
       if (path === '/events') return request.method === 'HEAD' ? text(response, 200, undefined, 'text/event-stream; charset=utf-8') : stream(request, response);
@@ -164,8 +175,8 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
   });
 
   // ---- the writes ---------------------------------------------------------------
-  async function write(request, response, path, mine) {
-    const error = (status, code) => json(response, status, { error: code });
+  async function write(request: IncomingMessage, response: ServerResponse, path: string, mine: Session | null) {
+    const error = (status: number, code: string) => json(response, status, { error: code });
     try {
       if (path === '/session') {
         // Sign-in: the access token comes in a header (never in the address) and a session cookie goes back.
@@ -191,23 +202,23 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
       if (path.startsWith('/api/notifications/')) {
         if (!notifications) return error(503, 'unavailable');
         const input = await body(request);
-        return json(response, 200, await notifications[path.slice('/api/notifications/'.length)](mine, input));
+        return json(response, 200, await (notifications as unknown as Handlers)[path.slice('/api/notifications/'.length)]!(mine, input));
       }
       if (!actions) return error(503, 'unavailable');
       const input = await body(request);
-      const run = { '/api/actions/challenge': 'begin', '/api/actions/confirm': 'confirm', '/api/actions/undo': 'undo', '/api/actions/answer': 'answer',
-        '/api/passkeys/options': 'registerOptions', '/api/passkeys/finish': 'registerFinish' }[path];
-      return json(response, 200, await actions[run](mine, input));
+      const run = ({ '/api/actions/challenge': 'begin', '/api/actions/confirm': 'confirm', '/api/actions/undo': 'undo', '/api/actions/answer': 'answer',
+        '/api/passkeys/options': 'registerOptions', '/api/passkeys/finish': 'registerFinish' } as Record<string, string>)[path];
+      return json(response, 200, await (actions as unknown as Handlers)[run!]!(mine, input));
     } catch (caught) {
-      if (caught?.status) return error(caught.status, caught.code);
+      if ((caught as Failure)?.status) return error((caught as { status: number }).status, (caught as { code: string }).code);
       return error(500, 'failed');
     }
   }
 
-  async function stream(request, response) {
+  async function stream(request: IncomingMessage, response: ServerResponse) {
     response.writeHead(200, { ...HEADERS, 'content-type': 'text/event-stream; charset=utf-8', connection: 'keep-alive', 'x-accel-buffering': 'no' });
     response.write('retry: 3000\n\n');
-    let last = null, healthy = false, busy = false, stopped = false;
+    let last: Board | null = null, healthy = false, busy = false, stopped = false;
     const tick = async () => {
       if (busy || stopped) return;
       busy = true;
@@ -230,6 +241,6 @@ export function appServer({ source, token, ranges = TAILSCALE, language = 'en', 
   }
   server.on('clientError', (_error, socket) => socket.end('HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n'));
   const close = server.close.bind(server);
-  server.close = (callback) => { unwatch(); actions?.stop?.(); for (const entry of [...streams]) { entry.stop(); entry.response.end(); } server.closeAllConnections?.(); return close(callback); };
+  server.close = (callback?: (error?: Error) => void) => { unwatch(); actions?.stop?.(); for (const entry of [...streams]) { entry.stop(); entry.response.end(); } server.closeAllConnections?.(); return close(callback); };
   return server;
 }

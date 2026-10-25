@@ -14,6 +14,48 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { duplicateConfigKeys, ignoredConfigs, loadConf, runAsCommand, section, stateDir } from './conf.ts';
+import type { ConfSections } from './conf.ts';
+
+export type Usage = {
+  model?: string;
+  cost_usd?: number;
+  tokens_in?: number;
+  tokens_out?: number;
+  tokens_cache?: number;
+  tokens_cache_write?: number;
+  tokens_cache_write_5m?: number;
+  tokens_cache_write_1h?: number;
+  tokens_total?: number;
+};
+export type RunStart = {
+  runId: string;
+  role: string;
+  ticket?: string | null;
+  model?: string | null;
+  provider?: string | null;
+  startedAt?: string;
+  lane?: string | null;
+  source?: string;
+  requestedModel?: string | null;
+  project?: string | null;
+  label?: string | null;
+};
+export type RunEnd = {
+  runId: string;
+  outcome: string;
+  exitCode?: number | null;
+  endedAt?: string;
+  usage?: Usage;
+};
+export type LedgerEvent = {
+  kind: string;
+  at?: string;
+  ticket?: string | null;
+  runId?: string | null;
+  detail?: string | null;
+  value?: number | null;
+  source?: string;
+};
 
 export const EVENT_KINDS = [
   'wake_skipped', // the pre-check found nothing to do: no model was started
@@ -129,11 +171,11 @@ CREATE TABLE IF NOT EXISTS events (
 CREATE INDEX IF NOT EXISTS events_at ON events (at);
 `;
 
-export function ledgerPath() {
+export function ledgerPath(): string {
   return process.env.ORCH_LEDGER || join(stateDir(), 'ledger.db');
 }
 
-export function openLedger(path = ledgerPath(), { readOnly = false } = {}) {
+export function openLedger(path: string = ledgerPath(), { readOnly = false }: { readOnly?: boolean } = {}): DatabaseSync {
   if (!readOnly && path !== ':memory:') mkdirSync(join(path, '..'), { recursive: true });
   const db = new DatabaseSync(path, { readOnly });
   db.exec('PRAGMA busy_timeout = 5000');
@@ -141,9 +183,9 @@ export function openLedger(path = ledgerPath(), { readOnly = false } = {}) {
     db.exec('PRAGMA journal_mode = WAL');
     db.exec(SCHEMA);
     // Columns added after the first ledger was created.
-    const columns = db.prepare('PRAGMA table_info(runs)').all().map((column) => column.name);
+    const columns = (db.prepare('PRAGMA table_info(runs)').all() as { name: string }[]).map((column) => column.name);
     for (const column of ['project', 'label']) if (!columns.includes(column)) db.exec(`ALTER TABLE runs ADD COLUMN ${column} TEXT`);
-    const ignored = new Set([...ignoredConfigs, process.env.CLEARED_IGNORED_UNTRACKED_CONF].filter(Boolean));
+    const ignored = new Set([...ignoredConfigs, process.env.CLEARED_IGNORED_UNTRACKED_CONF].filter(Boolean) as string[]);
     for (const detail of ignored) {
       if (!db.prepare('SELECT 1 FROM events WHERE kind = ? AND detail = ? LIMIT 1').get('untracked_config_ignored', detail))
         db.prepare('INSERT INTO events (at, kind, detail) VALUES (?, ?, ?)').run(new Date().toISOString(), 'untracked_config_ignored', detail);
@@ -157,32 +199,33 @@ export function openLedger(path = ledgerPath(), { readOnly = false } = {}) {
   return db;
 }
 
-export function now() {
+export function now(): string {
   return new Date().toISOString();
 }
 
 // Cost in euros: what the CLI reported when it reports one, else the token
 // counts times the price table, else nothing.
-export function costEur(conf, usage) {
+export function costEur(conf: ConfSections, usage: Usage): { cost: number | null; basis: 'cli' | 'prices' | null } {
   const rate = Number(section(conf, 'currency').usd_eur);
   if (!rate) return { cost: null, basis: null };
   if (typeof usage.cost_usd === 'number') return { cost: usage.cost_usd * rate, basis: 'cli' };
-  const line = section(conf, 'prices')[usage.model];
+  const line = section(conf, 'prices')[usage.model as string];
   if (!line) return { cost: null, basis: null };
-  const [input, output, cacheRead, write5m, write1h] = line.split(/\s+/).map(Number);
+  // A short price line leaves the missing prices undefined, as before: the cost is NaN.
+  const [input, output, cacheRead, write5m, write1h] = line.split(/\s+/).map(Number) as [number, number, number, number, number];
   const w5 = usage.tokens_cache_write_5m ?? 0;
   const w1 = usage.tokens_cache_write_1h ?? Math.max((usage.tokens_cache_write ?? 0) - w5, 0);
   const usd = ((usage.tokens_in ?? 0) * input + (usage.tokens_out ?? 0) * output + (usage.tokens_cache ?? 0) * cacheRead + w5 * write5m + w1 * write1h) / 1e6;
   return { cost: usd * rate, basis: 'prices' };
 }
 
-export function totalTokens(usage) {
+export function totalTokens(usage: Usage): number | null {
   if (typeof usage.tokens_total === 'number') return usage.tokens_total;
   const parts = [usage.tokens_in, usage.tokens_out, usage.tokens_cache, usage.tokens_cache_write];
-  return parts.some((n) => typeof n === 'number') ? parts.reduce((sum, n) => sum + (n ?? 0), 0) : null;
+  return parts.some((n) => typeof n === 'number') ? parts.reduce<number>((sum, n) => sum + (n ?? 0), 0) : null;
 }
 
-export function runStart(db, run) {
+export function runStart(db: DatabaseSync, run: RunStart): void {
   db.prepare(`INSERT INTO runs (run_id, ticket, role, model, provider, started_at, lane, source, requested_model, project, label, outcome)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'running')`).run(
     run.runId, run.ticket ?? null, run.role, run.model ?? null, run.provider ?? null, run.startedAt ?? now(),
@@ -190,10 +233,10 @@ export function runStart(db, run) {
   );
 }
 
-export function runEnd(db, conf, run) {
+export function runEnd(db: DatabaseSync, conf: ConfSections, run: RunEnd): void {
   const usage = run.usage ?? {};
   const { cost, basis } = costEur(conf, usage);
-  const int = (n) => (typeof n === 'number' ? Math.round(n) : null);
+  const int = (n: number | null | undefined) => (typeof n === 'number' ? Math.round(n) : null);
   const result = db.prepare(`UPDATE runs SET ended_at = ?, outcome = ?, exit_code = ?, model = COALESCE(?, model),
     tokens_in = ?, tokens_out = ?, tokens_cache = ?, tokens_cache_write = ?, tokens_total = ?, cost_eur = ?, cost_basis = ?
     WHERE run_id = ?`).run(
@@ -204,25 +247,25 @@ export function runEnd(db, conf, run) {
   if (!result.changes) throw new Error(`unknown run ${run.runId}`);
 }
 
-const SETTABLE = { '--outcome': 'outcome', '--pr-number': 'pr_number', '--lines-changed': 'lines_changed', '--human-decision': 'human_decision', '--human-latency-min': 'human_latency_min' };
+const SETTABLE: Record<string, string> = { '--outcome': 'outcome', '--pr-number': 'pr_number', '--lines-changed': 'lines_changed', '--human-decision': 'human_decision', '--human-latency-min': 'human_latency_min' };
 
-export function addEvent(db, event) {
+export function addEvent(db: DatabaseSync, event: LedgerEvent): void {
   if (!EVENT_KINDS.includes(event.kind)) throw new Error(`unknown event kind "${event.kind}" (known: ${EVENT_KINDS.join(', ')})`);
   db.prepare('INSERT INTO events (at, kind, ticket, run_id, detail, value, source) VALUES (?, ?, ?, ?, ?, ?, ?)').run(
     event.at ?? now(), event.kind, event.ticket ?? null, event.runId ?? null, event.detail ?? null, event.value ?? null, event.source ?? 'dispatcher',
   );
 }
 
-function options(argv) {
-  const out = {};
+function options(argv: string[]): Record<string, string> {
+  const out: Record<string, string> = {};
   for (let i = 0; i < argv.length; i += 2) {
-    if (!argv[i].startsWith('--') || argv[i + 1] === undefined) throw new Error(`expected "--option value", got "${argv[i]}"`);
-    out[argv[i]] = argv[i + 1];
+    if (!argv[i]!.startsWith('--') || argv[i + 1] === undefined) throw new Error(`expected "--option value", got "${argv[i]}"`);
+    out[argv[i]!] = argv[i + 1]!;
   }
   return out;
 }
 
-function main([command, ...rest]) {
+function main([command, ...rest]: string[]): void {
   if (command === 'init') {
     openLedger().close();
     process.stdout.write(`${ledgerPath()}\n`);
@@ -230,18 +273,18 @@ function main([command, ...rest]) {
   }
   if (command === 'sql') {
     const db = openLedger(ledgerPath(), { readOnly: true });
-    process.stdout.write(`${JSON.stringify(db.prepare(rest[0]).all())}\n`);
+    process.stdout.write(`${JSON.stringify(db.prepare(rest[0] as string).all())}\n`);
     return;
   }
   const o = options(rest);
   const db = openLedger();
   if (command === 'run-start') {
-    runStart(db, { runId: o['--run-id'], ticket: o['--ticket'] || null, role: o['--role'], model: o['--model'] || null, provider: o['--provider'] || null, lane: o['--lane'] || null, source: o['--source'] || 'dispatcher', requestedModel: o['--requested-model'] || null, project: o['--project'] || null, label: o['--label'] || null });
+    runStart(db, { runId: o['--run-id'] as string, ticket: o['--ticket'] || null, role: o['--role'] as string, model: o['--model'] || null, provider: o['--provider'] || null, lane: o['--lane'] || null, source: o['--source'] || 'dispatcher', requestedModel: o['--requested-model'] || null, project: o['--project'] || null, label: o['--label'] || null });
   } else if (command === 'run-end') {
     const usage = o['--usage-file'] ? JSON.parse(readFileSync(o['--usage-file'], 'utf8')) : {};
-    runEnd(db, loadConf(), { runId: o['--run-id'], outcome: o['--outcome'], exitCode: o['--exit-code'] === undefined ? null : Number(o['--exit-code']), usage });
+    runEnd(db, loadConf(), { runId: o['--run-id'] as string, outcome: o['--outcome'] as string, exitCode: o['--exit-code'] === undefined ? null : Number(o['--exit-code']), usage });
   } else if (command === 'run-set') {
-    const runId = o['--run-id'];
+    const runId = o['--run-id'] as string;
     for (const [option, column] of Object.entries(SETTABLE)) {
       if (o[option] === undefined) continue;
       const value = column === 'outcome' || column === 'human_decision' ? o[option] : Number(o[option]);
@@ -249,7 +292,7 @@ function main([command, ...rest]) {
       if (!result.changes) throw new Error(`unknown run ${runId}`);
     }
   } else if (command === 'event') {
-    addEvent(db, { kind: o['--kind'], at: o['--at'] || undefined, ticket: o['--ticket'] || null, runId: o['--run-id'] || null, detail: o['--detail'] || null, value: o['--value'] === undefined ? null : Number(o['--value']), source: o['--source'] || 'dispatcher' });
+    addEvent(db, { kind: o['--kind'] as string, at: o['--at'] || undefined, ticket: o['--ticket'] || null, runId: o['--run-id'] || null, detail: o['--detail'] || null, value: o['--value'] === undefined ? null : Number(o['--value']), source: o['--source'] || 'dispatcher' });
   } else {
     throw new Error('usage: ledger.ts init | run-start | run-end | run-set | event | sql');
   }
@@ -260,7 +303,7 @@ if (runAsCommand(import.meta.url)) {
   try {
     main(process.argv.slice(2));
   } catch (error) {
-    process.stderr.write(`ledger: ${error.message}\n`);
+    process.stderr.write(`ledger: ${(error as Error).message}\n`);
     process.exit(1);
   }
 }

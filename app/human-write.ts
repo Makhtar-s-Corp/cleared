@@ -7,7 +7,7 @@ import { loadConf, projectDir, section, stateDir, expandHome } from '../lib/conf
 import { defaultDir, readCredentials } from './lib/credentials.ts';
 import { perform } from './lib/human-tracker.ts';
 
-const answer = (value) => { process.stdout.write(`${JSON.stringify(value)}\n`); };
+const answer = (value: unknown) => { process.stdout.write(`${JSON.stringify(value)}\n`); };
 try {
   const request = JSON.parse(readFileSync(0, 'utf8'));
   const conf = loadConf();
@@ -18,6 +18,6 @@ try {
   answer(await perform(request, { conf, creds, settings, project: { state: stateDir() } }));
 } catch (error) {
   // The reason stays in the server's journal; the browser gets the code only.
-  console.error(`human-write: ${String(error.message).slice(0, 300)}`);
-  answer({ ok: false, code: error.code && /^[a-z]{3,12}$/.test(error.code) ? error.code : 'failed' });
+  console.error(`human-write: ${String((error as Error).message).slice(0, 300)}`);
+  answer({ ok: false, code: (error as { code?: string }).code && /^[a-z]{3,12}$/.test((error as { code: string }).code) ? (error as { code: string }).code : 'failed' });
 }

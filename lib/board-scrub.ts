@@ -1,6 +1,6 @@
 // Display text is filtered before it enters snapshot.json. Captures are kept
 // separately as image bytes and are the only place where money may appear.
-export function scrub(text, max = 400) {
+export function scrub(text: unknown, max = 400): string {
   return String(text ?? '')
     .replace(/[\x00-\x08\x0b-\x1f\x7f]/g, ' ')
     .replace(/\b[a-z][a-z0-9+.-]*:\/\/[^\s]+/gi, '[link]')

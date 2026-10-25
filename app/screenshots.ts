@@ -1,6 +1,7 @@
 // Takes the pictures attached to the pull request: the tower and the porthole,
 // light and dark, at 1440, 768 and 390 px wide, from the demonstration data.
 //   npm install && node screenshots.ts [output folder]
+// @ts-ignore playwright-core is a devDependency of app/ that may not be installed here: the little used is typed below.
 import { chromium } from 'playwright-core';
 import { existsSync, mkdirSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -8,25 +9,33 @@ import { join } from 'node:path';
 import { appServer } from './server.ts';
 import { demoSource } from './sources/demo.ts';
 import { createActions } from './lib/actions.ts';
+import type { AddressInfo } from 'node:net';
+import type { Passkey } from './lib/credentials.ts';
+
+type Page = { goto(url: string): Promise<unknown>; waitForSelector(selector: string, options?: { timeout?: number }): Promise<unknown>; waitForTimeout(ms: number): Promise<void>;
+  screenshot(options: { path: string; fullPage?: boolean }): Promise<unknown>; click(selector: string): Promise<void> };
+type Context = { addInitScript(script: () => void): Promise<void>; addCookies(cookies: { name: string; value: string; url: string }[]): Promise<void>; newPage(): Promise<Page>; close(): Promise<void> };
+type Browser = { newContext(options: { viewport: { width: number; height: number }; deviceScaleFactor?: number }): Promise<Context>; close(): Promise<void> };
+type Chromium = { launch(options: { executablePath: string; args: string[] }): Promise<Browser> };
 
 const out = process.argv[2] ?? new URL('./screenshots', import.meta.url).pathname;
 mkdirSync(out, { recursive: true });
 const token = 'd'.repeat(64);
 // As `cleared app --demo` serves it: the answer form of a question is there (a gesture is written nowhere).
 const source = demoSource();
-let keys = [];
+let keys: Passkey[] = [];
 const actions = createActions({ source, origin: '', owner: 'you', readPasskeys: () => keys, writePasskeys: (list) => { keys = list; }, run: async () => ({ ok: true }) });
 const server = appServer({ source, token, ranges: ['127.0.0.0/8'], pollMs: 500, heartbeatMs: 2000, actions });
-await new Promise((r) => server.listen(0, '127.0.0.1', r));
-const port = server.address().port;
+await new Promise<void>((r) => server.listen(0, '127.0.0.1', r));
+const port = (server.address() as AddressInfo).port;
 
 const signIn = await fetch(`http://127.0.0.1:${port}/session`, { method: 'POST', headers: { authorization: `Bearer ${token}` } });
-const session = /cleared_app=([^;]+)/.exec(signIn.headers.get('set-cookie'))[1];
+const session = /cleared_app=([^;]+)/.exec(signIn.headers.get('set-cookie')!)![1]!;
 
 const cache = join(process.env.PLAYWRIGHT_BROWSERS_PATH || join(homedir(), '.cache', 'ms-playwright'));
 const bundled = existsSync(cache) ? readdirSync(cache).filter((d) => d.startsWith('chromium-')).map((d) => join(cache, d, 'chrome-linux64', 'chrome')).find(existsSync) : null;
 const executablePath = process.env.CHROME_PATH || bundled || '/usr/bin/google-chrome';
-const browser = await chromium.launch({ executablePath, args: ['--no-sandbox'] });
+const browser = await (chromium as Chromium).launch({ executablePath, args: ['--no-sandbox'] });
 
 for (const width of [1440, 768, 390]) {
   for (const theme of ['light', 'dark']) {
@@ -58,13 +67,13 @@ for (const width of [1440, 768, 390]) {
       server.closeAllConnections();
       await page.waitForSelector('#conn:not([hidden])', { timeout: 20000 });
       await page.screenshot({ path: join(out, 'connection-lost-light-1440.png') });
-      await new Promise((r) => server.listen(port, '127.0.0.1', r));
+      await new Promise<void>((r) => server.listen(port, '127.0.0.1', r));
     }
     await context.close();
   }
 }
 // The mockups of the design, rendered the same way (they load the fonts from app/public/fonts, nothing from outside).
-for (const [file, width, height] of [['tower', 1440, 900], ['porthole-phone', 390, 844]]) {
+for (const [file, width, height] of [['tower', 1440, 900], ['porthole-phone', 390, 844]] as [string, number, number][]) {
   const context = await browser.newContext({ viewport: { width, height } });
   const page = await context.newPage();
   await page.goto(new URL(`./reference/${file}.html`, import.meta.url).href);

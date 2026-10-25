@@ -6,6 +6,16 @@ import { stateDir } from '../../conf.ts';
 import { openLedger } from '../../ledger.ts';
 import { createHash } from 'node:crypto';
 import { checkedImage } from '../images.ts';
+import type { DatabaseSync, StatementResultingChanges } from 'node:sqlite';
+import type { ConfSections } from '../../conf.ts';
+import type { ActionAuthor, Identity, LabelActors, NewTicket, StatusChange, Ticket, TicketChange, TicketComment } from '../contract.ts';
+
+export type LocalTrackerOptions = { conf?: ConfSections; db?: DatabaseSync; actor?: Identity; approvalDir?: string };
+type TicketRow = { id: number; title: string; body: string; labels: string; project: string | null; status: string; created_at: string; updated_at: string };
+type HistoryRow = { status: string; actor_kind: string; actor_id: string; at: string; proof: string | null; approval_context: string | null; content_hash: string | null };
+type CommentRow = { id: number; ticket: number; body: string; images: string; actor_kind: string; actor_id: string; created_at: string; edited_at: string | null; proof: string | null };
+type ApprovalRecord = { ticket?: unknown; at: string; pulls: { pr: number; head: string }[] };
+type VerifiedKind = ActionAuthor['kind'];
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS tracker_tickets (
@@ -29,15 +39,19 @@ CREATE TABLE IF NOT EXISTS tracker_images (
   digest TEXT PRIMARY KEY, mime TEXT NOT NULL, body BLOB NOT NULL, created_at TEXT NOT NULL
 );
 `;
-const now = () => new Date().toISOString();
-const ticketNumber = (id) => {
+const now = (): string => new Date().toISOString();
+const ticketNumber = (id: string | number | bigint): number => {
   const match = /^(?:LOCAL-)?([1-9][0-9]*)$/.exec(String(id));
   if (!match) throw new Error(`Invalid local ticket: ${id}`);
   return Number(match[1]);
 };
 
 export class LocalTracker {
-  constructor({ conf, db = openLedger(), actor, approvalDir = join(stateDir(), 'validations') } = {}) {
+  conf: ConfSections | undefined;
+  db: DatabaseSync;
+  actor: Identity;
+  approvalDir: string;
+  constructor({ conf, db = openLedger(), actor, approvalDir = join(stateDir(), 'validations') }: LocalTrackerOptions = {}) {
     this.conf = conf;
     this.db = db;
     this.db.exec(SCHEMA);
@@ -57,44 +71,44 @@ export class LocalTracker {
     const agentUid = conf?.sections?.tracker?.agents_uid;
     const owner = conf?.sections?.tracker?.owner_id;
     if (!actor && (!agentUid || !owner)) throw new Error('Local tracking requires [tracker] agents_uid and owner_id for separate accounts');
-    if (!actor && String(process.getuid()) === agentUid && name === owner) throw new Error('Agent and human accounts must be separate');
-    this.actor = actor ?? (agentUid && String(process.getuid()) === agentUid
+    if (!actor && String(process.getuid!()) === agentUid && name === owner) throw new Error('Agent and human accounts must be separate');
+    this.actor = actor ?? (agentUid && String(process.getuid!()) === agentUid
       ? { kind: 'agents', id: name }
-      : owner && name === owner && (!agentUid || String(process.getuid()) !== agentUid)
+      : owner && name === owner && (!agentUid || String(process.getuid!()) !== agentUid)
         ? { kind: 'human', id: name }
         : { kind: 'shared', id: name });
     this.approvalDir = approvalDir;
   }
-  whoAmI() { return this.actor; }
-  approvalContext(id) {
+  whoAmI(): Identity { return this.actor; }
+  approvalContext(id: string | number): string | null {
     const ticket = `LOCAL-${ticketNumber(id)}`;
-    let record;
-    try { record = JSON.parse(readFileSync(join(this.approvalDir, `${ticket}.json`), 'utf8')); }
+    let record: ApprovalRecord;
+    try { record = JSON.parse(readFileSync(join(this.approvalDir, `${ticket}.json`), 'utf8')) as ApprovalRecord; }
     catch { return null; }
     if (record.ticket !== ticket || !Number.isFinite(Date.parse(record.at)) || !Array.isArray(record.pulls) || !record.pulls.length
       || record.pulls.some((pull) => !Number.isSafeInteger(pull.pr) || !/^[0-9a-f]{40}$/.test(pull.head))) return null;
     const versions = record.pulls.map(({ pr, head }) => ({ pr, head })).sort((a, b) => a.pr - b.pr);
     return createHash('sha256').update(JSON.stringify([ticket, record.at, versions])).digest('hex');
   }
-  contentHash(ticket) {
-    const row = this.db.prepare('SELECT title, body, labels, project FROM tracker_tickets WHERE id = ?').get(ticketNumber(ticket));
+  contentHash(ticket: string | number | bigint): string | null {
+    const row = this.db.prepare('SELECT title, body, labels, project FROM tracker_tickets WHERE id = ?').get(ticketNumber(ticket)) as Pick<TicketRow, 'title' | 'body' | 'labels' | 'project'> | undefined;
     if (!row) return null;
     return createHash('sha256').update(JSON.stringify([row.title, row.body, row.labels, row.project])).digest('hex');
   }
-  privateKey() {
+  privateKey(): Buffer {
     const path = this.conf?.sections?.tracker?.human_private_key;
     if (!path) throw new Error('Local human actions require [tracker] human_private_key');
     const info = statSync(path);
-    if (info.uid !== process.getuid() || (info.mode & 0o077) !== 0)
+    if (info.uid !== process.getuid!() || (info.mode & 0o077) !== 0)
       throw new Error('The local human signing key must be owned by the current account and readable only by it (mode 0600)');
     return readFileSync(path);
   }
-  proof(ticket, status, at, approvalContext = null, contentHash = null) {
+  proof(ticket: number | bigint, status: string, at: string, approvalContext: string | null = null, contentHash: string | null = null): string | null {
     if (this.actor.kind !== 'human') return null;
     const payload = JSON.stringify([Number(ticket), status, at, this.actor.id, approvalContext, contentHash]);
     return sign(null, Buffer.from(payload), this.privateKey()).toString('base64');
   }
-  verifiedKind(row, ticket) {
+  verifiedKind(row: HistoryRow, ticket: number): VerifiedKind {
     if (row.actor_kind !== 'human') return row.actor_kind === 'agents' ? 'agents' : 'other';
     const publicKey = this.conf?.sections?.tracker?.human_public_key;
     if (!publicKey || !row.proof) return 'other';
@@ -104,11 +118,11 @@ export class LocalTracker {
       Buffer.from(row.proof, 'base64')) ? 'human' : 'other'; }
     catch { return 'other'; }
   }
-  commentProof(ticket, body, at, images = '[]') {
+  commentProof(ticket: number, body: string, at: string, images = '[]'): string | null {
     if (this.actor.kind !== 'human') return null;
     return sign(null, Buffer.from(JSON.stringify(['comment', Number(ticket), body, images, at, this.actor.id])), this.privateKey()).toString('base64');
   }
-  verifiedCommentKind(row, ticket) {
+  verifiedCommentKind(row: CommentRow, ticket: string | number): VerifiedKind {
     if (row.actor_kind !== 'human') return row.actor_kind === 'agents' ? 'agents' : 'other';
     const publicKey = this.conf?.sections?.tracker?.human_public_key;
     if (!publicKey || !row.proof) return 'other';
@@ -117,19 +131,21 @@ export class LocalTracker {
       Buffer.from(row.proof, 'base64')) ? 'human' : 'other'; }
     catch { return 'other'; }
   }
-  ticket(row) {
+  ticket(row: TicketRow): Ticket;
+  ticket(row: TicketRow | undefined): Ticket | null;
+  ticket(row: TicketRow | undefined): Ticket | null {
     if (!row) return null;
     return { id: String(row.id), identifier: `LOCAL-${row.id}`, title: row.title,
       description: row.body, body: row.body, labels: JSON.parse(row.labels), project: row.project,
       state: row.status, status: row.status, createdAt: row.created_at,
       updatedAt: row.updated_at, url: `local://ticket/${row.id}` };
   }
-  listTickets({ status } = {}) {
-    return (status ? this.db.prepare('SELECT * FROM tracker_tickets WHERE status = ? ORDER BY id').all(status)
-      : this.db.prepare('SELECT * FROM tracker_tickets ORDER BY id').all()).map((row) => this.ticket(row));
+  listTickets({ status }: { status?: string } = {}): Ticket[] {
+    return ((status ? this.db.prepare('SELECT * FROM tracker_tickets WHERE status = ? ORDER BY id').all(status)
+      : this.db.prepare('SELECT * FROM tracker_tickets ORDER BY id').all()) as TicketRow[]).map((row) => this.ticket(row));
   }
-  getTicket(id) { return this.ticket(this.db.prepare('SELECT * FROM tracker_tickets WHERE id = ?').get(ticketNumber(id))); }
-  createTicket({ title, body = '', labels = [], project = null }) {
+  getTicket(id: string | number | bigint): Ticket | null { return this.ticket(this.db.prepare('SELECT * FROM tracker_tickets WHERE id = ?').get(ticketNumber(id)) as TicketRow | undefined); }
+  createTicket({ title, body = '', labels = [], project = null }: NewTicket): Ticket | null {
     if (!title?.trim()) throw new Error('Ticket title is required');
     const status = this.conf?.sections?.tracker?.todo_state;
     if (!status) throw new Error('Missing required [tracker] todo_state');
@@ -145,7 +161,7 @@ export class LocalTracker {
       return this.getTicket(result.lastInsertRowid);
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
-  moveTicket(id, status) {
+  moveTicket(id: string | number, status: string): Ticket | null {
     const number = ticketNumber(id);
     if (!this.getTicket(number)) throw new Error(`No such ticket: ${id}`);
     const statuses = ['todo_state', 'progress_state', 'review_state', 'validate_state', 'go_state', 'done_state']
@@ -165,37 +181,37 @@ export class LocalTracker {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     return this.getTicket(number);
   }
-  history(id) {
-    return this.db.prepare('SELECT status, actor_kind, actor_id, at, proof, approval_context, content_hash FROM tracker_history WHERE ticket = ? ORDER BY id').all(ticketNumber(id))
+  history(id: string | number): StatusChange[] {
+    return (this.db.prepare('SELECT status, actor_kind, actor_id, at, proof, approval_context, content_hash FROM tracker_history WHERE ticket = ? ORDER BY id').all(ticketNumber(id)) as HistoryRow[])
       .map((row) => ({ status: row.status, by: { kind: this.verifiedKind(row, ticketNumber(id)), id: row.actor_id },
         at: row.at, approvalContext: row.approval_context }));
   }
   // Who set the labels and the project: this tracker sets them only when the
   // ticket is created, so it is its creator, as the signed history says.
-  labelActors(id) {
+  labelActors(id: string | number): LabelActors {
     const ticket = this.getTicket(id);
     if (!ticket) throw new Error(`No such ticket: ${id}`);
-    const creator = this.history(id)[0]?.by ?? { kind: 'other', id: 'unknown' };
+    const creator: ActionAuthor = this.history(id)[0]?.by ?? { kind: 'other', id: 'unknown' };
     return { labels: Object.fromEntries(ticket.labels.map((label) => [label, creator])), project: ticket.project ? creator : null };
   }
-  comments(id, { since } = {}) {
-    const rows = since
+  comments(id: string | number, { since }: { since?: string } = {}): TicketComment[] {
+    const rows = (since
       ? this.db.prepare('SELECT * FROM tracker_comments WHERE ticket = ? AND (created_at > ? OR edited_at > ?) ORDER BY id DESC').all(ticketNumber(id), since, since)
-      : this.db.prepare('SELECT * FROM tracker_comments WHERE ticket = ? ORDER BY id DESC').all(ticketNumber(id));
+      : this.db.prepare('SELECT * FROM tracker_comments WHERE ticket = ? ORDER BY id DESC').all(ticketNumber(id))) as CommentRow[];
     return rows.map((row) => ({ id: String(row.id), body: row.body, images: JSON.parse(row.images),
       createdAt: row.created_at, editedAt: row.edited_at, agent: this.verifiedCommentKind(row, id) === 'agents',
       by: { kind: this.verifiedCommentKind(row, id), id: row.actor_id },
       byOwner: this.verifiedCommentKind(row, id) === 'human' && row.actor_id === this.conf?.sections?.tracker?.owner_id,
       url: `local://ticket/${id}#comment-${row.id}` }));
   }
-  comment(id, body, { images = [] } = {}) {
+  comment(id: string | number, body: string, { images = [] }: { images?: string[] } = {}): TicketComment | undefined {
     if (!this.getTicket(id)) throw new Error(`No such ticket: ${id}`);
     const imageRefs = images.map((path) => path.startsWith('local://capture/') ? path : this.upload(path));
     const serializedImages = JSON.stringify(imageRefs);
     const at = now();
     const proof = this.commentProof(ticketNumber(id), body, at, serializedImages);
     this.db.exec('BEGIN IMMEDIATE');
-    let result;
+    let result: StatementResultingChanges;
     try {
       result = this.db.prepare('INSERT INTO tracker_comments(ticket, body, images, actor_kind, actor_id, created_at, proof) VALUES (?, ?, ?, ?, ?, ?, ?)')
         .run(ticketNumber(id), body, serializedImages, this.actor.kind, this.actor.id, at, proof);
@@ -204,8 +220,8 @@ export class LocalTracker {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     return this.comments(id).find((item) => item.id === String(result.lastInsertRowid));
   }
-  editComment(id, commentId, body) {
-    const row = this.db.prepare('SELECT * FROM tracker_comments WHERE ticket = ? AND id = ?').get(ticketNumber(id), Number(commentId));
+  editComment(id: string | number, commentId: string | number, body: string): TicketComment | undefined {
+    const row = this.db.prepare('SELECT * FROM tracker_comments WHERE ticket = ? AND id = ?').get(ticketNumber(id), Number(commentId)) as CommentRow | undefined;
     if (!row) throw new Error(`No such comment: ${commentId}`);
     if (row.actor_kind !== this.actor.kind || row.actor_id !== this.actor.id) throw new Error('Cannot edit another actor’s comment');
     const at = now();
@@ -218,19 +234,19 @@ export class LocalTracker {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     return this.comments(id).find((item) => item.id === String(row.id));
   }
-  upload(path) {
+  upload(path: string): string {
     const image = checkedImage(path, this.conf?.sections?.tracker?.capture_roots);
     const digest = createHash('sha256').update(image.bytes).digest('hex');
     this.db.prepare('INSERT OR IGNORE INTO tracker_images(digest, mime, body, created_at) VALUES (?, ?, ?, ?)')
       .run(digest, image.mime, image.bytes, now());
     return `local://capture/${digest}`;
   }
-  changesSince(cursor) {
+  changesSince(cursor?: string): { events: TicketChange[]; cursor: string } {
     const readAt = now();
     const since = cursor || '1970-01-01T00:00:00.000Z';
-    const events = this.db.prepare('SELECT * FROM tracker_tickets WHERE updated_at > ? ORDER BY updated_at, id').all(since)
+    const events = (this.db.prepare('SELECT * FROM tracker_tickets WHERE updated_at > ? ORDER BY updated_at, id').all(since) as TicketRow[])
       .map((row) => ({ ...this.ticket(row), comments: this.comments(row.id), agent: this.history(row.id)[0]?.by.kind !== 'human' }));
     return { events, cursor: readAt };
   }
-  close() { this.db.close(); }
+  close(): void { this.db.close(); }
 }

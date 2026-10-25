@@ -5,19 +5,23 @@
 // `type` is a dotted name; `data` is plain JSON. See docs/app.md for the
 // mapping to AG-UI, planned for later without any AG-UI library today.
 export const EVENT_TYPES = ['snapshot', 'ticket.updated', 'ticket.removed', 'fuel.updated', 'health.updated', 'stats.updated', 'heartbeat'];
+export type Version = { pr: number; head: string };
+export type BoardTicket = { id: string; ref?: string | null; kind?: string; approval?: { at: string; versions: Version[] } | null; captures?: unknown };
+export type Board = { tickets: BoardTicket[]; fuel?: unknown; stats?: unknown; landed?: unknown; owner?: unknown; health?: unknown; mode?: unknown; generatedAt?: string | null };
+export type Envelope = { id: number; type: string; at: string; data: unknown };
 
 let counter = 0;
-export function envelope(type, data, now = Date.now()) {
+export function envelope(type: string, data: unknown, now = Date.now()): Envelope {
   if (!EVENT_TYPES.includes(type)) throw new Error(`Unknown event type: ${type}`);
   counter += 1;
   return { id: counter, type, at: new Date(now).toISOString(), data };
 }
-export const frame = (event) => `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
+export const frame = (event: Envelope) => `id: ${event.id}\nevent: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`;
 
-const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 // What changed between two snapshots, as events (never the whole thing twice).
-export function diffSnapshots(before, after, now = Date.now()) {
-  const events = [];
+export function diffSnapshots(before: Board, after: Board, now = Date.now()) {
+  const events: Envelope[] = [];
   const old = new Map(before.tickets.map((t) => [t.id, t]));
   const next = new Set(after.tickets.map((t) => t.id));
   for (const ticket of after.tickets) if (!same(old.get(ticket.id), ticket)) events.push(envelope('ticket.updated', ticket, now));
