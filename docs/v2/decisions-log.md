@@ -6307,4 +6307,5 @@ The run made the labels `status:In Progress`, `status:In Review`, `status:Ready 
 
 **Resources.** No Docker object, no port opened, no tunnel, no secret; no real v1 ledger was looked for or read, and its real dry run is the owner's.
 
+- Pull request: 387, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-v1-import`.
