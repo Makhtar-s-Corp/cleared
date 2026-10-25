@@ -300,3 +300,9 @@ The passkey files above; the passkey parts of `app/lib/actions.ts`, `app/lib/not
 | Unknown on 2026-10-25 | Closed by |
 | --- | --- |
 | Whether the owner wants the v1 gestures confirmed by the session, refused, or the v1 app dropped | the owner (question in the log entry, the session applied) |
+
+## 7. Deploy checklist (v2 server switch)
+
+Written on 2026-10-25 at the lead's request, after pull request 388 merged (the v1 drops gone, `wake.ts` in place of the bash wake). These are steps for the owner or the operator on each server; no lane runs them, and nothing in this repository does them.
+
+1. **Run `serve/install.ts` again on each server**, from the checkout the units should use, so that its systemd user units name `wake.ts` instead of `wake.sh` and `serve/install.sh` (decisions log, the cleanup's entry, "For an installation"). It checks every port it binds before it writes anything (its header, `serve/install.ts`).
