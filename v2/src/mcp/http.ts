@@ -4,7 +4,7 @@
 // no event stream, no session id. GET and DELETE are 405, which the
 // transport allows for a server with no stream.
 //
-// Three checks, in this order, before a message is read:
+// Four checks, in this order, before a message is read:
 //   1. the peer: this machine or the tailnet (100.64.0.0/10 and its IPv6
 //      fd7a:115c:a1e0::/48), as B3.2 says; anyone else is 403, whatever
 //      address the service was told to listen on. Not the other private
@@ -12,7 +12,11 @@
 //      (172.17.0.0/16 and the like), and a container is never trusted;
 //   2. no Origin: a request from a web page is 403, so a page the person
 //      opens cannot reach the server through their browser;
-//   3. the token: Authorization: Bearer <the v2-mcp-token file beside
+//   3. the Host (issue #347): 127.0.0.1, localhost, [::1] or the tailnet
+//      address the request came in on, with or without a port; any other
+//      is 403, so a name made to resolve to this machine (DNS rebinding)
+//      is refused before the token is read;
+//   4. the token: Authorization: Bearer <the v2-mcp-token file beside
 //      ledger.db>, compared in constant time. It is a file of its own, made
 //      as the app's proof is (64 hex characters, mode 600, this account's),
 //      and never the app's proof: the proof with a user id opens every
@@ -46,20 +50,47 @@ export function readOrCreateMcpToken(path: string): string {
   return readOrCreateProof(path, 'the MCP token');
 }
 
-const PRIVATE = new BlockList();
-PRIVATE.addSubnet('127.0.0.0', 8, 'ipv4');
-PRIVATE.addSubnet('100.64.0.0', 10, 'ipv4');
-PRIVATE.addAddress('::1', 'ipv6');
-PRIVATE.addSubnet('fd7a:115c:a1e0::', 48, 'ipv6');
+const LOOPBACK = new BlockList();
+LOOPBACK.addSubnet('127.0.0.0', 8, 'ipv4');
+LOOPBACK.addAddress('::1', 'ipv6');
+const TAILNET = new BlockList();
+TAILNET.addSubnet('100.64.0.0', 10, 'ipv4');
+TAILNET.addSubnet('fd7a:115c:a1e0::', 48, 'ipv6');
+
+// An address as the socket gives it, IPv4 written in IPv6 unwrapped.
+const unmapped = (address: string): string => /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)?.[1] ?? address;
+
+function within(list: BlockList, address: string): boolean {
+  const family = isIP(address);
+  return family !== 0 && list.check(address, family === 4 ? 'ipv4' : 'ipv6');
+}
 
 // Whether a peer's address is this machine's or the tailnet's.
 export function privatePeer(address: string | undefined): boolean {
   if (!address) return false;
-  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/i.exec(address)?.[1];
-  const ip = mapped ?? address;
-  const family = isIP(ip);
-  if (family === 0) return false;
-  return PRIVATE.check(ip, family === 4 ? 'ipv4' : 'ipv6');
+  const ip = unmapped(address);
+  return within(LOOPBACK, ip) || within(TAILNET, ip);
+}
+
+const LOOPBACK_HOSTS: ReadonlySet<string> = new Set(['127.0.0.1', 'localhost', '[::1]']);
+
+// Whether a Host header names this machine as a client of this route reaches
+// it: 127.0.0.1, localhost or [::1], or the tailnet address the request came
+// in on (local, the socket's own address). The name is matched as written,
+// in any case, so 127.1 and localhost. are refused; an IPv6 address is
+// compared as an address, so it may be written whole.
+export function allowedHost(host: string | undefined, local: string | undefined): boolean {
+  const name = /^(\[[0-9a-f:.]+\]|[^:@[\]]+)(?::\d{1,5})?$/i.exec(host ?? '')?.[1]?.toLowerCase();
+  if (!name) return false;
+  if (LOOPBACK_HOSTS.has(name)) return true;
+  const address = local === undefined ? undefined : unmapped(local).toLowerCase();
+  if (!address || !within(TAILNET, address)) return false;
+  if (!name.startsWith('[')) return name === address;
+  const written = name.slice(1, -1);
+  if (isIP(written) !== 6 || isIP(address) !== 6) return false;
+  const one = new BlockList();
+  one.addAddress(address, 'ipv6');
+  return one.check(written, 'ipv6');
 }
 
 export type McpRouteDeps = {
@@ -121,6 +152,7 @@ export function lanesMcpRoutes(deps: McpRouteDeps): Route[] {
     const { request, response } = context;
     if (!privatePeer(request.socket.remoteAddress)) return refuse(context, 403, 'http_peer');
     if (request.headers.origin !== undefined) return refuse(context, 403, 'http_origin');
+    if (!allowedHost(header(request, 'host'), request.socket.localAddress)) return refuse(context, 403, 'http_host');
     const token = deps.token();
     if (token === undefined) return refuse(context, 503, 'http_unreadable');
     const given = /^Bearer ([^\s]+)$/.exec(header(request, 'authorization') ?? '')?.[1];

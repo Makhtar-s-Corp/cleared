@@ -19,6 +19,7 @@
   "http_unauthorized": "A token is needed: the Authorization header, Bearer then the content of the v2-mcp-token file beside ledger.db.",
   "http_peer": "This server answers this machine and the tailnet only.",
   "http_origin": "A request from a web page is refused.",
+  "http_host": "This server answers a request addressed to 127.0.0.1, localhost or its tailnet address only.",
   "http_content_type": "The body is JSON (Content-Type: application/json).",
   "http_too_large": "The body is too large ({max} KB at most).",
   "http_version": "This version of the MCP protocol is not supported.",
