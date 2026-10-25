@@ -1,7 +1,7 @@
 // Runs the repository's guard (lib/guard/codex-guard.ts, the private terms
 // and secrets check that v1 applies before sending anything out) on every
 // v2 file and the v2 workflow, as a tree (names and contents), and, with
-// --base <ref>, on the lines changed since that ref, as a lane's diff is
+// --base <ref>, on the lines added since that ref, as a lane's diff is
 // checked (--strict). Prints only position and category, never a value.
 //   node scripts/guard.ts [--base origin/v2]
 //
@@ -135,14 +135,18 @@ try {
   };
   let clean = guard(`${present.length} v2 files`, ['--tree', snapshot]);
   if (base) {
-    // Added and removed lines only (no context): what this change brings, not the text around it.
+    // Added lines only (the owner, 2026-10-25 16:30): what this change brings. A removed line is
+    // already in the base, and so is the unchanged line git repeats after a hunk header's second
+    // @@, so neither is read. Each file's +++ line stays, so a code file keeps its own patterns,
+    // and so do a renamed or copied file's new name.
     // The lock file is left out of this strict pass: npm writes it (registry addresses, integrity
     // hashes, version ranges), and the strict "assigned secret" rule reads the dependency
     // js-tokens, followed by its version range, as a secret. The tree pass above
     // still checks the whole lock file.
     const changes = join(work, 'changes.diff');
-    writeFileSync(changes, git(root, ['diff', '-U0', '--no-ext-diff', '--no-color', '--no-textconv', `${base}...HEAD`, '--', '.', ':(exclude)v2/package-lock.json']));
-    clean = guard(`the lines changed since ${base}`, ['--strict', changes]) && clean;
+    const diff = git(root, ['diff', '-U0', '--no-ext-diff', '--no-color', '--no-textconv', `${base}...HEAD`, '--', '.', ':(exclude)v2/package-lock.json']);
+    writeFileSync(changes, diff.split('\n').filter((line) => /^(?:\+|rename to |copy to )/.test(line)).join('\n') + '\n');
+    clean = guard(`the lines added since ${base}`, ['--strict', changes]) && clean;
   }
   status = clean ? 0 : 1;
 } finally {
