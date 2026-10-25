@@ -1,0 +1,4 @@
+{
+  "environment_title": "Prepare the environment",
+  "environment_intro": "The project's .devcontainer found, or a setup session proposed, and its image built ahead so sessions start in seconds."
+}

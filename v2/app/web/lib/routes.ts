@@ -3,6 +3,7 @@
 // (app/src/server.ts, PAGES), which of the page's links the router takes
 // over, and the stack of the sessions kept mounted. No React here, so the
 // node tests read it.
+import { isStepId, type StepId } from '../../../src/setup/types.ts';
 
 export type ScreenName = 'tower' | 'inbox' | 'session' | 'lead' | 'ask' | 'consumption' | 'services';
 
@@ -32,6 +33,21 @@ export function placeOf(pathname: string): Place | undefined {
   }
   return undefined;
 }
+
+// The setup assistant's addresses (milestone-5-plan.md, section 5): /setup,
+// the assistant at its current step, and /setup/<step>. A page of its own,
+// not a screen of the shell: placeOf does not know them, so the router
+// leaves them to the browser, and the server (app/src/server.ts) writes the
+// setup page for them.
+export type SetupPlace = { readonly step: StepId | null };
+
+export function setupPlaceOf(pathname: string): SetupPlace | undefined {
+  if (pathname === '/setup') return { step: null };
+  const step = /^\/setup\/([a-z-]+)$/.exec(pathname)?.[1];
+  return step !== undefined && isStepId(step) ? { step } : undefined;
+}
+
+export const setupPath = (step: StepId): string => `/setup/${step}`;
 
 // The sessions a kept view draws besides its own (lane 36, U6): the view of
 // a ticket follows the ticket from its author to its reviewer and puts the

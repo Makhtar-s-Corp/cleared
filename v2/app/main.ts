@@ -8,9 +8,14 @@
 // Browser tab's preview listener on 127.0.0.1:8794 (src/preview.ts,
 // CLEARED_V2_PREVIEW_PORT and CLEARED_V2_PREVIEW_ORIGIN), which serves a
 // session's trial environment from an origin of its own.
+// The settings file is read first (src/setup/load.ts), and on a ledger with
+// no account the app answers the setup assistant alone (src/setup.ts,
+// docs/v2/milestone-5-plan.md, decision 5).
+import '../src/setup/load.ts';
 import { createServer } from 'node:http';
 import users, { ProofError, SqliteUsers, proofPath, readOrCreateProof } from '../src/modules/users.ts';
 import { formatAddress } from '../src/server.ts';
+import { SETUP_TABLES } from '../src/setup/tables.ts';
 import { LedgerPathError, StoreError, applyTables, ledgerPath, openStore } from '../src/store/db.ts';
 import { fixturePreview } from './fixtures/session.ts';
 import { fixtureSource } from './fixtures/source.ts';
@@ -36,7 +41,7 @@ const preview = orExit(() => readPreviewConfig(process.env, { app: config.port, 
 orExit(() => readBundle());
 const ledger = orExit(() => ledgerPath());
 const store = orExit(() => openStore(ledger));
-applyTables(store.db, [...users.tables, ...SESSION_TABLES]);
+applyTables(store.db, [...users.tables, ...SESSION_TABLES, ...SETUP_TABLES]);
 const proof = orExit(() => readOrCreateProof(proofPath(ledger)));
 const source = config.source === 'fixtures'
   ? await fixtureSource(config.project ? { project: config.project } : {})
@@ -45,7 +50,7 @@ const project = config.project || (config.source === 'fixtures' ? 'Guestbook' : 
 
 const handler = createAppHandler({
   users: new SqliteUsers(store.db), sessions: new CookieSessions(store.db), throttle: new LoginThrottle(), source,
-  language: config.language, project, publicOrigin: config.publicOrigin, previewOrigin: preview.origin,
+  language: config.language, project, publicOrigin: config.publicOrigin, previewOrigin: preview.origin, setup: { db: store.db },
 });
 
 const address = formatAddress(config.host, config.port);

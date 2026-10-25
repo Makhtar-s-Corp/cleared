@@ -36,8 +36,10 @@ export class TerminalError extends Error {
   }
 }
 
-// What a terminal runs: the harness (its name for the first line) or the shell.
-export type TerminalProgram = { readonly mode: TerminalMode; readonly command: readonly string[]; readonly name?: string };
+// What a terminal runs: the harness (its name for the first line) or the
+// shell. `intro` replaces the first line, '' for none: the setup
+// assistant's terminal is no session's (setup/steps/model.ts).
+export type TerminalProgram = { readonly mode: TerminalMode; readonly command: readonly string[]; readonly name?: string; readonly intro?: string };
 
 export type TerminalsDeps = {
   readonly container: SessionContainer;
@@ -125,7 +127,8 @@ export class Terminals {
     };
     this.#open.set(session, open);
     this.#deps.journal(session, { type: 'CUSTOM', name: 'cleared.terminal_opened', value: { by, cols: size.cols, rows: size.rows, mode: program.mode } });
-    this.#push(open, firstLine(program));
+    const first = program.intro ?? firstLine(program);
+    if (first !== '') this.#push(open, first);
     process.onOutput((chunk) => {
       open.outputBytes += chunk.length;
       const text = open.decoder.decode(chunk, { stream: true });

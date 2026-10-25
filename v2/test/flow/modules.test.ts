@@ -53,13 +53,13 @@ test('the three modules of lane 7 declare the routes of the API that are theirs,
   assert.deepEqual(routeKeys(inbox), ['GET /api/inbox']);
   assert.equal(inbox.tables.length, 1);
   assert.match(inbox.tables[0] as string, /CREATE TABLE IF NOT EXISTS flow_inbox/);
-  assert.deepEqual([...MODULE_NAMES], ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox', 'lead', 'notify', 'knowledge']);
+  assert.deepEqual([...MODULE_NAMES], ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox', 'lead', 'notify', 'knowledge', 'setup', 'run', 'secrets']);
 });
 
 test('the modules assemble with the other lanes\' stubs: no route declared twice, the adapters provided', () => {
   const store = openStore(':memory:');
   applyTables(store.db, [...sessions.tables, ...inbox.tables]);
-  const app = assemble({ sessions, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox, lead: emptyModule, notify: emptyModule, knowledge: emptyModule }, { store });
+  const app = assemble({ sessions, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox, lead: emptyModule, notify: emptyModule, knowledge: emptyModule, setup: emptyModule, run: emptyModule, secrets: emptyModule }, { store });
   assert.equal(routeKeys(app).length, 42);   // 20, lane 31's five terminal routes and the save, set aside (lane j2-proof-clean-base), the variants' two (issue #271), and Resume from here (issue #272), Close (issue #249), and Open in an editor (C19), and Hand over (B6.3), and the batches' three (requirement C6), and the proof receipt's captures (P210), and the chat's command (P212), and the lanes' MCP server (P216), and the production page's checks (P218), and the choice of the captures' two (P226)
   assert.deepEqual(Object.keys(app.registry.sessionAdapters), ['claude-code', 'cursor', 'codex']);
   assert.ok(!app.routes.some((r) => r.path === '/api/tickets/:id/approve'), 'the approval route is lane 8\'s');
@@ -145,7 +145,7 @@ test('the modules stop in reverse order, awaited, and a stop that fails does not
   const stopper = (name: string, fail = false) => ({ ...emptyModule, stop: async () => { await Promise.resolve(); order.push(name); if (fail) throw new Error('boom'); } });
   const store = openStore(':memory:');
   try {
-    const app = assemble({ sessions: emptyModule, users: stopper('users'), tickets: emptyModule, flow: stopper('flow', true), approval: emptyModule, inbox: emptyModule, lead: stopper('lead'), notify: emptyModule, knowledge: emptyModule }, { store });
+    const app = assemble({ sessions: emptyModule, users: stopper('users'), tickets: emptyModule, flow: stopper('flow', true), approval: emptyModule, inbox: emptyModule, lead: stopper('lead'), notify: emptyModule, knowledge: emptyModule, setup: emptyModule, run: emptyModule, secrets: emptyModule }, { store });
     const errors = console.error;
     console.error = () => {};
     try { await app.stop?.(); } finally { console.error = errors; }

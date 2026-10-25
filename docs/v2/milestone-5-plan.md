@@ -114,7 +114,7 @@ Matrix line P248, pull request 410. Two decisions of section 3 changed, as the d
 
 ## 5. The browser setup assistant (`v2-j5-assistant`)
 
-Matrix: B6.5. Wave 1. Effort L.
+Matrix: B6.5, and P249, the lane's own line, added when it delivered. Wave 1. Effort L.
 
 ### 5.1 Context
 
@@ -461,7 +461,7 @@ Files edited by lanes of different waves only: `v2/src/setup/steps/environment.t
 
 After wave 5: the rehearsal by the orchestrator, fix lanes for what it finds, then the real run (question 5). Then rule 2 of the matrix, line by line, before `v2` goes to `main`.
 
-Outside the waves: `v2-j5-vapid-flaky` (issue #411, pull request 413, matrix line P249) made the VAPID key test of `test/notify.test.ts` deterministic after it failed once in pull request 410's CI. It edits that test alone, no file of a wave's lane.
+Outside the waves: `v2-j5-vapid-flaky` (issue #411, pull request 413, matrix line P250) made the VAPID key test of `test/notify.test.ts` deterministic after it failed once in pull request 410's CI. It edits that test alone, no file of a wave's lane.
 
 ## 18. What needs real accounts or a fresh machine
 
