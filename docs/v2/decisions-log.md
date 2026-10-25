@@ -5228,4 +5228,5 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **Resources.** No Docker object, no Claude Code, chat, Cursor or Codex account, no network beyond `npm ci` of the lock file, no tunnel, no secret: the tests' tokens are made at run time, and the service and the fake client listen on port 0 on loopback.
 
+- Pull request: 344, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-local-mcp`.
