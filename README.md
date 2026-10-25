@@ -42,26 +42,11 @@ This diagram shows the normal path for an application change. The configured too
 
 ## Requirements
 
-Linux with systemd, Node.js 24, git, jq, curl, GitHub CLI (`gh`), Claude Code and/or Codex CLI. Forge calls use the `gh` login and git credentials of the service account, or a GitHub App configured in [`[forge]`](docs/configuration.md#forge) so that pull requests, pushes and merges show as its bot with one-hour tokens. Linear credentials are needed only for the Linear tracker; GitHub Issues needs a GitHub App ID, installation ID, and private key so Cleared can renew its installation token, plus Tesseract OCR for capture uploads; local tracking needs separate operating-system accounts and an approval signing key. Authenticate the CLIs before starting (as `[security] agent_user` when it is set): `serve/install.sh` proves each configured model answers, with one small request per model on the subscription, before it installs any service; `serve/check-harness.sh` runs the same check by hand. `serve/install.sh` never binds or publishes ports 80 and 443, nor a port already in use, and checks them before writing anything ([Decisions](docs/concepts.md#decisions)). Orca is needed only with the default `[terminal] adapter = orca`. With `none`, no terminal is needed (see [Configuration](docs/configuration.md#terminal)). Tailscale is required only if you install the dashboard and wake timers. A repository where the base branch can be protected is recommended (a private repository on a free GitHub plan cannot be; see [Security](docs/security.md#branch-protection)). Separate agent and human identities are needed before allowing unattended shipping; see [Ticket trackers](docs/trackers.md) and [Security](docs/security.md).
+Linux with systemd, Node.js 24, git, jq, curl, GitHub CLI (`gh`), Claude Code and/or Codex CLI. Forge calls use the `gh` login and git credentials of the service account, or a GitHub App configured in [`[forge]`](docs/configuration.md#forge) so that pull requests, pushes and merges show as its bot with one-hour tokens. Linear credentials are needed only for the Linear tracker; GitHub Issues needs a GitHub App ID, installation ID, and private key so Cleared can renew its installation token, plus Tesseract OCR for capture uploads; local tracking needs separate operating-system accounts and an approval signing key. `serve/install.sh` never binds or publishes ports 80 and 443, nor a port already in use, and checks them before writing anything ([Decisions](docs/concepts.md#decisions)). Orca is needed only with the default `[terminal] adapter = orca`. With `none`, no terminal is needed (see [Configuration](docs/configuration.md#terminal)). Tailscale is required only if you install the dashboard and wake timers. A repository where the base branch can be protected is recommended (a private repository on a free GitHub plan cannot be; see [Security](docs/security.md#branch-protection)). Separate agent and human identities are needed before allowing unattended shipping; see [Ticket trackers](docs/trackers.md) and [Security](docs/security.md).
 
 ## Open a test team
 
-This example uses Linear. For GitHub Issues or local SQLite, follow [Ticket trackers](docs/trackers.md) to create the test ticket and configure `[tracker]` first. Use a disposable GitHub project with a `main` branch and a test ticket such as `EX-1` already in your Linear team's **Todo** state. Copy both clone URLs from the repositories' **Code → HTTPS** menus. Install and authenticate the required CLIs, then export `LINEAR_API_KEY` or the separate `LINEAR_APP_CLIENT_ID` and `LINEAR_APP_CLIENT_SECRET` before running the commands: the dry run queries Linear. Run the commands in a new parent directory, not in a checkout serving an existing project.
-
-```sh
-git clone '<cleared-repository-url>' cleared
-git clone '<your-test-project-git-url>' sample-app
-cd sample-app
-mkdir -p .cleared && cp ../cleared/agents.example.conf .cleared/agents.conf
-od -An -tx1 -N32 /dev/urandom | tr -d ' \n'
-${EDITOR:-vi} .cleared/agents.conf
-git add .cleared/agents.conf && git -c user.name='Test User' -c user.email='test@example.invalid' commit -m "chore: configure Cleared"
-git push origin main
-CLEARED_REPO=$PWD ../cleared/spawn-lane.sh dev EX-1 --dry-run
-CLEARED_REPO=$PWD ../cleared/spawn-lane.sh dev EX-1
-```
-
-In the editor, set `[guard] salt` to the random value printed above and set `terms = none` and `allowed = none` **only for a test repository without private terms**. Replace the example tracker team and states, worktree root, model IDs, and adapter settings with values available on your machine. The final command opens a worktree and an Orca terminal (or, with `[terminal] adapter = none`, a detached session); the ticket's team then starts. If the session cannot be started, Cleared prints the exact command to run in the created worktree. Do not use the example's model IDs or salt as production settings.
+v1's lanes, terminals and one-shot harness adapters were removed in milestone 4 ([plan](docs/v2/milestone-4-plan.md)). Sessions are run by the v2 service: see [`v2/README.md`](v2/README.md) to start it and try it on sample data.
 
 ## Read more
 

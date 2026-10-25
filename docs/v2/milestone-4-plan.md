@@ -43,7 +43,15 @@ Every `drop` row of keep-and-drop whose files no kept file runs, sources, import
 
 `serve/serve-dashboard.mjs` goes once `allowed` and `TAILSCALE` live in `app/lib/access.mjs`.
 
-The kept files that call a dropped one lose that call, and nothing else. They are the wake, `lib/common.sh` and the tests of kept areas. A test case that only proves a dropped behaviour goes with it, and the log names each file it left.
+The kept files that call a dropped one lose that call, and nothing else:
+
+- **The wake** loses the v1 lead's session, which ran through the terminal and one-shot adapters. The v2 lead session replaces it. `prompts/events/` and `prompts/wake-events.jq` built that session's prompt, so they go with it. The wake's pre-check (`lib/wake.mjs`) stays: the snapshot reads each pull request's size and checks from the state it writes.
+- **`review-pr.sh` goes** (decision 3).
+- **`host-state.sh`** loses its count of the host's screen tests (`lib/screens.mjs`).
+- **The installer** loses the harness probe, the lead bridge's probes, the heavy-command door and the dashboard.
+- **The example settings** lose the sections of the dropped features. So do their defaults in `lib/conf.mjs`, and the catalog keys that only the dropped files used.
+
+A test case that only proves a dropped behaviour goes with it, and the log names each file it left.
 
 Kept until a later step, although dropped: `host-state.sh` and `lib/common.sh`. `merge-pr.sh` runs or sources both.
 
@@ -55,9 +63,8 @@ What these scripts did only for dropped features is not carried over, and the lo
 
 ### Step c: the rest of the kept bash
 
-- **`wake.sh`.** Its kept parts move to Node. Those are the snapshot (`lib/board-collector.mjs`), the heartbeat's wake end, the notifications' dispatch, the release watch's `reconcile`, the outbox, the queued go-lives and the GitHub outage note. The v1 lead's short session does not move: it ran through the terminal and one-shot adapters, which are dropped, and the v2 lead session replaces it. That lead session also takes `lib/wake.mjs`, `lib/route.mjs`'s wake call, `prompts/events/` and `prompts/wake-events.jq`.
+- **`wake.sh`.** What step a leaves of it moves to Node: the pre-check, the snapshot (`lib/board-collector.mjs`), the heartbeat's wake end, the notifications' dispatch, the release watch's `reconcile`, the outbox, the queued go-lives and the GitHub outage note.
 - **`lib/ports.sh` and `serve/install.sh`** are written in Node, without the sudo and bubblewrap steps (dropped).
-- **`review-pr.sh`** has no Node form to take. It opens a review only through `spawn-lane.sh` (dropped), and cross-model review is v2's reviewer session (B5.7, D8). Its verdict becomes `drop` (decision 3).
 - **`lib/common.sh` goes last**, once `guard_text` exists in Node.
 - **CI.** The `bash -n` step of `checks.yml` goes.
 
@@ -75,7 +82,7 @@ The proof is `v2/test/kept-javascript.test.ts`, extended to the repository: no t
 
 1. **"The core" is every tracked file outside `examples/` and `docs/`.** The example projects are projects Cleared works on, not Cleared. A test proves each of the two "no" rules (no bash, no kept JavaScript) on the whole repository, so a `git grep` at the milestone's end only repeats what CI already checks.
 2. **v1's files are converted where they are**, not moved under `v2/`. The broker, the units and v2's loads by address name these paths. A move would change every one of them for no behaviour. The decision of 2026-10-21 that keeps v1 next to v2 until milestone 4 ends with this lane only for the removed files.
-3. **`review-pr.sh` goes instead of being adapted.** Its keep-and-drop verdict was `adapt` because cross-model review is kept, and v2 keeps it in its reviewer session. The script itself only opens a v1 review lane.
+3. **`review-pr.sh` goes instead of being adapted.** Its keep-and-drop verdict was `adapt` because cross-model review is kept, and v2 keeps it in its reviewer session (B5.7, D8). The script itself only opens a v1 review lane, through `spawn-lane.sh`, so it has no Node form to take. The tests of the guarded merge record their review as the v2 service does (`v2/src/approval/review.ts`).
 4. **The browser's scripts stay JavaScript.** `app/public/*.js` are loaded by their address into the page, with no build step, as v2's two browser files are. The B5.11b line already names that exception for v2.
 5. **The `proposed` drops are confirmed by issue #382** ("delete everything keep-and-drop.md marks dropped"). The log lists each of them.
 6. **No new behaviour.** A port keeps its interface. What is not carried over is named, and every item of it serves a dropped feature.

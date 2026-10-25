@@ -7,91 +7,10 @@ import { basename, dirname, join } from 'node:path';
 import { loadConf, parseConf, ORCH_HOME } from '../lib/conf.mjs';
 import { route } from '../lib/route.mjs';
 import { openLedger, runStart, runEnd, addEvent, costEur } from '../lib/ledger.mjs';
-import { conf, scratch, fixtureProject, sandbox, runLane, laneWithRemote, flowBox, reviewedPull, task, first } from './support.mjs';
-
-test('every role with permissions never allows what it denies, nor a network or docker command', () => {
-  const sections = Object.keys(conf.sections).filter((name) => name.startsWith('permissions.'));
-  assert.ok(sections.includes('permissions.dev') && sections.includes('permissions.review'));
-  const list = (text) => (text || '').split(',').map((item) => item.trim()).filter(Boolean);
-  for (const name of sections) {
-    const { mode, allow, deny } = conf.sections[name];
-    assert.ok(['read-only', 'accept-edits'].includes(mode), `${name}: mode`);
-    assert.ok(conf.roles[name.slice('permissions.'.length).replace(/-live$/, '')], `${name}: not a role`);
-    for (const allowed of list(allow)) {
-      for (const denied of list(deny)) assert.ok(!(allowed === denied || allowed.startsWith(`${denied} `)), `${name} allows "${allowed}", which it denies`);
-      assert.doesNotMatch(allowed, /^(curl|wget|ssh|scp|nc|docker|gh|npx)\b|^git (push|fetch|pull|clone|remote)\b|^npm (install|ci|i)\b|docker/, `${name} allows "${allowed}"`);
-    }
-    for (const must of ['curl', 'docker', 'git push']) assert.ok(list(deny).includes(must), `${name} does not deny ${must}`);
-  }
-});
+import { conf, scratch, fixtureProject, sandbox, laneWithRemote, task, first } from './support.mjs';
 
 
-test('a refusal by the safeguard of a backend stops the lane when the policy says stop', () => {
-  const lane = runLane(sandbox({ policy: 'stop' }), 3);
-  assert.equal(lane.status, 3);
-  assert.deepEqual(lane.runs, [{ model: 'm1', outcome: 'refused', exit_code: 3 }]);
-  assert.deepEqual(lane.events, ['model_fallback_failed']);
-  assert.match(lane.comment, /provider guard/);
-});
 
-
-test('a refusal by the safeguard of a backend takes the fallback when the policy says fallback', () => {
-  const lane = runLane(sandbox({ policy: 'fallback' }), 3);
-  assert.equal(lane.status, 0);
-  assert.deepEqual(lane.runs.map((run) => run.outcome), ['refused', 'done']);
-  assert.deepEqual(lane.events, ['model_fallback']);
-});
-
-
-test('the Codex adapter tells a guard refusal (3) from a CI run in progress (2), and reads the answer and the tokens', () => {
-  const box = sandbox();
-  writeFileSync(join(box.home, 'prompt.md'), 'p');
-  const call = ({ ci = 0, script }) => {
-    // The runs in progress are `ci`; the base's last commit is old, so no deployment is in progress whatever the hour
-    // (an answer of 0 was read as today at midnight: the host was busy from 00:00 to 00:10).
-    writeFileSync(join(box.home, 'bin', 'gh'), `#!/usr/bin/env bash\nif [ "$1" = api ]; then echo 2026-01-01T00:00:00Z; else echo ${ci}; fi\n`, { mode: 0o755 });
-    writeFileSync(join(box.home, 'task.sh'), `#!/usr/bin/env bash\n${script}\n`, { mode: 0o755 });
-    const run = spawnSync(join(ORCH_HOME, 'adapters', 'codex.sh'), ['run', '--model', 'm', '--prompt-file', join(box.home, 'prompt.md'), '--report', join(box.home, 'r.md'), '--usage', join(box.home, 'u.json')], {
-      cwd: box.repo, encoding: 'utf8', env: { ...box.env, ADAPTER_RUNNER: 'container', ADAPTER_TASK_SCRIPT: join(box.home, 'task.sh') },
-    });
-    return { status: run.status, report: readFileSync(join(box.home, 'r.md'), 'utf8'), usage: JSON.parse(readFileSync(join(box.home, 'u.json'), 'utf8')) };
-  };
-  const refusal = call({ script: 'echo "/tmp/x/repo/test/a.test.mjs:3: secret littéral" >&2; echo "Refusé : contenu sensible dans ce qui serait envoyé à Codex." >&2; exit 1' });
-  assert.equal(refusal.status, 3);
-  assert.match(refusal.report, /^outcome: refused$/m);
-  assert.match(refusal.report, /- test\/a\.test\.mjs:3: secret littéral/);
-  const englishRefusal = call({ script: 'echo "/tmp/x/repo/test/a.test.mjs:4: email address" >&2; echo "Refused: sensitive content in data that would be sent to Codex." >&2; exit 1' });
-  assert.equal(englishRefusal.status, 3);
-  assert.match(englishRefusal.report, /- test\/a\.test\.mjs:4: email address/);
-  assert.equal(call({ ci: 1, script: 'exit 0' }).status, 2);
-  const done = call({ script: 'printf "the answer\\nthe answer"; printf "tokens used\\n1,234\\n" >&2' });
-  assert.equal(done.status, 0);
-  assert.equal(done.usage.tokens_total, 1234);
-  assert.equal(done.usage.limits, undefined, 'a run that says nothing of its subscription leaves nothing');
-  assert.equal(done.usage.tokens_in, null, 'and one that says nothing of its tokens by kind leaves the split empty');
-  // What the session used, by kind, passed on by the task script: kept as the ledger names it for every backend
-  // (input that was not read from the cache, input read from it, output); the total stays the one the CLI printed.
-  const used = call({ script: 'printf "ok"; printf \'tokens used\\n7,063\\ntoken usage {"input_tokens":29037,"cached_input_tokens":22016,"cache_write_input_tokens":0,"output_tokens":42,"reasoning_output_tokens":0,"total_tokens":29079}\\n\' >&2' });
-  assert.deepEqual([used.usage.tokens_in, used.usage.tokens_cache, used.usage.tokens_out, used.usage.tokens_cache_write, used.usage.tokens_total], [7021, 22016, 42, 0, 7063]);
-  // A line that cannot be read, or without the figures that count, leaves the split empty and takes nothing else with it.
-  for (const line of ['not json', '{"input_tokens":"many","output_tokens":3}', '{"output_tokens":3}', '[1,2]']) {
-    const odd = call({ script: `printf "ok"; printf 'tokens used\\n5\\ntoken usage ${line}\\n' >&2` });
-    assert.deepEqual([odd.status, odd.usage.tokens_in, odd.usage.tokens_out, odd.usage.tokens_total], [0, null, null, 5], line);
-  }
-  // What the CLI recorded of its subscription, passed on by the task script: read under the names the windows have elsewhere.
-  const resets = Math.floor(Date.now() / 1000) + 3600;
-  const limited = call({ script: `printf "ok"; printf 'rate limits {"primary":{"used_percent":41.5,"window_minutes":10080,"resets_at":${resets}},"secondary":{"used_percent":7,"window_minutes":300,"resets_at":${resets}},"plan_type":"x"}\\ntokens used\\n10\\n' >&2` });
-  assert.equal(limited.status, 0);
-  assert.deepEqual(limited.usage.limits, { windows: { seven_day: { used: 41.5, resets_at: new Date(resets * 1000).toISOString().replace('.000Z', 'Z') }, five_hour: { used: 7, resets_at: new Date(resets * 1000).toISOString().replace('.000Z', 'Z') } } });
-  assert.equal(call({ script: `printf "ok"; printf 'rate limits not json\\n' >&2` }).usage.limits, undefined);
-  // A window whose figures cannot be read does not take the other with it; two windows of the same length keep the fuller one.
-  const odd = call({ script: `printf "ok"; printf 'rate limits {"primary":{"used_percent":93,"window_minutes":10080,"resets_at":${resets}},"secondary":{"used_percent":5,"window_minutes":300,"resets_at":1e30}}\\n' >&2` });
-  assert.deepEqual(Object.keys(odd.usage.limits.windows), ['seven_day']);
-  assert.equal(odd.usage.limits.windows.seven_day.used, 93);
-  const twin = call({ script: `printf "ok"; printf 'rate limits {"primary":{"used_percent":93,"window_minutes":10080,"resets_at":${resets}},"secondary":{"used_percent":12,"window_minutes":10080,"resets_at":${resets}}}\\n' >&2` });
-  assert.equal(twin.usage.limits.windows.seven_day.used, 93);
-  assert.match(done.report, /## Report\n\nthe answer\n\n## Changed files/);
-});
 
 
 test('[Linear adapter] a comment that the guard refuses never reaches tracker', () => {
@@ -123,73 +42,9 @@ test('[Linear adapter] a comment that the guard refuses never reaches tracker', 
 });
 
 
-test('push-lane sends nothing when a commit message is refused by the guard', () => {
-  const flagged = `fix: le mot de ${'pass'}${'word'} = "${'x'.repeat(12)}"`;
-  const lane = laneWithRemote('dev/X-5', flagged);
-  const run = lane.push();
-  assert.equal(run.status, 1);
-  assert.match(run.stderr, /refused by the guard/);
-  assert.deepEqual(lane.onRemote().map((ref) => ref.split(' ')[0]), ['main']);
-});
 
 
-test('push-lane sends nothing when the changes of the branch hold what the guard refuses', () => {
-  const lane = laneWithRemote('dev/X-5', null);
-  writeFileSync(join(lane.path, 'notes.md'), `Le mot de ${'pass'}${'word'} = "${'x'.repeat(12)}"\n`);
-  execFileSync('git', ['-C', lane.path, 'add', 'notes.md']);
-  execFileSync('git', ['-C', lane.path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'docs: notes']);
-  const run = lane.push();
-  assert.equal(run.status, 1);
-  assert.match(run.stderr, /refused by the guard/);
-  assert.deepEqual(lane.onRemote().map((ref) => ref.split(' ')[0]), ['main']);
-});
 
-
-test('push-lane judges what a branch adds, not what it removes: taking a refused value out of a file does not block the lane', () => {
-  const flagged = `Le mot de ${'pass'}${'word'} = "${'x'.repeat(12)}"`;
-  const lane = laneWithRemote('dev/X-5', null);
-  // The value is already on the base branch; the lane removes it.
-  writeFileSync(join(lane.box.repo, 'notes.md'), `${flagged}\nune ligne\n`);
-  lane.box.git('add', 'notes.md');
-  lane.box.git('commit', '-q', '-m', 'docs: notes');
-  lane.box.git('push', '-q', 'origin', 'main');
-  execFileSync('git', ['-C', lane.path, 'merge', '-q', '--ff-only', 'main']);
-  writeFileSync(join(lane.path, 'notes.md'), 'une ligne\n');
-  execFileSync('git', ['-C', lane.path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-am', 'docs: the value goes away']);
-  const run = lane.push();
-  assert.equal(run.status, 0, run.stderr);
-  assert.equal(run.stdout.trim(), '#41');
-});
-
-
-test('push-lane sends nothing when the changes of the branch cannot be read at all', () => {
-  const lane = laneWithRemote('dev/X-5', null);
-  // A branch with no history in common with the base: its changes against the base cannot be computed.
-  const tree = execFileSync('git', ['-C', lane.box.repo, 'mktree'], { input: '', encoding: 'utf8' }).trim();
-  const orphan = execFileSync('git', ['-C', lane.box.repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit-tree', tree, '-m', 'feat: from nowhere'], { encoding: 'utf8' }).trim();
-  execFileSync('git', ['-C', lane.path, 'reset', '-q', '--hard', orphan]);
-  const run = lane.push();
-  assert.notEqual(run.status, 0);
-  assert.deepEqual(lane.onRemote().map((ref) => ref.split(' ')[0]), ['main']);
-  assert.equal(lane.created(), null);
-});
-
-
-test('push-lane does not refuse a branch for a value that only shows in the context of its changes', () => {
-  const flagged = `Le mot de ${'pass'}${'word'} = "${'x'.repeat(12)}"`;
-  const lane = laneWithRemote('dev/X-5', null);
-  // The value is on the base, on a line git quotes as context in the header of the hunk below it.
-  writeFileSync(join(lane.box.repo, 'notes.txt'), `${flagged}\n\n\n\n\n\n\n\n fin\n`);
-  lane.box.git('add', 'notes.txt');
-  lane.box.git('commit', '-q', '-m', 'docs: notes');
-  lane.box.git('push', '-q', 'origin', 'main');
-  execFileSync('git', ['-C', lane.path, 'merge', '-q', '--ff-only', 'main']);
-  writeFileSync(join(lane.path, 'notes.txt'), `${flagged}\n\n\n\n\n\n\n\n fin\n une ligne de plus\n-- et une qui commence par deux tirets\n`);
-  execFileSync('git', ['-C', lane.path, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-am', 'docs: one more line']);
-  assert.match(execFileSync('git', ['-C', lane.path, 'diff', '--unified=0', 'main...HEAD'], { encoding: 'utf8' }), /^@@ .* @@ Le mot de/m, 'the fixture must put the value in a hunk header');
-  const run = lane.push();
-  assert.equal(run.status, 0, run.stderr);
-});
 
 
 test('[Linear adapter] only an image, and only from the folder a lane sets apart for what may leave, may be sent to tracker', () => {

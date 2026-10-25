@@ -172,8 +172,6 @@ function installer({ app = 'bind = 127.0.0.1\nport = 8788\n', listeners = '', se
   const proc = join(home, 'proc');
   mkdirSync(proc);
   writeFileSync(join(tool, 'lib', 'ports.sh'), readFileSync(join(tool, 'lib', 'ports.sh'), 'utf8').replace('\nports_proc=/proc\n', `\nports_proc=${proc}\n`));
-  writeFileSync(join(tool, 'dashboard.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
-  writeFileSync(join(tool, 'serve', 'check.sh'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });
   writeFileSync(join(bin, 'tailscale'), `#!/usr/bin/env bash\ncase "$*" in 'serve status --json') cat '${join(home, 'serve-status')}' ;; *) echo 100.64.0.1 ;; esac\n`, { mode: 0o755 });
   writeFileSync(join(home, 'serve-status'), serve);
   writeFileSync(join(bin, 'sleep'), '#!/usr/bin/env bash\nexit 0\n', { mode: 0o755 });

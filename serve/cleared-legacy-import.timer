@@ -1,9 +1,0 @@
-[Unit]
-Description=Cleared: old sessions into the ledger (hourly)
-
-[Timer]
-OnCalendar=hourly
-Persistent=true
-
-[Install]
-WantedBy=timers.target

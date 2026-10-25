@@ -15,7 +15,7 @@ import { route } from '../lib/route.mjs';
 import { addEvent, openLedger } from '../lib/ledger.mjs';
 import { activeRelease } from '../lib/release.mjs';
 import { finishedReviews } from '../lib/reviews.mjs';
-import { flowBox, reviewedPull, sandbox, scratch, task } from './support.mjs';
+import { sandbox, scratch, task } from './support.mjs';
 
 // ---- A project with a base and a branch, and the settings of its main checkout ----
 
@@ -403,285 +403,8 @@ test('the card: Ready to land appears while the full checks run and says so; a t
   } finally { b.close(); }
 });
 
-// ---- The rules at work: flow-lanes.sh, lane-run.sh, merge-pr.sh ----
 
-function fastFlow(extra = '', { tests = 'true {files}', capture = false } = {}) {
-  const box = flowBox();
-  const conf = join(box.box.home, 'agents.conf');
-  if (capture) writeFileSync(conf, readFileSync(conf, 'utf8').replace('[lanes]\n', `[lanes]\nkept_from = .local/captures\nkept_in = ${join(box.box.home, 'kept')}\n`));
-  writeFileSync(conf, `${readFileSync(conf, 'utf8')}\n[fast_lane]\nenabled = yes\nlabels = Quick\nauthor_model = b\nreview_model = a\nsafe_paths = docs/\ntests_command = ${tests}\n${capture ? 'capture_screen = /settings\n' : ''}${extra}`);
-  writeFileSync(join(box.box.home, 'tracker-labels-X-5.json'), '["Quick"]');
-  // The user himself put the label on the ticket, as the tracker's history says.
-  writeFileSync(join(box.box.home, 'tracker-label-actors-X-5.json'), JSON.stringify({ labels: { Quick: { kind: 'human', id: 'alice' } }, project: null }));
-  const events = (kind) => { const db = openLedger(join(box.box.state, 'ledger.db')); const rows = db.prepare('SELECT kind, value, detail FROM events WHERE kind = ? ORDER BY event_id').all(kind); db.close(); return rows; };
-  const runDirOf = (role) => join(box.box.state, 'runs', readdirSync(join(box.box.state, 'runs')).filter((name) => { try { return new RegExp(`ORCH_ROLE=${role}\\n`).test(readFileSync(join(box.box.state, 'runs', name, 'lane.env'), 'utf8')); } catch { return false; } }).sort().at(-1));
-  const review = (answer) => {
-    const lanes = execFileSync('git', ['-C', box.box.repo, 'worktree', 'list', '--porcelain'], { encoding: 'utf8' });
-    const path = /worktree (.*review-X-5)\n/.exec(lanes)[1];
-    assert.equal(spawnSync(join(box.box.home, 'lane-run.sh'), [runDirOf('review')], { cwd: path, env: { ...box.env, ANSWER: answer }, encoding: 'utf8' }).status, 0);
-  };
-  const stage = (files) => { const { worktree } = box.record('X-5'); write(worktree, files); execFileSync('git', ['-C', worktree, 'add', '-A']); };
-  return { ...box, events, runDirOf, review, stage };
-}
-
-test('on the fast lane, end to end: a light author asks nothing, the review is asked at once, the card is prepared before the full checks end, and red checks send the ticket back to its team', () => {
-  const f = fastFlow();
-  f.todo(['X-5']);
-  f.by('X-5', 0);
-  f.flow();
-  assert.deepEqual(f.record('X-5').fast_lane, { ...f.record('X-5').fast_lane, opening: 'fast', state: 'fast' });
-  assert.deepEqual(f.events('fast_lane_opened').length, 1);
-  const author = f.runDirOf('dev');
-  assert.equal(JSON.parse(readFileSync(join(author, 'chain.json'), 'utf8'))[0].alias, 'b', 'the light author');
-  assert.match(readFileSync(join(author, 'lane.env'), 'utf8'), /ORCH_FAST_LANE=fast/);
-  // The team is told to ask nothing and to take the most prudent reading; the limits are the project's.
-  f.stage({ 'docs/settings.md': 'Settings\n' });
-  const done = f.session('X-5', { commit: 'docs: rename the settings title', answer: 'Done: renamed the title, as the ticket says.\n\nQuestions for the user: None.' });
-  assert.equal(done.run.status, 0, done.run.stderr);
-  assert.match(done.prompt, /## Fast lane[\s\S]*Ask the user nothing[\s\S]*most prudent interpretation[\s\S]*change only files under docs\//);
-  assert.match(done.run.stdout, /Fast lane: targeted tests at [0-9a-f]{8}: passed/);
-  assert.deepEqual((({ head, exit }) => ({ head, exit }))(f.record('X-5').fast_lane.tests), { head: done.head, exit: 0 });
-  // An explicit ticket: no question reaches the user.
-  f.pull({ headRefOid: done.head });
-  const busy = { FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request","sha":"0000000000000000000000000000000000000000"}]' };
-  const first = f.flow(busy);
-  assert.deepEqual(f.stuck(), [], 'no lane_asks: nothing is asked of the user');
-  // Still a draft: nothing is asked for it yet, not even the review (its checks have not started).
-  assert.doesNotMatch(first.stdout, /on the fast lane|review is asked/);
-  // Out of draft, the review is asked for at once, by the light reviewer.
-  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [] });
-  const second = f.flow(busy);
-  assert.match(second.stdout, /#41 is on the fast lane at [0-9a-f]{8}: its review is asked for/);
-  assert.doesNotMatch(second.stdout, /taken out of draft/);
-  const reviewer = f.runDirOf('review');
-  assert.equal(JSON.parse(readFileSync(join(reviewer, 'chain.json'), 'utf8'))[0].alias, 'a', 'the light reviewer, not the author');
-  assert.match(readFileSync(join(reviewer, 'prompt.md'), 'utf8'), /## Fast lane[\s\S]*light review is still a review/);
-  f.review('Verdict : rien de bloquant.');
-  // Out of draft, the full checks run: the card for the user is prepared now, once, without waiting for them.
-  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
-  assert.match(f.flow().stdout, /#41 is on the fast lane, reviewed at [0-9a-f]{8} with its targeted tests and capture: the request is the lead's, the full checks run meanwhile/);
-  assert.equal(f.events('fast_lane_ready').length, 1);
-  assert.equal(f.events('fast_lane_ready')[0].value, 41);
-  assert.equal(f.flow().stdout.trim(), '', 'said once');
-  // The lead hears it as a finished review it must act on now.
-  const told = finishedReviews(openLedger(join(f.box.state, 'ledger.db'), { readOnly: true }), join(f.box.state, 'reports')).filter((r) => r.outcome === 'fast_lane_ready');
-  assert.equal(told.length, 1);
-  // The full suite turns red: the ticket goes back to its team, as on the full circuit.
-  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ conclusion: 'FAILURE' }] });
-  writeFileSync(join(f.box.home, 'runs-of-branch.json'), JSON.stringify([{ databaseId: 2, headSha: done.head, conclusion: 'failure' }]));
-  writeFileSync(join(f.box.home, 'run-log.txt'), 'verify\tUNKNOWN STEP\t2026-01-02T10:00:00.0000000Z ✖ the title test fails\n');
-  assert.match(f.flow().stdout, /X-5: opened again \(checks:/);
-  assert.equal(f.record('X-5').runs.length, 2);
-  assert.match(readFileSync(join(f.runDirOf('dev'), 'lane.env'), 'utf8'), /ORCH_FAST_LANE=fast/, 'reopened on the fast lane, with the light author');
-  assert.equal(JSON.parse(readFileSync(join(f.runDirOf('dev'), 'chain.json'), 'utf8'))[0].alias, 'b');
-});
-
-test('on the fast lane, a base-only merge after the user said go is not asked again; the request is not withdrawn', () => {
-  const f = fastFlow();
-  f.todo(['X-5']);
-  f.by('X-5', 0);
-  f.flow();
-  f.stage({ 'docs/settings.md': 'Settings\n' });
-  const done = f.session('X-5', { commit: 'docs: rename the settings title', answer: 'Done.\n\nQuestions for the user: None.' });
-  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [] });
-  f.flow();
-  f.review('Verdict : rien de bloquant.');
-  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
-  assert.match(f.flow().stdout, /is on the fast lane, reviewed at/);
-  assert.equal(f.events('fast_lane_ready').length, 1);
-  // He said go to this version; then the base moves on code that touches nothing of the branch, and the branch takes it in.
-  mkdirSync(join(f.box.state, 'validations'), { recursive: true });
-  writeFileSync(join(f.box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-03T10:00:00Z', pulls: [{ pr: 41, head: done.head }] }));
-  writeFileSync(join(f.box.home, 'tracker-state-X-5'), 'Go MEP\n');
-  mkdirSync(join(f.box.repo, 'api'), { recursive: true });
-  writeFileSync(join(f.box.repo, 'api', 'base.mjs'), 'export const base = 1;\n');
-  f.box.git('add', '.');
-  f.box.git('commit', '-q', '-m', 'feat: code on the base');
-  f.box.git('push', '-q', 'origin', 'main');
-  const other = scratch('fast-lane-base-');
-  const inOther = (...args) => execFileSync('git', ['-C', other, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' });
-  execFileSync('git', ['clone', '-q', '-b', 'dev/X-5', f.lane.remote, other]);
-  inOther('merge', '-q', '--no-edit', 'origin/main');
-  inOther('push', '-q', 'origin', 'HEAD:refs/heads/dev/X-5');
-  const brought = { head: inOther('rev-parse', 'HEAD').trim() };
-  assert.notEqual(brought.head, done.head);
-  f.pull({ headRefOid: brought.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
-  const said = f.flow().stdout;
-  assert.doesNotMatch(said, /is on the fast lane, reviewed at|asked for this version/, said);
-  assert.equal(f.events('fast_lane_ready').length, 1, 'no second request for the same agreement');
-  assert.equal(JSON.parse(readFileSync(join(f.box.state, 'validations', 'X-5.json'), 'utf8')).pulls[0].head, done.head, 'his agreement is still that version');
-});
-
-test('the targeted tests of a session with no agent account run with an empty home, never the service\'s', () => {
-  const f = fastFlow('', { tests: 'node -p process.env.HOME {files}' });
-  f.todo(['X-5']);
-  f.by('X-5', 0);
-  f.flow();
-  f.stage({ 'docs/settings.md': 'Settings\n' });
-  const done = f.session('X-5', { commit: 'docs: rename', answer: 'Done.\n\nQuestions for the user: None.' });
-  assert.equal(done.run.status, 0, done.run.stderr);
-  assert.match(done.run.stdout, /Fast lane: targeted tests at [0-9a-f]{8}: passed/);
-  const log = readFileSync(join(f.runDirOf('dev'), 'targeted-tests.log'), 'utf8').trim();
-  assert.ok(log.length > 0, 'the tests ran');
-  assert.equal(log.includes(f.box.home), false, `the service's home was not passed: ${log}`);
-});
-
-test('#116: a light author that stages its change and does not commit (no git identity, shared uid) is committed for before the rules judge the head: it stays on the fast lane, never « empty »', () => {
-  const f = fastFlow();
-  f.todo(['X-5']);
-  f.by('X-5', 0);
-  f.flow();
-  const base = execFileSync('git', ['-C', f.record('X-5').worktree, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
-  f.stage({ 'docs/glossary.md': 'Glossary\n' });
-  const done = f.session('X-5', { commit: null, answer: 'Done.\n\nQuestions for the user: None.' });
-  assert.equal(done.run.status, 0, done.run.stderr);
-  assert.notEqual(done.head, base, 'the dispatcher committed what was staged');
-  assert.equal(execFileSync('git', ['-C', f.box.repo, 'log', '-1', '--format=%an <%ae>', done.head], { encoding: 'utf8' }).trim(), 'dispatcher <dispatcher@localhost>');
-  assert.doesNotMatch(done.run.stdout, /the rules send X-5 to the full circuit/);
-  assert.match(done.run.stdout, /Fast lane: targeted tests at [0-9a-f]{8}: passed/);
-  assert.equal(f.events('fast_lane_fallback').length, 0, 'no fallback, « empty » or other');
-  assert.equal(f.record('X-5').fast_lane.state, 'fast');
-  assert.equal(f.record('X-5').fast_lane.tests.head, done.head, 'the rules judged the commit the dispatcher made');
-});
-
-test('a capture counts only when this run made it: a link, or a file older than the run, is not one, and the request waits for the capture', () => {
-  const f = fastFlow('', { capture: true });
-  f.todo(['X-5']);
-  f.by('X-5', 0);
-  f.flow();
-  f.stage({ 'docs/settings.md': 'Settings\n' });
-  const done = f.session('X-5', { commit: 'docs: rename', answer: 'Done.\n\nQuestions for the user: None.' });
-  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
-  f.flow();
-  f.review('Verdict : rien de bloquant.');
-  const kept = join(f.box.home, 'kept', 'X-5');
-  mkdirSync(kept, { recursive: true });
-  // The before side is older than the run, and the after side is a link to a file elsewhere: neither is this run's capture.
-  writeFileSync(join(kept, 'before.png'), 'png');
-  utimesSync(join(kept, 'before.png'), new Date('2020-01-01'), new Date('2020-01-01'));
-  writeFileSync(join(f.box.home, 'elsewhere.png'), 'png');
-  symlinkSync(join(f.box.home, 'elsewhere.png'), join(kept, 'after.png'));
-  assert.doesNotMatch(f.flow().stdout, /is on the fast lane, reviewed at/);
-  assert.equal(f.events('fast_lane_ready').length, 0, 'not ready without this run\'s capture');
-  // A new before side, but the after side is still a link: still not ready.
-  rmSync(join(kept, 'before.png'));
-  writeFileSync(join(kept, 'before.png'), 'png');
-  assert.doesNotMatch(f.flow().stdout, /is on the fast lane, reviewed at/);
-  // Both sides made by this run, as files: ready, with the capture said.
-  rmSync(join(kept, 'after.png'));
-  writeFileSync(join(kept, 'after.png'), 'png');
-  assert.match(f.flow().stdout, /is on the fast lane, reviewed at [0-9a-f]{8} with its targeted tests and capture/);
-  assert.equal(f.events('fast_lane_ready').length, 1);
-});
-
-test('after the author\'s work, a diff outside the safe paths sends the ticket back to the full circuit, says so, and runs no targeted test; a team that asks a question does too, and its question is relayed', () => {
-  const f = fastFlow();
-  f.todo(['X-5']);
-  f.by('X-5', 0);
-  f.flow();
-  f.stage({ 'server/x.mjs': 'export const x = 1;\n' });
-  const done = f.session('X-5', { commit: 'feat: more than asked' });
-  assert.match(done.run.stdout, /Fast lane: the rules send X-5 to the full circuit/);
-  assert.deepEqual((({ state, reasons }) => ({ state, reasons }))(f.record('X-5').fast_lane), { state: 'full', reasons: ['outside_safe', 'file_type'] });
-  assert.equal(f.record('X-5').fast_lane.tests, undefined);
-  assert.equal(f.events('fast_lane_fallback').length, 1);
-  // The full circuit from here: its review waits for green checks again, and a reopened lane gets the usual author.
-  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
-  assert.doesNotMatch(f.flow().stdout, /review is asked for|fast lane/);
-
-  const asks = fastFlow();
-  asks.todo(['X-5']);
-  asks.by('X-5', 0);
-  asks.flow();
-  asks.stage({ 'docs/settings.md': 'Settings\n' });
-  asks.session('X-5', { commit: 'docs: rename', answer: 'Done.\n\nQuestions for the user:\n- Should the title also change in the menu? I recommend yes.' });
-  const said = asks.flow().stdout;
-  assert.match(said, /a team on the fast lane asked a question: the ticket takes the full circuit/);
-  assert.deepEqual((({ state, reasons }) => ({ state, reasons }))(asks.record('X-5').fast_lane), { state: 'full', reasons: ['asked'] });
-  assert.deepEqual(asks.stuck(), ['lane_asks X-5'], 'the question is relayed on the full circuit');
-});
-
-test('merge on the fast lane: judged again at the very commit, it waits for its own checks, for the base branch and for a deployment, not for another pull request\'s CI or a screen test; a forged flag buys nothing', () => {
-  const pull = reviewedPull(['docs/guide.md']);
-  const conf = join(pull.box.home, 'agents.conf');
-  writeFileSync(conf, `${readFileSync(conf, 'utf8')}\n[fast_lane]\nenabled = yes\nsafe_paths = docs/\n`);
-  mkdirSync(join(pull.box.state, 'lanes'), { recursive: true });
-  const record = (over = {}) => writeFileSync(join(pull.box.state, 'lanes', 'X-5.json'), JSON.stringify({ ticket: 'X-5', pr: 7, fast_lane: { opening: 'fast', state: 'fast' }, ...over }));
-  mkdirSync(join(pull.box.state, 'validations'), { recursive: true });
-  writeFileSync(join(pull.box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-02T10:00:00Z', pulls: [{ pr: 7, head: pull.headOf() }] }));
-  writeFileSync(join(pull.box.home, 'tracker-moved'), '0');
-  // Another pull request's CI, on another commit.
-  const other = { FAKE_GH_RUNS: '[{"branch":"feat/other","event":"pull_request","sha":"1111111111111111111111111111111111111111"}]' };
-  // A deployment of a previous merge still going on the base branch, whatever commit it runs.
-  const deploy = { FAKE_GH_RUNS: '[{"branch":"main","event":"push","sha":"2222222222222222222222222222222222222222"}]' };
-  const dry = (extra) => pull.merge(['-', '--dry-run'], extra, 'Announcement.');
-  // The full circuit waits for a host with no CI at all.
-  assert.equal(dry(other).status, 3);
-  // On the fast lane, a pull request's run of another commit is not its business.
-  record();
-  const fast = dry(other);
-  assert.equal(fast.status, 0, fast.stderr);
-  assert.equal(JSON.parse(fast.stdout).lane, 'fast');
-  // A run of this very commit is: it waits.
-  assert.equal(dry({ FAKE_GH_RUNS: JSON.stringify([{ branch: 'feat/w', event: 'pull_request', sha: pull.headOf() }]) }).status, 3);
-  // A long deployment on the base branch holds it as it holds the full circuit; so does any run of another event.
-  assert.equal(dry(deploy).status, 3);
-  assert.match(dry(deploy).stdout + dry(deploy).stderr, /not free for a merge on the fast lane/);
-  assert.equal(dry({ FAKE_GH_RUNS: '[{"branch":"feat/other","event":"workflow_dispatch","sha":"3333333333333333333333333333333333333333"}]' }).status, 3);
-  // Its own checks still running: kept in the queue, never merged before they are green; red: refused.
-  pull.publish({ statusCheckRollup: [{ status: 'IN_PROGRESS' }] });
-  assert.equal(dry(other).status, 3);
-  pull.publish({ statusCheckRollup: [{ conclusion: 'FAILURE' }, { conclusion: 'SUCCESS' }] });
-  assert.match(dry(other).stderr, /a check is not green/);
-  pull.publish();
-  // Merged for real while another commit's CI runs; its time is measured with its lane, and its watch holds no one back.
-  const done = pull.merge(['-'], other, '**Live**: the settings title, see it on the settings screen.');
-  assert.equal(done.status, 0, done.stderr);
-  assert.ok(pull.merged());
-  const db = openLedger(join(pull.box.state, 'ledger.db'));
-  const measured = db.prepare("SELECT detail FROM events WHERE kind = 'ticket_measured'").all();
-  const merged = db.prepare("SELECT detail FROM events WHERE kind = 'merged_by_script'").get();
-  db.close();
-  assert.equal(measured.length, 0, 'no Todo time known for a pull request opened outside the rules: nothing is guessed');
-  assert.match(merged.detail, /fast lane$/);
-
-  // A record forged to say fast, on a pull request that touches code: judged again, and it waits like any other.
-  const forged = reviewedPull(['docs/guide.md', 'server/core.mjs']);
-  const forgedConf = join(forged.box.home, 'agents.conf');
-  writeFileSync(forgedConf, `${readFileSync(forgedConf, 'utf8')}\n[fast_lane]\nenabled = yes\nsafe_paths = docs/\n`);
-  mkdirSync(join(forged.box.state, 'lanes'), { recursive: true });
-  writeFileSync(join(forged.box.state, 'lanes', 'X-5.json'), JSON.stringify({ ticket: 'X-5', pr: 7, todo_at: '2026-01-01T00:00:00Z', fast_lane: { opening: 'fast', state: 'fast', head: forged.headOf() } }));
-  mkdirSync(join(forged.box.state, 'validations'), { recursive: true });
-  writeFileSync(join(forged.box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-02T10:00:00Z', pulls: [{ pr: 7, head: forged.headOf() }] }));
-  writeFileSync(join(forged.box.home, 'tracker-moved'), '0');
-  const kept = () => JSON.parse(readFileSync(join(forged.box.state, 'lanes', 'X-5.json'), 'utf8')).fast_lane.state;
-  const waits = forged.merge(['-', '--dry-run'], other, 'Announcement.');
-  assert.equal(waits.status, 3, waits.stderr);
-  assert.equal(kept(), 'fast', 'a dry run writes nothing');
-  // Judged at the very commit and sent back for good; on the full circuit, the review read on the fast lane counts for nothing, at this very head too.
-  const unreviewed = forged.merge(['-'], other, 'Announcement.');
-  assert.equal(unreviewed.status, 6, unreviewed.stderr);
-  assert.match(unreviewed.stderr, /has no review for X-5/);
-  assert.equal(kept(), 'full', 'judged at the very commit, and sent back for good');
-  rmSync(join(forged.box.state, 'merge-queue'), { recursive: true, force: true });
-  // The full circuit's own review may then read the same head, and does.
-  const env = { ...forged.box.env, HOME: forged.box.home, ORCH_PROC_DIR: join(forged.box.home, 'proc-none') };
-  const again = spawnSync(join(forged.box.home, 'review-pr.sh'), ['7', 'X-5', '--author-model', 'b'], { env, encoding: 'utf8' });
-  assert.equal(again.status, 0, again.stderr);
-  const opened = JSON.parse(again.stdout);
-  assert.equal(spawnSync(join(forged.box.home, 'lane-run.sh'), [opened.run_dir], { cwd: opened.worktree, env: { ...env, ANSWER: 'Verdict : rien de bloquant.' }, encoding: 'utf8' }).status, 0);
-  // Merged once the host is free, on the full circuit, with its time measured from Todo.
-  const live = forged.merge(['-'], {}, '**Live**: see it on the settings screen.');
-  assert.equal(live.status, 0, live.stderr);
-  const after = openLedger(join(forged.box.state, 'ledger.db'));
-  const row = after.prepare("SELECT value, detail FROM events WHERE kind = 'ticket_measured'").get();
-  after.close();
-  assert.equal(JSON.parse(row.detail).lane, 'full');
-  assert.ok(row.value > 0);
-  rmSync(join(forged.box.state, 'lanes'), { recursive: true, force: true });
-});
-
-test('the lane record is written under its lock: a writer waits for a holder of it, and the shell writer takes the same lock', async () => {
+test('the lane record is written under its lock: a writer waits for a holder of it', async () => {
   const state = scratch('fast-lane-lock-');
   mkdirSync(join(state, 'lanes'), { recursive: true });
   const record = join(state, 'lanes', 'X-1.json');
@@ -699,12 +422,6 @@ test('the lane record is written under its lock: a writer waits for a holder of 
   assert.ok(Date.now() - from >= 300, 'the writer waited for the holder of the lock');
   assert.equal(JSON.parse(readFileSync(record, 'utf8')).fast_lane.tests.head, commit);
   await exited;
-  // A shell writer (lane_write in lib/common.sh) rewrites the record under the same lock.
-  const lockedWriter = readFileSync(join(import.meta.dirname, '..', 'lib', 'common.sh'), 'utf8').split('\n').find((line) => line.startsWith('lane_write() {'));
-  assert.ok(lockedWriter, 'lane_write is defined');
-  execFileSync('bash', ['-c', `${lockedWriter}\nlane_write "$1" --arg at 2026-01-02T10:00:00Z '. + {closed: $at}'`, 'bash', record]);
-  assert.equal(JSON.parse(readFileSync(record, 'utf8')).closed, '2026-01-02T10:00:00Z');
-  assert.equal(JSON.parse(readFileSync(record, 'utf8')).fast_lane.tests.head, commit, 'nothing else is lost');
 });
 
 test('the card says what is true: running checks as running, red and not started as such; targeted tests failed or skipped', async () => {
@@ -940,12 +657,6 @@ test('adversarial: fullwidth look-alikes are refused as the ASCII they fold to u
   assert.equal(contentFinding(['Ｂｏｎｊｏｕｒ, ｍｏｎｄｅ']), null);
 });
 
-test('the lane record of a spawn is read and written under its lock, the lock lane_write takes', () => {
-  const spawn = readFileSync(fileURLToPath(new URL('../spawn-lane.sh', import.meta.url)), 'utf8');
-  assert.match(spawn, /\n {2}\(\n {4}flock -w 30 9\n {4}kept=\$\(jq [\s\S]*?\n {2}\) 9> "\$record\.lock"\n/);
-  assert.doesNotMatch(spawn, /\n {2}kept=\$\(jq /);
-});
-
 // ---- Who set the fast label ----
 
 test('label trust: a fast mark counts only when the user set it; a tracker that cannot say gives nothing unless the project opts in, and never against an agent it names', () => {
@@ -1011,58 +722,6 @@ test('[Linear adapter] label trust: each tracker says who set a label: GitHub by
   try { unsigned = byHuman.createTicket({ title: 'Mine', labels: ['Quick'] }); } catch { unsigned = null; }
   if (unsigned) assert.equal(reader.labelActors(unsigned.identifier).labels.Quick.kind, 'other', 'no signature that holds: not the user');
   db.close();
-});
-
-test('label trust, end to end: a label an agent set opens the full circuit with the routing table\'s author, and is said in the ledger; the opt-in covers only a tracker that cannot say', () => {
-  const forged = fastFlow();
-  writeFileSync(join(forged.box.home, 'tracker-label-actors-X-5.json'), JSON.stringify({ labels: { Quick: { kind: 'agents', id: 'cleared[bot]' } }, project: null }));
-  forged.todo(['X-5']);
-  forged.by('X-5', 0);
-  forged.flow();
-  assert.deepEqual((({ opening, state }) => ({ opening, state }))(forged.record('X-5').fast_lane), { opening: 'full', state: 'full' });
-  assert.equal(forged.events('fast_lane_opened').length, 0);
-  assert.match(forged.events('fast_lane_mark_ignored')[0].detail, /label Quick \(set by agents\)/);
-  assert.equal(JSON.parse(readFileSync(join(forged.runDirOf('dev'), 'chain.json'), 'utf8'))[0].alias, 'a', 'the routing table\'s author, not the light one');
-  // A tracker that cannot say: the full circuit; opted in, the fast lane.
-  const unknown = fastFlow();
-  rmSync(join(unknown.box.home, 'tracker-label-actors-X-5.json'));
-  unknown.todo(['X-5']);
-  unknown.by('X-5', 0);
-  unknown.flow();
-  assert.equal(unknown.record('X-5').fast_lane.opening, 'full');
-  assert.match(unknown.events('fast_lane_mark_ignored')[0].detail, /cannot say/);
-  const trusting = fastFlow('trust_label_without_actor = yes\n');
-  rmSync(join(trusting.box.home, 'tracker-label-actors-X-5.json'));
-  trusting.todo(['X-5']);
-  trusting.by('X-5', 0);
-  trusting.flow();
-  assert.equal(trusting.record('X-5').fast_lane.opening, 'fast');
-});
-
-test('demotion: a ticket the rules send to the full circuit gets the full circuit\'s own review, even at the head the light reviewer read, and the routing table\'s author for further work', () => {
-  const f = fastFlow();
-  f.todo(['X-5']);
-  f.by('X-5', 0);
-  f.flow();
-  f.stage({ 'docs/settings.md': 'Settings\n' });
-  const done = f.session('X-5', { commit: 'docs: rename the settings title', answer: 'Done.\n\nQuestions for the user: None.' });
-  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [] });
-  assert.match(f.flow().stdout, /its review is asked for/);
-  f.review('Verdict : rien de bloquant.');
-  // Sent to the full circuit at the same head (here by hand, as a team that asked would be).
-  const demoted = spawnSync(process.execPath, [join(f.box.home, 'lib', 'fast-lane.mjs'), 'demote', 'X-5', 'asked'], { env: f.env, encoding: 'utf8' });
-  assert.equal(demoted.status, 0, demoted.stderr);
-  assert.match(f.record('X-5').fast_lane.demoted_at, /^\d{4}-\d\d-\d\dT/);
-  // Green checks: the light review does not count; the full circuit's is asked for, at this very head.
-  f.pull({ headRefOid: done.head, isDraft: false, statusCheckRollup: [{ conclusion: 'SUCCESS' }] });
-  assert.match(f.flow().stdout, /#41 is green at [0-9a-f]{8}: its review is asked for/);
-  const reviewer = f.runDirOf('review');
-  assert.doesNotMatch(readFileSync(join(reviewer, 'prompt.md'), 'utf8'), /## Fast lane/, 'the full circuit\'s reviewer, not the light one');
-  // Further work goes to the routing table's author.
-  f.review('Verdict : corrections demandées, le titre du menu doit changer aussi.');
-  assert.match(f.flow().stdout, /X-5: opened again \(verdict:/);
-  assert.equal(JSON.parse(readFileSync(join(f.runDirOf('dev'), 'chain.json'), 'utf8'))[0].alias, 'a');
-  assert.match(readFileSync(join(f.runDirOf('dev'), 'lane.env'), 'utf8'), /ORCH_FAST_LANE=full/);
 });
 
 // ---- The file types the fast lane takes ----
@@ -1207,26 +866,4 @@ test('shared identity at opening: under the user\'s own key a label he seems to 
   let asked = 0;
   assert.deepEqual(openingFor(conf, fastSettings(conf), { identifier: 'X-1', labels: ['Bug'] }, { identity: () => { asked += 1; return 'app'; }, actorsOf: () => { asked += 1; return null; } }), { lane: 'full', ignored: [] });
   assert.equal(asked, 0);
-});
-
-test('shared identity at opening, end to end: under a shared key a lane opened by hand takes the full circuit despite the user\'s label, and fast_lane_mark_ignored says why; with an application the label opens the fast lane', () => {
-  const shared = fastFlow();
-  writeFileSync(join(shared.box.home, 'tracker-identity'), 'shared\n');
-  shared.todo(['X-5']);
-  shared.by('X-5', 0);
-  // The wake opens nothing from Todo under a shared key (flow-lanes.sh); a lane opened by hand (spawn-lane.sh) reads the label the same way.
-  assert.match(shared.flow().stdout, /the tracker cannot tell the user from an agent: no lane is opened/);
-  const spawned = spawnSync(join(shared.box.home, 'spawn-lane.sh'), ['dev', 'X-5', '--comment-on', 'none'], { env: shared.env, encoding: 'utf8' });
-  assert.equal(spawned.status, 0, spawned.stderr);
-  assert.deepEqual((({ opening, state }) => ({ opening, state }))(shared.record('X-5').fast_lane), { opening: 'full', state: 'full' });
-  assert.equal(shared.events('fast_lane_opened').length, 0);
-  assert.match(shared.events('fast_lane_mark_ignored')[0].detail, /label Quick \(set under the key the agents share with the user: the tracker cannot say who set it/);
-  assert.equal(JSON.parse(readFileSync(join(shared.runDirOf('dev'), 'chain.json'), 'utf8'))[0].alias, 'a', 'the routing table\'s author, not the light one');
-  const app = fastFlow();
-  writeFileSync(join(app.box.home, 'tracker-identity'), 'app\n');
-  app.todo(['X-5']);
-  app.by('X-5', 0);
-  app.flow();
-  assert.equal(app.record('X-5').fast_lane.opening, 'fast');
-  assert.equal(app.events('fast_lane_mark_ignored').length, 0);
 });

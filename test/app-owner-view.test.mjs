@@ -16,7 +16,6 @@ import { changes } from '../lib/wake.mjs';
 import { validBoard } from '../app/sources/live.mjs';
 import { demoSource } from '../app/sources/demo.mjs';
 import { createActions } from '../app/lib/actions.mjs';
-import { laneWithRemote } from './support.mjs';
 
 const dirs = [];
 after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
@@ -70,9 +69,6 @@ test('four long questions reach the ledger whole: the event keeps four times wha
   // Longer than four questions' worth: cut at the cap, on a character (an accent is never split).
   const huge = spawnSync(process.execPath, [join(import.meta.dirname, '..', 'lib', 'board-report.mjs'), 'clip-asked'], { input: 'é'.repeat(ASKED_MAX + 50), encoding: 'utf8' }).stdout;
   assert.equal(huge, 'é'.repeat(ASKED_MAX));
-  const flow = readFileSync(join(import.meta.dirname, '..', 'flow-lanes.sh'), 'utf8');
-  assert.match(flow, /board-report\.mjs" clip-asked/);
-  assert.doesNotMatch(flow, /cut -c1-1500/);
 });
 
 test('a block that opens with its recommendation keeps it as the recommendation, never as the question too', () => {
@@ -326,37 +322,10 @@ test('a JSON Web Token is hidden as one secret, in the pull request body and on 
   assert.equal(scrub(`Token ${jwt} expired`), 'Token [secret] expired');
 });
 
-test('the pull request opens with the team report to the user, without a path of the machine; a refused report leaves it out', () => {
+test('the pull request\'s report is the team report to the user, without a path of the machine', () => {
   assert.equal(prReport('---\noutcome: done\n---\n\n## Report\n\n## Done\n- Renamed (PR #314), see https://github.com/o/r/pull/314; capture at /home/svc/.local/a.png\n\n## Changed files\n\n- M a'),
     '## Done\n- Renamed (PR #314), see https://github.com/o/r/pull/314; capture at [path]');
-  const lane = laneWithRemote('dev/X-5');
-  mkdirSync(join(lane.box.state, 'reports'), { recursive: true });
-  writeFileSync(join(lane.box.state, 'reports', 'run1-dev-a1.md'), '---\noutcome: done\n---\n\n## Report\n\n## Fait\n- Le titre devient « À venir ».\n\n## Reste à faire\nRien.\n\n## Questions pour l’utilisateur\n1. Faut-il un second titre ? Je recommande que non.\n\n## Changed files\n\n- M a\n');
-  const run = lane.push();
-  assert.equal(run.status, 0, run.stderr);
-  // Without a run, the body is the bare one.
-  assert.doesNotMatch(lane.body(), /Fait/);
-  const again = laneWithRemote('dev/X-6');
-  mkdirSync(join(again.box.state, 'reports'), { recursive: true });
-  writeFileSync(join(again.box.state, 'reports', 'run1-dev-a1.md'), '## Report\n\n## Fait\n- Le titre devient « À venir ».\n\n## Questions pour l’utilisateur\n1. Faut-il un second titre ? Je recommande que non.\n\n## Changed files\n');
-  const pushed = spawnLane(again, { ORCH_RUN_ID: 'run1-dev-a1' });
-  assert.equal(pushed.status, 0, pushed.stderr);
-  const body = again.body();
-  assert.match(body, /^## Fait\n- Le titre devient « À venir »\.\n\n## Questions pour l’utilisateur\n1\. Faut-il un second titre \? Je recommande que non\.\n\n---\n\nOpened by the dispatcher for X-6/);
-  assert.match(body, /Commits:\n- feat: the work of the lane/);
-  const refused = laneWithRemote('dev/X-7');
-  mkdirSync(join(refused.box.state, 'reports'), { recursive: true });
-  writeFileSync(join(refused.box.state, 'reports', 'run1-dev-a1.md'), `## Report\n\n## Fait\n- le mot de ${'pass'}${'word'} = "${'x'.repeat(12)}"\n\n## Changed files\n`);
-  const left = spawnLane(refused, { ORCH_RUN_ID: 'run1-dev-a1' });
-  assert.equal(left.status, 0, left.stderr);
-  assert.match(left.stderr, /report is left out of the pull request/);
-  assert.doesNotMatch(refused.body(), /Fait/);
-  assert.match(refused.body(), /^Opened by the dispatcher for X-7/);
 });
-
-function spawnLane(lane, env) {
-  return spawnSync(join(lane.box.home, 'push-lane.sh'), [lane.path], { env: { ...lane.box.env, ...env }, encoding: 'utf8' });
-}
 
 test('a ticket in progress that no run of Cleared works on is not a team at work: it is listed apart as tracker only', async () => {
   const noTeam = await project();

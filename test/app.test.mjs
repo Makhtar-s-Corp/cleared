@@ -246,21 +246,6 @@ test('`cleared app` refuses a bad range and prints the address of the bind it is
   assert.equal(run(['--nonsense'], '').status, 64);
 });
 
-test('the old dashboard address redirects to the app when one is configured, and stays a page otherwise', async () => {
-  const { dashboardServer } = await import('../serve/serve-dashboard.mjs');
-  const dir = scratch(); writeFileSync(join(dir, 'index.html'), '<p>page</p>');
-  const ask = async () => {
-    const server = dashboardServer({ file: join(dir, 'index.html'), ranges: ['127.0.0.0/8'] });
-    await new Promise((r) => server.listen(0, '127.0.0.1', r));
-    const r = await fetch(`http://127.0.0.1:${server.address().port}/`, { redirect: 'manual' });
-    server.closeAllConnections(); server.close();
-    return [r.status, r.headers.get('location')];
-  };
-  assert.deepEqual(await ask(), [200, null]);
-  process.env.CLEARED_APP_URL = 'http://100.64.0.9:8788/';
-  try { assert.deepEqual(await ask(), [302, 'http://100.64.0.9:8788/']); } finally { delete process.env.CLEARED_APP_URL; }
-});
-
 test('the design is followed: no gradient, fonts served by the app, light by default, amber only for the human', async () => {
   const pub = join(import.meta.dirname, '..', 'app', 'public');
   const css = readFileSync(join(pub, 'style.css'), 'utf8');

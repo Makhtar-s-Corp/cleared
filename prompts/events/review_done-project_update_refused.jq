@@ -1,1 +1,0 @@
-def event_review_done_project_update_refused: "- The project checkout on the host did not take the latest shipped version; the tools still read old settings, prompts, and rules. Tell \($user) once in one infrastructure line where you report. Do not retry: a person must inspect that checkout. Script output, quoted:\n    | \(.text | gsub("\n"; " "))";

@@ -1,11 +1,35 @@
-// Who may talk to the app: the peer address (same ranges as the old dashboard),
-// the Host header (against DNS rebinding) and a private access token.
+// Who may talk to the app: the peer address (the ranges of the Tailscale
+// network by default), the Host header (against DNS rebinding) and a private
+// access token.
 import { createHash, createHmac, randomBytes, timingSafeEqual } from 'node:crypto';
 import { closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, writeSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { isIP } from 'node:net';
 
-export { allowed, TAILSCALE } from '../../serve/serve-dashboard.mjs';
+// The ranges Tailscale hands out to the machines of a network.
+export const TAILSCALE = ['100.64.0.0/10', 'fd7a:115c:a1e0::/48'];
+
+const bits = (address) => {
+  if (isIP(address) === 4) return address.split('.').map((part) => Number(part).toString(2).padStart(8, '0')).join('');
+  const [head, tail = ''] = address.split('::');
+  const left = head ? head.split(':') : [];
+  const right = tail ? tail.split(':') : [];
+  const groups = address.includes('::') ? [...left, ...Array(8 - left.length - right.length).fill('0'), ...right] : left;
+  return groups.map((group) => parseInt(group, 16).toString(2).padStart(16, '0')).join('');
+};
+
+// Listening on the Tailscale address is not enough: a container on the host
+// reaches that address too. So every connection is checked: a peer whose
+// address is outside the allowed ranges is refused, whatever it asks for.
+export function allowed(peer, ranges) {
+  // An IPv4 peer met on an IPv6 socket is written ::ffff:a.b.c.d.
+  const address = (peer || '').replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/, '').replace(/%.*$/, '');
+  if (!isIP(address)) return false;
+  return ranges.some((range) => {
+    const [network, length] = range.split('/');
+    return isIP(network) === isIP(address) && bits(address).startsWith(bits(network).slice(0, Number(length)));
+  });
+}
 
 const digest = (text) => createHash('sha256').update(String(text)).digest();
 export const sameToken = (given, expected) => Boolean(given) && Boolean(expected)

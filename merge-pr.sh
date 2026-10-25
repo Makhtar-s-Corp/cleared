@@ -17,13 +17,12 @@
 #      ([merge] guarded_paths), always needs his own agreement. What the pull
 #      request changes is read from git, renames undone: GitHub cuts a long
 #      list of files short;
-#   5. the host is free for a merge: no CI, no deployment settling, no screen
-#      test, GitHub up. One go-live at a time, under one lock from the first
-#      read to the merge. A pull request the rules keep on the fast lane at
-#      this very head (lib/fast-lane.mjs, docs/fast-lane.md) waits for none
-#      of what is unrelated to it: not for the checks of other commits, nor
-#      for a screen test (it takes no heavy slot); it still waits for its own
-#      checks (1), for GitHub, and for a deployment settling.
+#   5. the host is free for a merge: no CI, no deployment settling, GitHub
+#      up. One go-live at a time, under one lock from the first read to the
+#      merge. A pull request the rules keep on the fast lane at this very
+#      head (lib/fast-lane.mjs, docs/fast-lane.md) waits for none of what is
+#      unrelated to it, such as the checks of other commits; it still waits
+#      for its own checks (1), for GitHub, and for a deployment settling.
 # Then it merges the very commit it checked, and, when the ticket was in the
 # status of agreement, says where to see the result and puts it in Done.
 #
@@ -140,7 +139,7 @@ while IFS=$'\t' read -r run_id commit; do
   if only_base_merges "$commit" "$head"; then reviewed=$commit; break; fi
 done < <(ledger sql "select run_id from runs where role = 'review' and source = 'dispatcher' and outcome = 'done' and pr_number = $pr and ticket = '$ticket'${demoted:+ and julianday(started_at) >= julianday('$demoted')} order by started_at desc" \
   | jq -r '.[].run_id' | while IFS= read -r run_id; do printf '%s\t%s\n' "$run_id" "$(sed -n 's/^commit: //p' "$ORCH_STATE_DIR/reports/$run_id.md" 2> /dev/null | sed -n '1p')"; done)
-[ -n "$reviewed" ] || no "this version (${head:0:8}) has no review for $ticket that concludes « $(conf_get merge verdict) »: have it reviewed (review-pr.sh $pr $ticket)"
+[ -n "$reviewed" ] || no "this version (${head:0:8}) has no review for $ticket that concludes « $(conf_get merge verdict) »: have it reviewed"
 
 # 4. The agreement of the user.
 needs=$(node_lib merge.mjs needs "$work/files.json")
@@ -254,7 +253,7 @@ if [ "$lane_kind" = fast ]; then
   [ "$(jq -r --arg head "$head" --arg base "${base#origin/}" '.github_is_down == null and (.a_deployment_may_be_in_progress | not) and ([.ci_runs_in_progress[]? | select((.event == "pull_request" and .sha != $head and .branch != $base) | not)] | length == 0)' <<<"$host")" = true ] \
     || later "the host is not free for a merge on the fast lane (a deployment settling, a run of this very version, or a run on the base branch or of another event)"
 else
-  [ "$(jq -r '.free_for_a_merge' <<<"$host")" = true ] || later "the host is not free for a merge (a CI, a deployment settling or a screen test)"
+  [ "$(jq -r '.free_for_a_merge' <<<"$host")" = true ] || later "the host is not free for a merge (a CI or a deployment settling)"
 fi
 
 if [ -n "$dry_run" ]; then

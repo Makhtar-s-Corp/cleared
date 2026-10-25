@@ -61,28 +61,23 @@ exec "${realGit}" "$@"
   return { ...lane, bin, key, env, read, confPath };
 }
 
-// One session of the lane: the fake model leaves a change, the dispatcher commits it, pushes and opens the pull request.
-function session(lane, extra = {}) {
-  const runDir = scratch('cleared-forge-run-');
-  writeFileSync(join(runDir, 'prompt.md'), 'prompt\n');
-  writeFileSync(join(runDir, 'chain.json'), JSON.stringify([{ alias: 'a', adapter: 'first', model: 'm1' }]));
-  writeFileSync(join(runDir, 'lane.env'), 'ORCH_LANE=dev/X-1\nORCH_TICKET=X-1\nORCH_ROLE=dev\nORCH_RUN_BASE=X-1-forge\nORCH_REQUESTED_ALIAS=a\nORCH_RULE_NOTE=rule\nORCH_SPAWN_NOTE=\nORCH_COMMENT_ON=none\nORCH_WRITEUP_ROLE=\n');
-  const run = spawnSync(join(lane.box.home, 'lane-run.sh'), [runDir], { cwd: lane.path,
-    env: { ...lane.env, FAKE_LEAVES: 'echo work > work.txt', ...extra }, encoding: 'utf8' });
-  return { run, comment: readFileSync(join(runDir, 'comment.md'), 'utf8') };
-}
-
 // A script of the tool, run as the dispatcher runs them: lib/common.sh first.
 const script = (lane, body, extra = {}, input = undefined) => spawnSync('bash', ['-c', `. "${join(lane.box.home, 'lib', 'common.sh')}"\n${body}`],
   { env: { ...lane.env, ...extra }, encoding: 'utf8', input, cwd: lane.box.repo });
+// What the kept scripts ask of the forge, after lib/common.sh: a commit, a push of the lane's branch, and two gh calls.
+const forgeCalls = (lane, extra = {}) => ({ run: script(lane, [
+  `git -C ${JSON.stringify(lane.path)} -c user.name=dispatcher -c user.email=dispatcher@localhost commit -q --allow-empty -m 'feat: the work'`,
+  `git -C ${JSON.stringify(lane.path)} push -q origin dev/X-1`,
+  'gh pr list --state open > /dev/null',
+  'gh run list --limit 1 > /dev/null',
+].join('\n'), extra) });
 const filesUnder = (dir) => readdirSync(dir, { recursive: true }).map((name) => join(dir, String(name))).filter((path) => statSync(path).isFile());
 const author = (lane) => execFileSync(realGit, ['--git-dir', lane.remote, 'log', '-1', '--format=%an <%ae>|%cn <%ce>', 'dev/X-1'], { encoding: 'utf8' }).trim();
 
 test('without [forge], gh and git use the ambient credential exactly as before, and no token is minted', () => {
   const lane = forgeLane({ forge: false });
-  const { run, comment } = session(lane);
+  const { run } = forgeCalls(lane);
   assert.equal(run.status, 0, run.stderr);
-  assert.match(comment, /Pull request opened or updated: #41/);
   const seen = lane.read('gh-seen').trim().split('\n');
   assert.ok(seen.length >= 2, seen.join('\n'));
   for (const line of seen) assert.match(line, /^ambient-gh-token\|ambient-github-token\|/);
@@ -96,15 +91,14 @@ test('without [forge], gh and git use the ambient credential exactly as before, 
   assert.deepEqual(forgeEnv(parseConf(readFileSync(lane.confPath, 'utf8')), { A: '1' }), { A: '1' });
 });
 
-test('with [forge], gh gets the installation token, a push authenticates through the helper as x-access-token, and the dispatcher commits as the bot', () => {
+test('with [forge], gh gets the installation token, a push authenticates through the helper as x-access-token, and the scripts commit as the bot', () => {
   const lane = forgeLane();
-  const { run, comment } = session(lane);
+  const { run } = forgeCalls(lane);
   assert.equal(run.status, 0, run.stderr);
-  assert.match(comment, /Pull request opened or updated: #41/);
   assert.ok(lane.onRemote().some((line) => line.startsWith('dev/X-1 ')));
   // gh: the app's token, in its environment, for every call; never the ambient one, never in its arguments.
   const seen = lane.read('gh-seen').trim().split('\n');
-  assert.ok(seen.some((line) => line.includes('pr create')), seen.join('\n'));
+  assert.ok(seen.some((line) => line.includes('pr list')), seen.join('\n'));
   for (const line of seen) {
     const [token, github, args] = line.split('|');
     assert.equal(token, TOKEN);
@@ -121,9 +115,9 @@ test('with [forge], gh gets the installation token, a push authenticates through
   assert.match(pushEnv, /^GIT_CONFIG_KEY_\d+=url\.https:\/\/github\.com\/\.insteadOf$/m);
   assert.ok(!pushEnv.includes(TOKEN), 'the token is not in the environment git or the script runs with');
   assert.doesNotMatch(pushEnv, /^(GH_TOKEN|GITHUB_TOKEN)=/m, 'the ambient GitHub token is dropped once an app is configured');
-  // The commit the dispatcher made after the session carries the app's identity.
+  // The commit the scripts made carries the app's identity.
   assert.equal(author(lane), `${BOT} <${BOT_EMAIL}>|${BOT} <${BOT_EMAIL}>`);
-  // One token for the whole session (several gh calls and a push), asked for with the JWT on stdin only.
+  // One token for the whole run (several gh calls and a push), asked for with the JWT on stdin only.
   const asked = lane.read('curl-args').trim().split('\n');
   assert.deepEqual(asked, ['--config - https://api.github.com/app/installations/456/access_tokens']);
   // Kept where only the service account reads it.
@@ -404,125 +398,6 @@ test('a key file other accounts can read is refused before anything is asked of 
   assert.equal(lane.read('gh-seen'), '');
 });
 
-// The harness of each adapter, started as the dispatcher starts it, writes down its whole environment and arguments.
-// inLane: started in the worktree of a lane (dev/X-1) for its work, as lane-run.sh starts it, instead of for a text
-// only; the fake CLI then tries to commit, as a model would.
-function harnessRun(adapter, { agentUser = false, inLane = false, forge = true, prepare = null } = {}) {
-  const lane = forgeLane({ forge });
-  const dir = scratch('cleared-forge-harness-');
-  const cache = join(lane.box.state, 'forge');
-  mkdirSync(cache, { recursive: true, mode: 0o700 });
-  writeFileSync(join(cache, 'installation-token.json'), JSON.stringify({ app_id: '123', installation_id: '456', token: TOKEN,
-    expires_at: new Date(Date.now() + 60 * 60_000).toISOString() }), { mode: 0o600 });
-  const dump = `#!/usr/bin/env bash
-env > "${join(dir, 'env')}"
-printf '%s\\n' "$@" > "${join(dir, 'args')}"
-cat > /dev/null
-[ -z "\${FAKE_COMMIT:-}" ] || { git commit -q --allow-empty -m 'docs: what the model did' 2> "${join(dir, 'commit-err')}" && git log -1 --format='%an <%ae>|%cn <%ce>' > "${join(dir, 'committed')}"; }
-`;
-  writeFileSync(join(dir, 'claude'), `${dump}printf '%s\\n' '{"type":"result","is_error":false,"result":"Claude answer","modelUsage":{}}'\n`, { mode: 0o755 });
-  writeFileSync(join(dir, 'codex'), `${dump}previous=; for arg in "$@"; do [ "$previous" != --output-last-message ] || printf 'Codex answer\\n' > "$arg"; previous=$arg; done
-printf '%s\\n' '{"type":"item.completed","item":{"type":"agent_message","text":"Codex answer"}}'\n`, { mode: 0o755 });
-  let conf = readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8');
-  if (forge) conf = conf.replace('[forge]\n', `${forgeSection(lane.key)}`);
-  if (agentUser) {
-    // The account of the agents through a sudo and a bubblewrap that only pass the command on.
-    writeFileSync(join(dir, 'sudo'), `#!/usr/bin/env bash
-[ "$1 $2" = "-n -u" ] && [ "$4" = -- ] || exit 1
-case "$5" in id) exec id -u "$3" ;; test) exit 0 ;; env) shift 4; exec "$@" ;; *) exit 1 ;; esac
-`, { mode: 0o755 });
-    writeFileSync(join(dir, 'bwrap'), `#!/usr/bin/env bash
-while [ "$1" != -- ]; do shift; done; shift
-[ "$1" != claude ] || shift
-exec "${join(dir, 'claude')}" "$@"
-`, { mode: 0o755 });
-    conf = conf.replace('agent_user =\n', 'agent_user = nobody\n').replace('bwrap_path = /usr/bin/bwrap', `bwrap_path = ${join(dir, 'bwrap')}`);
-  }
-  writeFileSync(join(dir, 'agents.conf'), conf);
-  const empty = scratch('cleared-forge-empty-');
-  const prompt = join(dir, 'prompt.md');
-  writeFileSync(prompt, 'Say hello.\n');
-  if (prepare) prepare(lane);
-  const run = spawnSync('bash', ['-c', '. "$1/lib/common.sh"; permissions_env writing; adapter_env "$2"; gh pr list > /dev/null; exec "$1/adapters/$2.sh" run --model m --prompt-file "$3" --report "$4" --usage "$5"',
-    '_', ORCH_HOME, adapter, prompt, join(dir, 'report.md'), join(dir, 'usage.json')], { cwd: inLane ? lane.path : empty, encoding: 'utf8',
-    env: { ...lane.env, PATH: `${dir}:${lane.env.PATH}`, CLEARED_REPO: lane.box.repo, CLEARED_CONF: join(dir, 'agents.conf'),
-      CLEARED_STATE_DIR: lane.box.state, ...(inLane ? { ORCH_LANE: 'dev/X-1', FAKE_COMMIT: '1' } : { ORCH_TEXT_ONLY: '1' }) } });
-  const read = (name) => { try { return readFileSync(join(dir, name), 'utf8'); } catch { return ''; } };
-  return { run, lane, env: read('env'), args: read('args'), committed: read('committed').trim(), commitErr: read('commit-err') };
-}
-
-for (const [adapter, options] of [['claude', {}], ['claude', { agentUser: true }], ['codex', {}]]) {
-  test(`no forge credential reaches the ${adapter} harness${options.agentUser ? ' started under [security] agent_user' : ''}: no token variable, no git credential setting, no identity, the token nowhere`, () => {
-    const { run, lane, env, args } = harnessRun(adapter, options);
-    assert.equal(run.status, 0, run.stderr);
-    // The dispatcher around it did use the app (the gh call before the adapter).
-    assert.match(lane.read('gh-seen'), new RegExp(`^${TOKEN}\\|`));
-    const names = env.split('\n').map((line) => line.split('=')[0]);
-    for (const name of ['GH_TOKEN', 'GITHUB_TOKEN', 'GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL'])
-      assert.ok(!names.includes(name), `${name} reached the harness`);
-    assert.doesNotMatch(env, /forge\.mjs|credential\.https/, 'the credential helper reached the harness');
-    if (adapter === 'codex') assert.match(env, /^GIT_CONFIG_COUNT=2$/m, 'only the git settings of the Codex adapter itself');
-    else assert.ok(!names.some((name) => name.startsWith('GIT_CONFIG_')), env);
-    assert.ok(!env.includes(TOKEN));
-    assert.ok(!args.includes(TOKEN));
-  });
-}
-
-// #116: a lane's model with no git identity of its own is handed one, which is never the app's: identity strings,
-// no credential. One that has its own keeps it. (The dispatcher commits what is left in any case: lane-run.sh.)
-const LANE_IDENTITY = 'Cleared lane dev/X-1 <lane@cleared.invalid>';
-const noIdentity = (lane) => execFileSync(realGit, ['-C', lane.path, 'config', 'user.useConfigOnly', 'true']);
-for (const forge of [true, false]) {
-  test(`in its lane, a claude harness with no git identity${forge ? ' under [forge]' : ''} is given the lane's, not the app's, and can commit; the token still nowhere`, () => {
-    const { run, lane, env, args, committed, commitErr } = harnessRun('claude', { inLane: true, forge, prepare: noIdentity });
-    assert.equal(run.status, 0, run.stderr);
-    assert.match(env, /^GIT_AUTHOR_NAME=Cleared lane dev\/X-1$/m);
-    assert.match(env, /^GIT_AUTHOR_EMAIL=lane@cleared\.invalid$/m);
-    assert.match(env, /^GIT_COMMITTER_NAME=Cleared lane dev\/X-1$/m);
-    assert.match(env, /^GIT_COMMITTER_EMAIL=lane@cleared\.invalid$/m);
-    assert.ok(!env.includes(BOT) && !env.includes(BOT_EMAIL), 'never the identity of the app');
-    assert.equal(committed, `${LANE_IDENTITY}|${LANE_IDENTITY}`, commitErr);
-    assert.ok(!env.includes(TOKEN) && !args.includes(TOKEN));
-    assert.doesNotMatch(env, /^(GH_TOKEN|GITHUB_TOKEN)=/m);
-    if (forge) assert.doesNotMatch(env, /forge\.mjs|credential\.https/);
-    // The dispatcher's own environment is left as it was: its commits are still the app's (or the local identity).
-    assert.equal(lane.read('git-push-env').includes('lane@cleared.invalid'), false);
-  });
-}
-
-test('in its lane, a claude harness that has a git identity of its own keeps it: nothing is handed to it', () => {
-  const own = (lane) => {
-    execFileSync(realGit, ['-C', lane.path, 'config', 'user.name', 'Own Model']);
-    execFileSync(realGit, ['-C', lane.path, 'config', 'user.email', 'own@example.invalid']);
-  };
-  const { run, env, committed, commitErr } = harnessRun('claude', { inLane: true, prepare: own });
-  assert.equal(run.status, 0, run.stderr);
-  const names = env.split('\n').map((line) => line.split('=')[0]);
-  for (const name of ['GIT_AUTHOR_NAME', 'GIT_AUTHOR_EMAIL', 'GIT_COMMITTER_NAME', 'GIT_COMMITTER_EMAIL']) assert.ok(!names.includes(name), `${name} reached the harness`);
-  assert.equal(committed, 'Own Model <own@example.invalid>|Own Model <own@example.invalid>', commitErr);
-});
-
-test('harness_identity: only in the worktree of a lane, as the harness is started (its git settings included), and never under agent_user through sudo nor in the main checkout', () => {
-  const lane = forgeLane({ forge: false });
-  noIdentity(lane);
-  const identity = (cwd, extra = {}, prefix = 'env') => spawnSync('bash', ['-c', `. "${join(lane.box.home, 'lib', 'common.sh')}"; harness_identity ${prefix}; printf '%s\\n' "\${HARNESS_IDENTITY[@]}"`],
-    { cwd, env: { ...lane.env, ORCH_LANE: 'dev/X-1', ...extra }, encoding: 'utf8' }).stdout.trim();
-  assert.equal(identity(lane.path), 'GIT_AUTHOR_NAME=Cleared lane dev/X-1\nGIT_AUTHOR_EMAIL=lane@cleared.invalid\nGIT_COMMITTER_NAME=Cleared lane dev/X-1\nGIT_COMMITTER_EMAIL=lane@cleared.invalid');
-  assert.equal(identity(lane.box.repo), '', 'the main checkout: nothing');
-  assert.equal(identity(lane.path, { ORCH_LANE: '' }), '', 'not a lane: nothing');
-  assert.equal(identity(lane.path, { ORCH_TEXT_ONLY: '1' }), '', 'a text only: nothing');
-  // An identity in the account's own git settings: the harness has one, unless it is started without them (Codex).
-  execFileSync(realGit, ['-C', lane.path, 'config', '--unset', 'user.useConfigOnly']);
-  writeFileSync(join(lane.box.home, '.gitconfig'), '[user]\n\tname = Service\n\temail = service@example.invalid\n');
-  assert.equal(identity(lane.path), '');
-  assert.match(identity(lane.path, {}, 'env GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_COUNT=0 HOME=/nonexistent'), /^GIT_AUTHOR_NAME=Cleared lane dev\/X-1$/m);
-  // Under agent_user (a harness started through sudo): Git's control files are read-only to it; nothing.
-  writeFileSync(join(lane.box.home, '.gitconfig'), '');
-  noIdentity(lane);
-  writeFileSync(lane.confPath, readFileSync(lane.confPath, 'utf8').replace('[security]\nallow_shared_uid = true\n', '[security]\nallow_shared_uid = true\nagent_user = nobody\n'));
-  assert.equal(identity(lane.path), '');
-});
-
 test('cleared status says which identity the forge calls use, and reports a configured app that cannot give a token', () => {
   const status = (lane) => {
     const json = spawnSync(process.execPath, [join(lane.box.home, 'lib', 'heartbeat.mjs'), 'status', '--json'], { env: lane.env, encoding: 'utf8' });
@@ -560,7 +435,7 @@ const rmCache = (lane) => execFileSync('rm', ['-rf', join(lane.box.state, 'forge
 // from elsewhere without spreading them: a reviewer still reads new forge calls.
 test('scripts that call the forge source lib/common.sh, none runs gh around its function, and node forge calls use lib/forge.mjs', () => {
   const shell = [...readdirSync(ORCH_HOME).filter((name) => name.endsWith('.sh')),
-    ...['adapters', 'lib', 'serve'].flatMap((dir) => readdirSync(join(ORCH_HOME, dir), { recursive: true })
+    ...['lib', 'serve'].flatMap((dir) => readdirSync(join(ORCH_HOME, dir), { recursive: true })
       .map((name) => join(dir, String(name))).filter((name) => name.endsWith('.sh')))];
   const calls = /(^|[\s($`;|&])gh (pr|run|api|issue|repo|workflow)\b|\bgit\b[^\n|;]*\s(push|fetch|pull|ls-remote|clone)\b/m;
   const around = /(^|[\s($`;|&])(command|exec|env(\s+(-u\s+\S+|-\S+|\w+=\S*))*|nohup|xargs(\s+-\S+)*|timeout(\s+-\S+)*\s+\S+)\s+gh\b|\/bin\/gh\b|\b(ba)?sh\s+-c\s+["'][^"'\n]*\bgh\s/m;
@@ -575,7 +450,7 @@ test('scripts that call the forge source lib/common.sh, none runs gh around its 
     checked += 1;
     assert.match(text, /lib\/common\.sh"|\.\.\/lib\/common\.sh"|\.\.\/\.\.\/\.\.\)" && pwd\)\/lib\/common\.sh"/, `${name} calls the forge without lib/common.sh`);
   }
-  assert.ok(checked >= 14, `only ${checked} shell call sites found`);
+  assert.ok(checked >= 4, `only ${checked} shell call sites found`);
   const node = [...readdirSync(ORCH_HOME).filter((name) => name.endsWith('.mjs')), 'cleared',
     ...['lib', 'serve', 'app'].flatMap((dir) => readdirSync(join(ORCH_HOME, dir), { recursive: true })
       .map((name) => join(dir, String(name))).filter((name) => name.endsWith('.mjs')))];

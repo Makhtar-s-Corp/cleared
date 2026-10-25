@@ -161,17 +161,3 @@ test('broker refuses manual rollback from the service UID when a separate human 
     reason: 'Only the configured human account can request manual rollback', commit: null,
   });
 });
-
-test('lead action bridge exposes no merge or tracker move action', async (t) => {
-  const { pull } = await fixture(t);
-  const client = join(ORCH_HOME, 'lead-command.mjs');
-  const env = { ...pull.env, ORCH_LEAD_LOCAL: '1' };
-  const ping = spawnSync(process.execPath, [client, 'ping'], { env, encoding: 'utf8' });
-  assert.equal(ping.status, 0, ping.stderr);
-  for (const action of ['merge', 'move', 'write-validation']) {
-    const refused = spawnSync(process.execPath, [client, action], { env, encoding: 'utf8' });
-    assert.notEqual(refused.status, 0, action);
-  }
-  const forgedAuthor = spawnSync(process.execPath, [client, 'review', '7', 'X-5', 'forged-model'], { env, encoding: 'utf8' });
-  assert.notEqual(forgedAuthor.status, 0);
-});

@@ -382,7 +382,7 @@ function gitCalls(text) {
 
 test('every git command the Node code runs on a checkout has the read environment, or says why not (static check)', () => {
   const node = sourceFiles().filter((name) => name.endsWith('.mjs') || name === 'cleared');
-  for (const root of ['lead-command.mjs', 'release-request.mjs']) assert.ok(node.includes(root), `${root} is checked`);
+  for (const root of ['release-request.mjs']) assert.ok(node.includes(root), `${root} is checked`);
   const files = new Set();
   for (const name of node) {
     const text = withoutComments(readFileSync(join(ORCH_HOME, name), 'utf8'));

@@ -18,8 +18,7 @@ import { fixtureProject, reviewedPull, sandbox, scratch } from './support.mjs';
 test('runtime and provider-neutral tests contain no provider name or query', () => {
   const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard'], { cwd: ORCH_HOME, encoding: 'utf8' }).trim().split('\n');
   const checked = files.filter((file) => {
-    // The Orca terminal adapter names the one tracker whose issues Orca links to a worktree.
-    if (file.startsWith('lib/tracker/adapters/') || file === 'lib/terminal/orca.sh' || file.startsWith('docs/') || file.startsWith('prompts/')
+    if (file.startsWith('lib/tracker/adapters/') || file.startsWith('docs/') || file.startsWith('prompts/')
       || file === 'agents.example.conf' || file.startsWith('test/')) return false;
     // npm's lock files list registry packages by name: v2's names graphql (a package CopilotKit pulls in), not a tracker.
     if (file.endsWith('package-lock.json')) return false;
@@ -171,19 +170,6 @@ test('capture roots accept a nested lane wildcard and skip absent roots', () => 
   writeFileSync(file, Buffer.from('89504e470d0a1a0a', 'hex'));
   assert.equal(checkedImage(file, `${join(dir, 'missing')}, ${join(dir, 'lanes', '*', '.local', 'captures')}`).mime, 'image/png');
   assert.throws(() => checkedImage(file, join(dir, 'lanes', 'other', '.local', 'captures')), /outside/);
-});
-
-test('the Claude harness does not inherit tracker or forge credentials', () => {
-  const dir = scratch('cleared-claude-env-');
-  const prompt = join(dir, 'prompt.md');
-  writeFileSync(prompt, 'Test prompt');
-  writeFileSync(join(dir, 'claude'), '#!/usr/bin/env bash\nprintf "%s|%s|%s|%s" "${LINEAR_API_KEY:-}" "${LINEAR_APP_CLIENT_SECRET:-}" "${GH_TOKEN:-}" "${GITHUB_TOKEN:-}"\n', { mode: 0o755 });
-  const run = spawnSync(join(ORCH_HOME, 'adapters', 'claude.sh'), ['talk', '--model', 'test', '--prompt-file', prompt], {
-    env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'secret', LINEAR_APP_CLIENT_SECRET: 'secret',
-      GH_TOKEN: 'secret', GITHUB_TOKEN: 'secret' }, encoding: 'utf8',
-  });
-  assert.equal(run.status, 0, run.stderr);
-  assert.equal(run.stdout, '|||');
 });
 
 test('GitHub status labels preserve the actor from the issue timeline', () => {
@@ -458,8 +444,6 @@ test('local ticket moves through request, verified approval, guarded merge, and 
   const human = new LocalTracker({ conf, db, actor: { kind: 'human', id: 'alice' }, approvalDir });
   try {
     assert.equal(human.createTicket({ title: 'Test ticket', body: 'Body' }).identifier, 'LOCAL-1');
-    const opened = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'LOCAL-1'], { env: box.env, encoding: 'utf8' });
-    assert.equal(opened.status, 0, opened.stderr);
     assert.ok(agents.getTicket('LOCAL-1'));
     human.moveTicket('LOCAL-1', 'Go MEP');
     const earlier = db.prepare('SELECT status, actor_kind, actor_id, at, proof FROM tracker_history ORDER BY id DESC LIMIT 1').get();
@@ -554,8 +538,6 @@ if [ "$1" = api ] && [[ " $* " == *"/repos/example/project/issues/12"* || " $* "
   node ${fake} "\${@:2}"
 else exec ${original} "$@"; fi
 `, { mode: 0o755 });
-  const opened = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'GH-12'], { env: box.env, encoding: 'utf8' });
-  assert.equal(opened.status, 0, opened.stderr);
   const externalMove = (who, at) => {
     const data = JSON.parse(readFile(stateFile, 'utf8'));
     data.issue.labels = [{ name: 'status:Go MEP' }];
@@ -626,8 +608,6 @@ console.log(JSON.stringify({data}));
 node ${fake} "$@"
 `, { mode: 0o755 });
   const env = { LINEAR_APP_CLIENT_ID: 'app', LINEAR_APP_CLIENT_SECRET: 'secret' };
-  const opened = spawnSync(join(box.home, 'spawn-lane.sh'), ['dev', 'X-5'], { env: { ...box.env, ...env }, encoding: 'utf8' });
-  assert.equal(opened.status, 0, opened.stderr);
   const asked = pull.ask('Please approve this version.', env);
   assert.equal(asked.status, 0, asked.stderr);
   assert.equal(JSON.parse(readFile(stateFile, 'utf8')).status, 'À valider');

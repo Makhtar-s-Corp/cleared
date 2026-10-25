@@ -1,6 +1,6 @@
 // The publish step (milestone 1 plan, lane 5, decision 12): the ticket
 // branch leaves the machine from the host, after the repository's guard,
-// with the forge credential, as v1's push-lane.sh does it. Nothing from the
+// with the forge credential, as v1's push-lane.sh did it. Nothing from the
 // session's container ever holds that credential.
 //
 // The ticket checkout was written by the session, its .git folder included
@@ -129,9 +129,9 @@ export async function runGuard(project: string, ref: string, files: readonly str
   }
 }
 
-// What a diff adds, as push-lane.sh hands it to the guard: the name of each
-// file and the added lines; no removed line, and not the old text git
-// quotes after the @@ of a hunk.
+// What a diff adds, as v1's push-lane.sh handed it to the guard: the name
+// of each file and the added lines; no removed line, and not the old text
+// git quotes after the @@ of a hunk.
 export function addedLines(diff: string): string {
   return diff.split('\n').filter((line) => !line.startsWith('-')).map((line) => line.replace(/^(@@ [^@]* @@).*/, '$1')).join('\n');
 }

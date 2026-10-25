@@ -1,15 +1,8 @@
 #!/usr/bin/env bash
-# Installs the systemd user units of the dispatcher, with no administrator
-# rights, no container and no proxy:
-#   - the dashboard, served to the Tailscale network only, and the timer that
-#     writes it again;
-#   - the wake of the project lead, every minute;
-#   - the hourly reading of the old sessions into the ledger.
-# Before any unit, it proves that each harness model the configuration can
-# start answers, asked as a lane asks it (serve/check-harness.sh; one small
-# request per model, on the subscription; CLEARED_SKIP_HARNESS_PROBE=1 skips
-# it on a host that cannot reach the providers). Then checks who can reach the dashboard. Run it again from another checkout
-# to move every unit there while the wake timer is stopped.
+# Installs the systemd user units of Cleared, with no administrator rights,
+# no container and no proxy: the release broker, the wake every minute, and
+# the app, served to the Tailscale network only. Run it again from another
+# checkout to move every unit there while the wake timer is stopped.
 # Before anything is written, every port it binds or tells to publish is
 # checked (lib/ports.sh): never 80 or 443, never a port something else
 # listens on. No setting turns that off (#112).
@@ -18,7 +11,50 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 . "$here/../lib/common.sh"
-. "$here/../lib/contract.sh"
+
+# contract_probe_reason < text: the line of it that says why, cut short: the
+# first one that names an error (error, failed, denied, not logged,
+# unauthorized, invalid, refused), else the first that says something (a
+# warning or a stack frame often comes before the error). Whatever looks like
+# a key or a token is hidden: a word starting with sk-, a run of 24 or more of
+# A-Z a-z 0-9 _ + / = . - with both cases and a digit (base64, JWT, most
+# keys), or one of 32 or more letters and digits only, with a digit (hex). A
+# path stays readable (a piece of it that looks like a key does not), and so
+# do model ids, error names and words joined by hyphens.
+contract_probe_reason() {
+  tr -d '\r' | awk '
+    function secret(t) {
+      if (t ~ /^sk-/ && length(t) >= 20) return 1
+      if (length(t) >= 24 && t ~ /[a-z]/ && t ~ /[A-Z]/ && t ~ /[0-9]/) return 1
+      return length(t) >= 32 && t ~ /^[A-Za-z0-9]+$/ && t ~ /[0-9]/ && t ~ /[A-Za-z]/
+    }
+    function hide(t,   n, part, i, out) {
+      if (t !~ /^\.?\//) return secret(t) ? "[hidden]" : t
+      n = split(t, part, "/"); out = part[1]
+      for (i = 2; i <= n; i++) out = out "/" (secret(part[i]) ? "[hidden]" : part[i])
+      return out
+    }
+    function clean(line,   out) {
+      out = ""
+      while (match(line, /[A-Za-z0-9_+\/=.-]+/)) {
+        out = out substr(line, 1, RSTART - 1) hide(substr(line, RSTART, RLENGTH))
+        line = substr(line, RSTART + RLENGTH)
+      }
+      return out line
+    }
+    /[^[:space:]]/ {
+      if (!seen++) first = $0
+      if (tolower($0) ~ /error|failed|denied|not logged|unauthorized|invalid|refused/) { said = $0; found = 1; exit }
+    }
+    END {
+      if (!found) said = first
+      if (!found && !seen) exit
+      said = clean(said)
+      sub(/^[[:space:]]+/, "", said)
+      print said
+    }' | cut -c1-200
+}
+
 
 port=${CLEARED_DASHBOARD_PORT:-8787}
 app_port=${CLEARED_APP_PORT:-8788}
@@ -98,7 +134,7 @@ if [ "$named" != "$service_named" ]; then
 fi
 printf '%s\n' "$ORCH_STATE_DIR" > "$HOME/.config/cleared/state"
 chmod go-w "$HOME/.config/cleared/state"
-mkdir -p "$units" "$ORCH_STATE_DIR/dashboard"
+mkdir -p "$units" "$ORCH_STATE_DIR"
 # The service keeps its state private. Account creation and sudo grants are
 # administrator actions, never an installer side effect.
 agent_user=$(conf_get security agent_user)
@@ -131,52 +167,6 @@ if [ -n "$agent_user" ]; then
   if [ -n "$probe" ]; then rm -f "$probe"; die "$agent_user wrote to Cleared state; remove that access before installing"; fi
   writable=$(sudo -n -u "$agent_user" -- find "$ORCH_STATE_DIR" -writable -print -quit 2>/dev/null || true)
   [ -z "$writable" ] || die "$agent_user can write Cleared state path $writable"
-  # The door of the heavy commands (when-free.sh, lib/common.sh): the teams
-  # take it with flock on a descriptor opened read-only, so it lives outside
-  # the state, in a directory of this account that $agent_user may traverse
-  # and not write, and the file is readable by it and writable by nobody
-  # else. The host status the service writes for the teams sits next to it.
-  heavy_lock=$(conf_get lanes heavy_lock) || heavy_lock=
-  if [ -z "$heavy_lock" ]; then
-    [ -z "$(conf_get lanes heavy_commands)" ] || die "Set [lanes] heavy_lock to an absolute path outside Cleared state, in a directory this account owns and $agent_user can traverse but not write (for example $socket_parent/heavy.lock): the teams' heavy commands cannot open a door in the state; see docs/configuration.md"
-  else
-    case "$heavy_lock" in /*) ;; *) die "[lanes] heavy_lock must be an absolute path, not \"$heavy_lock\" (no ~: the agents' account has another home)" ;; esac
-    ! heavy_lock_in_state "$heavy_lock" || die "[lanes] heavy_lock ($heavy_lock) is inside Cleared state, which $agent_user must not open: name a file in a service-owned directory outside it"
-    heavy_dir=$(dirname "$heavy_lock")
-    [ -d "$heavy_dir" ] || die "Create the service-owned directory of [lanes] heavy_lock first: $heavy_dir (traversable by $agent_user, writable by this account only)"
-    [ "$(stat -c %u "$heavy_dir")" = "$(id -u)" ] || die "The directory of [lanes] heavy_lock ($heavy_dir) must belong to the service account"
-    heavy_mode=$(stat -c %a "$heavy_dir")
-    (( (8#$heavy_mode & 022) == 0 )) || die "The directory of [lanes] heavy_lock ($heavy_dir) must not be group/world-writable"
-    [ ! -L "$heavy_lock" ] || die "[lanes] heavy_lock ($heavy_lock) must not be a symbolic link"
-    [ -e "$heavy_lock" ] || (umask 022 && : >> "$heavy_lock") || die "[lanes] heavy_lock ($heavy_lock) could not be created"
-    [ -f "$heavy_lock" ] || die "[lanes] heavy_lock ($heavy_lock) must be a regular file"
-    [ "$(stat -c %u "$heavy_lock")" = "$(id -u)" ] || die "[lanes] heavy_lock ($heavy_lock) must belong to the service account"
-    chmod 0644 "$heavy_lock"
-    host_status_write '{}' || die "the host status next to [lanes] heavy_lock could not be written in $heavy_dir"
-    if sudo -n -u "$agent_user" -- test -w "$heavy_dir" 2>/dev/null; then
-      die "$agent_user can write the directory of [lanes] heavy_lock ($heavy_dir): it may open the door for reading, nothing more"
-    fi
-    # Nor any directory above it: one it could write would let it move that
-    # directory aside and put a door and a host status of its own in its place.
-    heavy_up=$heavy_dir
-    while [ "$heavy_up" != / ]; do
-      heavy_up=$(dirname "$heavy_up")
-      if sudo -n -u "$agent_user" -- test -w "$heavy_up" 2>/dev/null; then
-        die "$agent_user can write $heavy_up, above the directory of [lanes] heavy_lock: it could put a door and a host status of its own in place of $heavy_dir; choose a directory whose parents it cannot write"
-      fi
-    done
-    for heavy_file in "$heavy_lock" "$(host_status_path)"; do
-      if sudo -n -u "$agent_user" -- test -w "$heavy_file" 2>/dev/null; then
-        die "$agent_user can write $heavy_file: it may read it, nothing more"
-      fi
-    done
-    sudo -n -u "$agent_user" -- test -r "$(host_status_path)" 2>/dev/null || die "$agent_user cannot read the host status $(host_status_path): grant traversal of $heavy_dir and read access"
-    # As when-free.sh does it: opened read-only, then flock (the door may be
-    # held by a session at work: it is waited for, a while).
-    if ! said=$(cd / && sudo -n -u "$agent_user" -- bash -c 'exec 8< "$1" && flock -w 60 8' _ "$heavy_lock" 2>&1); then
-      die "$agent_user cannot open [lanes] heavy_lock ($heavy_lock) read-only and take its lock: grant traversal of $heavy_dir and read access to the file, or run this again if a session held it for a minute ($(contract_probe_reason <<<"${said:-nothing}"))"
-    fi
-  fi
   # The human's own accesses (tracker tokens, signing key, passkeys) and the app's access token belong to this
   # account alone: the agents' account must read none of them, nor traverse their directory.
   human_dir=$(conf_get app human_credentials_dir) || human_dir=
@@ -216,57 +206,15 @@ if [ -n "$agent_user" ]; then
   if ! sudo -n -u "$agent_user" -- test -r "$ORCH_HOME/release-request.mjs" 2>/dev/null; then
     die "$agent_user cannot read the release client: grant read and path traversal, not write"
   fi
-  # The probes that start node as the agents' account run from /: the folder
-  # this was started from may be closed to that account, and node would then
-  # fail on its current directory instead of on what is probed (#87). The
-  # first line node wrote is part of the message.
-  if ! said=$(cd / && sudo -n -u "$agent_user" -- env ORCH_REPO="$project" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" \
-    node "$ORCH_HOME/lead-command.mjs" ping 2>&1 > /dev/null); then
-    die "Configure the narrow agent-to-service sudo rule for serve/lead-actions.mjs; see docs/security.md (the lead client as $agent_user said: $(contract_probe_reason <<<"${said:-nothing}"))"
-  fi
-  # NODE_OPTIONS runs before lead-actions.mjs can scrub the environment. Prove
-  # sudoers drops it, including when an agent explicitly asks sudo to keep env.
-  env_probe=$(mktemp -d)
-  chmod 755 "$env_probe"
-  : > "$env_probe/marker"
-  chmod 600 "$env_probe/marker"
-  cat > "$env_probe/probe.cjs" <<EOF
-if (process.getuid() === $(id -u)) require('node:fs').writeFileSync('$env_probe/marker', 'injected');
-EOF
-  chmod 644 "$env_probe/probe.cjs"
-  said=$(cd / && sudo -n -u "$agent_user" -- env NODE_OPTIONS="--require=$env_probe/probe.cjs" ORCH_REPO="$project" ORCH_CONF="$ORCH_CONF" ORCH_STATE_DIR="$ORCH_STATE_DIR" \
-    node "$ORCH_HOME/lead-command.mjs" ping 2>&1 > /dev/null) || die "The lead client failed the sudo environment probe: $(contract_probe_reason <<<"${said:-nothing}")"
-  # From / too: a node stopped by its current directory would leave the
-  # marker untouched and prove nothing.
-  (cd / && sudo -n -u "$agent_user" -- env NODE_OPTIONS="--require=$env_probe/probe.cjs" \
-    sudo -n -E -u "$(id -un)" /usr/bin/node "$ORCH_HOME/serve/lead-actions.mjs" ping > /dev/null 2>&1) || true
-  [ ! -s "$env_probe/marker" ] || die "The reverse sudo rule preserves NODE_OPTIONS; require env_reset and forbid SETENV"
-  rm -f "$env_probe/marker" "$env_probe/probe.cjs"
-  rmdir "$env_probe"
-fi
-# Each harness model the configuration can start answers, asked as a lane
-# asks it (under the agents' account when there is one), before any unit is
-# written or started: serve/check-harness.sh, one small request per model on
-# the subscription. A host that cannot reach the providers skips it, loudly.
-if [ "${CLEARED_SKIP_HARNESS_PROBE:-}" = 1 ]; then
-  echo "WARNING: CLEARED_SKIP_HARNESS_PROBE=1: the harness models were NOT probed. Nothing proves that a lane can start${agent_user:+ under $agent_user}; run serve/check-harness.sh once this host can reach the providers." >&2
-else
-  # The table goes out as it is printed; what it says on its error output is kept for the message.
-  { harness_said=$("$here/check-harness.sh" 2>&1 >&3) && harness_code=0 || harness_code=$?; } 3>&1
-  if [ "$harness_code" != 0 ]; then
-    [ -z "$harness_said" ] || printf '%s\n' "$harness_said" >&2
-    harness_first=$(sed -n '1{s/^check-harness\.sh: //;p;}' <<<"$harness_said")
-    die "harness probe failed: ${harness_first:-serve/check-harness.sh exited $harness_code}. No unit was installed or started. Sign the CLI in${agent_user:+ as $agent_user} (or fix [models]) and run this again; on a host that cannot reach the providers, CLEARED_SKIP_HARNESS_PROBE=1 skips the probe"
-  fi
 fi
 chmod o-w "$ORCH_STATE_DIR"
 for unit in "$here"/cleared-*.service "$here"/cleared-*.timer; do
   unit=$(basename "$unit")
-  sed -e "s|@PORT@|$port|; s|@APP_PORT@|$app_port|; s|@BIND@|$bind|; s|@DASHBOARD_DIR@|$ORCH_STATE_DIR/dashboard|; s|@ORCH_HOME@|$ORCH_HOME|; s|@ORCH_REPO@|$project|" "$here/$unit" > "$units/$unit"
+  sed -e "s|@PORT@|$port|; s|@APP_PORT@|$app_port|; s|@BIND@|$bind|; s|@ORCH_HOME@|$ORCH_HOME|; s|@ORCH_REPO@|$project|" "$here/$unit" > "$units/$unit"
 done
 systemctl --user daemon-reload
-systemctl --user enable --now cleared-release-broker.service cleared-dashboard.service cleared-dashboard-refresh.timer cleared-wake.timer cleared-legacy-import.timer cleared-app.service
-systemctl --user restart cleared-release-broker.service cleared-dashboard.service cleared-app.service
+systemctl --user enable --now cleared-release-broker.service cleared-wake.timer cleared-app.service
+systemctl --user restart cleared-release-broker.service cleared-app.service
 if [ -n "$agent_user" ]; then
   reachable= said=
   for attempt in 1 2 3 4 5 6 7 8 9 10; do
@@ -276,14 +224,11 @@ if [ -n "$agent_user" ]; then
   done
   [ -n "$reachable" ] || die "$agent_user cannot reach the release socket; check [security] socket_path and directory traversal (the release client said: $(contract_probe_reason <<<"${said:-nothing}"))"
 fi
-"$ORCH_HOME/dashboard.sh" > /dev/null
-sleep 1
-"$here/check.sh"
 if [ -n "$(ports_serve_hint "$public_origin" "$app_address" "$app_port")" ]; then
   echo "Cleared app: $public_origin/login, once it is published on the Tailscale network, if not done yet (never on 443: docs/app.md):"
   echo "  $(ports_serve_hint "$public_origin" "$app_address" "$app_port")"
 else
-  echo "Cleared app: http://$bind:$app_port/login (the old dashboard address now redirects there)"
+  echo "Cleared app: http://$bind:$app_port/login"
 fi
 echo "Access token: run '$ORCH_HOME/cleared app --bind $bind --link' on this machine to print the sign-in address; the token file stays outside the project."
 [ -n "$agent_user" ] || echo "release lock is not a security boundary: agents run as the service account"
