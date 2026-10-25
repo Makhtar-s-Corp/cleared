@@ -425,6 +425,70 @@ test('a ticket layer that fails to build falls back to the fake', async () => {
   assert.match(started.siblings[0]?.reason ?? '', /the ticket layer could not be built: .*boom/);
 });
 
+// The base layer, or the ticket layer, that cannot be made (lane j3-test-gaps).
+const baseBuild = (args: readonly string[]) => args[0] === 'build' && !args.includes('--network');
+
+test('a base layer that fails to build makes the sibling a fake, with the reason, and no ticket layer is tried', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  fake.intercept = (args) => (baseBuild(args) ? { code: 1, stdout: '', stderr: 'ERROR: failed to solve: no space' } : undefined);
+  const started = await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [{ ...files.guestbook, contract: files.contract }] }));
+  assert.equal(started.siblings[0]?.kind, 'fake');
+  assert.match(started.siblings[0]?.reason ?? '', /^the base layer could not be built: .*no space/);
+  assert.ok(!builds(fake).some((args) => args.includes('--network')));
+});
+
+test('with no contract to fake, a base layer that fails to build stops the start before any object of the session is created, and names the sibling', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  fake.intercept = (args) => (baseBuild(args) ? { code: 1, stdout: '', stderr: 'ERROR: failed to solve' } : undefined);
+  await assert.rejects(startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook] })), /^RuntimeError: sibling guestbook: the base layer could not be built: .*, and it has no contract to fake$/);
+  assert.deepEqual(onlyVolume(fake), []);
+});
+
+test('with no contract to fake, a ticket layer that fails to build runs the base layer, with the reason', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  fake.intercept = (args) => (args[0] === 'build' && args.includes('--network') ? { code: 1, stdout: '', stderr: 'ERROR: failed to solve: boom' } : undefined);
+  const started = await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook] }));
+  assert.equal(started.siblings[0]?.kind, 'base');
+  assert.match(started.siblings[0]?.reason ?? '', /^the ticket layer could not be built: .*boom/);
+  assert.ok(byName(fake.containers, sessionNames(SESSION).sibling('guestbook')).args?.includes('cleared-v2-base-guestbook:cafe0b1ec7ed'));
+  assert.ok(!fake.images.some((image) => image.name === sessionNames(SESSION).siblingImage('guestbook')), 'no ticket layer image is left');
+});
+
+test('a base image with no absolute working folder gets no ticket layer: the sibling runs the base layer, with the reason', async () => {
+  const files = workspaceFiles();
+  for (const workdir of ['', 'app']) {
+    const fake = new FakeDocker();
+    fake.workdirOf = () => workdir;
+    const started = await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook] }));
+    assert.equal(started.siblings[0]?.kind, 'base', JSON.stringify(workdir));
+    assert.match(started.siblings[0]?.reason ?? '', /^the ticket layer cannot be written: the base layer's working folder must be an absolute path/);
+    assert.ok(!builds(fake).some((args) => args.includes('--network')));
+  }
+});
+
+test('a sibling that stops while it is awaited is reported not ready at once, not at the end of the wait', async () => {
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  const sibling = sessionNames(SESSION).sibling('guestbook');
+  let probes = 0;
+  fake.execAnswer = (command) => {
+    if (command[0] !== 'node') return { code: 0, stdout: '', stderr: '' };
+    probes++;
+    // The first probe finds nothing listening, and the sibling exits.
+    const found = fake.containers.find((c) => c.name === sibling);
+    if (found) found.state = 'exited';
+    return { code: 1, stdout: '', stderr: '' };
+  };
+  const began = Date.now();
+  const started = await startSession(new Docker(fake.runner), runtimeSpec({ siblings: [files.guestbook], readyTimeoutMs: 60_000, readyPollMs: 10 }));
+  assert.equal(started.siblings[0]?.ready, false);
+  assert.equal(probes, 1);
+  assert.ok(Date.now() - began < 5_000, 'the start did not wait the minute out');
+});
+
 test('a sibling that is not running is never probed, and is reported not ready', async () => {
   const files = workspaceFiles();
   const fake = new FakeDocker();

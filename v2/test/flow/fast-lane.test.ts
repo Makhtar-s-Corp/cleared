@@ -10,6 +10,8 @@ import assert from 'node:assert/strict';
 import type { CustomValue } from '../../src/session/events.ts';
 import type { ReleaseItem } from '../../src/api/types.ts';
 import { FlowEngine, type FastVerdict, type FlowEffects, type MergeOutcome } from '../../src/flow/engine.ts';
+import { FastLaneStore, cardLane, fallbackComment } from '../../src/flow/fast-lane.ts';
+import { openStore } from '../../src/store/db.ts';
 import type { FlowEvent } from '../../src/flow/events.ts';
 import { describeFlowEvent } from '../../src/lead/prompts.ts';
 import type { ServiceLock } from '../../src/release/lock.ts';
@@ -51,6 +53,35 @@ async function toRelease(t: Setup, id: string): Promise<ReleaseItem> {
   await t.engine.settled();
   return release(t) as ReleaseItem;
 }
+
+test('the lane\'s row: a head kept without its figures, kept again, then sent back once for good; nothing after brings it back', () => {
+  const lanes = new FastLaneStore(openStore(':memory:').db);
+  assert.equal(lanes.get('LOCAL-1'), undefined);
+  assert.equal(lanes.demoted('LOCAL-1'), false);
+  lanes.kept('LOCAL-1', 'guestbook', { state: 'fast', reasons: [], keep: true }, '2026-10-25T08:00:00.000Z');
+  assert.deepEqual(lanes.get('LOCAL-1'), { ticket: 'LOCAL-1', state: 'fast', head: null, reasons: [], demotedAt: null });
+  lanes.kept('LOCAL-1', 'guestbook', FAST, '2026-10-25T08:01:00.000Z');
+  assert.equal(lanes.get('LOCAL-1')?.head, 'abc123');
+  assert.equal(lanes.demote('LOCAL-1', 'guestbook', OUTSIDE, '2026-10-25T08:02:00.000Z'), true);
+  assert.equal(lanes.demote('LOCAL-1', 'guestbook', { reasons: ['asked'] }, '2026-10-25T08:03:00.000Z'), false, 'sent back once');
+  lanes.kept('LOCAL-1', 'guestbook', { ...FAST, head: 'def456' }, '2026-10-25T08:04:00.000Z');
+  assert.deepEqual(lanes.get('LOCAL-1'), { ticket: 'LOCAL-1', state: 'full', head: 'abc123', reasons: ['outside_safe', 'file_type'], demotedAt: '2026-10-25T08:02:00.000Z' });
+  assert.equal(lanes.demoted('LOCAL-1'), true);
+  // A ticket never kept fast can be sent back too, with no head.
+  assert.equal(lanes.demote('LOCAL-2', 'guestbook', { reasons: ['several_services'] }, '2026-10-25T08:05:00.000Z'), true);
+  assert.equal(lanes.get('LOCAL-2')?.head, null);
+});
+
+test('the card\'s lane: a demotion wins over any head, no verdict is unreadable, a verdict that says nothing of the change is off', () => {
+  const demoted = { ticket: 'LOCAL-1', state: 'full' as const, head: 'abc123', reasons: ['asked' as const], demotedAt: '2026-10-25T08:00:00.000Z' };
+  assert.deepEqual(cardLane(demoted, FAST), { state: 'full', reasons: ['asked'] });
+  assert.deepEqual(cardLane(undefined, undefined), { state: 'off', reasons: ['unreadable'] });
+  assert.deepEqual(cardLane({ ...demoted, state: 'fast', reasons: [] }, undefined), { state: 'off', reasons: ['unreadable'] });
+  assert.deepEqual(cardLane(undefined, FAST), { state: 'fast', reasons: [] });
+  assert.deepEqual(cardLane(undefined, OUTSIDE), { state: 'full', reasons: ['outside_safe', 'file_type'] });
+  assert.deepEqual(cardLane(undefined, OFF), { state: 'off', reasons: ['disabled'] });
+  assert.equal(fallbackComment(['too_many_files', 'link']).split('.')[0], 'Back to the full circuit: too many files changed; a file gains a link or a remote address');
+});
 
 test('a Quick ticket the rules keep fast is judged after its author and at the head it publishes, and its card says so', async () => {
   const { t, ticket, judged } = await quick();
