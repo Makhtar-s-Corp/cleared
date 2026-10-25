@@ -52,11 +52,23 @@ export type LeadView = {
 };
 
 
-// 09:31 today; with the day before that.
+// 09:31 today; with the day before that, said by Intl in the page's
+// language. The thread says dozens of them at each visit, and a formatter
+// is slow to build: one per language, kept (lane j3-tab-perf).
+const days = new Map<string, Intl.DateTimeFormat>();
+const dayOf = (at: Date, language: 'en' | 'fr'): string => {
+  let format = days.get(language);
+  if (!format) {
+    format = new Intl.DateTimeFormat(language, { day: 'numeric', month: 'short' });
+    days.set(language, format);
+  }
+  return format.format(at);
+};
+
 export function clockOf(iso: string, now: Date, language: 'en' | 'fr'): string {
   const at = new Date(iso);
   const time = clock(iso);
-  return at.toDateString() === now.toDateString() ? time : `${at.toLocaleDateString(language, { day: 'numeric', month: 'short' })} ${time}`;
+  return at.toDateString() === now.toDateString() ? time : `${dayOf(at, language)} ${time}`;
 }
 
 // ------------------------------------------------------------------ header
@@ -254,6 +266,31 @@ export interface StreamLike {
   addEventListener(name: string, listener: (event: { data: string }) => void): void;
   close(): void;
   onerror: (() => void) | null;
+}
+
+// The stream says the lead's state and its plans again each time the
+// screen opens it, at each visit of the Lead (lane j3-tab-perf). Against
+// what the screen held before a frame: whether the frame changes it (else
+// the thread is not drawn again), and whether it changes what the inbox
+// shows, a question the lead asks or a plan proposed or moved (else the
+// inbox is not read again).
+type Held = { readonly lead: LeadState; readonly plans: readonly Plan[] };
+
+const samePlan = (plan: Plan, held: Held): boolean => {
+  const known = held.plans.find((p) => p.id === plan.id);
+  return known !== undefined && JSON.stringify(known) === JSON.stringify(plan);
+};
+
+export function frameChanges(frame: LeadStreamFrame, held: Held): boolean {
+  if (frame.kind === 'state') return JSON.stringify(frame.state) !== JSON.stringify(held.lead);
+  if (frame.kind === 'plan') return !samePlan(frame.plan, held);
+  return true;
+}
+
+export function inboxNews(frame: LeadStreamFrame, held: Held): boolean {
+  if (frame.kind === 'state') return frame.state.pendingQuestion !== null && frame.state.pendingQuestion.requestId !== held.lead.pendingQuestion?.requestId;
+  if (frame.kind === 'plan') return !samePlan(frame.plan, held);
+  return false;
 }
 
 export type Follower = { stop(): void; lastSeq(): number };

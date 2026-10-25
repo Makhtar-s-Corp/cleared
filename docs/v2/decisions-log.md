@@ -5765,6 +5765,64 @@ The 120 PNG captures of `docs/v2/ui-polish/` (P222, 366) weighed 11.3 MB. They w
 - Pull request: 370, against `v2`.
 - Author: the night driver.
 
+## 2026-10-25: a screen switch does only the work of drawing the next screen, and the budget is measured alone (the author's choices, lane `j3-tab-perf`, P223, issue #367)
+
+**The need.** Pull request 366 saw `app/test/foundation/budget-browser.test.ts` fail in a full run of the browser job's files, which run in parallel, and pass alone at 31.9 and 35.9 ms. The brief asks for a reproducible measure of the p95 under load first, the real causes (renders, redundant reads, heavy work at the switch), fixes with no new feature and no visible change, and a budget test that does not flake. No issue existed: #367 was opened for this lane. The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight; the conventions followed are those of section 10 of `milestone-1-plan.md` (a lane changes its own files), as the earlier lanes did.
+
+**What was measured, on `origin/v2` at `ac24420`.**
+- The failure, reproduced: in a run of the twenty files of the CI's browser list in parallel, the budget's p95 was 127.7 ms; alone, 26.7 and 27.7 ms.
+- The load, reproduced: Chromium's own CPU throttling, four times, once the screens were drawn, gives the same numbers (122.6 and 147.2 ms alone). `CLEARED_V2_BUDGET_SLOWDOWN=4` now does it in the test.
+- A CPU profile and a timeline trace of the switches, slowed four times, and counters installed in the page over a lap of the budget's fourteen switches (`LAP_TWO`, twice): which components each React commit draws again, the Intl formatters built, the permission reads, the reads of the service, and each forced layout with the function that forced it.
+
+**The causes found.**
+1. **Intl formatters built at every number.** `lib/time.ts` and the translator's `format` built an `Intl.NumberFormat` for each number said: 472 in one lap, 118 at each visit of the Lead. The Lead's thread built a date formatter for each line (`toLocaleDateString`).
+2. **The page laid out twice in one frame.** The shell gave the window its scroll back (`useScrollKept`, which forces a layout) before it turned the next screen's sheets on, and the Lead's thread measured its height before them too (a child's layout effects run before the shell's). The sheets then changed every style, and the browser laid the page out again before painting. 4 of the lap's 14 scrolls happened with the previous screen's sheets on.
+3. **A Lead visit asked the inbox again.** The Lead's stream says the lead's state again each time the screen opens it, and the screen asked the shell to recount the inbox for any state with a waiting question, so each visit read `/inbox` and drew the shell and the kept sessions again. The thread was also drawn again for each frame of that replay and for the same trains (10 React commits for a Lead visit).
+4. **The sidebar's bell read the notification permission at every draw**, a call into the browser, and the sidebar draws at every switch (16 reads in the lap).
+5. **A screen drawn again drew itself twice**: once from what it kept, then again when its first read of the cache brought the same values in a new object (the inbox's list was also copied at each read). And every refetch told the screens that read the resource, even when the service answered what the cache held, as the ten-second poll of the resources the change stream does not cover does.
+6. **A screen's catalog over the shell's** was spread again at each switch, hundreds of keys.
+
+**Decision.**
+1. **One formatter per language and options**, kept for the page's life (`numberFormat` in `lib/i18n.ts`, used by `lib/time.ts` and the translator; the word for yesterday; the Lead's day and month through a kept `Intl.DateTimeFormat`, which says what `toLocaleDateString` said). The same text: `app/test/time.test.ts` and the new tests read it.
+2. **One layout per switch.** The next screen's sheets go on in an insertion effect, before any layout effect, the screens' own included; the shell focuses the screen and writes the screen's name into the live region (through a ref, so the shell does not draw again for it); the scroll is given back last.
+3. **The Lead's stream tells only what is new.** `frameChanges` drops a frame that changes nothing the screen holds, `inboxNews` asks the inbox again only for a question the screen did not hold or a plan proposed or moved, the same trains draw nothing, and the thread scrolls to its end on a new line only, not when the agent's thread replaces the kept one.
+4. **The bell reads the browser once per answer of the service.** The permission changes only through the bell's own gesture, which reads again.
+5. **The same values draw nothing.** `useKept` keeps what it holds when the new value has the same fields (`sameFields`); the inbox's `known` returns the list itself when every item is known; the cache tells no reader when a refetch answers what it held (the query client keeps the held value, its structural sharing).
+6. **Catalogs made once** per screen and language.
+7. **The budget is measured alone in CI.** The browser job runs the other files in parallel, then the budget's file alone, and adds its TAP to the same file, so the summary keeps its measures and the job's counts cover both. The budget itself is unchanged: 100 ms, from the click to the painted screen, the median of three runs' p95.
+8. **Not done.** Keeping every screen mounted, as the sessions are, would remove most of what is left, but it changes how the screens live (the Lead's stream and timers while hidden, the ids); not a lane for a polish. Consumption, outside the budget's lap, still builds its formatters as it did.
+
+**Tests first.** `c0e373b` and `3fc0ce3` hold the tests alone. On the old code: `switch-work-browser.test.ts` (in the CI's browser list) counts 472 formatters, 16 permission reads, 2 reads of the inbox from the Lead and 4 scrolls on the previous screen's sheets, where it wants none; `switch-work.test.ts` fails on the formatters built again, on `inboxNews` and `frameChanges`, which do not exist, and on a refetch of an unchanged resource telling its reader; `web/test/switch-work.test.tsx` fails on the catalogs made again, on `sameFields`, which does not exist, and on the inbox's list copied. `CLEARED_V2_BUDGET_SLOWDOWN=4` fails the budget at 122.6 and 147.2 ms.
+
+**Measures**, on this lane's host, shared with other lanes (load average from 2 to 25 during the runs), so each before and after was run alternately, the old build served from a copy of its `dist/`:
+
+| | Before (`ac24420`) | After |
+| --- | --- | --- |
+| p95 of 40 switches, 8 alternate pairs, median of the pairs | 29.9 ms (26.8 to 37.7) | 19.5 ms (17.6 to 20.7) |
+| Median switch, same runs | 18.9 ms | 13.4 ms |
+| The same with the CPU slowed four times: p95 | 130.3 ms (122.0 to 348.1) | 104.5 ms (87.8 to 265.9) |
+| The same: median switch | 71.2 ms | 61.6 ms |
+| The budget test, `CI=true`, the median of three runs' p95 | 39.5, 29.9, 39.6 ms | 26.8 ms, then 71.2 and 62.4 ms during a load average of 13.7 |
+| The budget test slowed four times, `CI=true` | 154.3, 115.1, 145.6 ms (fails) | 94.4, 102.3, 90.7 ms (fails once) |
+| The main thread's busy time per switch (CPU profile, not slowed) | 30 to 32 ms | 20 to 21 ms |
+| React commits in a lap of seven switches | 35 (10 for the Lead) | 23 (6 for the Lead) |
+| Style and layout passes per switch | 2 (the forced one, then the sheets') | 1 |
+
+With the CPU slowed four times the budget is at its edge: what is left is the next screen's own style, layout and render, about a third of it the one layout. The parallel run is the reason for the CI's separate step: with the fixes, the twenty files in one parallel run still put the budget at 85.9, 128.5, 86.8, 116.0, 155.2 and 91.9 ms, failing three times in six while other lanes loaded the host; the CI's two commands replayed here three times gave 56 of 56 tests in the parallel part and the budget alone at 28.0, 27.5 and 29.5 ms (`CI=true`, load average 3 to 18).
+
+**No visible change.** `scripts/capture-screens.ts --via click` on the old and the new build: the tower, the inbox, the sessions, a session and the Lead at 1440 and 390, light and dark, in English, and light in French, 30 captures, 29 identical to the byte; the 30th (the French tower at 1440) differs by 4 bytes and is drawn the same, and the new build gives one or the other of the two files from one capture to the next.
+
+**Checks** (on `origin/v2` at `ac24420`). `npm run typecheck` passes. `npm test`: 2096 Node tests, 2025 pass, 71 skipped (the browser tests and the gated real-harness tests), 0 fail; 333 Vitest tests pass. The CI's browser step replayed three times: every test passes. `npm run guard -- --base origin/v2`: nothing refused.
+
+**The merge of 365 and 366** (lanes `j3-docs-slop` and `j3-ui-polish`, at `origin/v2` `c41101e`). The log keeps their entries, then this one; the matrix keeps P221 and P222, then P223, every id once; the browser list keeps 366's `phone-fit-browser.test.ts` beside this lane's file, the budget still alone after them. Neither lane touches the files this lane changed in `app/web/lib`, the shell or the Lead. After the merge: `npm run typecheck` passes; `npm test`: 2114 Node tests, 2035 pass, 79 skipped, 0 fail, and 342 Vitest tests pass. The CI's browser step replayed three times, during a load average of 23 to 40 from other lanes: the budget alone at 29.8, 47.3 and 26.3 ms, and 64 of 64, 63 of 64 and 64 of 64 in the parallel part; the one failure is `app/test/session/production-browser.test.ts` waiting more than 30 seconds for its card, which passes alone twice. `npm run guard -- --base origin/v2`: nothing refused.
+
+**The merge of 369 and 370** (the compressed captures and the milestone 3 report, at `origin/v2` `dbaeb4d`). The log keeps their entries, then this one. They change images and docs only, none of this lane's files. After the merge: `test/docs.test.ts`, `test/wording.test.ts` and the root tests that read the workflow pass; `npm run guard -- --base origin/v2`: nothing refused.
+
+**Resources.** No Docker object, no Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no port but the tests' loopback port 0, no secret.
+
+- Pull request: 372, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-tab-perf`.
+
 ## 2026-10-25: the tests CI saw unstable, their causes, and tests on the error paths the coverage found unrun (the author's choices, lane `j3-test-gaps`, P225)
 
 **The need.** No issue: the brief is the line. Measure the coverage of v2 without a new dependency, name the critical modules little covered (the engine, the fast lane, the harness pick, the receipt, the session runtime), add useful tests on their error paths and limits, and make stable the two tests CI saw unstable: `test/scripts/rehearsal-adapter.test.ts` (the lead's turn) and `app/test/inbox/mobile-browser.test.ts` (Go in French at 375 px, "Traité."), the real cause first. While the lane ran, the owner added two more seen on pull requests with no code: `app/test/consumption/wins-browser.test.ts`, "in French the panel is French, and holds on a phone" (no horizontal scroll, run 40176736780), and the Go test in English (pull request 370). No change of the product's behaviour. `milestone-2-plan.md` has no sections 9 and 10, as earlier lanes noted; the conventions followed are those of section 10 of `milestone-1-plan.md` (a lane changes its own files and appends here). P223 is lane `j3-tab-perf`'s (pull request 372) and P224 lane `j3-a11y`'s; this lane takes the next, P225.

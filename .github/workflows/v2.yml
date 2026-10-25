@@ -90,12 +90,14 @@ jobs:
         # palette, the keys and the sidebar). The TAP output is
         # kept for the summary. Every test that ran must pass, none may be skipped, and there must be at least as many tests
         # as listed files, so an emptied file or a failed run fails the job without a fixed count to keep up to date.
+        # The tab-switch budget runs alone, once the others have ended: run beside them, it measured their browsers'
+        # load as much as the app (lane j3-tab-perf, issue #367).
         run: |
           set -o pipefail
           export CLEARED_V2_PLAYWRIGHT="$PWD/node_modules/playwright-core"
           export CLEARED_V2_CHROME="$(node -p "require('$CLEARED_V2_PLAYWRIGHT').chromium.executablePath()")"
           files="app/test/choices-browser.test.ts app/test/notify/browser.test.ts app/test/session/tabs-browser.test.ts
-            app/test/session/terminal-browser.test.ts app/test/foundation/budget-browser.test.ts
+            app/test/session/terminal-browser.test.ts
             app/test/foundation/stack-browser.test.ts app/test/shell/shell-browser.test.ts
             app/test/session/continuity-browser.test.ts app/test/inbox/inbox-browser.test.ts
             app/test/polish/first-paint-browser.test.ts app/test/i18n-browser.test.ts
@@ -104,12 +106,14 @@ jobs:
             app/test/consumption/wins-browser.test.ts
             app/test/ask/citations-browser.test.ts app/test/inbox/mobile-browser.test.ts
             app/test/session/production-browser.test.ts test/flow/production-capture.test.ts
-            app/test/session/plan-ask-browser.test.ts app/test/polish/phone-fit-browser.test.ts"
-          node --test --test-reporter=tap $files | tee "$RUNNER_TEMP/browser.tap"
-          count() { grep -E "^# $1 " "$RUNNER_TEMP/browser.tap" | awk '{print $3}'; }
+            app/test/session/plan-ask-browser.test.ts app/test/polish/phone-fit-browser.test.ts app/test/foundation/switch-work-browser.test.ts"
+          alone="app/test/foundation/budget-browser.test.ts"
+          node --test --test-reporter=tap $files | tee "$RUNNER_TEMP/browser.tap" || true
+          node --test --test-reporter=tap $alone | tee -a "$RUNNER_TEMP/browser.tap" || true
+          count() { grep -E "^# $1 " "$RUNNER_TEMP/browser.tap" | awk '{n += $3} END {print n + 0}'; }
           test "$(count skipped)" = 0 || { echo "::error::$(count skipped) browser test(s) skipped"; exit 1; }
           test "$(count pass)" = "$(count tests)" || { echo "::error::$(count pass) of $(count tests) browser tests passed"; exit 1; }
-          test "$(count tests)" -ge "$(echo $files | wc -w)" || { echo "::error::fewer browser tests than listed files"; exit 1; }
+          test "$(count tests)" -ge "$(echo $files $alone | wc -w)" || { echo "::error::fewer browser tests than listed files"; exit 1; }
       - name: Job summary
         # A test prints a line "measure <name> <value>"; the TAP stream carries it as "# measure ...", and it is copied here.
         if: always()
