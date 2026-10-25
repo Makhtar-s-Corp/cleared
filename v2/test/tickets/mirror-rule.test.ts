@@ -41,7 +41,8 @@ test('between two agents the app wins, whatever the times', () => {
   assert.equal(decide({ agreed: 'Todo', local: side('In Review', 'agents', T1), remote: side('Done', 'agents', T2) }), 'push');
 });
 
-test('a remote state the app does not have is no change', () => {
-  assert.equal(decide({ agreed: 'Todo', local: side('In Progress', 'agents', T1), remote: null }), 'push');
+test('a tracker in a state the app does not have (a person may have put it there): only the owner\'s move is written on it', () => {
+  assert.equal(decide({ agreed: 'Todo', local: side('In Progress', 'agents', T1), remote: null }), 'none');
+  assert.equal(decide({ agreed: 'Todo', local: side('In Progress', 'human', T1), remote: null }), 'push');
   assert.equal(decide({ agreed: 'Todo', local: side('Todo', 'agents', T1), remote: null }), 'none');
 });

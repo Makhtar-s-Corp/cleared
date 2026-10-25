@@ -176,6 +176,26 @@ test('between two people, the later move wins', async () => {
   assert.equal(s.tracker.status(issue), 'Todo');
 });
 
+test('a person who put the issue in a state the app does not have is not undone by an agent, only by the owner', async () => {
+  const s = setup();
+  const { ticket, issue } = await linked(s);
+  s.clock.tick();
+  s.tracker.act(issue, null);                         // closed as not planned, Canceled, Backlog
+  s.clock.tick();
+  await s.mirror.pass();
+  s.clock.tick();
+  await s.store.move(ticket.id, 'In Review', AGENTS);
+  s.clock.tick();
+  await s.mirror.pass();
+  assert.equal(s.tracker.status(issue), null);
+  assert.deepEqual(s.tracker.calls.filter((c) => c.startsWith('move')), []);
+  s.clock.tick();
+  await s.store.move(ticket.id, 'Todo', HUMAN);
+  s.clock.tick();
+  await s.mirror.pass();
+  assert.equal(s.tracker.status(issue), 'Todo');
+});
+
 test('a stale read of the mirror\'s own earlier write is not a change on the tracker', async () => {
   const s = setup();
   const { ticket, issue } = await linked(s);
