@@ -39,6 +39,26 @@ Run from `v2/`:
 
 `GET /health` (and `HEAD`) answers `200` with `{"status":"ok"}`. Any other path is `404`; another method on `/health` is `405`; a request target the URL parser refuses (such as `//[`) is `400`.
 
+## The flow
+
+The service runs tickets once it knows its project (`src/flow/config.ts`, `src/workspace/config.ts`). Without `CLEARED_V2_WORKSPACE` or `CLEARED_V2_PROJECT` it still answers `/health`, and the ticket routes answer `503` "the flow is not configured". A setting that is named but wrong stops the service at start.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `CLEARED_V2_PROJECT` | none | The project of a one-service workspace, the `project` value of its rows. It needs the four below. |
+| `CLEARED_V2_PROJECT_DIR` | none | The service's checkout on this server, an absolute path. |
+| `CLEARED_V2_REPO` | none | The GitHub repository, `owner/name`. |
+| `CLEARED_V2_REPO_URL` | none | What a session's checkout clones. |
+| `CLEARED_V2_BASE` | `main` | The base branch. |
+| `CLEARED_V2_WORKSPACE` | none | A workspace of several services: one file in the format of `agents.conf`, an absolute path ([`examples/workspace.conf`](../examples/workspace.conf)). With `CLEARED_V2_PROJECT` set too, the two must name the same id. |
+| `CLEARED_V2_STATE_DIR` | `$XDG_STATE_HOME/cleared-v2`, else `~/.local/state/cleared-v2` | The flow's own state. |
+| `CLEARED_V2_WORKDIRS` | `<state>/work` | The sessions' checkouts, an absolute path. |
+| `CLEARED_V2_AUTHOR_MODEL` | `claude-opus-5-5` | A Quick ticket's author is `claude-haiku-5-5` (see [The fast lane](#the-fast-lane)). |
+| `CLEARED_V2_REVIEWER_MODEL` | `claude-sonnet-5-5` | Always another model than the author's. |
+| `CLEARED_V2_REVIEW_ROUNDS` | `3` | A review that still asks for changes after this many rounds sends the ticket back to Todo with its last report. |
+| `CLEARED_V2_IDLE_MINUTES` | `15` | A session idle this long is stopped. |
+| `CLEARED_V2_QUESTION_TIMEOUT_MINUTES` | `30` | How long a team's question waits for the owner. Then the lead has 10 minutes to decide, then the session's declared answer applies or the ticket is parked. |
+
 ## The app
 
 `v2/app` is the web app: the sign-in page, the shell (project, Tower, Inbox with its count, Sessions, Tickets, Plans, the notifications button, the clock, the theme button, the signed-in person) and the screens. It holds no key and signs nothing. Every request a signed-in person makes to `/api/service/*` goes to the service on loopback as `/api/*`, with the person's id and the app's proof, and with nothing of the browser's cookie or anti-forgery token. Design: [`app/DESIGN.md`](../app/DESIGN.md), with the Geist fonts served by the app itself.
@@ -96,6 +116,10 @@ The bell in the header turns this browser's notifications on or off, and says ho
 - **iPhone and iPad.** Web notifications exist only for the app added to the Home Screen (Share, then Add to Home Screen); the menu says so in Safari. The app serves `manifest.webmanifest`, its icons and the service worker `sw.js` without a session, so it can be installed. The worker shows what is pushed, opens only addresses of the app, and caches nothing.
 - **Routes.** `GET /api/notifications` answers `{ available, reason, publicKey, devices }`, with `reason` one of `off` (no Web Push), `insecure`, `no_subject`, `config` (a setting cannot be read) and `store` (the directory is refused). `POST /api/notifications/subscribe` takes `{ subscription }` as the browser gives it, and `POST /api/notifications/unsubscribe` takes `{ endpoint }`.
 
+### On a phone
+
+The inbox works on a 375-pixel screen (P217, `app/web/screens/inbox/inbox.css`): a session plan's Go and Change, and a release's Approve, Send back and Close, stay above the shell's bar of screens, each reached without scrolling. Under 480 pixels the release's Approve has a row of its own. `app/test/inbox/mobile-browser.test.ts` taps them in Chromium at 375 by 667, in French and in English; the captures are in [`docs/v2/mobile-ui/`](../docs/v2/mobile-ui/). Approve starts the 60-second grace, as on a computer; the merge after it is the lock's.
+
 ## The ledger's MCP server
 
 An agent searches the sessions' history through it (issue 292): the sessions, their events, the review verdicts, the questions and the permission answers that `ledger.db` keeps. To install it, give the agent this line: `claude mcp add cleared-ledger -e CLEARED_STATE_DIR=<folder of ledger.db> -- node <cleared checkout>/v2/src/cli/ledger-mcp.ts`.
@@ -141,6 +165,49 @@ A slash command `@cleared <task>` posted to `POST /hooks/chat` creates a ticket 
 | `CLEARED_V2_PICK_HARNESSES` | `claude-code` | The harnesses a pick may run, each at most once: `claude-code`, `codex` (on `gpt-6-luna` unless `codex=<model>`), `cursor=<model>` (Cursor has no default model). Leave it unset until the owner's real trials of Codex and Cursor (`docs/adapters.md`). A wrong value stops the service at start. |
 
 - **The limits.** The Consumption screen's lanes, as for variants, and the week stop (`CLEARED_V2_WEEK_STOP_PERCENT`, 85 by default), read per harness: a harness at the stop starts no variant.
+
+## The proof receipt
+
+Every pull request Cleared opens starts with a receipt (P210, `src/flow/receipt.ts`, its words in `src/flow/messages/receipt.en.json` and `.fr.json`, in the project's language):
+
+- **Captures.** `before.png` of what the base runs (the origin of the service's `health_url`), `after.png` of the ticket's trial environment, and `flow.webm`, about 20 seconds of the after page scrolled down and back up (`src/flow/proof-capture.ts`). Each page reaches its own address only. Linked through the app when `CLEARED_NOTIFY_LINK_BASE` is set (see [Settings](#settings)), else "kept by Cleared". A capture that was not taken says why: no browser, no `health_url`, no trial environment, or a failure. A ticket of variants takes none.
+- **Tests.** Each review round's run of the declared `[session] test_command`, passed, failed or not run.
+- **Cost.** Tokens and time, as [the ticket's cost](#the-cost-of-a-ticket) counts them. Dollars only when every session reported a figure.
+
+The receipt is built from structured fields only: no command output, no error text, no path of this machine.
+
+## The cost of a ticket
+
+`GET /api/tickets/:id/cost` (P211, `src/consumption/ticket-cost.ts`) reads the ledger and nothing else. The session screen's ticket card of a Done ticket shows it, and the proof receipt says the same figures.
+
+- **Tokens.** The four counts of each finished turn of every session of the ticket: authors, reviewers, variants, handovers.
+- **Time.** The agents' own time, each turn from its start to its end, and the ticket's time, from its first stored event to its last. Both are said as the app says a duration ("1 h 30", "1h 30m").
+- **Dollars.** Only the API-equivalent figure the harness reports (Claude Code's `total_cost_usd`), never an estimate and never euros. Codex and Cursor report none, so a ticket with one of their sessions has no dollar figure.
+- **Not counted.** The lead's turns: they serve several tickets at once, and the ledger gives no share of them to one.
+
+## Ticket templates
+
+The Tower's bar has a Template chip with four ready-made tickets: Bug, Review, CI and Question (P214, `src/tickets/templates.ts`, `app/web/screens/tower/templates.ts`). A template fills an empty or untouched description with its sections and keeps any words already written. Its ticket carries the label `type:<id>` (`type:bug`, `type:review`, `type:ci`, `type:question`); `POST /api/tickets` refuses an unknown one or two of them. The harness pick counts its wins per type from that label. The words are in `app/messages/tower.en.json` and `.fr.json`.
+
+## Code questions and their links
+
+A question to the code, from the Tower's bar or a session's Plan tab, starts a reader on the base branch; its answer is on `/ask/<id>` (`POST /api/asks`, `GET /api/asks/:id`). The reader cites code as `service/path:line` or `service/path:from-to`. The service checks each citation against the commit the reader's folder was exported at, from git's objects, and builds the link itself (P215, `src/reader/citations.ts`): `https://github.com/<repo>/blob/<commit>/<path>#L<from>-L<to>`. An address the reader writes is never taken. A citation that commit does not hold gets no link and is listed under the answer with its reason (`no_file`, `no_line`, `no_repository`, `unchecked`), so an invented one shows. GitHub only; at most 40 citations an answer.
+
+## After a release: the production page
+
+Cleared never deploys. With `[release] production_url` set in a service's `.cleared/agents.conf` ([configuration](../docs/configuration.md#release)), once a release the human approved has landed and its watch ended healthy, the service opens that page in Chromium, takes one screenshot and attaches it to the Done ticket's card, with a comment on the ticket (P218, `src/flow/production.ts`). The page is only read: GET and HEAD of its own origin, nothing else. Without a health check nothing says the deploy is done, so the page is not opened and the card says why. `GET /api/tickets/:id/production` gives each service's last check; the screenshot is the proof route's `production.png`.
+
+## The fast lane
+
+A ticket with the `Quick` label opens on the fast lane, with `claude-haiku-5-5` as its author (B2.2, `src/flow/fast-lane.ts`). After each author session, and again at the head it publishes, v1's written rules judge the real diff against the base, with the `[fast_lane]` settings of the base branch's `agents.conf`. A broken rule sends the ticket back to the full circuit for good, with a comment that names the rule. The release card's "Lane" fact says which lane the ticket is on, and the approval is asked while the checks run; the merge waits for them. What v1 does and what v2 leaves out: [docs/fast-lane.md](../docs/fast-lane.md#in-cleared-v2).
+
+## The prompt cache
+
+A Claude Code session's system prompt keeps only what does not change between sessions; the working directory, auto-memory and the git status go to the first message (P219, `images/session/runner/main.ts`: `excludeDynamicSections`, `snapshot`). The lead's briefing goes from what changes least to what changes most. `node scripts/prompt-cache.ts` (`scripts/prompt-cache.ts`) measures it on a reference fake run with a model of the cache: 20.5 % of the estimated input tokens served before, 36.1 % after, 4.0 % both ways with `--no-system-entry`. No real run has measured it yet: [docs/adapters.md](../docs/adapters.md#the-system-prompt-and-the-prompt-cache-2026-10-25-issue-335-not-verified-by-a-run) lists the checks.
+
+## Skills
+
+A session reads the project's skills: the base branch's `.claude/skills` is mounted read only in the session's Claude configuration folder, and the runner gives Claude Code `settingSources: ['user']`, which reads that folder and not the checkout's own `.claude/` (B5.5b, `images/session/runner/main.ts`). The `claude-code` section of the doctor checks it against a real Claude Code; it has not run yet ([docs/adapters.md](../docs/adapters.md#the-user-setting-source-alone-2026-10-25-b55b-not-verified-by-a-run)).
 
 ## The guard
 

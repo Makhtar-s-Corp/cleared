@@ -145,7 +145,7 @@ test('a service that never becomes ready stops the start and removes what was cr
   const fake = new FakeDocker();
   fake.execAnswer = () => ({ code: 2, stdout: '', stderr: '' });
   // Said in seconds, as the flow's other waits are: the message reaches the ticket's comment.
-  await assert.rejects(startSession(new Docker(fake.runner), runtimeSpec({ readyTimeoutMs: 0 })), /^postgres did not become ready within 0 seconds$/);
+  await assert.rejects(startSession(new Docker(fake.runner), runtimeSpec({ readyTimeoutMs: 0 })), /: postgres did not become ready within 0 seconds$/);
   assert.deepEqual(onlyVolume(fake), [sessionNames(SESSION).volume]);
 });
 
