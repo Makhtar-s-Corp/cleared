@@ -7,7 +7,8 @@
 // field's right edge; the inbox's buttons are a computer's (36 px at most),
 // and a phone's still 44; Consumption's levers are sections of their panel,
 // not cards in a card, and their choices are options with a mark, the one
-// picked in the text's colour, not filled in ink.
+// picked in the text's colour, not filled in ink; a lever of one button is an
+// action and has no mark.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/redesign/redesign-browser.test.ts
 import test from 'node:test';
@@ -117,21 +118,23 @@ test('the inbox on a phone: the detail\'s buttons stay 44 px tall', { skip }, as
   }, true);
 });
 
-test('Consumption: the levers are not cards in a card; their choices are options with a mark, the picked one in the text\'s colour', { skip }, async () => {
+test('Consumption: the levers are not cards in a card; their choices are options with a mark, the picked one in the text\'s colour, a lone action none', { skip }, async () => {
   await signedIn(1440, async (page, base) => {
     await page.goto(`${base}/consumption`);
     await page.locator('.lever .choice').first().waitFor();
     const levers = await page.locator('.lever').evaluateAll((items: any[]) => items.map((l) => { const s = getComputedStyle(l); return `${s.boxShadow}|${s.backgroundColor}`; }));
     for (const lever of levers) assert.equal(lever, 'none|rgba(0, 0, 0, 0)', 'a lever has no frame or fill of its own');
-    const choices = await page.locator('.lever .choice').evaluateAll((items: any[]) => items.map((c) => ({
+    const choices: { mark: string; pressed: boolean; alone: boolean; colour: string; text: string }[] = await page.locator('.lever .choice').evaluateAll((items: any[]) => items.map((c) => ({
       mark: getComputedStyle(c, '::before').content,
       pressed: c.getAttribute('aria-pressed') === 'true' || c.dataset.state === 'on',
+      alone: c.parentElement.children.length === 1,
       colour: getComputedStyle(c).color,
       text: getComputedStyle(document.body).color,
     })));
     assert.ok(choices.some((c) => c.pressed), 'a choice is picked');
     for (const choice of choices) {
-      assert.notEqual(choice.mark, 'none', 'each choice has its mark');
+      if (choice.alone) assert.equal(choice.mark, 'none', 'a lone action has no mark');
+      else assert.notEqual(choice.mark, 'none', 'each choice among options has its mark');
       if (choice.pressed) assert.equal(choice.colour, choice.text, 'the picked choice keeps the text\'s colour');
     }
   });
