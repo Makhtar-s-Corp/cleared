@@ -132,10 +132,10 @@ test('the levers offer the models the owner may choose, never the reviewers\', a
   assert.deepEqual(model!.choices.map((c) => [c.label, c.pressed, c.change]), [
     ['Opus 5.5', false, { model: 'claude-opus-5-5' }], ['Haiku 5.5', false, { model: 'claude-haiku-5-5' }], ['Default', true, { model: null }],
   ]);
-  assert.equal(model!.state, 'Configured model: Opus 5.5');
+  assert.equal(model!.state, 'Default model: Opus 5.5');
   assert.match(model!.detail, /Reviewers stay on Sonnet 5\.5\./);
   assert.deepEqual(lanes!.choices.map((c) => [c.label, c.change]), [['1', { maxLanes: 1 }], ['2', { maxLanes: 2 }], ['3', { maxLanes: 3 }], ['No limit', { maxLanes: null }]]);
-  assert.equal(lanes!.state, 'As each plan says');
+  assert.equal(lanes!.state, 'Set by each plan');
   assert.deepEqual(pause!.choices.map((c) => [c.label, c.change]), [['Pause', { paused: true }]]);
   const on = leverViews({ model: { ...read().levers.model, choice: 'claude-haiku-5-5', current: 'claude-haiku-5-5' }, maxLanes: { choice: 1, options: [1, 2, 3] }, paused: true }, fr);
   assert.equal(on[0]!.state, 'Les nouveaux départs utilisent Haiku 5.5');

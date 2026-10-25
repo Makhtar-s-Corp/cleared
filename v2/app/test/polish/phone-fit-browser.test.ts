@@ -19,6 +19,8 @@ declare const document: any;
 declare const getComputedStyle: any;
 
 const WIDTHS = [375, 390] as const;
+// The page's own fonts, loaded: a width measured in the fallback font says nothing.
+const fontsReady = (page: any) => page.evaluate(() => document.fonts.ready.then(() => undefined));
 
 async function onPhone(language: 'en' | 'fr', width: number, run: (page: any, base: string) => Promise<void>): Promise<void> {
   const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW }), extra: { language } });
@@ -51,6 +53,7 @@ for (const language of ['en', 'fr'] as const) {
       await onPhone(language, width, async (page, base) => {
         await page.goto(`${base}/consumption`);
         await page.locator('[data-wins="shown"]').waitFor();
+        await fontsReady(page);
         const wrapped = await page.locator('.wins-table th').evaluateAll((cells: any[]) => cells.flatMap((cell) => {
           const range = document.createRange();
           range.selectNodeContents(cell);
@@ -59,7 +62,14 @@ for (const language of ['en', 'fr'] as const) {
         }));
         assert.deepEqual(wrapped, [], 'no header on two lines');
         // Nor is the table wider than its panel: no column hidden behind a scroll (the art director's pass).
-        const box = await page.locator('.wins-scroll').evaluate((scroll: any) => ({ needs: scroll.scrollWidth, room: scroll.clientWidth }));
+        // The table's own width at its narrowest (min-content), not the 100 % it stretches to.
+        const box = await page.locator('.wins-scroll').evaluate((scroll: any) => {
+          const table = scroll.querySelector('table');
+          table.style.width = 'min-content';
+          const needs = Math.ceil(table.getBoundingClientRect().width);
+          table.style.width = '';
+          return { needs, room: scroll.clientWidth };
+        });
         assert.ok(box.needs <= box.room, `the table needs ${box.needs} px, its panel has ${box.room}`);
       });
     });
@@ -67,6 +77,7 @@ for (const language of ['en', 'fr'] as const) {
     test(`${language} at ${width}: a picked template's placeholder is said whole in the title's field`, { skip }, async () => {
       await onPhone(language, width, async (page) => {
         await page.locator('[data-bar="template"]').click();
+        await fontsReady(page);
         for (const id of ['bug', 'review', 'ci', 'question']) {
           await page.locator(`[data-template="${id}"]`).click();
           const fit = await page.locator('#ask-input').evaluate((input: any) => {
