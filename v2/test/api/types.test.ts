@@ -182,7 +182,7 @@ test('the shapes of waves 9 to 11 (lane 17) type check with real values', () => 
   const items: NextInboxItem[] = [plan, contract, knowledge];
   const ask: Ask = {
     id: 'ask-1', question: 'Where is an entry refused?', service: 'guestbook', target: { service: 'guestbook', path: 'src/page.ts', line: 12 }, session: 's9', state: 'answered',
-    turns: [{ question: 'Where is an entry refused?', answer: 'In src/page.ts, line 14.', at: base.since, costUsd: 0.05, inputTokens: 2000, outputTokens: 120 }],
+    turns: [{ question: 'Where is an entry refused?', answer: 'In guestbook/src/page.ts:14.', at: base.since, costUsd: 0.05, inputTokens: 2000, outputTokens: 120, citations: [{ text: 'guestbook/src/page.ts:14', service: 'guestbook', path: 'src/page.ts', from: 14, to: 14, commit: 'c'.repeat(40), url: `https://github.com/example-org/guestbook/blob/${'c'.repeat(40)}/src/page.ts#L14`, problem: null }] }],
     costUsd: 0.05, inputTokens: 2000, outputTokens: 120, weekPercent: null, createdAt: base.since, by: 'u1',
   };
   const recipe: Recipe = { name: 'bump-dependency', service: 'guestbook', kind: 'ticket', parameters: [{ name: 'package', description: 'The package to bump', required: true }], lane: 'fast', size: 's', services: ['guestbook'], body: 'Bump {{package}} to its latest version.' };

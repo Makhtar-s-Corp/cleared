@@ -25,7 +25,8 @@ const ENV = {
 function effects(released: { id: string; session: string | null }[] = []): ReaderEffects {
   return {
     fileAt: async () => 'x\n',
-    prepare: async (input) => `/state/work/asks/${input.id}`,
+    prepare: async (input) => ({ dir: `/state/work/asks/${input.id}`, commits: Object.fromEntries(input.services.map((name) => [name, 'c'.repeat(40)])) }),
+    linesAt: async () => 1,
     release: async (input) => { released.push(input); },
   };
 }
@@ -72,7 +73,7 @@ test('the reader is built once, from the flow\'s configuration and the registry\
   engine = { config };
   assert.equal(runtime.reader(registry), undefined, 'no adapter');
   const inputs: StartInput[] = [];
-  const fake = createFakeAdapter({ log: store.events, script: turn('t1', 'An answer.', 0.01) });
+  const fake = createFakeAdapter({ log: store.events, script: turn('t1', 'In guestbook/src/health.ts:1.', 0.01) });
   const withAdapter: Registry = { ...registry, sessionAdapters: { 'claude-code': { ...fake, start: (input) => { inputs.push(input); return fake.start(input); } } } };
   const reader = runtime.reader(withAdapter);
   assert.ok(reader);
@@ -82,6 +83,8 @@ test('the reader is built once, from the flow\'s configuration and the registry\
   assert.equal(reader.get(ask.id)?.state, 'answered');
   assert.equal(inputs[0]?.model, 'claude-haiku-5-5');
   assert.equal(inputs[0]?.project, 'guestbook');
+  assert.equal(reader.get(ask.id)?.turns[0]?.citations[0]?.url, `https://github.com/example-org/cleared-example-guestbook/blob/${'c'.repeat(40)}/src/health.ts#L1`,
+    'the link is on the service\'s repository, as the flow\'s configuration names it');
   reader.close();
 });
 
