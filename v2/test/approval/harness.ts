@@ -1,5 +1,5 @@
-// A lock to run the real v1 scripts against: merge-pr.sh, ask-validation.sh,
-// tracker.sh and the release broker, on a temporary state directory, a
+// A lock to run the real v1 scripts against: merge-pr.ts, ask-validation.ts,
+// tracker.ts and the release broker, on a temporary state directory, a
 // temporary repository with a bare origin, and a fake gh and docker first on
 // the PATH. Nothing here reaches GitHub, Docker or the machine's own state.
 import { execFileSync, spawnSync, type SpawnSyncReturns } from 'node:child_process';
@@ -155,7 +155,7 @@ export function lockBox(options: { socket?: boolean } = {}) {
   };
   const run = (script: string, args: string[], extra: NodeJS.ProcessEnv = {}, input?: string): SpawnSyncReturns<string> =>
     spawnSync(join(CLEARED_HOME, script), args, { env: { ...env, ...extra }, encoding: 'utf8', ...(input === undefined ? {} : { input }) });
-  const tracker = (...args: string[]) => run('tracker.sh', args);
+  const tracker = (...args: string[]) => run('tracker.ts', args);
   const merged = () => { try { return readFileSync(join(fake, 'pr-merged'), 'utf8').trim().split('\n'); } catch { return null; } };
   return { dir, state, repo, env, keys, keyFile, confFile, secret, socket, fake, git, head, publish, commit, run, tracker, merged };
 }

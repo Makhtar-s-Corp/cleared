@@ -1,4 +1,4 @@
-// What ask-validation.sh keeps of a request for agreement
+// What ask-validation.ts keeps of a request for agreement
 // (<state>/validations/<ticket>.json): the time of the request and the head
 // of each pull request shown. The human's approval is to these versions and
 // to nothing else (lib/validation-record.mjs reads the same file).
@@ -15,7 +15,7 @@ const HEAD = /^[0-9a-f]{40}$/;
 export const byPr = (a: Version, b: Version) => a.pr - b.pr;
 
 // As lib/validation-record.mjs approvalOf: nothing is returned for a file
-// that is not exactly what ask-validation.sh writes.
+// that is not exactly what ask-validation.ts writes.
 export function readApprovalRecord(stateDir: string, ticket: string): ApprovalRecord | undefined {
   if (!TICKET.test(ticket)) return undefined;
   try {

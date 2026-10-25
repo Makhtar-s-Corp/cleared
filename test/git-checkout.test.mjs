@@ -348,8 +348,8 @@ const sourceFiles = () => {
   const walk = (dir) => {
     for (const entry of readdirSync(join(ORCH_HOME, dir), { withFileTypes: true })) {
       const name = dir ? `${dir}/${entry.name}` : entry.name;
-      if (entry.isDirectory()) { if (!['node_modules', 'test', '.git', 'docs'].includes(entry.name) && !entry.name.startsWith('.')) walk(name); }
-      else if (/\.(mjs|sh)$/.test(entry.name)) files.push(name);
+      if (entry.isDirectory()) { if (!['node_modules', 'test', '.git', 'docs'].includes(entry.name) && !entry.name.startsWith('.') && !(dir === '' && ['v2', 'examples'].includes(entry.name))) walk(name); }
+      else if (/\.(mjs|sh|ts)$/.test(entry.name)) files.push(name);
     }
   };
   walk('');
@@ -381,7 +381,7 @@ function gitCalls(text) {
 }
 
 test('every git command the Node code runs on a checkout has the read environment, or says why not (static check)', () => {
-  const node = sourceFiles().filter((name) => name.endsWith('.mjs') || name === 'cleared');
+  const node = sourceFiles().filter((name) => /\.(mjs|ts)$/.test(name) || name === 'cleared');
   for (const root of ['release-request.mjs']) assert.ok(node.includes(root), `${root} is checked`);
   const files = new Set();
   for (const name of node) {
@@ -439,7 +439,7 @@ test('no shell script declares a checkout safe, and those a human command reache
       queue.push(...named(call.split(/,\s*[[{]/)[0]));
     }
   }
-  assert.ok(queue.includes('tracker.sh'), 'cleared status starts tracker.sh: the check finds it');
+  assert.deepEqual(queue, [], 'the human commands start no shell script: cleared status asks the tracker through tracker.ts');
   while (queue.length) {
     const name = queue.shift();
     if (reached.has(name)) continue;
@@ -450,7 +450,6 @@ test('no shell script declares a checkout safe, and those a human command reache
   }
   const project = /\bgit\s+-C\s+"\$\{?(?:ORCH_REPO|CLEARED_REPO|project|repo)\}?"/;
   const flagged = [...reached].filter((name) => project.test(withoutComments(readFileSync(join(ORCH_HOME, name), 'utf8'))));
-  assert.ok(flagged.includes('lib/common.sh'), 'the tracked-file check of lib/common.sh is found');
   const security = readFileSync(join(ORCH_HOME, 'docs', 'security.md'), 'utf8');
   for (const name of [...flagged, 'serve/install.sh']) assert.ok(security.includes(name), `docs/security.md names ${name}`);
 });

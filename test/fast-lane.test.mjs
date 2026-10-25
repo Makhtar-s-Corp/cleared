@@ -691,7 +691,7 @@ test('[Linear adapter] label trust: each tracker says who set a label: GitHub by
   assert.deepEqual(github.labelActors('GH-3'), { labels: { Quick: { kind: 'agents', id: 'cleared[bot]' }, Bug: { kind: 'other', id: 'alice' } }, project: { kind: 'human', id: 'alice' } });
 
   const box = sandbox();
-  copyFileSync(join(import.meta.dirname, '..', 'tracker.sh'), join(box.home, 'tracker.sh'));
+  copyFileSync(join(import.meta.dirname, '..', 'tracker.ts'), join(box.home, 'tracker.ts'));
   writeFileSync(box.env.ORCH_CONF, readFileSync(box.env.ORCH_CONF, 'utf8').replace('adapter = local', 'adapter = linear\nowner_id = alice'));
   const answer = join(box.home, 'linear-answer.json');
   writeFileSync(join(box.home, 'bin', 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\ncat '${answer}'\n`, { mode: 0o755 });
@@ -700,7 +700,7 @@ test('[Linear adapter] label trust: each tracker says who set a label: GitHub by
     writeFileSync(answer, JSON.stringify({ data: { viewer: { id: 'key-owner' }, issue: { createdAt: '2026-01-01T00:00:00Z', creator, botActor: null,
       labels: { nodes: [{ id: 'L1', name: 'Quick' }, { id: 'L2', name: 'Bug' }] }, project: { id: 'P1', name: 'Wording' },
       history: { pageInfo: { hasNextPage: more }, nodes: history } } } }));
-    const run = spawnSync(join(box.home, 'tracker.sh'), ['label-actors', 'X-5'], { env: { ...box.env, LINEAR_API_KEY: 'k' }, encoding: 'utf8' });
+    const run = spawnSync(join(box.home, 'tracker.ts'), ['label-actors', 'X-5'], { env: { ...box.env, LINEAR_API_KEY: 'k' }, encoding: 'utf8' });
     return run.status === 0 ? JSON.parse(run.stdout) : null;
   };
   // The user added it, then an agent removed and added it again: the agent's.

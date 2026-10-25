@@ -1,4 +1,4 @@
-// The review record merge-pr.sh reads (lane 8; the contract is registry.ts
+// The review record merge-pr.ts reads (lane 8; the contract is registry.ts
 // ReviewRecorder). A review is a `runs` row with role review, source
 // dispatcher, outcome done, its pull request and ticket, and a report file
 // <state>/reports/<run id>.md in the format lib/reviews.mjs readReport

@@ -16,7 +16,7 @@
 //      leaves when it refuses or when the project names no list;
 //   3. push the branch to the branch of the same name, never forced;
 //   4. reuse the open pull request of the branch, or open one with gh:
-//      not a draft (merge-pr.sh refuses a draft), its body the session's
+//      not a draft (merge-pr.ts refuses a draft), its body the session's
 //      report as lib/pr-body.mjs cleans it, left out when the guard refuses
 //      it, then the commits; the proof receipt first (P210, flow/receipt.ts),
 //      in the project's language ([owner] language at the base), guarded on

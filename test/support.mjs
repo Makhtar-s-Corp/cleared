@@ -85,11 +85,11 @@ export function sandbox({ policy = 'fallback', maxLanes = 3 } = {}) {
   const home = scratch('orch-home-');
   const state = join(home, 'state');
   const repo = join(home, 'repo');
-  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'host-state.sh'), join(ORCH_HOME, 'merge-pr.sh'), join(ORCH_HOME, 'ask-validation.sh'), home]);
+  execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), join(ORCH_HOME, 'wake.sh'), join(ORCH_HOME, 'merge-pr.ts'), join(ORCH_HOME, 'ask-validation.ts'), join(ORCH_HOME, 'package.json'), home]);
   execFileSync('mkdir', ['-p', repo, join(home, 'lanes')]);
   execFileSync('cp', ['-r', join(ORCH_HOME, 'prompts'), home]);
   // tracker and GitHub as files the test writes: what they "say now".
-  writeFileSync(join(home, 'tracker.sh'), `#!/usr/bin/env bash
+  writeFileSync(join(home, 'tracker.ts'), `#!/usr/bin/env bash
 if [ "$1" = ticket-prefix ]; then echo X; exit; fi
 if [ "$1" = legacy-line-allowed ]; then exit 0; fi
 if [ "$1" = changes ]; then cat "${join(home, 'tracker-now.json')}"; exit; fi
@@ -194,15 +194,15 @@ export function reviewedPull(files, { answer = 'Verdict : rien de bloquant.', pr
   writeFileSync(confPath, `${readFileSync(confPath, 'utf8').replace('base = main', 'base = origin/main')}[merge]\ntooling_paths = ${table.tooling_paths}\nguarded_paths = ${table.guarded_paths}\ncode_paths = server/, frontend/, shared/\nverdict = rien de bloquant\nlines_until = 2026-01-03T00:00:00Z\nqueue_hours = 24\n`);
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[tracker]\nadapter = local\nteam = X\n', '[tracker]\nadapter = local\nteam = X\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n'));
   publish();
-  // The passing review of this version, where merge-pr.sh reads it: a runs row of the ledger and its report, as the
+  // The passing review of this version, where merge-pr.ts reads it: a runs row of the ledger and its report, as the
   // v2 service records it (v2/src/approval/review.ts).
   recordReview(box, { ticket, pr: 7, commit: headOf(), answer });
-  const merge = (args = [], extra = {}, input = undefined) => spawnSync(join(box.home, 'merge-pr.sh'), ['7', ticket, ...args], { env: { ...env, ...extra }, encoding: 'utf8', input });
+  const merge = (args = [], extra = {}, input = undefined) => spawnSync(join(box.home, 'merge-pr.ts'), ['7', ticket, ...args], { env: { ...env, ...extra }, encoding: 'utf8', input });
   const merged = () => { try { return readFileSync(join(box.home, 'pr-merged'), 'utf8').trim().split('\n'); } catch { return null; } };
   const moves = () => { try { return readFileSync(join(box.home, 'tracker-moves'), 'utf8').trim().split('\n'); } catch { return []; } };
   const ledgerKinds = () => { const db = openLedger(join(box.state, 'ledger.db')); const rows = db.prepare("select kind from events where kind in ('merged_by_script', 'merge_refused') order by rowid").all().map((row) => row.kind); db.close(); return rows; };
   const hisLine = (body, over = {}) => writeFileSync(join(box.home, 'tracker-comments.json'), JSON.stringify([{ id: 'u1', body, byOwner: true, createdAt: '2026-01-02T10:00:00Z', editedAt: null, ...over }]));
-  const ask = (input = '**Ce qui change.** Je la mets en ligne ?', extra = {}) => spawnSync(join(box.home, 'ask-validation.sh'), [ticket, '-', '--pr', '7'], { env: { ...env, ...extra }, encoding: 'utf8', input });
+  const ask = (input = '**Ce qui change.** Je la mets en ligne ?', extra = {}) => spawnSync(join(box.home, 'ask-validation.ts'), [ticket, '-', '--pr', '7'], { env: { ...env, ...extra }, encoding: 'utf8', input });
   return { lane, box, env, headOf, publish, merge, merged, moves, ledgerKinds, hisLine, ask, git: laneGit };
 }
 

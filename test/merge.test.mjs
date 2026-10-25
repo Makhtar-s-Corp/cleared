@@ -44,7 +44,7 @@ test('a go-live reads which agreement a change needs, the lines the user wrote b
   // the orchestration, its settings and its tests. So all of it needs the user's own agreement, like the checks of the
   // CI, the deployment and his written rules; only what is read by people, never by a script, ships by itself.
   const everyFile = execFileSync('git', ['-C', ORCH_HOME, 'ls-files', '--', '.'], { encoding: 'utf8' }).trim().split('\n').map((file) => `ops/cleared/${file}`);
-  assert.ok(everyFile.includes('ops/cleared/merge-pr.sh') && everyFile.includes('ops/cleared/lib/merge.mjs') && everyFile.includes('ops/cleared/prompts/review.md'));
+  assert.ok(everyFile.includes('ops/cleared/merge-pr.ts') && everyFile.includes('ops/cleared/lib/merge.mjs') && everyFile.includes('ops/cleared/prompts/review.md'));
   const manuals = ['ops/cleared/README.md', 'ops/cleared/GUIDE.md'];
   for (const file of everyFile) assert.equal(agreementNeeded([file], merge), manuals.includes(file) ? 'tooling' : 'guarded', file);
   // The record of the decisions is read by the agents as their rules (the prompts of the reviewer, of the lead and of
@@ -172,7 +172,7 @@ test('what the user of the app sees goes live only on his own move of the ticket
   // Not in his status, no line of his: asked for, not done.
   const none = live();
   assert.equal(none.status, 6);
-  assert.match(none.stderr, /the user has not agreed[\s\S]*ask-validation\.sh X-5 - --pr 7/);
+  assert.match(none.stderr, /the user has not agreed[\s\S]*ask-validation\.ts X-5 - --pr 7/);
   assert.equal(pull.merged(), null);
   // In his status by his own hand, but nobody showed him this pull request: his move is for something else.
   writeFileSync(join(pull.box.home, 'tracker-moved'), '0');
@@ -423,7 +423,7 @@ test('only the version a reviewer read goes live: a commit of the lane on top of
   assert.match(unread.stderr, /has no review for X-5 that concludes « rien de bloquant »: have it reviewed$/m);
   assert.equal(pull.merged(), null);
   // And a review for another ticket is not a review for this one.
-  assert.match(spawnSync(join(pull.box.home, 'merge-pr.sh'), ['7', 'X-6', '--dry-run'], { env: pull.env, encoding: 'utf8' }).stderr, /has no review for X-6/);
+  assert.match(spawnSync(join(pull.box.home, 'merge-pr.ts'), ['7', 'X-6', '--dry-run'], { env: pull.env, encoding: 'utf8' }).stderr, /has no review for X-6/);
   const corrected = reviewedPull(['ops/cleared/wake.sh'], { answer: 'Verdict : à corriger avant fusion.' });
   assert.match(corrected.merge().stderr, /has no review for X-5 that concludes « rien de bloquant »/);
 });
@@ -452,11 +452,11 @@ test('a go-live that only waits is kept and done by the wake, with every check a
   assert.equal(pull.merge().status, 3);
   // One go-live at a time: while another holds the lock, this one waits, whatever the host says.
   pull.publish();
-  const held = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(pull.box.state, 'merge.lock'), join(pull.box.home, 'merge-pr.sh'), '7', 'X-5'], { env: pull.env, encoding: 'utf8' });
+  const held = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(pull.box.state, 'merge.lock'), join(pull.box.home, 'merge-pr.ts'), '7', 'X-5'], { env: pull.env, encoding: 'utf8' });
   assert.equal(held.status, 3, held.stderr);
   assert.match(held.stdout, /another go-live is being done/);
   // A dry run merges nothing: it neither waits for the lock nor takes it from a real go-live.
-  const tried = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(pull.box.state, 'merge.lock'), join(pull.box.home, 'merge-pr.sh'), '7', 'X-5', '--dry-run'], { env: pull.env, encoding: 'utf8' });
+  const tried = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(pull.box.state, 'merge.lock'), join(pull.box.home, 'merge-pr.ts'), '7', 'X-5', '--dry-run'], { env: pull.env, encoding: 'utf8' });
   assert.equal(tried.status, 0, tried.stderr);
   assert.equal(JSON.parse(tried.stdout).would_merge, 7);
   assert.equal(pull.merged(), null);
@@ -546,7 +546,7 @@ esac
   const repoRoot = fixtureProject();
   const secrets = join(dir, 'secrets');
   const base = { PATH: `${dir}:${process.env.PATH}`, HOME: process.env.HOME, ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state'), ORCH_SECRETS_FILE: secrets };
-  const linear = (env, ...args) => spawnSync(join(ORCH_HOME, 'tracker.sh'), args, { encoding: 'utf8', env: { ...base, ...env } });
+  const linear = (env, ...args) => spawnSync(join(ORCH_HOME, 'tracker.ts'), args, { encoding: 'utf8', env: { ...base, ...env } });
   const lines = (name) => { try { return readFileSync(join(dir, name), 'utf8').trim().split('\n'); } catch { return []; } };
   // The application's identifier and secret, in the file of secrets: a token is asked for, and used.
   writeFileSync(secrets, 'OTHER=1\nLINEAR_API_KEY=personal-key\nLINEAR_APP_CLIENT_ID="the-id"\nLINEAR_APP_CLIENT_SECRET=the-secret\n');
@@ -618,7 +618,7 @@ test('[Linear adapter] a script never puts a ticket in the status that is the us
   // First with the key of a person and nobody named in the settings: the user is the owner of that key.
   const keyConf = join(dir, 'agents-key.conf');
   writeFileSync(keyConf, readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace(/^owner_id = .*\n/m, ''));
-  const linear = (...args) => spawnSync(join(ORCH_HOME, 'tracker.sh'), args, { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: keyConf } });
+  const linear = (...args) => spawnSync(join(ORCH_HOME, 'tracker.ts'), args, { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: keyConf } });
   answer({});
   const refused = linear('move', 'X-1', 'Go MEP');
   assert.equal(refused.status, 1);
@@ -645,7 +645,7 @@ test('[Linear adapter] a script never puts a ticket in the status that is the us
     answer({ viewer: { id: 'app-user', app: true }, issue: { state: { name: 'Go MEP' }, history: { nodes: moves } } });
     const confPath = join(dir, 'agents.conf');
     writeFileSync(confPath, readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace(/^owner_id\s*=.*$/m, 'owner_id = the-user'));
-    return spawnSync(join(ORCH_HOME, 'tracker.sh'), ['moved-by-owner', 'X-1', 'Go MEP', ...more], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: confPath } });
+    return spawnSync(join(ORCH_HOME, 'tracker.ts'), ['moved-by-owner', 'X-1', 'Go MEP', ...more], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: confPath } });
   };
   const by = (actorId, app, at, updatedAt = at) => ({ createdAt: at, updatedAt, actorId, actor: { id: actorId, app }, botActor: null, toState: { name: 'Go MEP' } });
   assert.match(readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8'), /^owner_id =\s*$/m);
@@ -708,14 +708,14 @@ test('the user is asked for his agreement once for a version, on the ticket, wit
   writeFileSync(confPath, readFileSync(confPath, 'utf8').replace('[tracker]\nadapter = local\nteam = X\n', '[tracker]\nadapter = local\nteam = X\nvalidate_state = À valider\ngo_state = Go MEP\ndone_state = Done\n'));
   const pull = (head, over = {}) => writeFileSync(join(box.home, 'pr-view.json'), JSON.stringify({ number: 7, state: 'OPEN', headRefOid: head, ...over }));
   pull('1111111111111111111111111111111111111111');
-  const ask = (args, input) => spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', ...args], { env: box.env, encoding: 'utf8', input });
+  const ask = (args, input) => spawnSync(join(box.home, 'ask-validation.ts'), ['X-5', '-', ...args], { env: box.env, encoding: 'utf8', input });
   const posted = () => { try { return readFileSync(join(box.home, 'tracker-posted'), 'utf8'); } catch { return null; } };
   const moves = () => { try { return readFileSync(join(box.home, 'tracker-moves'), 'utf8').trim().split('\n'); } catch { return []; } };
   const kept = () => { try { return JSON.parse(readFileSync(join(box.state, 'validations', 'X-5.json'), 'utf8')).pulls; } catch { return null; } };
   // Asked for nothing in particular: he would agree to whatever comes after.
   const vague = ask([], '**La fiche montre les mois d’avant.** Je la mets en ligne ?');
   assert.equal(vague.status, 1);
-  assert.match(vague.stderr, /usage: ask-validation\.sh/);
+  assert.match(vague.stderr, /usage: ask-validation\.ts/);
   // A capture that is not one: nothing is asked without it.
   const bad = ask(['--pr', '7', '--capture', '/somewhere/notes.txt', 'Après'], '**La fiche montre les mois d’avant.** Je la mets en ligne ?');
   assert.equal(bad.status, 1);
@@ -737,7 +737,7 @@ test('the user is asked for his agreement once for a version, on the ticket, wit
   const comments = () => { try { return readFileSync(join(box.home, 'tracker-posted-log'), 'utf8').trim().split('\n').length; } catch { return 0; } };
   pull('3333333333333333333333333333333333333333');
   const before = comments();
-  const stuck = spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', '--pr', '7'], { env: { ...box.env, FAKE_TRACKER_MOVE_DOWN: '1' }, encoding: 'utf8', input: 'La fiche a changé. Je la mets en ligne ?' });
+  const stuck = spawnSync(join(box.home, 'ask-validation.ts'), ['X-5', '-', '--pr', '7'], { env: { ...box.env, FAKE_TRACKER_MOVE_DOWN: '1' }, encoding: 'utf8', input: 'La fiche a changé. Je la mets en ligne ?' });
   assert.equal(stuck.status, 1);
   assert.match(stuck.stderr, /the card could not be moved[\s\S]*Ask again with the same request/);
   assert.equal(comments(), before + 1);
@@ -770,7 +770,7 @@ test('the user is asked for his agreement once for a version, on the ticket, wit
   assert.deepEqual(kept(), [{ pr: 7, head: '4444444444444444444444444444444444444444' }]);
   // A request left unfinished long ago is not taken for the one made now: he is written again.
   pull('5555555555555555555555555555555555555555');
-  const stale = spawnSync(join(box.home, 'ask-validation.sh'), ['X-5', '-', '--pr', '7'], { env: { ...box.env, FAKE_TRACKER_MOVE_DOWN: '1' }, encoding: 'utf8', input: 'Une version de plus. Je la mets en ligne ?' });
+  const stale = spawnSync(join(box.home, 'ask-validation.ts'), ['X-5', '-', '--pr', '7'], { env: { ...box.env, FAKE_TRACKER_MOVE_DOWN: '1' }, encoding: 'utf8', input: 'Une version de plus. Je la mets en ligne ?' });
   assert.equal(stale.status, 1);
   const pendingPath = join(box.state, 'validations', 'X-5.pending');
   writeFileSync(pendingPath, JSON.stringify({ ...JSON.parse(readFileSync(pendingPath, 'utf8')), at: '2020-01-01T00:00:00Z' }));
@@ -803,7 +803,7 @@ test('the user is asked for his agreement once for a version, on the ticket, wit
   assert.equal(second.status, 0, second.stderr);
   assert.equal(JSON.parse(readFileSync(recordPath, 'utf8')).closing, true);
   // And a request does not write the record while a go-live holds it.
-  const waited = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(box.state, 'merge.lock'), join(box.home, 'ask-validation.sh'), 'X-5', '-', '--pr', '9'], { env: { ...box.env, ORCH_LOCK_WAIT: '1' }, encoding: 'utf8', input: 'Une troisième ?' });
+  const waited = spawnSync('bash', ['-c', 'exec 9> "$1"; flock 9; shift; "$@"; code=$?; exit "$code"', '_', join(box.state, 'merge.lock'), join(box.home, 'ask-validation.ts'), 'X-5', '-', '--pr', '9'], { env: { ...box.env, ORCH_LOCK_WAIT: '1' }, encoding: 'utf8', input: 'Une troisième ?' });
   assert.equal(waited.status, 1);
   assert.match(waited.stderr, /a go-live is being done/);
   assert.match(posted(), /\(Version shown: PR 8 at 88888888\.\)/);

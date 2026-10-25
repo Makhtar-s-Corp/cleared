@@ -142,7 +142,7 @@ test('the gh stand-in keeps each repository apart: one branch name on two servic
   assert.deepEqual(forge.prs.map((pr) => [pr.number, pr.repo]), [[101, 'rehearsal/filter-api'], [102, 'rehearsal/guestbook']]);
 });
 
-test('the lock stand-in keeps the request for agreement as ask-validation.sh does, so the approval finds it', () => {
+test('the lock stand-in keeps the request for agreement as ask-validation.ts does, so the approval finds it', () => {
   const state = mkdtempSync(join(tmpdir(), 'cleared-rehearsal-state-'));
   const head = 'a'.repeat(40);
   writeValidation(state, { ticket: 'LOCAL-1', prs: [101] }, () => head, '2026-10-22T21:20:00.000Z');

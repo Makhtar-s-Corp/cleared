@@ -92,7 +92,7 @@ if [ -z "$last" ] || ! since=$(date -u -d "$last - 12 minutes" +%Y-%m-%dT%H:%M:%
   [ ! -f "$state" ] || echo "$(basename "$0"): $state cannot be read: starting over as a first wake" >&2
 fi
 # A source that does not answer: this wake sees nothing and moves nothing.
-"$ORCH_HOME/tracker.sh" changes "$since" > "$work/tracker.json" || die "tracker did not answer: nothing read, nothing moved"
+"$ORCH_HOME/tracker.ts" changes "$since" > "$work/tracker.json" || die "tracker did not answer: nothing read, nothing moved"
 if [ -n "$github_out" ]; then
   echo '[]' > "$work/pulls.json"
 else

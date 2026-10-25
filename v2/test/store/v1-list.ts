@@ -1,6 +1,6 @@
 // Lists the tickets of a ledger.db the way v1 does, with
 // lib/tracker/adapters/local.mjs, so a test proves the migrated file is still
-// the one tracker.sh and merge-pr.sh read.
+// the one tracker.ts and merge-pr.ts read.
 //   node v1-list.ts <ledger.db>
 import { pathToFileURL } from 'node:url';
 import { join } from 'node:path';

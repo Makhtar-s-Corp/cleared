@@ -1,6 +1,6 @@
 // The tickets module (lane 8, approval and lock): the TicketStore on the local
 // tracker's tables in ledger.db, so ids, states and signatures are the ones
-// tracker.sh and merge-pr.sh read. The ticket routes of the API are lane 7's.
+// tracker.ts and merge-pr.ts read. The ticket routes of the API are lane 7's.
 // Milestone 2 (lane 14, decision 18): the workspace and its services, as
 // tables of this module beside the tracker's, their rows written at the
 // start from the configuration, and GET /api/workspace.

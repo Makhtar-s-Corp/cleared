@@ -231,7 +231,7 @@ export function tool(file: string, args: readonly string[], options: { readonly 
   return run;
 }
 
-// The tracker's entry point (tracker.ts), as the bash scripts ran tracker.sh:
+// The tracker's entry point (tracker.ts), as the bash scripts ran tracker.ts:
 // the file of the tool's folder, so that a test may put its own there.
 export function tracker(args: readonly string[], options: { readonly input?: string; readonly quiet?: boolean } = {}): Run {
   projectEnv();

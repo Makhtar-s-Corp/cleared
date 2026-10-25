@@ -389,9 +389,9 @@ close_tickets_left_open() {
       read -r open unknown <<<"$(shown_left "$record")"
       [ "$open" = 0 ] && [ "$unknown" = 0 ] || continue
       code=0
-      "$ORCH_HOME/tracker.sh" moved-by-owner "$ticket" "$go" || code=$?
+      "$ORCH_HOME/tracker.ts" moved-by-owner "$ticket" "$go" || code=$?
       case "$code" in
-        0) "$ORCH_HOME/tracker.sh" move "$ticket" "$(conf_get tracker done_state)" > /dev/null || continue ;;
+        0) "$ORCH_HOME/tracker.ts" move "$ticket" "$(conf_get tracker done_state)" > /dev/null || continue ;;
         5 | 6) ledger event --kind ticket_left_open --ticket "$ticket" --detail "everything shown on $ticket is live or closed, but the ticket is no longer in « $go » by the user's own hand (he moved it, or someone else did): the wake leaves it as it is and closes nothing. Tell the user where the ticket stands" ;;
         *) continue ;;
       esac
@@ -544,7 +544,7 @@ flush_outbox() {
     done
   } > "$grouped"
   code=0
-  "$ORCH_HOME/tracker.sh" comment "$(conf_get lead report_on)" "$grouped" "$(user_message grouped_sender)" > /dev/null || code=$?
+  "$ORCH_HOME/tracker.ts" comment "$(conf_get lead report_on)" "$grouped" "$(user_message grouped_sender)" > /dev/null || code=$?
   rm -f "$grouped"
   # Not sent: back where they were, for the next wake.
   [ "$code" = 0 ] || mv "$sending"/*.md "$box"/
@@ -628,7 +628,7 @@ open_queued_merges() {
     code=0
     if [ -n "${ORCH_BROKER_SECRET:-}" ]; then
       # Test fixtures execute the old merge checks with a fixture-only key.
-      why=$(ORCH_FROM_QUEUE=1 "$ORCH_HOME/merge-pr.sh" "$pr" "$ticket" ${said:+"$said"} 2>&1 > /dev/null) || code=$?
+      why=$(ORCH_FROM_QUEUE=1 "$ORCH_HOME/merge-pr.ts" "$pr" "$ticket" ${said:+"$said"} 2>&1 > /dev/null) || code=$?
     elif [ -n "$said" ] && [ ! -r "$said" ]; then
       code=69 why="queued announcement cannot be read: $said"
     else

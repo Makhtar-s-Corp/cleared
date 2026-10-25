@@ -102,7 +102,7 @@ test('the approval is asked while the checks run: the owner\'s Go is taken then,
   const { t, ticket } = await quick({
     effects: {
       async prChecks() { return checks; },
-      // As merge-pr.sh: a pull request whose checks still run is kept in the queue.
+      // As merge-pr.ts: a pull request whose checks still run is kept in the queue.
       async mergeRelease() { const outcome = checks === 'passed' ? 'merged' : 'queued'; merges.push(outcome); return { outcome, message: outcome === 'queued' ? 'a check still runs' : '' }; },
     },
   });

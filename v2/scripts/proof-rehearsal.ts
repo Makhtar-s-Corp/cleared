@@ -250,7 +250,7 @@ export function brokerRequest(raw: string): BrokerRequest {
   return { op: 'ask', ticket, pr, prs: prs.length > 0 ? prs : [pr] };
 }
 
-// What ask-validation.sh keeps of a request for agreement
+// What ask-validation.ts keeps of a request for agreement
 // (<state>/validations/<ticket>.json, approval/record.ts): the time and the
 // head of each pull request shown. The approval is checked against it. A
 // pull request whose head is unknown keeps nothing, and the approval is refused.

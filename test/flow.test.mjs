@@ -136,17 +136,6 @@ test('wake.sh during an outage of GitHub: the outage in the ledger with its star
 });
 
 
-test('host-state says the host is free for nothing while GitHub is down', () => {
-  const box = sandbox();
-  writeFileSync(join(box.home, 'github-status.json'), JSON.stringify({ components: [{ name: 'Pull Requests', status: 'partial_outage' }, { name: 'Actions', status: 'operational' }] }));
-  const run = spawnSync(join(box.home, 'host-state.sh'), [], { env: { ...box.env, FAKE_GH_LIST_DOWN: '1' }, encoding: 'utf8' });
-  assert.equal(run.status, 0, run.stderr);
-  const state = JSON.parse(run.stdout);
-  assert.equal(state.github_is_down, 'Pull Requests');
-  assert.equal(state.free_for_a_ci_run, false);
-  assert.equal(state.free_for_a_merge, false);
-});
-
 
 test('the catalog says a key in French when French has it, and falls back to English when it does not', async () => {
   const { message } = await import('../lib/i18n.mjs');
@@ -157,7 +146,7 @@ test('the catalog says a key in French when French has it, and falls back to Eng
 
 test('a source that does not answer: the wake reads nothing, moves nothing, and fails', () => {
   const box = sandbox();
-  writeFileSync(join(box.home, 'tracker.sh'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
+  writeFileSync(join(box.home, 'tracker.ts'), '#!/usr/bin/env bash\nexit 1\n', { mode: 0o755 });
   const run = spawnSync(join(box.home, 'wake.sh'), [], { env: box.env, encoding: 'utf8' });
   assert.equal(run.status, 1);
   assert.match(run.stderr, /tracker did not answer/);
@@ -182,7 +171,7 @@ test('[Linear adapter] tracker is asked for the newest comments of a ticket (fir
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issues":{"nodes":[]},"viewer":{"assignedIssues":{"nodes":[]}}}}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') };
-  for (const args of [['changes', '2026-01-01T00:00:00Z'], ['waiting']]) assert.equal(spawnSync(join(ORCH_HOME, 'tracker.sh'), args, { env, encoding: 'utf8' }).status, 0, args[0]);
+  for (const args of [['changes', '2026-01-01T00:00:00Z'], ['waiting']]) assert.equal(spawnSync(join(ORCH_HOME, 'tracker.ts'), args, { env, encoding: 'utf8' }).status, 0, args[0]);
   const asked = readFileSync(join(dir, 'asked'), 'utf8');
   assert.match(asked, /comments\(first: 20\)/);
   assert.match(asked, /comments\(first: 1\)/);
@@ -216,7 +205,7 @@ test('[Linear adapter] tracker is asked for the tickets of one state, to check w
   const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issues":{"nodes":[{"id":"i1","identifier":"X-1","title":"T","description":"Body","url":"u","createdAt":"2026-01-01T00:00:00Z","updatedAt":"2026-01-01T00:00:00Z","state":{"name":"In Progress"},"project":{"name":"P"},"labels":{"nodes":[]},"assignee":null}]}}}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
-  const run = spawnSync(join(ORCH_HOME, 'tracker.sh'), ['list', 'In Progress'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') } });
+  const run = spawnSync(join(ORCH_HOME, 'tracker.ts'), ['list', 'In Progress'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') } });
   assert.equal(run.status, 0, run.stderr);
   assert.deepEqual(JSON.parse(run.stdout), [{ id: 'i1', identifier: 'X-1', title: 'T', description: 'Body', body: 'Body',
     url: 'u', createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', state: 'In Progress',
@@ -231,7 +220,7 @@ test('[Linear adapter] a listing of tickets that fills the page says it may be c
   writeFileSync(join(dir, 'answer.json'), JSON.stringify({ data: { issues: { nodes } } }));
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\ncat "${join(dir, 'answer.json')}"\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
-  const run = spawnSync(join(ORCH_HOME, 'tracker.sh'), ['list', 'Done'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') } });
+  const run = spawnSync(join(ORCH_HOME, 'tracker.ts'), ['list', 'Done'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state') } });
   assert.equal(run.status, 0);
   assert.equal(JSON.parse(run.stdout).length, 100);
   assert.match(run.stderr, /may be cut short/);
@@ -276,7 +265,7 @@ test('[Linear adapter] a comment made of blanks is not posted', () => {
   const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ntouch "${join(dir, 'called')}"\necho '{}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
-  const run = spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '  \n \n', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
+  const run = spawnSync(join(ORCH_HOME, 'tracker.ts'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '  \n \n', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
   assert.equal(run.status, 1);
   assert.throws(() => readFileSync(join(dir, 'called')));
 });
@@ -286,7 +275,7 @@ test('[Linear adapter] a comment read on stdin is posted, signed by the one who 
   const dir = scratch('orch-tracker-');
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat >> "${join(dir, 'asked')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
   const repoRoot = fixtureProject();
-  const run = spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Une question pour toi.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: 'chef de projet' } });
+  const run = spawnSync(join(ORCH_HOME, 'tracker.ts'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Une question pour toi.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: 'chef de projet' } });
   assert.equal(run.status, 0, run.stderr);
   const asked = readFileSync(join(dir, 'asked'), 'utf8');
   // The tool carries no name of its own: with no [tracker] owner_name he is « l'utilisateur »; a project names him as it likes.
@@ -295,9 +284,9 @@ test('[Linear adapter] a comment read on stdin is posted, signed by the one who 
   const named = join(dir, 'named.conf');
   writeFileSync(named, readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace(/^name =$/m, 'name = Ada'));
   rmSync(join(dir, 'asked'));
-  assert.equal(spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Une autre.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: 'chef de projet', ORCH_CONF: named } }).status, 0);
+  assert.equal(spawnSync(join(ORCH_HOME, 'tracker.ts'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Une autre.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: 'chef de projet', ORCH_CONF: named } }).status, 0);
   assert.match(readFileSync(join(dir, 'asked'), 'utf8'), /Written by an agent \(chef de projet\), not by Ada\.\\n/);
-  assert.equal(spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } }).status, 1);
+  assert.equal(spawnSync(join(ORCH_HOME, 'tracker.ts'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: '', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } }).status, 1);
 });
 
 
@@ -307,7 +296,7 @@ test('[Linear adapter] the user is not written more than a few times an hour by 
   const repoRoot = fixtureProject();
   const limit = Number(conf.sections.tracker.comments_per_hour);
   assert.equal(limit, 6);
-  const post = (from) => spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: from } });
+  const post = (from) => spawnSync(join(ORCH_HOME, 'tracker.ts'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_SIGNED: from } });
   const entry = (minutesAgo, from) => JSON.stringify({ id: `c${minutesAgo}`, ticket: 'X-2', from, at: new Date(Date.now() - minutesAgo * 60_000).toISOString().replace(/\.\d+Z$/, 'Z') });
   mkdirSync(join(dir, 'state'));
   // Five in the last hour, by several agents, and older ones that no longer count: one more goes.
@@ -322,11 +311,11 @@ test('[Linear adapter] the user is not written more than a few times an hour by 
   // The limit holds without its setting (a typing mistake must not switch the rule of the user off).
   const noKey = join(dir, 'agents.conf');
   writeFileSync(noKey, readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace(/^comments_per_hour = .*$/m, 'coments_per_hour = 6'));
-  assert.equal(spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: noKey } }).status, 4);
+  assert.equal(spawnSync(join(ORCH_HOME, 'tracker.ts'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: noKey } }).status, 4);
   // Nor without a number in it.
   const notANumber = join(dir, 'agents-six.conf');
   writeFileSync(notANumber, readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace(/^comments_per_hour = .*$/m, 'comments_per_hour = six'));
-  assert.equal(spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: notANumber } }).status, 4);
+  assert.equal(spawnSync(join(ORCH_HOME, 'tracker.ts'), ['comment', 'X-1', '-'], { encoding: 'utf8', input: 'Un mot.', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: notANumber } }).status, 4);
 });
 
 

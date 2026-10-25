@@ -61,7 +61,7 @@ test('a clean branch is pushed from the host and its pull request opened through
   assert.equal(flag('--base'), 'main');
   assert.equal(flag('--head'), BRANCH);
   assert.equal(flag('--title'), 'Show the newest entry first');
-  assert.ok(!create.args.includes('--draft'), 'not a draft: merge-pr.sh refuses a draft');
+  assert.ok(!create.args.includes('--draft'), 'not a draft: merge-pr.ts refuses a draft');
   assert.ok(create.body?.includes('The list is sorted'), 'the report is in the body');
   assert.ok(!create.body?.includes('/home/someone'), 'no path of this machine in the body');
   assert.ok(create.body?.includes('- Show the newest entry first'), 'the commits are listed');

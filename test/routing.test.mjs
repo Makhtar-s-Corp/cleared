@@ -168,7 +168,7 @@ test('[Linear adapter] tracker saying no is an error: nothing is reported as sen
   const repoRoot = fixtureProject();
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') };
   for (const args of [['comment', 'X-1', join(dir, 'text.md'), 'test'], ['create', 'Projet', 'Bug', 'Un titre', join(dir, 'text.md')]]) {
-    const run = spawnSync(join(ORCH_HOME, 'tracker.sh'), args, { env, encoding: 'utf8' });
+    const run = spawnSync(join(ORCH_HOME, 'tracker.ts'), args, { env, encoding: 'utf8' });
     assert.notEqual(run.status, 0, args[0]);
     assert.equal(run.stdout.trim(), '', args[0]);
   }
@@ -198,7 +198,7 @@ test('[Linear adapter] a comment on a ticket tracker does not know is an error',
   writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\necho '{"data":{"issue":null}}'\n`, { mode: 0o755 });
   writeFileSync(join(dir, 'text.md'), 'Fait : rien.');
   const repoRoot = fixtureProject();
-  const run = spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-404', join(dir, 'text.md'), 'test'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
+  const run = spawnSync(join(ORCH_HOME, 'tracker.ts'), ['comment', 'X-404', join(dir, 'text.md'), 'test'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });
   assert.equal(run.status, 1);
   assert.match(run.stderr, /no such ticket: X-404/);
 });

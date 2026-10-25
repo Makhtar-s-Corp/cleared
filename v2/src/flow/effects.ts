@@ -422,7 +422,7 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     // `release-request.mjs request_release <ticket> <pr> --ask`, the
     // announcement on its stdin: the lock asks the human, at these heads.
     // Then the request time the lock recorded for these versions
-    // (<state>/validations/<ticket>.json, which ask-validation.sh writes).
+    // (<state>/validations/<ticket>.json, which ask-validation.ts writes).
     async requestRelease(input) {
       const limit = options.requestTimeoutMs ?? 60_000;
       const run = await lock(['request_release', input.ticket, String(input.pr), '--ask'], input.announcement, limit, {});
@@ -433,12 +433,12 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     },
 
     // `release-request.mjs request_release <ticket> <pr>`, without --ask:
-    // the broker runs merge-pr.sh, which merges once every check holds. The
+    // the broker runs merge-pr.ts, which merges once every check holds. The
     // client's exit says what happened (release-request.mjs and
-    // serve/release-broker.mjs): 0 merged; 5 not now (merge-pr.sh's 3 or 5,
+    // serve/release-broker.mjs): 0 merged; 5 not now (merge-pr.ts's 3 or 5,
     // or the broker busy with another release); 1 refused for good
-    // (merge-pr.sh's 6); anything else, the broker could not be asked.
-    // ORCH_FROM_QUEUE makes merge-pr.sh answer "not now" without writing
+    // (merge-pr.ts's 6); anything else, the broker could not be asked.
+    // ORCH_FROM_QUEUE makes merge-pr.ts answer "not now" without writing
     // v1's merge-queue file, which no v1 wake reads any more: the flow's
     // tick is the queue.
     async mergeRelease(input) {

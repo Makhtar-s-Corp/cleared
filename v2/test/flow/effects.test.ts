@@ -64,7 +64,7 @@ writeFileSync(${JSON.stringify(out)}, JSON.stringify({ args: process.argv.slice(
 test('requestRelease answers the request time the lock recorded, which the approval is bound to', async () => {
   const root = tempDir('flow-lock');
   const stub = join(root, 'release-request.mjs');
-  // As ask-validation.sh: the record, with its nanosecond time, in the state folder.
+  // As ask-validation.ts: the record, with its nanosecond time, in the state folder.
   writeFileSync(stub, `import { mkdirSync, writeFileSync } from 'node:fs';
 for await (const c of process.stdin) void c;
 mkdirSync(process.env.CLEARED_STATE_DIR + '/validations', { recursive: true });
@@ -127,7 +127,7 @@ test('mergeRelease asks the lock to merge, without --ask, the announcement on st
 test('mergeRelease reads the client\'s exit: 5 queued, 1 refused for good, anything else unavailable, with the last line it said', async () => {
   const cases: [number, string][] = [[5, 'queued'], [1, 'refused'], [69, 'unavailable'], [64, 'unavailable'], [3, 'unavailable']];
   for (const [code, outcome] of cases) {
-    const { stub } = lockStub(code, `merge-pr.sh: something\n#7 is not put live: exit ${code}\n`);
+    const { stub } = lockStub(code, `merge-pr.ts: something\n#7 is not put live: exit ${code}\n`);
     const { flow } = await effects(undefined, { releaseRequest: stub });
     assert.deepEqual(await flow.mergeRelease({ ticket: 'LOCAL-1', pr: 7, announcement: 'x' }), { outcome, message: `#7 is not put live: exit ${code}` }, `exit ${code}`);
   }

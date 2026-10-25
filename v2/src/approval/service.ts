@@ -175,7 +175,7 @@ export type ServiceLockOptions = {
 
 // The ticket store of one service's state folder: the same ledger and the
 // same signer, its validations record. Its recordApproval signs the
-// approver's move bound to that record, which that service's merge-pr.sh
+// approver's move bound to that record, which that service's merge-pr.ts
 // reads: the owner, or the user a human:<user> sensitivity names
 // (decision 24), whom that service's lock trusts as its owner_id.
 function serviceStore(db: DatabaseSync, environment: Environment, stateDir: string, now: () => Date, ownerId = environment.conf.ownerId): LocalTicketStore {
@@ -278,7 +278,7 @@ export async function checkApprover(
 // The gate of the one-service path, where the registry's approval writer
 // signs for the owner of the service's own lock: a human:<user> service
 // whose lock trusts another owner_id is refused as not set up, since its
-// merge-pr.sh would refuse the user's move.
+// merge-pr.ts would refuse the user's move.
 export type ApproverGate = (input: { readonly ticket: string; readonly by: string; readonly users: UserDirectory }) => Promise<void>;
 
 export function approverGate(read: () => { readonly workspace: WorkspaceConfig | undefined; readonly ownerId: string | undefined }): ApproverGate {

@@ -9,25 +9,25 @@ import type { UserId } from '../session/contract.ts';
 
 // What a lock answered a merge (`request_release` without --ask): merged;
 // not now (a check still runs, the host is busy, another release goes on);
-// refused for good, with merge-pr.sh's reason; or the lock could not be asked.
+// refused for good, with merge-pr.ts's reason; or the lock could not be asked.
 export type MergeOutcome = { readonly outcome: 'merged' | 'queued' | 'refused' | 'unavailable'; readonly message: string };
 
 export type Head = { readonly pr: number; readonly head: string };
 
 export interface ServiceLock {
   readonly service: string;
-  // The passing review of this service's pull request, where its merge-pr.sh
+  // The passing review of this service's pull request, where its merge-pr.ts
   // reads it: a runs row of the shared ledger and the report in its own
   // state folder. `session` names the run, so two pull requests of the same
   // number in two repositories get two runs.
   recordReview(review: ReviewRecord & { readonly commit: string; readonly verdictPhrase: string }): Promise<void>;
-  // `request_release --ask` on its broker: ask-validation.sh keeps the
+  // `request_release --ask` on its broker: ask-validation.ts keeps the
   // shown head in its own validations record. The request time it kept.
   ask(input: { readonly ticket: TicketId; readonly pr: number; readonly request: string }): Promise<{ readonly requestedAt: string }>;
   // Why its record no longer holds exactly this request; undefined when it does.
   check(input: { readonly ticket: TicketId; readonly requestedAt: string; readonly head: Head }): string | undefined;
   // The owner's move to go, signed, bound to its own record (approval_context),
-  // which its merge-pr.sh reads. Throws when the record is not the one shown.
+  // which its merge-pr.ts reads. Throws when the record is not the one shown.
   sign(input: { readonly ticket: TicketId; readonly by: UserId; readonly requestedAt: string; readonly heads: readonly Head[] }): Promise<void>;
   release(input: { readonly ticket: TicketId; readonly pr: number; readonly announcement: string }): Promise<MergeOutcome>;
   // `request_rollback` on its broker, accepted from the configured human

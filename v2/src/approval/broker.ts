@@ -11,7 +11,7 @@ import { join } from 'node:path';
 export type ReleaseBrokerRequest = {
   readonly ticket: string;
   readonly pr: number;
-  readonly announcement: string;                  // what changes, where to see it, how to check: merge-pr.sh refuses a go-live without it
+  readonly announcement: string;                  // what changes, where to see it, how to check: merge-pr.ts refuses a go-live without it
 };
 
 export type BrokerAnswer = {
@@ -79,8 +79,8 @@ export class SocketReleaseBroker implements ReleaseBroker {
     });
   }
 
-  // `request_release` without --ask: the broker runs merge-pr.sh, which merges
-  // when every check holds. Minutes, not seconds. `fromQueue`: merge-pr.sh
+  // `request_release` without --ask: the broker runs merge-pr.ts, which merges
+  // when every check holds. Minutes, not seconds. `fromQueue`: merge-pr.ts
   // answers "not now" without writing v1's merge-queue file (the broker
   // honours it from the service's uid only), as ORCH_FROM_QUEUE does for
   // release-request.mjs.
@@ -94,7 +94,7 @@ export class SocketReleaseBroker implements ReleaseBroker {
     return this.#send({ operation: 'request_rollback', ticket }, 15 * 60_000);
   }
 
-  // `request_release --ask`: the broker runs ask-validation.sh, which only
+  // `request_release --ask`: the broker runs ask-validation.ts, which only
   // writes the request on the local tracker and keeps what was shown.
   requestApproval(request: { readonly ticket: string; readonly pr: number; readonly request: string; readonly prs?: readonly number[] }): Promise<BrokerAnswer> {
     const prs = [request.pr, ...(request.prs ?? []).filter((n) => n !== request.pr)];

@@ -173,7 +173,7 @@ export function releaseRow(store: Store, row: { ticket: string; pr: number; stat
     .run(row.ticket, row.pr, `${row.ticket}-${row.pr}-${row.mergedAt}`, 'Newest entry first', row.mergedAt, row.status, row.lastHealth ?? null, row.endedAt ?? null);
 }
 
-// A row of the v1 ledger's events table, as merge-pr.sh and lib/release.mjs write it.
+// A row of the v1 ledger's events table, as merge-pr.ts and lib/release.mjs write it.
 export function ledgerRow(store: Store, row: { kind: string; ticket: string; pr: number; at: string; detail?: string }): void {
   store.db.prepare('INSERT INTO events (at, kind, ticket, detail, value, source) VALUES (?, ?, ?, ?, ?, ?)')
     .run(row.at, row.kind, row.ticket, row.detail ?? '', row.pr, 'dispatcher');

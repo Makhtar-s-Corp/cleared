@@ -37,7 +37,7 @@ async function fixture(t, { humanUser = '', allowSharedUid = true } = {}) {
 
 test('broker refuses an unapproved release, records the peer UID and commit, and alone can enter merge', async (t) => {
   const { pull, call, events } = await fixture(t);
-  const direct = spawnSync(join(pull.box.home, 'merge-pr.sh'), ['7', 'X-5'], { env: { ...pull.env, ORCH_BROKER_SECRET: '' }, encoding: 'utf8' });
+  const direct = spawnSync(join(pull.box.home, 'merge-pr.ts'), ['7', 'X-5'], { env: { ...pull.env, ORCH_BROKER_SECRET: '' }, encoding: 'utf8' });
   assert.equal(direct.status, 6);
   assert.match(direct.stderr, /only the release broker/);
   mkdirSync(join(pull.box.state, 'validations'), { recursive: true });
@@ -58,7 +58,7 @@ test('shared UID is refused by default and explicitly allowed with a permanent s
   assert.match(rollback.stderr, /\[security\] agent_user.*allow_shared_uid = true/);
   assert.equal(disabled.events().filter((event) => !event.accepted).length, 2);
   const secret = readFileSync(join(disabled.pull.box.state, 'release-broker.secret'), 'utf8');
-  const directMerge = spawnSync(join(disabled.pull.box.home, 'merge-pr.sh'), ['7', 'X-5'],
+  const directMerge = spawnSync(join(disabled.pull.box.home, 'merge-pr.ts'), ['7', 'X-5'],
     { env: { ...disabled.pull.env, ORCH_BROKER_SECRET: secret }, encoding: 'utf8' });
   assert.equal(directMerge.status, 6);
   assert.match(directMerge.stderr, /release lock requires \[security\] agent_user/i);

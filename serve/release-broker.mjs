@@ -127,13 +127,13 @@ async function handle(input, uid) {
         if (!prs.includes(pr) || prs.length > 8 || prs.some((n) => !Number.isSafeInteger(n) || n <= 0)) return reject('Invalid approval PRs');
         const captures = input.captures || [];
         if (!Array.isArray(captures) || captures.length > 8 || captures.some((c) => typeof c?.path !== 'string' || typeof c?.caption !== 'string' || c.path.length > 1000 || c.caption.length > 200)) return reject('Invalid captures');
-        const result = await command(join(home, 'ask-validation.sh'), [ticket, '-', ...prs.flatMap((n) => ['--pr', String(n)]), ...captures.flatMap((c) => ['--capture', c.path, c.caption])], input.approval_request);
+        const result = await command(join(home, 'ask-validation.ts'), [ticket, '-', ...prs.flatMap((n) => ['--pr', String(n)]), ...captures.flatMap((c) => ['--capture', c.path, c.caption])], input.approval_request);
         event(ticket, pr, uid, result.code === 0, result.stderr || result.stdout || `exit ${result.code}`, commit, operation);
         return { ok: result.code === 0, code: result.code === 0 ? 0 : 69, reason: result.stderr.trim(), output: result.stdout.trim(), commit };
       }
-      const result = await command(join(home, 'merge-pr.sh'), [String(pr), ticket, '-'], input.announcement, input.from_queue && uid === serviceUid ? { ORCH_FROM_QUEUE: '1' } : {});
+      const result = await command(join(home, 'merge-pr.ts'), [String(pr), ticket, '-'], input.announcement, input.from_queue && uid === serviceUid ? { ORCH_FROM_QUEUE: '1' } : {});
       event(ticket, pr, uid, result.code === 0 || result.code === 3, result.stderr || result.stdout || `exit ${result.code}`, commit, operation);
-      // Audited merge-pr.sh: only no() exits 6 for a definitive refusal.
+      // Audited merge-pr.ts: only no() exits 6 for a definitive refusal.
       // die(), GitHub failures, lock failures and unhandled script errors exit 1
       // or another code and must remain retryable in the queue.
       const code = result.code === 6 ? 1 : result.code === 0 ? 0 : result.code === 3 || result.code === 5 ? 5 : 69;

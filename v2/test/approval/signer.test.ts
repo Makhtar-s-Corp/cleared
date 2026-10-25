@@ -57,7 +57,7 @@ test('the context is sha256 of [ticket, at, versions sorted by pr, each as {pr, 
   assert.notEqual(approvalContext('LOCAL-1', '2026-10-21T10:00:00.000000000Z', [{ pr: 3, head: head('c') }, versions[0]!]), expected);
 });
 
-test('the record ask-validation.sh keeps is read as lib/validation-record.mjs reads it, and nothing else is', () => {
+test('the record ask-validation.ts keeps is read as lib/validation-record.mjs reads it, and nothing else is', () => {
   const state = scratch('cleared-v2-record-');
   const write = (text: string) => { writeFileSync(join(state, 'validations', 'LOCAL-1.json'), text); };
   assert.equal(readApprovalRecord(state, 'LOCAL-1'), undefined, 'none kept');

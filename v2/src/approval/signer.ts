@@ -2,7 +2,7 @@
 // the human's (docs/v2/milestone-1-plan.md, decision 6). The service process
 // holds it alone: a file it owns, mode 0600, outside the project, which no
 // session container mounts. The signature is the one lib/tracker/adapters/
-// local.mjs verifies, so merge-pr.sh and tracker.sh read it unchanged.
+// local.mjs verifies, so merge-pr.ts and tracker.ts read it unchanged.
 import { createPrivateKey, createPublicKey, generateKeyPairSync, sign, type KeyObject } from 'node:crypto';
 import { closeSync, constants, fstatSync, openSync, readFileSync } from 'node:fs';
 

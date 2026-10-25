@@ -28,7 +28,7 @@
 // command line.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, existsSync, mkdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { agoUtc, confGet, confSoft, die, guardText, hasText, lockFile, main, nowUtc, ownerName, projectEnv, say, scratchDir, scriptName, ScriptExit, userMessage, writeWhole } from '../../script.ts';
@@ -45,21 +45,27 @@ const uri = (text: string): string => [...Buffer.from(text, 'utf8')]
 // What `$(cat file)` gave a script: the text, its last line breaks cut.
 const contents = (file: string): string => readFileSync(file, 'utf8').replace(/\n+$/, '');
 
-// A curl call; the header lines that hold a credential go through a file in
-// a private folder, removed at once.
-function curl(args: readonly string[], options: { readonly input?: string | Buffer; readonly secretHeader?: string; readonly binary?: boolean } = {}): { status: number; stdout: Buffer } {
-  const dir = options.secretHeader === undefined ? null : scratchDir('cleared-linear-');
-  try {
-    const head: string[] = [];
-    if (dir) {
+// A curl call. The header that holds a credential reaches curl as
+// /dev/fd/3, a file of a private folder removed before curl starts, as the
+// bash adapter's process substitution gave it: never on a command line.
+function curl(args: readonly string[], options: { readonly input?: string | Buffer; readonly secretHeader?: string } = {}): { status: number; stdout: Buffer } {
+  let fd: number | null = null;
+  if (options.secretHeader !== undefined) {
+    const dir = scratchDir('cleared-linear-');
+    try {
       const file = join(dir.path, 'header');
-      writeFileSync(file, options.secretHeader!, { mode: 0o600 });
-      head.push('-H', `@${file}`);
+      writeFileSync(file, options.secretHeader, { mode: 0o600 });
+      fd = openSync(file, 'r');
+    } finally {
+      dir.remove();
     }
-    const run = spawnSync('curl', [...args.slice(0, -1), ...head, ...args.slice(-1)], { input: options.input ?? '', stdio: ['pipe', 'pipe', 'inherit'], maxBuffer: 64 * 1024 * 1024 });
+  }
+  try {
+    const head = fd === null ? [] : ['-H', '@/dev/fd/3'];
+    const run = spawnSync('curl', [...args.slice(0, -1), ...head, ...args.slice(-1)], { input: options.input ?? '', stdio: fd === null ? ['pipe', 'pipe', 'inherit'] : ['pipe', 'pipe', 'inherit', fd], maxBuffer: 64 * 1024 * 1024 });
     return { status: run.status ?? 1, stdout: run.stdout ?? Buffer.alloc(0) };
   } finally {
-    dir?.remove();
+    if (fd !== null) closeSync(fd);
   }
 }
 

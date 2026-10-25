@@ -1,6 +1,6 @@
 // The service's store: the v1 ledger file (ledger.db), opened with
 // node:sqlite as lib/ledger.mjs opens it, so that the tracker tables and the
-// runs merge-pr.sh reads stay in the same file (docs/v2/milestone-1-plan.md,
+// runs merge-pr.ts reads stay in the same file (docs/v2/milestone-1-plan.md,
 // decision 11). This file owns three tables: session_events, sessions and
 // policy_rules. Every other table belongs to the module that declares it.
 // What changes a table that exists is a versioned migration (migrations.ts,
@@ -150,7 +150,7 @@ function session(row: Row): SessionRecord {
 
 // Opened as lib/ledger.mjs openLedger opens it for writing: the directory
 // made, a 5 second busy timeout, the WAL journal, which v1 already sets on
-// the same file, so merge-pr.sh and the tracker read it as before.
+// the same file, so merge-pr.ts and the tracker read it as before.
 function openDatabase(path: string): DatabaseSync {
   let db: DatabaseSync | undefined;
   try {

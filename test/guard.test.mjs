@@ -20,7 +20,7 @@ test('[Linear adapter] a comment that the guard refuses never reaches tracker', 
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') };
   const post = (text) => {
     writeFileSync(join(dir, 'comment.md'), text);
-    return spawnSync(join(ORCH_HOME, 'tracker.sh'), ['comment', 'X-1', join(dir, 'comment.md'), 'test'], { env, encoding: 'utf8' });
+    return spawnSync(join(ORCH_HOME, 'tracker.ts'), ['comment', 'X-1', join(dir, 'comment.md'), 'test'], { env, encoding: 'utf8' });
   };
   // Built at run time so that this file holds nothing the guard would flag.
   const flagged = `Le mot de ${'pass'}${'word'} = "${'x'.repeat(12)}" est dans le rapport.`;
@@ -31,7 +31,7 @@ test('[Linear adapter] a comment that the guard refuses never reaches tracker', 
   // A ticket goes through the same guard, title and description.
   const open = (title, text) => {
     writeFileSync(join(dir, 'ticket.md'), text);
-    return spawnSync(join(ORCH_HOME, 'tracker.sh'), ['create', 'Projet', 'Bug', title, join(dir, 'ticket.md')], { env, encoding: 'utf8' });
+    return spawnSync(join(ORCH_HOME, 'tracker.ts'), ['create', 'Projet', 'Bug', title, join(dir, 'ticket.md')], { env, encoding: 'utf8' });
   };
   assert.notEqual(open('Un titre', flagged).status, 0);
   assert.notEqual(open(flagged, 'Une description.').status, 0);
@@ -67,7 +67,7 @@ echo '{"data":{"fileUpload":{"success":true,"uploadFile":{"uploadUrl":"https://s
   const confPath = join(dir, 'agents.conf');
   writeFileSync(confPath, `${readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace(/^capture_roots = .*$/m, `capture_roots = ${join(dir, 'lanes')}/*/to-send`)}`);
   const repoRoot = fixtureProject();
-  const upload = (file) => spawnSync(join(ORCH_HOME, 'tracker.sh'), ['upload', file], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: confPath } });
+  const upload = (file) => spawnSync(join(ORCH_HOME, 'tracker.ts'), ['upload', file], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: confPath } });
   const sent = () => { try { return readFileSync(join(dir, 'curl-args'), 'utf8'); } catch { return ''; } };
   assert.match(upload(join(dir, 'elsewhere.png')).stderr, /not under a folder of captures/);
   assert.match(upload(join(captures, '..', 'to-send', '..', 'test-results.png')).stderr, /not under a folder of captures/);

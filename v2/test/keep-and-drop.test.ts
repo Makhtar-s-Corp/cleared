@@ -31,15 +31,6 @@ function removed(): string[] {
 
 // Still tracked, with why (each one is a step of the plan, or a question).
 const STILL: ReadonlyMap<string, string> = new Map([
-  // Step b: v2's release path, ported to Node first.
-  ['merge-pr.sh', 'step b'],
-  ['ask-validation.sh', 'step b'],
-  ['tracker.sh', 'step b'],
-  ['host-state.sh', 'step b'],
-  ['lib/tracker/guard.sh', 'step b'],
-  ['lib/tracker/adapters/dispatch.sh', 'step b'],
-  ['lib/tracker/adapters/env.sh', 'step b'],
-  ['lib/tracker/adapters/linear.sh', 'step b'],
   // Step c: the rest of the kept bash.
   ['wake.sh', 'step c'],
   ['lib/ports.sh', 'step c'],

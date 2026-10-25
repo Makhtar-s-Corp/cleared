@@ -14,7 +14,7 @@
 // compute) is the full circuit at that head only, as v1's `keep: false`.
 // The review is the full circuit's in v2 whatever the lane, and the approval
 // is asked while the checks run for every ticket; the lock's merge waits for
-// them. v1's lane record, which lets merge-pr.sh spare a fast merge the
+// them. v1's lane record, which lets merge-pr.ts spare a fast merge the
 // unrelated checks, is not written: a fast ticket's merge waits as any.
 import { spawn } from 'node:child_process';
 import type { DatabaseSync } from 'node:sqlite';

@@ -1,6 +1,6 @@
 // What became of a release once the human approved it, read from what the
 // lock and the release watch write in ledger.db (docs/v2/milestone-2-plan.md,
-// decision 12): merge-pr.sh's `merged_by_script` row in v1's `events` table,
+// decision 12): merge-pr.ts's `merged_by_script` row in v1's `events` table,
 // then lib/release.mjs's `releases` row, whose status is the watch's own
 // verdict, with the times and the words of its `events` rows. The flow only
 // reads these tables; v1 creates them, and a ledger where they do not exist
@@ -17,8 +17,8 @@ export type Landing =
 type Row = Record<string, unknown>;
 type Event = { readonly at: string; readonly kind: string; readonly detail: string };
 
-// merge-pr.sh writes its times to the second, the service to the
-// millisecond, ask-validation.sh to the nanosecond: times are compared as
+// merge-pr.ts writes its times to the second, the service to the
+// millisecond, ask-validation.ts to the nanosecond: times are compared as
 // instants, and from the start of the second of `since`.
 const instant = (at: string): number => Date.parse(at);
 const second = (at: string): number => Math.floor(instant(at) / 1000) * 1000;
@@ -76,7 +76,7 @@ export function landingOf(db: DatabaseSync, input: { readonly ticket: string; re
     return { state: 'landed', mergedAt, at, health: 'healthy' };
   }
   if (status === 'failed') return unhealthy(String(release?.last_health ?? 'the release watch failed'), ended ?? mergedAt);
-  // No release row: merge-pr.sh merged, but the watch could not start.
+  // No release row: merge-pr.ts merged, but the watch could not start.
   if (status === undefined && last(['release_watch_failed'])) return unhealthy('the release watch could not start', mergedAt);
   return { state: 'merged', mergedAt };
 }

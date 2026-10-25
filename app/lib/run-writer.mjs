@@ -1,5 +1,5 @@
 // Starts app/human-write.mjs for one gesture. An agreement is written under the
-// same lock as ask-validation.sh and merge-pr.sh (state/merge.lock), so the
+// same lock as ask-validation.ts and merge-pr.ts (state/merge.lock), so the
 // version checked is still the version on record when the move is made.
 import { spawn } from 'node:child_process';
 import { join, dirname } from 'node:path';

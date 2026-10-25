@@ -133,18 +133,18 @@ test('the local ticket CLI creates, reads, comments, and moves without a network
 test('generic tracker comments keep the agent marker and hourly limit', () => {
   const box = sandbox();
   copyFileSync(join(ORCH_HOME, 'cleared'), join(box.home, 'cleared'));
-  copyFileSync(join(ORCH_HOME, 'tracker.sh'), join(box.home, 'tracker.sh'));
+  copyFileSync(join(ORCH_HOME, 'tracker.ts'), join(box.home, 'tracker.ts'));
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, readFile(confPath, 'utf8').replace('adapter = local',
     `adapter = local\nowner_id = alice\nagents_uid = ${process.getuid()}\ncomments_per_hour = 1`));
   execFileSync(join(box.home, 'cleared'), ['ticket', 'new', 'Comment limit'], { env: box.env });
   const file = join(box.home, 'note.md');
   writeFileSync(file, 'A useful update.');
-  const post = () => spawnSync(join(box.home, 'tracker.sh'), ['comment', 'LOCAL-1', file, 'tester'], { env: box.env, encoding: 'utf8' });
+  const post = () => spawnSync(join(box.home, 'tracker.ts'), ['comment', 'LOCAL-1', file, 'tester'], { env: box.env, encoding: 'utf8' });
   const first = post();
   assert.equal(first.status, 0, first.stderr);
   assert.match(first.stdout, /local:\/\/ticket\/LOCAL-1/);
-  const comments = JSON.parse(execFileSync(join(box.home, 'tracker.sh'), ['comments', 'LOCAL-1'], { env: box.env, encoding: 'utf8' }));
+  const comments = JSON.parse(execFileSync(join(box.home, 'tracker.ts'), ['comments', 'LOCAL-1'], { env: box.env, encoding: 'utf8' }));
   assert.match(comments[0].body, /^> Written by an agent \(tester\)/);
   assert.equal(post().status, 4);
   assert.match(readFile(join(box.state, 'tracker-comments.jsonl'), 'utf8'), /"id":"1"/);
@@ -152,11 +152,11 @@ test('generic tracker comments keep the agent marker and hourly limit', () => {
 
 test('the shell facade reports each adapter ticket prefix for lane cleanup', () => {
   const box = sandbox();
-  copyFileSync(join(ORCH_HOME, 'tracker.sh'), join(box.home, 'tracker.sh'));
+  copyFileSync(join(ORCH_HOME, 'tracker.ts'), join(box.home, 'tracker.ts'));
   for (const [adapter, expected] of [['local', 'LOCAL'], ['github', 'GH'], ['linear', 'X']]) {
     const config = join(box.home, 'agents.conf');
     writeFileSync(config, readFile(config, 'utf8').replace(/adapter = (?:local|github|linear)/, `adapter = ${adapter}`));
-    const result = spawnSync(join(box.home, 'tracker.sh'), ['ticket-prefix'], { env: box.env, encoding: 'utf8' });
+    const result = spawnSync(join(box.home, 'tracker.ts'), ['ticket-prefix'], { env: box.env, encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stdout.trim(), expected);
   }
@@ -426,7 +426,7 @@ test('a GitHub capture passes OCR and the text guard before any image bytes reac
 test('local ticket moves through request, verified approval, guarded merge, and done', () => {
   const pull = reviewedPull(['server/core.mjs'], { ticket: 'LOCAL-1' });
   const { box } = pull;
-  copyFileSync(join(ORCH_HOME, 'tracker.sh'), join(box.home, 'tracker.sh'));
+  copyFileSync(join(ORCH_HOME, 'tracker.ts'), join(box.home, 'tracker.ts'));
   const { privateKey, publicKey } = generateKeyPairSync('ed25519');
   const key = join(box.home, 'human.key');
   writeFileSync(key, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
@@ -483,7 +483,7 @@ test('local ticket moves through request, verified approval, guarded merge, and 
 test('GitHub Issues ticket moves through request, actor checks, guarded merge, and done', () => {
   const pull = reviewedPull(['server/core.mjs'], { ticket: 'GH-12' });
   const { box } = pull;
-  copyFileSync(join(ORCH_HOME, 'tracker.sh'), join(box.home, 'tracker.sh'));
+  copyFileSync(join(ORCH_HOME, 'tracker.ts'), join(box.home, 'tracker.ts'));
   const appKey = join(box.home, 'github-app.pem');
   const { privateKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
   writeFileSync(appKey, privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode: 0o600 });
@@ -564,7 +564,7 @@ else exec ${original} "$@"; fi
 test('Linear ticket moves through request, actor checks, guarded merge, and done', () => {
   const pull = reviewedPull(['server/core.mjs']);
   const { box } = pull;
-  copyFileSync(join(ORCH_HOME, 'tracker.sh'), join(box.home, 'tracker.sh'));
+  copyFileSync(join(ORCH_HOME, 'tracker.ts'), join(box.home, 'tracker.ts'));
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, readFile(confPath, 'utf8').replace('adapter = local', 'adapter = linear\nowner_id = alice'));
   const stateFile = join(box.home, 'fake-linear.json');
@@ -658,7 +658,7 @@ test('[Linear adapter] private capture download uses the tracker authorization h
   const box = sandbox();
   const marker = join(box.home, 'capture-header');
   writeFileSync(join(box.home, 'bin', 'curl'), `#!/bin/bash\nprev=\nfor arg in "$@"; do\n  if [ "$prev" = -H ]; then cat "\${arg#@}" > '${marker}'; fi\n  prev=$arg\ndone\nprintf '\\211PNG\\r\\n\\032\\n'\n`, { mode: 0o755 });
-  const run = (url) => spawnSync(join(box.home, 'lib', 'tracker', 'adapters', 'linear.sh'), ['download-capture', url],
+  const run = (url) => spawnSync(join(box.home, 'lib', 'tracker', 'adapters', 'linear.ts'), ['download-capture', url],
     { env: { ...box.env, LINEAR_API_KEY: 'test-key' } });
   const ok = run('https://uploads.linear.app/workspace/asset');
   assert.equal(ok.status, 0, ok.stderr.toString());

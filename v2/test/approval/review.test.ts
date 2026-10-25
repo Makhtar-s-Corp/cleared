@@ -22,7 +22,7 @@ function recorder(resolveHead?: (pr: number) => Promise<string | undefined>) {
   return { box, db, rec, base, verdict, rows, reports };
 }
 
-test('a passing review is a runs row and a report that merge.mjs, reviews.mjs and merge-pr.sh read', async () => {
+test('a passing review is a runs row and a report that merge.mjs, reviews.mjs and merge-pr.ts read', async () => {
   const r = recorder();
   await r.rec.record({ ...r.base, verdict: 'pass', report: 'The change is small and tested. Nothing blocks it.', commit: head('a') } as never);
   const [row] = r.rows();
@@ -35,7 +35,7 @@ test('a passing review is a runs row and a report that merge.mjs, reviews.mjs an
   const heads = spawnSync(process.execPath, ['--no-warnings', join(CLEARED_HOME, 'lib/reviews.mjs'), 'heads', '7'], { env: r.box.env, encoding: 'utf8' });
   assert.deepEqual(JSON.parse(heads.stdout), [head('a')]);
   const sed = spawnSync('sed', ['-n', 's/^commit: //p', file], { encoding: 'utf8' }).stdout.split('\n')[0];
-  assert.equal(sed, head('a'), 'the line merge-pr.sh reads');
+  assert.equal(sed, head('a'), 'the line merge-pr.ts reads');
 });
 
 test('a review that asks for changes is recorded as done and never concludes the verdict', async () => {

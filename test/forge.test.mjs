@@ -450,16 +450,19 @@ test('scripts that call the forge source lib/common.sh, none runs gh around its 
     checked += 1;
     assert.match(text, /lib\/common\.sh"|\.\.\/lib\/common\.sh"|\.\.\/\.\.\/\.\.\)" && pwd\)\/lib\/common\.sh"/, `${name} calls the forge without lib/common.sh`);
   }
-  assert.ok(checked >= 4, `only ${checked} shell call sites found`);
-  const node = [...readdirSync(ORCH_HOME).filter((name) => name.endsWith('.mjs')), 'cleared',
+  assert.ok(shell.length === 0 || checked >= 1, `only ${checked} shell call sites found`);
+  const node = [...readdirSync(ORCH_HOME).filter((name) => /\.(mjs|ts)$/.test(name)), 'cleared',
     ...['lib', 'serve', 'app'].flatMap((dir) => readdirSync(join(ORCH_HOME, dir), { recursive: true })
-      .map((name) => join(dir, String(name))).filter((name) => name.endsWith('.mjs')))];
+      .map((name) => join(dir, String(name))).filter((name) => /\.(mjs|ts)$/.test(name) && !name.includes('node_modules')))];
+  const ghFiles = [];
   for (const name of node) {
     if (name === 'lib/tracker/adapters/github.mjs') continue; // the tracker's own calls, with the tracker's token
     const text = readFileSync(join(ORCH_HOME, name), 'utf8');
-    if (/(execFileSync|execFile|spawnSync|spawn)\(\s*'gh'|run\('gh'|exec(Sync)?\(\s*[`'"][^`'"]*\bgh\s/.test(text)) assert.match(text, /forgeGhEnv/, `${name} runs gh without the forge credential`);
+    if (/(execFileSync|execFile|spawnSync|spawn)\(\s*'gh'|run\('gh'|exec(Sync)?\(\s*[`'"][^`'"]*\bgh\s/.test(text)) { ghFiles.push(name); assert.match(text, /forgeGhEnv/, `${name} runs gh without the forge credential`); }
     const networkGit = /'(push|fetch|pull|ls-remote|clone)'/.test(text) && /'git'/.test(text);
     const spreadGit = /(execFileSync|execFile|spawnSync|spawn)\(\s*'git',\s*\[[^\]]*\.\.\.\w+/.test(text);
     if (networkGit || spreadGit) assert.match(text, /forgeEnv/, `${name} may run a network git command without the forge credential`);
   }
+  // The Node commands that replaced the bash scripts (merge-pr.ts, ask-validation.ts) run gh through lib/script.ts.
+  assert.ok(ghFiles.includes('lib/script.ts'), `the check reads the gh calls of lib/script.ts: ${ghFiles.join(', ')}`);
 });

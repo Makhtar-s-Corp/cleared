@@ -114,7 +114,7 @@ test('the merge time is compared as an instant: a row written to the second, in 
   const { t, asked } = await landing({ approveAfterMs: 400 });
   const goAt = (await t.tickets.history(t.ticket.id)).at(-1)!.at;
   assert.match(goAt, /\.400Z$/);
-  // merge-pr.sh writes its time to the second (now_utc), so its row reads before the go move's millisecond.
+  // merge-pr.ts writes its time to the second (now_utc), so its row reads before the go move's millisecond.
   ledgerRow(t.store, { kind: 'merged_by_script', ticket: t.ticket.id, pr: 7, at: goAt.replace(/\.\d+Z$/, 'Z') });
   await tickAfter(t, 60_000);
   assert.deepEqual(asked, []);
@@ -205,7 +205,7 @@ test('a watch that could not start, or a rollback the watch could not make, is r
   for (const kind of ['release_watch_failed', 'rollback_migrations_blocked']) {
     const { t } = await landing({ answers: ['merged'] });
     await tickAfter(t, 60_000);
-    // merge-pr.sh writes release_watch_failed when the watch never started, so no release row; the blocked rollback ends the row as failed.
+    // merge-pr.ts writes release_watch_failed when the watch never started, so no release row; the blocked rollback ends the row as failed.
     if (kind !== 'release_watch_failed') releaseRow(t.store, { ticket: t.ticket.id, pr: 7, status: 'failed', mergedAt: iso(t.clock.now), endedAt: iso(t.clock.now + 1000) });
     ledgerRow(t.store, { kind, ticket: t.ticket.id, pr: 7, at: iso(t.clock.now + 1000), detail: `${kind} detail` });
     await tickAfter(t, 60_000);
@@ -231,7 +231,7 @@ test('without the v1 events table the landing still asks the lock and nothing th
   assert.ok(types(t).includes('release_merged'));
 });
 
-test('the merge is asked with the release\'s announcement, which merge-pr.sh needs for an agreed change', async () => {
+test('the merge is asked with the release\'s announcement, which merge-pr.ts needs for an agreed change', async () => {
   const seen: string[] = [];
   const { t } = await landing({ effects: { async mergeRelease(input) { seen.push(input.announcement); return { outcome: 'merged', message: '' }; } } });
   await tickAfter(t, 60_000);
