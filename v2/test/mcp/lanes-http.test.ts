@@ -1,14 +1,19 @@
 // The lanes' MCP server over HTTP (P216): POST /mcp on the service, MCP's
 // Streamable HTTP answered in plain JSON, behind a local token of its own
-// (never the app's proof), for peers of this machine or the tailnet only. Driven by a fake MCP client over loopback, port 0; no real Claude
-// Code is configured. The tokens are made at run time.
+// (never the app's proof), for peers of this machine or the tailnet only,
+// addressed to 127.0.0.1, localhost or the tailnet address they came in on
+// (issue #347). Driven by a fake MCP client over loopback, port 0; no real
+// Claude Code is configured. The tokens are made at run time. A request
+// from an address of this machine outside loopback and the tailnet (issue
+// #353) reaches the loopback listener with that address as its source: the
+// listener never opens wider.
 import test, { after } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { chmodSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
-import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import { createServer, request as httpRequest, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { tmpdir } from 'node:os';
+import { networkInterfaces, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Readable } from 'node:stream';
 import { createApiRoutes } from '../../src/api/routes.ts';
@@ -155,12 +160,15 @@ test('only this machine and the tailnet: loopback, 100.64.0.0/10 and fd7a:115c:a
     assert.equal(privatePeer(address), false, String(address));
 });
 
-test('a peer outside this machine and the tailnet, a session\'s container on a Docker bridge, is 403 before the token is read', async () => {
+// The route called with a request made here, for what a socket of this machine cannot be: a peer on a Docker
+// bridge, a request that came in on a tailnet address, a request with no Host. Counts the token's reads.
+async function direct(socket: { remoteAddress: string; localAddress: string }, host: string | undefined): Promise<{ status: number; sent: string; reads: number }> {
   const t = await setup();
-  const route = lanesMcpRoutes({ engine: () => t.engine, store: () => t.store, token: () => TOKEN, language: 'en', redactor: createRedactor({ env: {}, paths: [] }) })[0] as Route;
+  let reads = 0;
+  const route = lanesMcpRoutes({ engine: () => t.engine, store: () => t.store, token: () => { reads += 1; return TOKEN; }, language: 'en', redactor: createRedactor({ env: {}, paths: [] }) })[0] as Route;
   const request = Object.assign(Readable.from([Buffer.from(JSON.stringify(initialize))]), {
-    method: 'POST', url: MCP_PATH, socket: { remoteAddress: '172.17.0.2' },
-    headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}` },
+    method: 'POST', url: MCP_PATH, socket,
+    headers: { 'content-type': 'application/json', authorization: `Bearer ${TOKEN}`, ...(host === undefined ? {} : { host }) },
   }) as unknown as IncomingMessage;
   let status = 0;
   let sent = '';
@@ -170,6 +178,105 @@ test('a peer outside this machine and the tailnet, a session\'s container on a D
     end(text?: string) { sent = text ?? ''; },
   } as unknown as ServerResponse;
   await route.handle({ request, response, params: {}, registry: t.engine.registry });
-  assert.equal(status, 403);
-  assert.doesNotMatch(sent, new RegExp(TOKEN));
+  await t.engine.settled();
+  return { status, sent, reads };
+}
+
+test('a peer outside this machine and the tailnet, a session\'s container on a Docker bridge, is 403 before the token is read', async () => {
+  const answer = await direct({ remoteAddress: '172.17.0.2', localAddress: '172.17.0.1' }, '172.17.0.1:8791');
+  assert.equal(answer.status, 403);
+  assert.equal(answer.reads, 0, 'the token is not read');
+  assert.doesNotMatch(answer.sent, new RegExp(TOKEN));
+});
+
+type Raw = { status: number; body: string };
+// One POST of initialize through node:http, which lets the Host header and the source address be set.
+function rawPost(url: string, options: { host?: string; localAddress?: string } = {}): Promise<Raw> {
+  const target = new URL(url);
+  const body = JSON.stringify(initialize);
+  return new Promise((resolve, reject) => {
+    const sent = httpRequest({
+      host: target.hostname, port: target.port, path: target.pathname, method: 'POST',
+      ...(options.localAddress ? { localAddress: options.localAddress } : {}),
+      headers: {
+        'content-type': 'application/json', 'content-length': Buffer.byteLength(body), authorization: `Bearer ${TOKEN}`,
+        ...(options.host === undefined ? {} : { host: options.host }),
+      },
+    }, (response) => {
+      let text = '';
+      response.setEncoding('utf8');
+      response.on('data', (chunk: string) => { text += chunk; });
+      response.on('end', () => resolve({ status: response.statusCode ?? 0, body: text }));
+    });
+    sent.on('error', reject);
+    sent.end(body);
+  });
+}
+
+test('a Host that is not 127.0.0.1, localhost or [::1] is 403 before the token is read, beside the Origin\'s 403 (issue #347)', async () => {
+  let reads = 0;
+  const s = await serve({ token: () => { reads += 1; return TOKEN; } });
+  const port = new URL(s.url).port;
+  for (const host of [`127.0.0.1:${port}`, `localhost:${port}`, `LocalHost:${port}`, `[::1]:${port}`, '127.0.0.1', 'localhost']) {
+    const answer = await rawPost(s.url, { host });
+    assert.equal(answer.status, 200, host);
+  }
+  const accepted = reads;
+  assert.ok(accepted > 0);
+  // A name that resolves to this machine (DNS rebinding), another spelling of loopback, a tailnet address the request did not come in on.
+  for (const host of [`evil.example:${port}`, `127.0.0.1.nip.io:${port}`, `localhost.:${port}`, `127.1:${port}`, `0.0.0.0:${port}`, `[::ffff:127.0.0.1]:${port}`,
+    `user@127.0.0.1:${port}`, `localhost:${port}:1`, 'localhost:abc', `100.101.102.103:${port}`, `[fd7a:115c:a1e0::1]:${port}`]) {
+    const answer = await rawPost(s.url, { host });
+    assert.equal(answer.status, 403, host);
+    assert.match(answer.body, /127\.0\.0\.1, localhost/, host);
+    assert.doesNotMatch(answer.body, /evil|nip\.io|user@/, 'the Host received is not repeated');
+  }
+  assert.equal(reads, accepted, 'a refused Host never reads the token');
+  assert.equal((await s.post(initialize, { origin: `http://127.0.0.1:${port}` })).status, 403, 'an Origin is refused with a good Host too');
+  const none = await direct({ remoteAddress: '127.0.0.1', localAddress: '127.0.0.1' }, undefined);
+  assert.equal(none.status, 403, 'no Host');
+  assert.equal(none.reads, 0);
+});
+
+test('the tailnet address the request came in on is a Host the route takes, and no other one', async () => {
+  const v4 = { remoteAddress: '100.101.102.103', localAddress: '100.70.0.1' };
+  assert.equal((await direct(v4, '100.70.0.1:8791')).status, 200);
+  assert.equal((await direct(v4, '100.70.0.1')).status, 200);
+  assert.equal((await direct({ remoteAddress: '::ffff:100.101.102.103', localAddress: '::ffff:100.70.0.1' }, '100.70.0.1:8791')).status, 200);
+  const v6 = { remoteAddress: 'fd7a:115c:a1e0::2', localAddress: 'fd7a:115c:a1e0::eb2c:1' };
+  assert.equal((await direct(v6, '[fd7a:115c:a1e0::eb2c:1]:8791')).status, 200);
+  assert.equal((await direct(v6, '[fd7a:115c:a1e0:0:0:0:eb2c:1]:8791')).status, 200, 'the same address written whole');
+  for (const [socket, host] of [[v4, '100.70.0.2:8791'], [v4, '100.70.0.1.example:8791'], [v6, '[fd7a:115c:a1e0::eb2c:2]:8791'],
+    [{ remoteAddress: '100.101.102.103', localAddress: '172.17.0.1' }, '172.17.0.1:8791']] as const) {
+    const answer = await direct(socket, host);
+    assert.equal(answer.status, 403, host);
+    assert.equal(answer.reads, 0, host);
+  }
+});
+
+// An address of this machine that is neither loopback nor the tailnet's: its LAN, its public address, a Docker bridge.
+function outsideAddress(): string | undefined {
+  return Object.values(networkInterfaces()).flat()
+    .find((entry) => entry !== undefined && !entry.internal && entry.family === 'IPv4' && !privatePeer(entry.address))?.address;
+}
+
+test('a request from an address of this machine outside loopback and the tailnet, on a real socket, is 403 before the token is read (issue #353)', async (context) => {
+  const source = outsideAddress();
+  if (!source) return context.skip('this machine has no IPv4 address outside loopback and the tailnet');
+  let reads = 0;
+  const s = await serve({ token: () => { reads += 1; return TOKEN; } });
+  let answer: Raw;
+  try {
+    answer = await rawPost(s.url, { localAddress: source });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code ?? '';
+    if (['EADDRNOTAVAIL', 'EINVAL', 'ENETUNREACH', 'EHOSTUNREACH'].includes(code)) return context.skip(`the loopback listener cannot be reached from that address here (${code})`);
+    throw error;
+  }
+  assert.equal(answer.status, 403);
+  assert.match(answer.body, /this machine and the tailnet only/);
+  assert.equal(reads, 0, 'the token is not read');
+  const control = await rawPost(s.url);
+  assert.equal(control.status, 200, 'the same server answers a loopback peer');
+  assert.equal(reads, 1);
 });
