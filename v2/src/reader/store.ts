@@ -1,7 +1,7 @@
 // The asks table (docs/v2/milestone-2-plan.md, decision 28), a table of the
 // sessions module: one row per question to the code, its turns as JSON (the
-// question, the answer, the cost and the tokens of each), its state and the
-// session that answers it now. The sums are read from the turns.
+// question, the answer, the cost, the tokens and the citations of each), its
+// state and the session that answers it now. The sums are read from the turns.
 import type { DatabaseSync } from 'node:sqlite';
 import type { Ask, AskAnswer } from '../api/types.ts';
 import type { SessionId, UserId } from '../session/contract.ts';
@@ -27,7 +27,8 @@ export type AskRecord = Ask & { readonly project: string };
 const cents = (value: number) => Math.round(value * 1e6) / 1e6;
 
 function toAsk(row: Row): AskRecord {
-  const turns = JSON.parse(row.turns) as AskAnswer[];
+  // A turn stored before P215 has no citations.
+  const turns = (JSON.parse(row.turns) as AskAnswer[]).map((turn) => (turn.citations ? turn : { ...turn, citations: [] }));
   return {
     id: row.id, project: row.project, question: row.question, service: row.service,
     target: row.target === null ? null : JSON.parse(row.target) as AskTarget,
@@ -47,7 +48,7 @@ export class AskStore {
   }
 
   create(ask: { id: string; project: string; question: string; service: string | null; target: AskTarget | null; by: UserId; at: string }): AskRecord {
-    const turns: AskAnswer[] = [{ question: ask.question, answer: null, at: ask.at, costUsd: null, inputTokens: 0, outputTokens: 0 }];
+    const turns: AskAnswer[] = [{ question: ask.question, answer: null, at: ask.at, costUsd: null, inputTokens: 0, outputTokens: 0, citations: [] }];
     this.#db.prepare('INSERT INTO asks (id, project, question, service, target, session, state, turns, week_percent, by_user, created_at, updated_at) VALUES (?, ?, ?, ?, ?, NULL, ?, ?, NULL, ?, ?, ?)')
       .run(ask.id, ask.project, ask.question, ask.service, ask.target === null ? null : JSON.stringify(ask.target), 'starting', JSON.stringify(turns), ask.by, ask.at, ask.at);
     return this.get(ask.id) as AskRecord;

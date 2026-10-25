@@ -16,7 +16,9 @@
 //   session's running total), its tokens the turn's usage. A follow-up is
 //   sent to the live session, or, once the idle rule stopped it, to a new
 //   one briefed with the turns before. The week share is the seven-day
-//   window as the reader's session last reported it.
+//   window as the reader's session last reported it. The code an answer
+//   cites is checked and linked before the turn is written (citations.ts,
+//   P215): the app never sees an answer without its links.
 //
 //   Nobody answers a reader's requests: the policy refuses what would ask,
 //   and a question or a request that still reaches the service is refused
@@ -29,6 +31,7 @@ import type { SessionEvent, Usage } from '../session/events.ts';
 import { DEFAULT_SAFE_COMMANDS, type Policy } from '../session/policy.ts';
 import type { Store } from '../store/db.ts';
 import { readerBriefing, readerPrompt } from './briefing.ts';
+import { citationsOf } from './citations.ts';
 import { AskStore, type AskRecord } from './store.ts';
 import { ReaderError, excerpt, parseTarget, type AskTarget } from './target.ts';
 
@@ -41,19 +44,26 @@ const TICK_MS = 30_000;
 const HARNESS = 'claude-code' as const;
 
 // What the reader does on the host (workdir.ts): a file of a service at its
-// base branch; the ask's folder, made again for each session; and, at a
-// stop, the folder, the session's containers and its config volume removed.
+// base branch; the lines of a file at a commit, for a citation; the ask's
+// folder, made again for each session, with the commit each service was
+// exported at; and, at a stop, the folder, the session's containers and its
+// config volume removed.
 export type ReaderEffects = {
   fileAt(service: string, path: string): Promise<string>;
-  prepare(input: { readonly id: string; readonly services: readonly string[]; readonly briefing: string }): Promise<string>;
+  linesAt(service: string, commit: string, path: string): Promise<number>;
+  prepare(input: { readonly id: string; readonly services: readonly string[]; readonly briefing: string }): Promise<{ readonly dir: string; readonly commits: Readonly<Record<string, string>> }>;
   release(input: { readonly id: string; readonly session: SessionId | null }): Promise<void>;
 };
+
+// A service as the reader names it: its repository (owner/name) and, for a
+// folder of a monorepo, that folder, for the links of its citations.
+export type ReaderServiceInfo = { readonly name: string; readonly base: string; readonly repo: string; readonly path: string | null };
 
 export type ReaderDeps = {
   readonly store: Pick<Store, 'db' | 'events' | 'sessions'>;
   readonly adapter: SessionAdapter;
   readonly effects: ReaderEffects;
-  readonly workspace: { readonly id: string; readonly services: readonly { readonly name: string; readonly base: string }[] };
+  readonly workspace: { readonly id: string; readonly services: readonly ReaderServiceInfo[] };
   readonly model: string;
   readonly idleMs: number;
   readonly maxLive?: number;
@@ -65,6 +75,7 @@ type Live = {
   readonly ask: string;
   readonly handle: SessionHandle;
   readonly startedAt: string;
+  readonly commits: Readonly<Record<string, string>>;   // what its folder was exported at
   lastActivity: number;
   total: number;                         // the session's cost at the end of its last turn
   text: string[];                        // the assistant's text of the turn that runs
@@ -132,7 +143,7 @@ export class ReaderService {
     const ask = this.#asks.get(id);
     if (!ask || ask.project !== this.#deps.workspace.id) throw new ReaderError('not_found', `no ask ${id}`);
     if (ask.state === 'starting' || ask.state === 'running') throw new ReaderError('conflict', 'a turn of this ask runs: wait for its answer');
-    const turns: AskAnswer[] = [...ask.turns, { question, answer: null, at: this.#at(), costUsd: null, inputTokens: 0, outputTokens: 0 }];
+    const turns: AskAnswer[] = [...ask.turns, { question, answer: null, at: this.#at(), costUsd: null, inputTokens: 0, outputTokens: 0, citations: [] }];
     const live = this.#live.get(id);
     if (live && !live.ending) {
       live.running = true;
@@ -208,11 +219,10 @@ export class ReaderService {
     this.#starting.add(id);
     void (async () => {
       const ask = this.#asks.get(id) as AskRecord;
-      let workdir: string | undefined;
       try {
         const services = this.#servicesOf(ask.service);
         const named = this.#deps.workspace.services.filter((s) => services.includes(s.name));
-        workdir = await this.#deps.effects.prepare({ id, services, briefing: readerBriefing({ workspace: this.#deps.workspace.id, services: named }) });
+        const { dir: workdir, commits } = await this.#deps.effects.prepare({ id, services, briefing: readerBriefing({ workspace: this.#deps.workspace.id, services: named }) });
         const input: StartInput = {
           project: this.#deps.workspace.id, ticket: id, role: 'reader', harness: HARNESS, model: this.#deps.model, workdir,
           briefing: { projectPage: '', decisions: [], glossary: [], lessons: [], lastHandover: null },
@@ -221,7 +231,7 @@ export class ReaderService {
         };
         const handle = await this.#deps.adapter.start(input);
         const at = this.#at();
-        const live: Live = { ask: id, handle, startedAt: at, lastActivity: this.#now().getTime(), total: 0, text: [], open: new Map(), running: true, ending: false };
+        const live: Live = { ask: id, handle, startedAt: at, commits, lastActivity: this.#now().getTime(), total: 0, text: [], open: new Map(), running: true, ending: false };
         this.#live.set(id, live);
         this.#asks.update(id, { state: 'running', session: handle.id, at });
         this.#row(live, 'working');
@@ -283,18 +293,28 @@ export class ReaderService {
       }
       case 'RUN_FINISHED': {
         const total = event.result.total_cost_usd;
+        const answer = live.text.join('\n\n');
+        live.text = [];
+        const citations = await citationsOf(answer, {
+          services: this.#deps.workspace.services, read: this.#servicesOf((this.#asks.get(live.ask) as AskRecord).service), commits: live.commits,
+          linesAt: (service, commit, path) => this.#deps.effects.linesAt(service, commit, path),
+        });
         const ask = this.#asks.get(live.ask) as AskRecord;
         const turns = [...ask.turns];
         const last = turns.at(-1);
         if (last) {
           turns[turns.length - 1] = {
-            ...last, answer: live.text.join('\n\n'), costUsd: total === null ? null : rounded(Math.max(0, total - live.total)),
+            ...last, answer, citations, costUsd: total === null ? null : rounded(Math.max(0, total - live.total)),
             inputTokens: last.inputTokens + inputOf(event.usage), outputTokens: last.outputTokens + outputOf(event.usage),
           };
         }
         if (total !== null) live.total = total;
-        live.text = [];
         live.running = false;
+        // Stopped while its citations were checked: the answer is kept, the state the stop wrote too.
+        if (live.ending) {
+          this.#asks.update(live.ask, { turns, at: this.#at() });
+          return;
+        }
         this.#asks.update(live.ask, { state: 'answered', turns, at: this.#at() });
         this.#row(live, 'done');
         return;
