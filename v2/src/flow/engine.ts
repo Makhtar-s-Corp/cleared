@@ -3127,7 +3127,8 @@ export class FlowEngine {
       }
     }
     if (published.length === 0) return fail(`The branch was not published: no service of the ticket (${order.map((s) => s.name).join(', ')}) has a commit of its own.`, 'publish_refused');
-    await this.#judgeFast(ticket);
+    // A ticket of one service of several publishes one pull request, whose head is judged as a one-service ticket's.
+    const lane = await this.#judgeFast(ticket, published.length === 1 ? { head: (published[0] as (typeof published)[number]).pr.head } : undefined);
     const announcement = [
       `Ticket ${id}: ${ticket.title}`,
       '',
@@ -3167,7 +3168,7 @@ export class FlowEngine {
       pr: { number: first.pr.number, url: first.pr.url, checks: 'pending' },
       heads: stops.map((stop) => ({ pr: stop.pr.number, head: stop.head })),
       captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } },
-      sessions: this.#releaseSessions(id, round), train: view({ ...train, item: '', approver: null }), groups: card.groups, flags: card.flags, ...this.#cardLane(ticket, undefined),
+      sessions: this.#releaseSessions(id, round), train: view({ ...train, item: '', approver: null }), groups: card.groups, flags: card.flags, ...this.#cardLane(ticket, lane),
     }, reviewer.id);
     this.#trains.haltActive(id);
     this.#trains.add({ ...train, item: item.id });

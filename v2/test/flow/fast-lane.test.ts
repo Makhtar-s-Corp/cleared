@@ -12,6 +12,7 @@ import type { ReleaseItem } from '../../src/api/types.ts';
 import { FlowEngine, type FastVerdict, type FlowEffects, type MergeOutcome } from '../../src/flow/engine.ts';
 import type { FlowEvent } from '../../src/flow/events.ts';
 import { describeFlowEvent } from '../../src/lead/prompts.ts';
+import type { ServiceLock } from '../../src/release/lock.ts';
 import type { ServiceConfig, WorkspaceConfig } from '../../src/workspace/config.ts';
 import { REPORT_FIX, REPORT_PASS, finished, quickAuthor, reviewerScript, setup, started, text, until, type Scripts, type Setup } from './support.ts';
 
@@ -189,5 +190,28 @@ test('a Quick ticket of several services is never fast: it goes back to the full
   await t.engine.settled();
   assert.deepEqual(of(t, 'fast_lane_fallback').map((e) => e.reasons), [['several_services']]);
   assert.equal(judged.calls.length, 0);
+  await t.engine.close();
+});
+
+// A lock per service that records the review and asks the approval, as a train's does.
+const askingLock = (svc: ServiceConfig): ServiceLock => ({
+  service: svc.name,
+  async recordReview() { /* recorded */ },
+  async ask() { return { requestedAt: '2026-10-21T10:00:00.000Z' }; },
+  check() { return undefined; },
+  async sign() { /* signed */ },
+  async release() { return { outcome: 'queued', message: '' }; },
+  async rollback() { return { ok: true, message: '' }; },
+});
+
+test('a Quick ticket of one service in a workspace of several is judged at its published head as any one-service ticket', async () => {
+  const judged = rules([]);
+  const workspace: WorkspaceConfig = { id: 'guestbook', name: 'Guestbook', file: null, services: [service('guestbook'), service('filter-api')] };
+  const t = await setup({ scripts: { author: quickAuthor }, config: { workspace }, effects: { fastLane: judged.effect }, locks: askingLock });
+  const ticket = await t.tickets.create({ title: 'A troubleshooting section', project: 'guestbook', labels: ['Quick'], services: ['guestbook'] }, { kind: 'human', id: 'u1' });
+  const card = await toRelease(t, ticket.id);
+  assert.deepEqual(judged.calls.map((c) => [c.service?.name, c.workdir ? 'workdir' : c.head]), [['guestbook', 'workdir'], ['guestbook', 'abc123']]);
+  assert.deepEqual(card.fastLane, { state: 'fast', reasons: [] });
+  assert.deepEqual(of(t, 'fast_lane_fallback'), []);
   await t.engine.close();
 });
