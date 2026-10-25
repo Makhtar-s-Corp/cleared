@@ -31,8 +31,11 @@ export const MODEL_FILE = 'claude.token';
 const TERMINAL = 'setup';
 
 // What `claude setup-token` prints: a long-lived OAuth token of a Claude
-// subscription. An API key (sk-ant-api…) is told apart and refused.
-export const looksLikeSetupToken = (value: string): boolean => /^sk-ant-oat\d{2}-[A-Za-z0-9_-]{20,}$/.test(value);
+// subscription, one line (sk-ant-oat01-… today). Only what it cannot be is
+// refused, so a change of its prefix does not lock a newcomer out: a paste
+// with a space or a line break, one too short, and an API key (sk-ant-api…),
+// which the adapter does not read.
+export const looksLikeSetupToken = (value: string): boolean => /^[A-Za-z0-9_-]{20,4096}$/.test(value) && !value.startsWith('sk-ant-api');
 
 function credentialOf(deps: StepDeps): CredentialView {
   if (deps.fromEnvironment.has('CLEARED_CLAUDE_CREDENTIALS')) return { set: true, at: null, source: 'environment' };

@@ -91,7 +91,6 @@
 @media (max-width: 640px) {
   .setup { padding: var(--space-3) 16px 32px; }
   .setup-main { padding: var(--space-3); }
-  .setup-progress-state { display: none; }
   .setup-progress li:not([aria-current="step"]) .setup-progress-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .setup-rights { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .setup-rights li { display: block; margin-bottom: var(--space-2); }

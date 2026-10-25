@@ -15,7 +15,7 @@
   "model_set_environment": "The login comes from the file the CLEARED_CLAUDE_CREDENTIALS variable of Cleared's environment names. Change it there.",
   "model_replace": "Replace the login",
   "model_api": "An Anthropic API key is not offered: Cleared's Claude Code sessions use a subscription's login.",
-  "model_error_invalid": "This is not what claude setup-token prints. Its line starts with sk-ant-oat.",
+  "model_error_invalid": "This is not what claude setup-token prints. Paste its one line alone, without spaces. An API key is not taken.",
   "model_error_environment": "The login comes from Cleared's environment: change it there.",
   "model_error_other": "The login could not be saved. Try again in a moment.",
   "terminal_label": "Terminal for claude setup-token",

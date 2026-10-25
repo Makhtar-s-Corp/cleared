@@ -15,7 +15,7 @@
   "model_set_environment": "La connexion vient du fichier que nomme la variable CLEARED_CLAUDE_CREDENTIALS de l'environnement de Cleared. Modifiez-la là.",
   "model_replace": "Remplacer la connexion",
   "model_api": "Une clé d'API Anthropic n'est pas proposée : les sessions Claude Code de Cleared utilisent la connexion d'un abonnement.",
-  "model_error_invalid": "Ce n'est pas ce qu'imprime claude setup-token. Sa ligne commence par sk-ant-oat.",
+  "model_error_invalid": "Ce n'est pas ce qu'imprime claude setup-token. Collez sa ligne seule, sans espace. Une clé d'API n'est pas acceptée.",
   "model_error_environment": "La connexion vient de l'environnement de Cleared : modifiez-la là.",
   "model_error_other": "La connexion n'a pas pu être enregistrée. Réessayez dans un instant.",
   "terminal_label": "Terminal pour claude setup-token",
