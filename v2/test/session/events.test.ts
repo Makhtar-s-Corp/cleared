@@ -46,6 +46,8 @@ test('the measured steps and the custom names are the plan\'s', () => {
     'cleared.proof_captured',
     // Milestone 3: the production page checked after a release landed (P218, issue #334).
     'cleared.production_checked',
+    // Milestone 5: a session waits for its service's prepared image (C15, issue #422).
+    'cleared.prepared_image',
   ]);
 });
 

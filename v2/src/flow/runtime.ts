@@ -20,7 +20,9 @@ import { contractPort, readContract } from '../../images/fake/fake.ts';
 import { Docker } from '../container/docker.ts';
 import type { PreviewTarget } from '../container/preview.ts';
 import { planSiblings } from '../container/services.ts';
-import { exportBase } from '../workspace/checkout.ts';
+import { PreparedImages, preparedAfterMerge } from '../container/prepared.ts';
+import { exportBase, projectCheckout } from '../workspace/checkout.ts';
+import { forgeEnvironments } from '../workspace/publish.ts';
 import { createApiRoutes } from '../api/routes.ts';
 import type { Registry, Route } from '../modules/registry.ts';
 import { proofPath, readOrCreateProof } from '../modules/users.ts';
@@ -87,6 +89,15 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       weekStopPercent: loadPlanConfig(env).weekStopPercent,
     });
     engine.startTimer();
+    // A merge builds a service's prepared image again when it changed what the image holds (C15).
+    engine.subscribe(preparedAfterMerge({
+      images: new PreparedImages({ docker: new Docker(), stateDir: stateDir() }),
+      services: () => workspaceOf(flow).services.map((service) => ({ service: service.name, dir: service.dir, base: service.base, path: service.path })),
+      fetch: async (source) => {
+        const service = workspaceOf(flow).services.find((candidate) => candidate.name === source.service);
+        if (service) await projectCheckout({ url: service.url, dir: service.dir, base: service.base, env: (await forgeEnvironments(service.dir, env)).git });
+      },
+    }));
     // What the last process left running is stopped and put back (decision 12 of milestone 2).
     const recovering = engine;
     recovering.recovered = recovering.recover().catch((error) => console.error(`cleared-v2: the restart recovery failed (${error instanceof Error ? error.name : typeof error})`));

@@ -25,6 +25,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { parseAllowList } from '../../images/egress/proxy.ts';
 import { DockerError, assertSessionId, type ContainerSpec, type Docker, type Limits } from './docker.ts';
 import type { ImageChoice } from './devcontainer.ts';
+import { PreparedImages, type PreparedChoice } from './prepared.ts';
 import { ServiceError, dependencyChange, ticketLayerDockerfile, type ServiceSpec, type SiblingSpec } from './services.ts';
 
 // The session image pins Claude Code's version; the tag follows it.
@@ -94,7 +95,11 @@ export type SessionRuntimeSpec = {
   // uid:gid the session runs as: the service's own, so the workdir stays its.
   readonly user: string;
   readonly command: readonly string[];
+  // The session's image: this one when given; else the prepared image of
+  // the service (prepared.ts), when it has one, waited for while it builds
+  // (onWait says so); else Cleared's session image.
   readonly image?: string;
+  readonly prepared?: { readonly service: string; readonly stateDir: string; readonly onWait?: () => void };
   readonly egressImage?: string;
   readonly fakeImage?: string;
   readonly limits?: Limits;
@@ -116,9 +121,19 @@ export type StartedSibling = {
   readonly reason?: string;                      // why it is not its ticket layer
 };
 
+// The image the session runs: given by the caller, the service's prepared
+// one, or Cleared's (default), with why when the service has one but not ready.
+export type SessionImage = {
+  readonly image: string;
+  readonly kind: 'given' | 'prepared' | 'default';
+  readonly reason?: Extract<PreparedChoice, { kind: 'default' }>['reason'];
+  readonly waitedMs: number;
+};
+
 export type StartedSession = {
   readonly session: string;
   readonly container: string;
+  readonly image: SessionImage;
   readonly egress: string;
   readonly services: readonly string[];
   readonly siblings: readonly StartedSibling[];
@@ -180,6 +195,14 @@ function validate(spec: SessionRuntimeSpec): void {
     }
   }
   if (spec.skills !== undefined && !isAbsolute(spec.skills)) throw new RuntimeError(`the skills folder must be an absolute path, got ${JSON.stringify(spec.skills)}`);
+  if (spec.prepared && (!SIBLING_NAME.test(spec.prepared.service) || !isAbsolute(spec.prepared.stateDir))) throw new RuntimeError(`a prepared image is named by a service name and an absolute state folder, got ${JSON.stringify(spec.prepared.service)}`);
+}
+
+async function imageOf(docker: Docker, spec: SessionRuntimeSpec): Promise<SessionImage> {
+  if (spec.image !== undefined) return { image: spec.image, kind: 'given', waitedMs: 0 };
+  if (!spec.prepared) return { image: SESSION_IMAGE, kind: 'default', waitedMs: 0 };
+  const choice = await new PreparedImages({ docker, stateDir: spec.prepared.stateDir }).choose(spec.prepared.service, spec.prepared.onWait);
+  return choice.kind === 'prepared' ? { image: choice.image, kind: 'prepared', waitedMs: choice.waitedMs } : { image: SESSION_IMAGE, kind: 'default', reason: choice.reason, waitedMs: choice.waitedMs };
 }
 
 const SIBLING_NAME = /^[a-z0-9](?:[a-z0-9-]{0,38}[a-z0-9])?$/;
@@ -294,6 +317,9 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
   if (existing.containers + existing.networks > 0)
     throw new RuntimeError(`session ${session} already has ${existing.containers} containers and ${existing.networks} networks: stop it first`);
 
+  // Chosen before anything is created: a build waited for holds nothing of the session.
+  const image = await imageOf(docker, spec);
+
   // What this call creates, the only objects its cleanup removes.
   const created = { containers: [] as string[], networks: [] as string[], images: [] as string[] };
   const siblings: { readonly spec: SiblingSpec; readonly container: string; readonly image: SiblingImage }[] = [];
@@ -387,7 +413,7 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
 
     const noProxy = ['localhost', '127.0.0.1', ...spec.services.map((service) => service.alias), ...siblings.map((sibling) => sibling.spec.name)].join(',');
     await container({
-      name: names.container, session, role: 'session', image: spec.image ?? SESSION_IMAGE,
+      name: names.container, session, role: 'session', image: image.image,
       networks: [{ name: names.network }],
       user: spec.user, readOnly: true, tmpfs: ['/tmp'], dropAllCapabilities: true, noNewPrivileges: true,
       limits: spec.limits ?? DEFAULT_LIMITS,
@@ -425,6 +451,7 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
   return {
     session,
     container: names.container,
+    image,
     egress: names.egress,
     services: spec.services.map((service) => names.service(service.alias)),
     siblings: startedSiblings,

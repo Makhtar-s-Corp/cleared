@@ -76,6 +76,9 @@ export const CUSTOM_NAMES = [
   // checked once the release landed healthy, journaled by the flow on the
   // session the release was approved on.
   'cleared.production_checked',
+  // Milestone 5 (C15, issue #422): the session waits for its service's
+  // prepared image, built because what it holds changed.
+  'cleared.prepared_image',
 ] as const;
 export type CustomName = (typeof CUSTOM_NAMES)[number];
 
@@ -223,6 +226,7 @@ export type CustomValue = {
   // without its query, the capture's name in the ticket's proof folder or why
   // there is none.
   'cleared.production_checked': ProductionCheck;
+  'cleared.prepared_image': { readonly service: string; readonly state: 'waiting' };
 };
 
 type Base = { readonly timestamp?: number };
