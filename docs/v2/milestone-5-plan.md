@@ -110,7 +110,7 @@ None for the lane: its real run is on this server, labelled. The fresh machine i
 
 ### 4.7 Delivered
 
-Matrix line P248, pull request PRNUM. Two decisions of section 3 changed, as the decisions log of 2026-10-25 says: nothing is published (decision 3), since the app finds the service on `127.0.0.1` and refuses any other address of its own, so the three containers share the host's network and bind `127.0.0.1` only; and the one command is `docker compose -f v2/compose.yaml run --rm install` (decision 4), since `up -d` cannot check the port first nor print the address. The broker runs under the service's account, not its own (decision 2), since the lock accepts the service's requests by its own uid.
+Matrix line P248, pull request 410. Two decisions of section 3 changed, as the decisions log of 2026-10-25 says: nothing is published (decision 3), since the app finds the service on `127.0.0.1` and refuses any other address of its own, so the three containers share the host's network and bind `127.0.0.1` only; and the one command is `docker compose -f v2/compose.yaml run --rm install` (decision 4), since `up -d` cannot check the port first nor print the address. The broker runs under the service's account, not its own (decision 2), since the lock accepts the service's requests by its own uid.
 
 ## 5. The browser setup assistant (`v2-j5-assistant`)
 

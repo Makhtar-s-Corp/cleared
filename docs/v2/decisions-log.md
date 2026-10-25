@@ -6766,5 +6766,5 @@ The three issues were then closed by hand as not planned. Nothing ran against Li
 
 **Resources.** Docker on this server. The containers and images the runs made carried `cleared.dev=v2` and were removed by that label and the project's afterwards, with three exceptions said plainly. Run 3's inner builds used the classic builder, whose intermediate containers carried no label and which Docker removed at once (buildx since). Runs 1 and 2 failed in the package step and left no container or image. The build cache of the builds stays on the server: it is no labelled object, and pruning it would touch other builds. The base image `node:24` was read by the builds, not pulled. No Claude Code login read, no home mounted, no Slack, Cursor or Codex account. Network: `npm ci`, Debian's and Docker's apt repositories, GitHub's release of `gh` and its key, `git fetch` and GitHub for the issue and the pull request. Ports 18791, 18792 and 18794 on `127.0.0.1` during the runs, the tests' own ephemeral loopback ones, no tunnel, no secret.
 
-- Pull request: PRNUM, against `v2`.
+- Pull request: 410, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-compose`.
