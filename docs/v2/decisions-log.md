@@ -6781,3 +6781,26 @@ The three issues were then closed by hand as not planned. Nothing ran against Li
 
 - Pull request: 410, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-compose`.
+
+## 2026-10-25: the VAPID key test with a leading zero byte signs with fixed scalars, no random draw (the author's choices, lane `v2-j5-vapid-flaky`, P249, issue #411)
+
+**The need.** Issue #411: the test "a VAPID key whose private scalar starts with a zero byte is kept on 32 bytes and still signs" (`test/notify.test.ts`, at the repository's root, run by the `checks` workflow) failed once in CI on pull request 410 and passed on the rerun. Make it deterministic with a fixed key. The same brief asked for question 1 of [milestone-5-plan.md](milestone-5-plan.md) section 19 to be marked as the owner's decision of 2026-10-25 at 19:33, option (a), images built on the machine, nothing published, and for no file under `v2/src/setup`, `v2/src/modules` or `v2/app/web/screens/setup` to be touched. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md).
+
+**The branch.** The brief asked for `v2/j5-vapid-flaky`. Git refuses that name beside the local branch `v2`, so the lane runs on `v2-j5-vapid-flaky`, B4.1's form.
+
+**The cause, from the CI's log.** The first attempt of run 40223470582 (workflow `checks`, at `edee589`) says `Node drops the leading zero: the case is exercised` and `30 !== 31`, at `test/notify.test.ts:87`. The test made its scalar from a zero byte and 31 random bytes, then expected Node's `getPrivateKey()` to give 31 bytes back. When the first random byte was a zero too, about once in 256 draws, Node dropped both zeros and gave 30. The product was right: `scalar()` in `lib/notify/adapters/webpush.ts` pads any length back to 32 bytes. The test's own check of its setup was what failed.
+
+**Decision.**
+1. **Two fixed scalars, no draw.** The case runs on a zero byte then 31 bytes of `0x42`, and on two zero bytes then 30 bytes of `0x42`. Both are valid P-256 scalars, below the group's order. The loop that drew again on a refused scalar and the `randomBytes` import it alone used are gone. The two-zero case is the one the CI drew.
+2. **The setup check names the length it expects**, 31 or 32 minus the zeros. Each key is kept on 32 bytes and signs, kept long or kept short as an earlier version did, checked with the public key as before.
+3. **No change to `lib/`.** Nothing in the product was wrong.
+4. **Question 1 of the plan: no edit.** At `origin/v2` `c7de110`, section 19 already says "Answered by the owner on 2026-10-25 at 19:33, relayed by the lead: (a)", the images built on the machine and nothing published to any registry, and sections 18 and 20 say the same. Commit `edee589` of pull request 410 wrote it, with its own entry above. Nothing is left to mark.
+
+**Tests first.** The old assertion, run in a scratch script against the two fixed scalars: one zero passes; two zeros fail with the CI's own words, `Node drops the leading zero: the case is exercised`, `30 !== 31`. `4584893` holds the new test, the only change of code in this lane.
+
+**Checks** (Node 24.21.0, at `origin/v2` `c7de110`). The case alone, 300 runs one after another: 300 pass, 0 fail. The `checks` workflow's steps: `tsc -p .` with the types of `v2/` passes; `node --no-warnings --test --test-timeout=120000 test/*.test.ts`: 405 tests, 403 pass, 2 skipped, 0 fail. `npm run guard -- --base origin/v2` in `v2/`: nothing refused (841 v2 files, and the lines added since `origin/v2`; run without a private-term list, `CLEARED_REPO` unset). The guard does not read `docs/v2/`, so the matrix line and this entry were searched for the owner's name and the first piloted project's: none.
+
+**Resources.** No Docker object, no port, no Claude Code login read, no Slack, Cursor or Codex account. Network: `npm ci` of `v2/`'s lock file, `git fetch`, and GitHub for the issue, the CI's log and the pull request. No tunnel, no secret.
+
+- Pull request: against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-vapid-flaky`.
