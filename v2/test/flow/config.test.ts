@@ -88,6 +88,9 @@ test('loadFlowConfig reads the environment and refuses what is missing or unsafe
   assert.equal(config?.workdirRoot, '/state/work');
   assert.equal(config?.steps, true, 'a ticket runs in steps (lane 23)');
   assert.equal(loadFlowConfig({ ...env, CLEARED_V2_BUDGET_USD: '7.5' })?.budgetUsd, 7.5);
+  // The app's address the proof receipt links its captures to (P210); none by default.
+  assert.equal(loadFlowConfig({ ...env, CLEARED_NOTIFY_LINK_BASE: 'https://cleared.example.invalid' })?.linkBase, 'https://cleared.example.invalid');
+  assert.equal(loadFlowConfig(env)?.linkBase, undefined);
   assert.equal(loadFlowConfig({}), undefined, 'not configured: the flow does not start');
   assert.throws(() => loadFlowConfig({ ...env, CLEARED_V2_BUDGET_USD: 'lots' }), FlowConfigError);
   assert.throws(() => loadFlowConfig({ ...env, CLEARED_V2_PROJECT_DIR: 'relative' }), FlowConfigError);

@@ -31,6 +31,8 @@ import { ledgerPath, type Store } from '../store/db.ts';
 import { InboxStore } from '../inbox/store.ts';
 import { loadFlowConfig, workspaceOf, type FlowConfig } from './config.ts';
 import { realEffects } from './effects.ts';
+import { previewAddress } from './proof-capture.ts';
+import { readConfig } from '../config.ts';
 import { FlowEngine, type FlowDeps, type FlowEffects } from './engine.ts';
 
 export type Runtime = {
@@ -66,7 +68,13 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
 
   function engineOf(registry: Registry): FlowEngine | undefined {
     if (engine || !config || !store) return engine;
-    const made = (options.effects ?? ((c) => realEffects(c, { env })))(config);
+    // The proof receipt's after page (P210): the session's preview through this service, on loopback.
+    const preview = (session: string) => {
+      const target = previewTargetOf(session);
+      if (!target) return undefined;
+      try { return previewAddress(readConfig(env), target, proofOf()); } catch { return undefined; }
+    };
+    const made = (options.effects ?? ((c) => realEffects(c, { env, preview })))(config);
     const flow = config;
     engine = new FlowEngine({
       store, inbox: new InboxStore(store.db), registry, config,
@@ -83,6 +91,13 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     const recovering = engine;
     recovering.recovered = recovering.recover().catch((error) => console.error(`cleared-v2: the restart recovery failed (${error instanceof Error ? error.name : typeof error})`));
     return engine;
+  }
+
+  function previewTargetOf(session: string): PreviewTarget | undefined {
+    const row = store?.sessions.get(session);
+    if (!row?.previewKey || !row.service || !config) return undefined;
+    const run = workspaceOf(config).services.find((service) => service.name === row.service)?.run;
+    return run ? { session: row.id, key: row.previewKey, alias: row.service, port: run.port } : undefined;
   }
 
   const proofOf = (): string => (proof ??= readOrCreateProof(proofPath(ledgerPath(env))));
@@ -175,12 +190,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     engine: engineOf,
     proof: proofOf,
     routes: (match) => api.filter((route) => match(route.path)),
-    previewTarget(session) {
-      const row = store?.sessions.get(session);
-      if (!row?.previewKey || !row.service || !config) return undefined;
-      const run = workspaceOf(config).services.find((service) => service.name === row.service)?.run;
-      return run ? { session: row.id, key: row.previewKey, alias: row.service, port: run.port } : undefined;
-    },
+    previewTarget: previewTargetOf,
   };
 }
 
