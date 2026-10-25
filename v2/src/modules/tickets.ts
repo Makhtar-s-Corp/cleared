@@ -4,12 +4,16 @@
 // Milestone 2 (lane 14, decision 18): the workspace and its services, as
 // tables of this module beside the tracker's, their rows written at the
 // start from the configuration, and GET /api/workspace.
+// Milestone 4 (issue #381, P230): the mirrors on GitHub Issues and Linear
+// (tickets/mirror.ts), started with the service when their settings name a
+// token file, and stopped with it.
 import type { DatabaseSync } from 'node:sqlite';
 import { approvalEnvironment } from '../approval/service.ts';
-import { FlowConfigError, loadFlowConfig } from '../flow/config.ts';
+import { FlowConfigError, loadFlowConfig, workspaceOf } from '../flow/config.ts';
 import { runtime } from '../flow/runtime.ts';
 import { TICKET_TABLES, WORKSPACE_TABLES, recordWorkspace } from '../tickets/local-store.ts';
-import type { Module } from './registry.ts';
+import { MIRROR_TABLES, MirrorConfigError, createMirror, loadMirrorConfig, type Mirror } from '../tickets/mirror.ts';
+import type { Module, Registry } from './registry.ts';
 
 // Writes the configured workspace's rows; nothing when the service is not
 // set up to run tickets. The one-service workspace of the milestone 1
@@ -20,8 +24,38 @@ export function recordWorkspaceOf(db: DatabaseSync, env: NodeJS.ProcessEnv, now:
   if (workspace) recordWorkspace(db, workspace, now());
 }
 
+let ledger: DatabaseSync | undefined;
+let mirror: Mirror | undefined;
+
+// The mirror the settings ask for, on the registry's ticket store and the
+// flow's engine; none without settings or a project, and a bad setting is
+// said in one line (never a token) and leaves the mirror off.
+export function startMirror(registry: Registry, db: DatabaseSync, env: NodeJS.ProcessEnv = process.env): Mirror | undefined {
+  let config;
+  try {
+    config = loadMirrorConfig(env);
+  } catch (error) {
+    if (!(error instanceof MirrorConfigError)) throw error;
+    console.error(`cleared-v2: the mirror is off: ${error.message}`);
+    return undefined;
+  }
+  if (!config) return undefined;
+  const flow = loadFlowConfig(env);
+  if (!flow) {
+    console.error('cleared-v2: the mirror is off: it needs the project the service runs (CLEARED_V2_PROJECT)');
+    return undefined;
+  }
+  const made = createMirror(config, {
+    db, tickets: registry.ticketStore, project: flow.project,
+    services: workspaceOf(flow).services.map((s) => ({ name: s.name, repo: s.repo })),
+    flow: () => runtime.engine(registry),
+  });
+  made?.start(config.pollMs);
+  return made;
+}
+
 const tickets: Module = {
-  tables: [...TICKET_TABLES, ...WORKSPACE_TABLES],
+  tables: [...TICKET_TABLES, ...WORKSPACE_TABLES, ...MIRROR_TABLES],
   routes: runtime.routes((path) => path === '/api/workspace'),
   provide: ({ store }) => {
     try {
@@ -32,7 +66,17 @@ const tickets: Module = {
       console.error(`cleared-v2: ${error.message}`);
       process.exit(64);
     }
+    ledger = store.db;
     return { ticketStore: approvalEnvironment(store.db).ticketStore };
+  },
+  start: (registry) => {
+    if (!mirror && ledger) mirror = startMirror(registry, ledger);
+  },
+  // The pass that runs is awaited, so that the store does not close under it.
+  stop: async () => {
+    const ending = mirror;
+    mirror = undefined;
+    await ending?.close();
   },
 };
 
