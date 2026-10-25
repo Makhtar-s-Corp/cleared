@@ -6179,3 +6179,58 @@ P224's axe test reads the phone's screens at 390 in both languages and themes, t
 
 - Pull request: 377, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-visual-redesign`.
+
+## 2026-10-25: the tickets mirrored on GitHub Issues and Linear, and the conflict rule (the author's choices, lane `v2-j4-issue-mirrors`, P229 to P231, issue #381)
+
+**The need.** Issue #381, milestone 4: the app's tickets kept in step with GitHub Issues and Linear both ways, the last change made by a person winning, an agent's change never beating a person's, and the conflict rule written in the docs (B5.8b, D17, B6.4, B6.4p). GitHub is used against the example repositories only; Linear against a fake server only, with no real key. The brief's section 6 is not in the repository: the plan takes milestone 4 from the matrix's B6.4 and B6.4p, which repeat it (the issue's "line 158" is B6.4p). `milestone-2-plan.md` has no sections 9 and 10, so the conventions followed are those of sections 9 and 10 of `milestone-1-plan.md`, as earlier lanes noted. The plan came first, in its own commit: [milestone-4-plan.md](milestone-4-plan.md), section 2 (the cleanup lane, issue #382, adds its own section).
+
+**Decision.**
+1. **Polling.** A pass every minute by default (`CLEARED_V2_MIRROR_POLL_SECONDS`, 15 at least), started and stopped by the tickets module (`modules/tickets.ts`, start and stop), so `main.ts` and the module list stay as they are. No webhook: it would need an address the tracker can reach, and the brief allows no tunnel and no new listener.
+2. **What goes both ways.** New tickets and new issues, but only those created after a tracker's first pass, so turning the mirror on copies nothing old. Then the state, both ways. Title, body and GitHub's labels are copied at creation only: the app has no edit of them, and the approval binds them (`content_hash`). Comments, assignees, Linear's labels and projects are not mirrored.
+3. **The rule** (`decide()` in `src/tickets/mirror.ts`, written for a person in [mirrors.md](mirrors.md)). It is a three-way comparison: the mirror keeps, per ticket and tracker, the state both sides last agreed on (`mirror_links.agreed`).
+   - A side that moved from it wins.
+   - When both moved: a person beats an agent whatever the times; the later of two people wins; between two agents, or at the same second, the app wins.
+   - Comparing states, not events, means the mirror's own writes are never read as a change once the agreed state is recorded.
+4. **Who is a person.**
+   - In the app, only the owner's signed row. Anything else is an agent, a guest user of the app included, since the store cannot prove who they are.
+   - On a tracker, an agent is a bot, an app or an unnamed actor. Any other actor is a person, the mirror's own account included: `gh` here is signed in as a person's account.
+   - A change by the mirror's account is the mirror's own write only when `mirror_writes` holds a write of the same state within a minute of it. Such a change that differs from the agreed state is a stale read, and is ignored.
+5. **Never through a tracker.**
+   - An approval: a move to Ready to Ship is put back, with a comment in `CLEARED_V2_APP_LANGUAGE`.
+   - A move of an approved ticket, or of one whose release is landing: put back, with a comment.
+   - A session started: a ticket moved to Todo there waits in the app's Todo, since starting one needs a user of the app.
+   - A signed row: the mirror writes as `agents`, `cleared-mirror`. Who made the change on the tracker is kept in `mirror_applied`, and the rule reads it from there.
+   - A person's move of a ticket the flow works on goes through `FlowEngine.setAside`, which takes the mirror's words (an optional third argument, the one change to `flow/engine.ts`), then the state is written. When the engine refuses (a landing train), the tracker is put back.
+6. **GitHub.**
+   - One tracker per service repository. A ticket goes to its first service's repository, else to the workspace's first service's.
+   - A state is one `status:<state>` label on an open issue, as v1 wrote it. Done is the issue closed as completed, not planned is no state, and an open issue with no status label is Todo.
+   - A move puts the new label on before taking the old one off, so the issue never reads as having no state in between.
+   - Who made each change is replayed from the issue's events. Events made at the same second by one account are one change, as a label swap on GitHub's page is.
+7. **Linear.**
+   - One team (`CLEARED_V2_MIRROR_LINEAR_TEAM`); its workflow states are matched to the app's by name, and the others (Backlog, Triage, Canceled) read as no state.
+   - Who made each change comes from the issue's history: `actor` is a person, unless it is the key's own user; `botActor` is an agent.
+   - The key is sent as its file holds it, so an OAuth token is written `Bearer <token>`.
+8. **Secrets and addresses.** The tokens are read from files, never from a variable, and no log or error carries one (tested). Another API address than GitHub's or Linear's must be on loopback, which is what the tests' fakes use.
+9. **Branch.** `v2/j4-issue-mirrors` cannot be made while a local branch `v2` exists (git refuses a ref under another ref), so the branch is `v2-j4-issue-mirrors`, B4.1's form.
+
+**Tests first.** `9e35567` committed the tests before any code: the rule, the pass on the real ticket store with a tracker in memory, the two trackers against fakes of GitHub's REST API and Linear's GraphQL API on loopback (port 0), B6.4p's steps 1 to 3 on both, the catalog, and Set aside with given words. On the old code the mirror's files failed to load, and the Set aside test failed: the owner's note was written whatever was given. Two test mistakes were found when the code ran, and fixed in the code's commit:
+- one case of `mirror-rule.test.ts` expected `none` where its own comment described `push`;
+- the Linear test of a long list counted one issue of the test before it, made at the same instant.
+
+The pinned list of the tickets module's tables in `test/tickets/services.test.ts` now has the mirror's tables after the others.
+
+**The real GitHub run** (2026-10-25 12:17 to 12:18 UTC, the example repository `cleared-example-guestbook` of the organisation this repository lives in, the mirror's code on a ledger in memory, the token of the `gh` login read from a file and never printed):
+- Step 1: LOCAL-1 in In Progress became issue #23 with `status:In Progress`.
+- Step 3: a person swapped the label to In Review while an agent moved the ticket to Needs Approval after it. After the pass, both sides held In Review.
+- The refusal: a person put Ready to Ship. The app stayed in In Review, the label came back to In Review, and the French comment was written on #23.
+- Step 2: issue #24, created on GitHub with no label, came into the app as LOCAL-2 in Todo.
+- Both tickets were then moved to Done in the app, and both issues were closed as completed, with `status:Done`.
+- The mirror logged nothing.
+
+The run made the labels `status:In Progress`, `status:In Review`, `status:Ready to Ship` and `status:Done` in that repository. Nothing ran against Linear for real.
+
+**Checks.** See the pull request. `npm run guard -- --base origin/v2` is run before the READY.
+
+**Resources.** No Docker object, no port opened outside the tests (port 0 on loopback), no tunnel, no secret written; no Linear key asked for or used; two issues made and closed on the example repository, nothing on any other.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-issue-mirrors`.

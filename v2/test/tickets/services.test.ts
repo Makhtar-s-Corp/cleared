@@ -15,6 +15,7 @@ import { handle } from '../../src/server.ts';
 import { applyTables, openStore } from '../../src/store/db.ts';
 import { MemoryTicketStore } from '../../src/tickets/contract.ts';
 import { LocalTicketStore, TICKET_TABLES, WORKSPACE_TABLES } from '../../src/tickets/local-store.ts';
+import { MIRROR_TABLES } from '../../src/tickets/mirror.ts';
 import type { WorkspaceConfig } from '../../src/workspace/config.ts';
 import { CONFIG, setup, type Setup } from '../flow/support.ts';
 
@@ -56,7 +57,8 @@ test('the local store writes ticket_services, creating it when only the tracker 
 });
 
 test('the tickets module declares the workspace tables apart from the v1 tracker tables, and serves GET /api/workspace', () => {
-  assert.deepEqual(tickets.tables, [...TICKET_TABLES, ...WORKSPACE_TABLES]);
+  // The mirrors' tables come after (milestone 4, P229).
+  assert.deepEqual(tickets.tables, [...TICKET_TABLES, ...WORKSPACE_TABLES, ...MIRROR_TABLES]);
   for (const statement of WORKSPACE_TABLES) assert.match(statement, /^CREATE TABLE IF NOT EXISTS (workspaces|services|ticket_services) /);
   assert.deepEqual(tickets.routes.map((r) => `${r.method} ${r.path}`), ['GET /api/workspace']);
 });

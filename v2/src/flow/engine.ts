@@ -1486,9 +1486,12 @@ export class FlowEngine {
   // that lands are refused. The multi-service proof sets its earlier runs'
   // tickets aside, so that each run starts with nothing of theirs open
   // (scripts/proof-base.ts).
-  async setAside(id: TicketId, by: UserId): Promise<{ readonly sessions: number; readonly items: number }> {
-    const note = 'The owner set this ticket aside: its sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.';
-    return this.#takeOut(id, by, { message: 'The owner set the ticket aside: this session was stopped.', code: 'set_aside', reason: 'set_aside', note, refusal: 'it is not set aside' });
+  // The mirror of a tracker (tickets/mirror.ts, P231) gives its own words:
+  // a person moved the ticket there.
+  async setAside(id: TicketId, by: UserId, words?: { readonly note: string; readonly message: string }): Promise<{ readonly sessions: number; readonly items: number }> {
+    const note = words?.note ?? 'The owner set this ticket aside: its sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.';
+    const message = words?.message ?? 'The owner set the ticket aside: this session was stopped.';
+    return this.#takeOut(id, by, { message, code: 'set_aside', reason: 'set_aside', note, refusal: 'it is not set aside' });
   }
 
   // Close (POST /api/tickets/:id/close, issue #249): a ticket that should

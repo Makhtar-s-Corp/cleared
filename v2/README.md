@@ -156,6 +156,10 @@ A slash command `@cleared <task>` posted to `POST /hooks/chat` creates a ticket 
 - **The answers.** At once: the ticket's id, its title and the Tower's address. Then, posted to `response_url`: the author session's address when it starts, and the pull request's when the release waits for approval, each once, a restart included. The addresses are the app's (`CLEARED_V2_APP_ORIGIN`, else `http://127.0.0.1:8792`); the words are in `src/flow/messages/chat.en.json` and `.fr.json`, in the app's language.
 - **The limits.** The ticket is a batch of one: it starts within the Consumption screen's lanes and the week stop, and the answer says when it waits. The service listens on this machine only: how a chat platform reaches it is the owner's setup.
 
+## GitHub Issues and Linear
+
+With `CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE` or `CLEARED_V2_MIRROR_LINEAR_TOKEN_FILE` set, the service keeps its tickets on GitHub Issues or Linear too, and brings back what people change there, every minute (P229 to P231, `src/tickets/mirror.ts`). A person's change wins over an agent's; a tracker never approves a ticket, never starts a session, and never writes as the owner. Settings, what is mirrored and the conflict rule: [docs/v2/mirrors.md](../docs/v2/mirrors.md). Linear is tested against a fake only.
+
 ## The harness pick
 
 `POST /api/tickets` with `harnesses`, 2 to 4 names, runs a variant of the ticket on each (P213, `src/flow/harness-pick.ts`). Once all have ended, the flow keeps by itself the variant that committed a change and whose own run of the declared test command passed, with the fewest tokens, else the shortest agent time; the others stop and their containers go. None green: the owner chooses in the inbox. The wins per ticket type are on the Consumption screen. Tested with fake adapters only.

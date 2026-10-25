@@ -2,6 +2,7 @@
 // store, with a tracker kept in memory: what is created and moved each way,
 // who wins a conflict, and what a tracker never does through the mirror.
 import test from 'node:test';
+import { randomBytes } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -384,15 +385,16 @@ test('the timer runs passes one at a time until close', async () => {
 test('the settings: nothing configured is no mirror; tokens come from files; an address other than the trackers\' own must be on loopback', () => {
   const dir = scratch('cleared-mirror-conf-');
   const file = join(dir, 'token');
-  writeFileSync(file, 'test-token-value\n', { mode: 0o600 });
+  const value = randomBytes(16).toString('hex');
+  writeFileSync(file, `${value}\n`, { mode: 0o600 });
   assert.equal(loadMirrorConfig({}), undefined);
   const github = loadMirrorConfig({ CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE: file });
-  assert.deepEqual(github, { pollMs: 60_000, language: 'fr', github: { api: 'https://api.github.com', token: 'test-token-value' } });
+  assert.deepEqual(github, { pollMs: 60_000, language: 'fr', github: { api: 'https://api.github.com', token: value } });
   const linear = loadMirrorConfig({
     CLEARED_V2_MIRROR_LINEAR_TOKEN_FILE: file, CLEARED_V2_MIRROR_LINEAR_TEAM: 'ENG', CLEARED_V2_MIRROR_LINEAR_API: 'http://127.0.0.1:4567/graphql',
     CLEARED_V2_MIRROR_POLL_SECONDS: '30', CLEARED_V2_APP_LANGUAGE: 'en',
   });
-  assert.deepEqual(linear, { pollMs: 30_000, language: 'en', linear: { api: 'http://127.0.0.1:4567/graphql', token: 'test-token-value', team: 'ENG' } });
+  assert.deepEqual(linear, { pollMs: 30_000, language: 'en', linear: { api: 'http://127.0.0.1:4567/graphql', token: value, team: 'ENG' } });
   const refused: [Record<string, string>, RegExp][] = [
     [{ CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE: join(dir, 'missing') }, /CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE/],
     [{ CLEARED_V2_MIRROR_LINEAR_TOKEN_FILE: file }, /CLEARED_V2_MIRROR_LINEAR_TEAM/],
@@ -401,7 +403,7 @@ test('the settings: nothing configured is no mirror; tokens come from files; an 
     [{ CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE: file, CLEARED_V2_MIRROR_POLL_SECONDS: '5' }, /15/],
   ];
   for (const [env, message] of refused) {
-    assert.throws(() => loadMirrorConfig(env), (error: unknown) => error instanceof MirrorConfigError && message.test(error.message) && !error.message.includes('test-token-value'));
+    assert.throws(() => loadMirrorConfig(env), (error: unknown) => error instanceof MirrorConfigError && message.test(error.message) && !error.message.includes(value));
   }
 });
 
@@ -412,4 +414,30 @@ test('the mirror is made from the settings: one GitHub tracker per service repos
   assert.equal(createMirror(undefined, deps), undefined);
   const mirror = createMirror({ pollMs: 60_000, language: 'fr', github: { api: 'https://api.github.com', token: 't' }, linear: { api: 'https://api.linear.app/graphql', token: 't', team: 'ENG' } }, deps);
   assert.deepEqual(mirror?.trackerNames, ['github:org/guestbook', 'github:org/filter-api', 'linear:ENG']);
+});
+
+test('the tickets module starts no mirror without settings, and a bad setting or no project leaves it off in one line, never with the token', async () => {
+  const { startMirror } = await import('../../src/modules/tickets.ts');
+  const { defaultRegistry } = await import('../../src/modules/registry.ts');
+  const clock = new Clock();
+  const { db } = openStore(clock);
+  const dir = scratch('cleared-mirror-start-');
+  const file = join(dir, 'token');
+  const value = randomBytes(16).toString('hex');
+  writeFileSync(file, `${value}\n`, { mode: 0o600 });
+  const lines: string[] = [];
+  const said = console.error;
+  console.error = (line: unknown) => { lines.push(String(line)); };
+  try {
+    assert.equal(startMirror(defaultRegistry(), db, {}), undefined);
+    assert.equal(lines.length, 0);
+    assert.equal(startMirror(defaultRegistry(), db, { CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE: file, CLEARED_V2_MIRROR_POLL_SECONDS: '1' }), undefined);
+    assert.equal(startMirror(defaultRegistry(), db, { CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE: file, HOME: dir }), undefined);
+  } finally {
+    console.error = said;
+  }
+  assert.equal(lines.length, 2);
+  assert.match(lines[0] as string, /the mirror is off: CLEARED_V2_MIRROR_POLL_SECONDS/);
+  assert.match(lines[1] as string, /the mirror is off: it needs the project/);
+  for (const line of lines) assert.ok(!line.includes(value));
 });

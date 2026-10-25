@@ -4,6 +4,7 @@
 // tracker; an issue created there appears in the app; a person's move on
 // the tracker wins over an agent's move in the app between two passes.
 import test from 'node:test';
+import { randomBytes } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { GitHubTracker } from '../../src/tickets/mirror-github.ts';
 import { LinearTracker } from '../../src/tickets/mirror-linear.ts';
@@ -23,11 +24,12 @@ type Remote = {
 };
 
 async function linear(clock: Clock): Promise<Remote> {
-  const fake = new FakeLinear({ clock: () => clock.iso, accounts: { 'fake-linear-key': { id: 'user-mirror', name: 'Cleared' } } });
+  const key = randomBytes(16).toString('hex');
+  const fake = new FakeLinear({ clock: () => clock.iso, accounts: { [key]: { id: 'user-mirror', name: 'Cleared' } } });
   const api = await fake.listen();
   const jane = { user: { id: 'user-jane', name: 'Jane' } };
   return {
-    tracker: new LinearTracker({ api, token: 'fake-linear-key', team: 'ENG' }),
+    tracker: new LinearTracker({ api, token: key, team: 'ENG' }),
     stateOf: (id) => fake.stateOf(id),
     personCreates: (title, state) => fake.create(jane, { title, state }).id,
     personMoves: (id, state) => fake.move(id, jane, state),
@@ -38,10 +40,11 @@ async function linear(clock: Clock): Promise<Remote> {
 async function github(clock: Clock): Promise<Remote> {
   const repo = 'org/guestbook';
   const jane = { login: 'jane', type: 'User' as const };
-  const fake = new FakeGitHub({ clock: () => clock.iso, accounts: { 'fake-github-token': { login: 'cleared-bot', type: 'User' } }, repos: [repo] });
+  const key = randomBytes(16).toString('hex');
+  const fake = new FakeGitHub({ clock: () => clock.iso, accounts: { [key]: { login: 'cleared-bot', type: 'User' } }, repos: [repo] });
   const api = await fake.listen();
   return {
-    tracker: new GitHubTracker({ api, token: 'fake-github-token', repo, service: 'guestbook' }),
+    tracker: new GitHubTracker({ api, token: key, repo, service: 'guestbook' }),
     stateOf: (id) => {
       const issue = fake.issue(repo, Number(id));
       if (issue.state === 'closed') return 'Done';

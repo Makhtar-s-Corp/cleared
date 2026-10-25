@@ -3,6 +3,7 @@
 // the issue closed as completed; who made each change is read from the
 // issue's events.
 import test, { after, before } from 'node:test';
+import { randomBytes } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { GitHubTracker } from '../../src/tickets/mirror-github.ts';
 import { TrackerError } from '../../src/tickets/mirror.ts';
@@ -13,7 +14,7 @@ const REPO = 'org/guestbook';
 const MIRROR: FakeAccount = { login: 'cleared-bot', type: 'User' };
 const JANE: FakeAccount = { login: 'jane', type: 'User' };
 const ACTIONS: FakeAccount = { login: 'github-actions[bot]', type: 'Bot' };
-const TOKEN = 'mirror-token-value';
+const TOKEN = randomBytes(16).toString('hex');
 
 const clock = new Clock();
 const fake = new FakeGitHub({ clock: () => clock.iso, accounts: { [TOKEN]: MIRROR, 'jane-token': JANE }, repos: [REPO] });
@@ -127,9 +128,10 @@ test('a comment is written on the issue', async () => {
 });
 
 test('an answer GitHub refuses is a TrackerError that names the request, never the token', async () => {
-  const wrong = new GitHubTracker({ api, token: 'not-a-known-token', repo: REPO });
+  const unknown = randomBytes(16).toString('hex');
+  const wrong = new GitHubTracker({ api, token: unknown, repo: REPO });
   await assert.rejects(wrong.changed(clock.iso), (error: unknown) =>
-    error instanceof TrackerError && /401/.test(error.message) && /GET/.test(error.message) && !error.message.includes('not-a-known-token'));
+    error instanceof TrackerError && /401/.test(error.message) && /GET/.test(error.message) && !error.message.includes(unknown));
   const missing = new GitHubTracker({ api, token: TOKEN, repo: 'org/missing' });
   await assert.rejects(missing.create({ title: 'x', body: '', labels: [], status: 'Todo' }), (error: unknown) => error instanceof TrackerError && /404/.test(error.message));
 });

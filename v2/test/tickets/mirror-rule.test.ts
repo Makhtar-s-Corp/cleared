@@ -25,8 +25,8 @@ test('both changed to the same state: they agree', () => {
 });
 
 test('a person beats an agent, even when the agent came later', () => {
-  assert.equal(decide({ agreed: 'Todo', local: side('In Review', 'agents', T2), remote: side('Todo', 'human', T1) }), 'none',
-    'the remote person moved it back to the agreed state: the remote did not change, so the agent wins (no conflict)');
+  assert.equal(decide({ agreed: 'Todo', local: side('In Review', 'agents', T2), remote: side('Todo', 'human', T1) }), 'push',
+    'the tracker is in the agreed state: it did not change, so there is no conflict and the agent\'s move is written');
   assert.equal(decide({ agreed: 'In Progress', local: side('In Review', 'agents', T2), remote: side('Todo', 'human', T1) }), 'pull');
   assert.equal(decide({ agreed: 'In Progress', local: side('Todo', 'human', T1), remote: side('Done', 'agents', T2) }), 'push');
 });

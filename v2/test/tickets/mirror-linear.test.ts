@@ -2,13 +2,14 @@
 // API, never a real account or key: a state is the team's workflow state of
 // the same name, and who made each change is read from the issue's history.
 import test, { after, before } from 'node:test';
+import { randomBytes } from 'node:crypto';
 import assert from 'node:assert/strict';
 import { LinearTracker } from '../../src/tickets/mirror-linear.ts';
 import { TrackerError } from '../../src/tickets/mirror.ts';
 import { Clock } from './mirror-support.ts';
 import { FakeLinear } from './fakes/linear.ts';
 
-const TOKEN = 'fake-linear-key';
+const TOKEN = randomBytes(16).toString('hex');
 const MIRROR = { id: 'user-mirror', name: 'Cleared' };
 const JANE = { user: { id: 'user-jane', name: 'Jane' } };
 const GITHUB_APP = { bot: { id: 'bot-github', name: 'GitHub' } };
@@ -78,6 +79,7 @@ test('changed issues: a state the app does not have reads as none, and each chan
 });
 
 test('every page of a long list is read', async () => {
+  clock.tick();
   const since = clock.iso;
   clock.tick();
   for (let i = 0; i < 120; i++) fake.create(JANE, { title: `Issue ${i}`, state: 'Todo' });
@@ -85,9 +87,10 @@ test('every page of a long list is read', async () => {
 });
 
 test('a key Linear refuses, and a team it does not have, are TrackerErrors that never hold the key', async () => {
-  const wrong = new LinearTracker({ api, token: 'not-a-known-key', team: 'ENG' });
+  const unknown = randomBytes(16).toString('hex');
+  const wrong = new LinearTracker({ api, token: unknown, team: 'ENG' });
   await assert.rejects(wrong.changed(clock.iso), (error: unknown) =>
-    error instanceof TrackerError && /401|Authentication/.test(error.message) && !error.message.includes('not-a-known-key'));
+    error instanceof TrackerError && /401|Authentication/.test(error.message) && !error.message.includes(unknown));
   const other = new LinearTracker({ api, token: TOKEN, team: 'OPS' });
   await assert.rejects(other.changed(clock.iso), (error: unknown) => error instanceof TrackerError && /OPS/.test(error.message));
 });
