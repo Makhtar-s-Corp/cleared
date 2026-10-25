@@ -29,6 +29,8 @@ test('the language set between the import and the start is the one POST /mcp ans
   const store = openStore(':memory:');
   const app = assemble({ sessions: emptyModule, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox: emptyModule, lead: emptyModule, notify: emptyModule, knowledge: emptyModule }, { store });
   app.start?.();
+  // Set back after the start: only a read at the start answers in English.
+  process.env.CLEARED_V2_APP_LANGUAGE = 'fr';
   const server: Server = createServer((request, response) => dispatch(app, request, response, handle));
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   try {
