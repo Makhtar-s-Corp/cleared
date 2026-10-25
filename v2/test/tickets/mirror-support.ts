@@ -1,6 +1,6 @@
 // What the mirror's tests share: the real ticket store with the owner's
-// signing key, and a tracker kept in memory whose issues a test moves as a
-// person, an agent or the mirror itself.
+// signing key, and a tracker kept in memory whose issues a test moves,
+// edits and comments as a person, an agent or the mirror itself.
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -8,7 +8,7 @@ import { ApprovalSigner } from '../../src/approval/signer.ts';
 import { MemoryUsers } from '../../src/modules/registry.ts';
 import { applyTables } from '../../src/store/db.ts';
 import { LocalTicketStore, TICKET_TABLES } from '../../src/tickets/local-store.ts';
-import { MIRROR_TABLES, type Tracker, type TrackerChange, type TrackerIssue } from '../../src/tickets/mirror.ts';
+import { MIRROR_TABLES, type Tracker, type TrackerChange, type TrackerComment, type TrackerEdit, type TrackerIssue } from '../../src/tickets/mirror.ts';
 import { OWNER, keyPair, scratch } from '../approval/harness.ts';
 
 export const OWNER_USER = 'user-uuid-1';
@@ -44,7 +44,8 @@ export function openStore(clock: Clock) {
   return { db, store, dir };
 }
 
-type Held = { issue: TrackerIssue; comments: string[] };
+type Held = { issue: TrackerIssue; comments: TrackerComment[] };
+type Actor = TrackerChange['actor'];
 
 // A tracker in memory. The mirror's own calls are recorded and stamped as
 // the mirror's changes; a test makes a person's or an agent's with act().
@@ -57,6 +58,7 @@ export class MemoryTracker implements Tracker {
   failing = false;
   #clock: Clock;
   #next = 1;
+  #comment = 1;
 
   constructor(clock: Clock, options: { name?: string; title?: string; service?: string } = {}) {
     this.#clock = clock;
@@ -88,7 +90,7 @@ export class MemoryTracker implements Tracker {
     const at = this.#clock.iso;
     const issue: TrackerIssue = {
       id, key: id, url: `https://tracker.example/${id}`, title: input.title, body: input.body ?? '', labels: input.labels ?? [],
-      status: input.status, createdAt: at, updatedAt: at, changes: [],
+      status: input.status, createdAt: at, updatedAt: at, changes: [], edits: [],
     };
     this.issues.set(id, { issue, comments: [] });
     return issue;
@@ -97,6 +99,23 @@ export class MemoryTracker implements Tracker {
   // A move on the tracker by someone other than the mirror.
   act(id: string, status: string | null, actor: 'person' | 'agent' | 'mirror' = 'person', who = actor === 'person' ? 'jane' : 'integration'): void {
     this.#change(id, status, { actor, who });
+  }
+
+  // An edit on the tracker by someone other than the mirror; an actor of
+  // null leaves no record of who made it, as GitHub does for a description.
+  editBy(id: string, fields: { title?: string; body?: string }, actor: Actor | null = 'person', who = actor === 'person' ? 'jane' : 'integration'): void {
+    const held = this.#held(id);
+    const at = this.#clock.iso;
+    const edits: TrackerEdit[] = actor === null ? [] : (['title', 'body'] as const).filter((f) => fields[f] !== undefined).map((field) => ({ field, actor, who, at }));
+    held.issue = { ...held.issue, ...fields, updatedAt: at, edits: [...held.issue.edits, ...edits] };
+  }
+
+  // A comment on the tracker by someone other than the mirror. It does not
+  // change the issue's time: the mirror reads comments by their own.
+  say(id: string, body: string, actor: Actor = 'person', who = actor === 'person' ? 'jane' : 'integration'): string {
+    const comment: TrackerComment = { id: `C-${this.#comment++}`, issue: id, body, actor, who, at: this.#clock.iso };
+    this.#held(id).comments.push(comment);
+    return comment.id;
   }
 
   async changed(since: string): Promise<TrackerIssue[]> {
@@ -119,17 +138,34 @@ export class MemoryTracker implements Tracker {
     this.#change(id, status, { actor: 'mirror', who: 'cleared-bot' });
   }
 
-  async comment(id: string, body: string): Promise<void> {
+  async edit(id: string, fields: { title?: string; body?: string }): Promise<void> {
+    this.calls.push(`edit ${id} ${Object.keys(fields).join(',')}`);
+    this.#fail();
+    this.editBy(id, fields, 'mirror', 'cleared-bot');
+  }
+
+  async comment(id: string, body: string): Promise<string> {
     this.calls.push(`comment ${id}`);
     this.#fail();
-    this.#held(id).comments.push(body);
+    return this.say(id, body, 'mirror', 'cleared-bot');
+  }
+
+  async commentsSince(since: string): Promise<TrackerComment[]> {
+    this.calls.push(`comments ${since}`);
+    this.#fail();
+    return [...this.issues.values()].flatMap((h) => h.comments).filter((c) => c.at >= since);
   }
 
   status(id: string): string | null {
     return this.#held(id).issue.status;
   }
 
+  issue(id: string): TrackerIssue {
+    return this.#held(id).issue;
+  }
+
+  // The bodies of the issue's comments, oldest first.
   comments(id: string): string[] {
-    return this.#held(id).comments;
+    return this.#held(id).comments.map((c) => c.body);
   }
 }

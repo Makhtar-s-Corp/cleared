@@ -2,7 +2,8 @@
 // section 1), on the real ticket store and the real trackers' code over
 // fakes of Linear and GitHub: a ticket created in the app appears on the
 // tracker; an issue created there appears in the app; a person's move on
-// the tracker wins over an agent's move in the app between two passes.
+// the tracker wins over an agent's move in the app between two passes. Then
+// the follow-ups (P237, issue #386): a comment and an edit each way.
 import test from 'node:test';
 import { randomBytes } from 'node:crypto';
 import assert from 'node:assert/strict';
@@ -20,6 +21,10 @@ type Remote = {
   stateOf(id: string): string | undefined;
   personCreates(title: string, state: string): string;
   personMoves(id: string, state: string): void;
+  personComments(id: string, body: string): void;
+  personEdits(id: string, title: string): void;
+  commentsOf(id: string): string[];
+  titleOf(id: string): string | undefined;
   close(): Promise<void>;
 };
 
@@ -33,6 +38,10 @@ async function linear(clock: Clock): Promise<Remote> {
     stateOf: (id) => fake.stateOf(id),
     personCreates: (title, state) => fake.create(jane, { title, state }).id,
     personMoves: (id, state) => fake.move(id, jane, state),
+    personComments: (id, body) => { fake.comment(id, jane, body); },
+    personEdits: (id, title) => fake.edit(id, jane, { title }),
+    commentsOf: (id) => fake.issues.get(id)?.comments.map((c) => c.body) ?? [],
+    titleOf: (id) => fake.issues.get(id)?.title,
     close: () => fake.close(),
   };
 }
@@ -58,6 +67,10 @@ async function github(clock: Clock): Promise<Remote> {
       if (state === 'Done') fake.close_(repo, Number(id), jane);
       else fake.status(repo, Number(id), jane, state);
     },
+    personComments: (id, body) => { fake.comment(repo, Number(id), jane, body); },
+    personEdits: (id, title) => fake.edit(repo, Number(id), jane, { title }),
+    commentsOf: (id) => fake.comments.get(Number(id))?.map((c) => c.body) ?? [],
+    titleOf: (id) => fake.issue(repo, Number(id)).title,
     close: () => fake.close(),
   };
 }
@@ -102,6 +115,41 @@ for (const [name, make] of [['Linear', linear], ['GitHub Issues', github]] as co
       assert.equal(rows.n, 0);
       const forged = db.prepare("SELECT count(*) AS n FROM tracker_history WHERE actor_id = 'cleared-mirror' AND (actor_kind <> 'agents' OR proof IS NOT NULL)").get() as { n: number };
       assert.equal(forged.n, 0, 'the mirror\'s rows are never a signed person\'s');
+    } finally {
+      await remote.close();
+    }
+  });
+}
+
+for (const [name, make] of [['Linear', linear], ['GitHub Issues', github]] as const) {
+  test(`P237 on ${name}: a comment each way, once, and a person's edit of the title there reaches the app`, async () => {
+    const clock = new Clock();
+    const { db, store } = openStore(clock);
+    const remote = await make(clock);
+    try {
+      const mirror = new Mirror({ db, tickets: store, trackers: [remote.tracker], project: PROJECT, services: [], language: 'en', now: clock.now, log: (line) => assert.fail(line) });
+      await mirror.pass();
+      clock.tick();
+      const ticket = await store.create({ title: 'Newest entry first', project: PROJECT }, HUMAN);
+      clock.tick(60);
+      await mirror.pass();
+      const { issue } = db.prepare('SELECT issue FROM mirror_links WHERE ticket = ?').get(ticket.id) as { issue: string };
+
+      clock.tick();
+      await store.comment(ticket.id, 'Pull request #12 is open.', AGENTS);
+      remote.personComments(issue, 'Sort them by date, please.');
+      clock.tick();
+      remote.personEdits(issue, 'Newest entries first');
+      clock.tick(60);
+      await mirror.pass();
+      clock.tick(60);
+      await mirror.pass();
+      assert.deepEqual(remote.commentsOf(issue), ['Sort them by date, please.', 'Cleared:\n\nPull request #12 is open.']);
+      const comments = (await store.comments(ticket.id)).map((c) => [c.by.id, c.body]);
+      assert.equal(comments.length, 2);
+      assert.match(comments[1]?.[1] ?? '', /^(Jane|jane), on (Linear|GitHub):\n\nSort them by date, please\.$/);
+      assert.equal((await store.get(ticket.id))?.title, 'Newest entries first');
+      assert.equal(remote.titleOf(issue), 'Newest entries first');
     } finally {
       await remote.close();
     }

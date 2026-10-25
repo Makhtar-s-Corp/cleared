@@ -4,9 +4,12 @@
 // github.mjs); an open issue with none is in Todo, one with two reads as no
 // state; Done is the issue closed as completed. Who made each change is
 // read from the issue's events: the token's own account is the mirror's, a
-// bot or an app is an agent, anyone else a person.
+// bot or an app is an agent, anyone else a person. A change of the title is
+// its `renamed` event; GitHub's events say nothing of a change of the
+// description, so no one is named for it (P237). Comments are read for the
+// whole repository, by their own time.
 import { DEFAULT_STATES, type TicketStates } from './contract.ts';
-import { TrackerError, trackerFetch, type Tracker, type TrackerChange, type TrackerIssue } from './mirror-tracker.ts';
+import { TrackerError, trackerFetch, type Tracker, type TrackerChange, type TrackerComment, type TrackerEdit, type TrackerIssue } from './mirror-tracker.ts';
 
 const PER_PAGE = 100;
 const STATUS = 'status:';
@@ -20,6 +23,10 @@ type Issue = {
 type Event = {
   readonly event: string; readonly actor: Account; readonly created_at: string; readonly label?: { readonly name?: string };
   readonly state_reason?: string | null; readonly performed_via_github_app?: unknown;
+};
+type IssueComment = {
+  readonly id: number; readonly body: string | null; readonly user: Account; readonly created_at: string;
+  readonly issue_url: string; readonly performed_via_github_app?: unknown;
 };
 
 const labelName = (label: string | { readonly name?: string }) => (typeof label === 'string' ? label : label.name ?? '');
@@ -90,12 +97,17 @@ export class GitHubTracker implements Tracker {
     return named.length === 1 ? (named[0] as string).slice(STATUS.length) : null;
   }
 
-  #actorOf(event: Event, me: string): Pick<TrackerChange, 'actor' | 'who'> {
-    const login = event.actor?.login;
+  #actorOf(account: Account, viaApp: unknown, me: string): Pick<TrackerChange, 'actor' | 'who'> {
+    const login = account?.login;
     if (!login) return { actor: 'agent', who: 'unknown' };
     if (login === me) return { actor: 'mirror', who: login };
-    if (event.actor?.type === 'Bot' || event.performed_via_github_app) return { actor: 'agent', who: login };
+    if (account?.type === 'Bot' || viaApp) return { actor: 'agent', who: login };
     return { actor: 'person', who: login };
+  }
+
+  #edits(events: readonly Event[], me: string): TrackerEdit[] {
+    return events.filter((e) => e.event === 'renamed')
+      .map((e) => ({ field: 'title' as const, ...this.#actorOf(e.actor, e.performed_via_github_app, me), at: e.created_at }));
   }
 
   // The state after each of the issue's events, from the state before the
@@ -125,18 +137,18 @@ export class GitHubTracker implements Tracker {
       const next = relevant[i + 1];
       if (next && next.created_at === event.created_at && next.actor?.login === event.actor?.login) continue;
       const status = this.#statusOf(state, reason, labels);
-      if (status !== null && status !== before) changes.push({ status, ...this.#actorOf(event, me), at: event.created_at });
+      if (status !== null && status !== before) changes.push({ status, ...this.#actorOf(event.actor, event.performed_via_github_app, me), at: event.created_at });
       before = status;
     }
     return changes;
   }
 
-  #issueOf(issue: Issue, changes: readonly TrackerChange[]): TrackerIssue {
+  #issueOf(issue: Issue, changes: readonly TrackerChange[], edits: readonly TrackerEdit[] = []): TrackerIssue {
     const labels = issue.labels.map(labelName);
     return {
       id: String(issue.number), key: `${this.#repo}#${issue.number}`, url: issue.html_url, title: issue.title, body: issue.body ?? '',
       labels: labels.filter((l) => !l.startsWith(STATUS)), status: this.#statusOf(issue.state, issue.state_reason, labels),
-      createdAt: issue.created_at, updatedAt: issue.updated_at, changes,
+      createdAt: issue.created_at, updatedAt: issue.updated_at, changes, edits,
     };
   }
 
@@ -147,7 +159,7 @@ export class GitHubTracker implements Tracker {
     for (const issue of issues) {
       if (issue.pull_request !== undefined) continue;
       const events = await this.#pages<Event>(`/repos/${this.#repo}/issues/${issue.number}/events`);
-      out.push(this.#issueOf(issue, this.#changes(issue, events, me)));
+      out.push(this.#issueOf(issue, this.#changes(issue, events, me), this.#edits(events, me)));
     }
     return out;
   }
@@ -172,7 +184,25 @@ export class GitHubTracker implements Tracker {
     if (!done && issue.state === 'closed') await this.#request('PATCH', path, { state: 'open' });
   }
 
-  async comment(id: string, body: string): Promise<void> {
-    await this.#request('POST', `/repos/${this.#repo}/issues/${encodeURIComponent(id)}/comments`, { body });
+  async edit(id: string, fields: { readonly title?: string; readonly body?: string }): Promise<void> {
+    await this.#request('PATCH', `/repos/${this.#repo}/issues/${encodeURIComponent(id)}`, {
+      ...(fields.title !== undefined ? { title: fields.title } : {}), ...(fields.body !== undefined ? { body: fields.body } : {}),
+    });
+  }
+
+  async comment(id: string, body: string): Promise<string> {
+    const made = await this.#request<{ id: number }>('POST', `/repos/${this.#repo}/issues/${encodeURIComponent(id)}/comments`, { body });
+    return String(made.id);
+  }
+
+  // The repository's comments updated since, pull requests' included: the
+  // mirror keeps those of the issues it links.
+  async commentsSince(since: string): Promise<TrackerComment[]> {
+    const me = await this.#me();
+    const comments = await this.#pages<IssueComment>(`/repos/${this.#repo}/issues/comments?sort=updated&direction=asc&since=${encodeURIComponent(since)}`);
+    return comments.flatMap((c) => {
+      const issue = /\/issues\/(\d+)$/.exec(c.issue_url)?.[1];
+      return issue ? [{ id: String(c.id), issue, body: c.body ?? '', ...this.#actorOf(c.user, c.performed_via_github_app, me), at: c.created_at }] : [];
+    });
   }
 }

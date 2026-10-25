@@ -51,3 +51,28 @@ test('histories reads several tickets\' history in one call, each as history rea
   assert.deepEqual(read.get('LOCAL-2'), await store.history('LOCAL-2'));
   assert.deepEqual((await store.histories([])).size, 0);
 });
+
+test('an edit writes the title or the body, keeps the history of states, and refuses an empty title or an unknown ticket', async () => {
+  let clock = 0;
+  const store = new MemoryTicketStore({ now: () => new Date(Date.UTC(2026, 9, 25, 10, clock++)).toISOString() });
+  await store.create({ title: 'Newest entry first', body: 'Sort the entries.', project: 'guestbook' }, owner);
+  const retitled = await store.edit('LOCAL-1', { title: 'Newest entries first' }, service);
+  assert.deepEqual([retitled.title, retitled.body, retitled.updatedAt], ['Newest entries first', 'Sort the entries.', '2026-10-25T10:01:00.000Z']);
+  const rewritten = await store.edit('LOCAL-1', { body: 'By date, newest first.' }, service);
+  assert.deepEqual([rewritten.title, rewritten.body], ['Newest entries first', 'By date, newest first.']);
+  assert.deepEqual((await store.history('LOCAL-1')).map((h) => h.status), ['Todo']);
+  await assert.rejects(store.edit('LOCAL-1', { title: '  ' }, service), /a ticket needs a title/);
+  await assert.rejects(store.edit('LOCAL-9', { body: 'x' }, service), TicketError);
+});
+
+test('on the local store, an edit is written in tracker_tickets, and the owner\'s creation row no longer reads as theirs', async () => {
+  const { Clock, HUMAN, openStore } = await import('./mirror-support.ts');
+  const { store } = openStore(new Clock());
+  const ticket = await store.create({ title: 'Newest entry first', body: 'Sort the entries.', project: 'guestbook' }, HUMAN);
+  assert.equal((await store.history(ticket.id))[0]?.by.kind, 'human');
+  const edited = await store.edit(ticket.id, { title: 'Newest entries first', body: 'By date.' }, { kind: 'agents', id: 'cleared-mirror' });
+  assert.deepEqual([edited.title, edited.body], ['Newest entries first', 'By date.']);
+  assert.deepEqual([(await store.get(ticket.id))?.title, (await store.get(ticket.id))?.body], ['Newest entries first', 'By date.']);
+  assert.deepEqual((await store.history(ticket.id)).map((h) => [h.status, h.by.kind]), [['Todo', 'other']], 'the text is not the one the owner signed');
+  await assert.rejects(store.edit(ticket.id, { title: '' }, { kind: 'agents', id: 'cleared-mirror' }), /a ticket needs a title/);
+});
