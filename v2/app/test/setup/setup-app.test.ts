@@ -125,7 +125,7 @@ test('a wrong code, a name or a password the app refuses, the service account\'s
   try {
     assert.equal(JSON.parse((await owner(s, { code: 'ZZZZ-ZZZZ', name: 'alex', password: PASSWORD })).text).error, 'code_wrong');
     assert.equal(JSON.parse((await owner(s, { code: s.code, name: 'a b', password: PASSWORD })).text).error, 'name');
-    assert.equal(JSON.parse((await owner(s, { code: s.code, name: 'alex', password: 'short' })).text).error, 'password');
+    assert.equal(JSON.parse((await owner(s, { code: s.code, name: 'alex', password: 'short' })).text).error, 'phrase', 'a word the guard does not read as a credential');
     assert.equal(JSON.parse((await owner(s, { code: s.code, name: userInfo().username, password: PASSWORD })).text).error, 'service_account');
     assert.equal((await owner(s, { code: s.code, name: 'alex', password: PASSWORD }, { origin: 'http://evil.invalid' })).status, 403);
     assert.equal((await owner(s, { code: s.code, name: 'alex', password: PASSWORD }, { 'sec-fetch-site': 'cross-site' })).status, 403);

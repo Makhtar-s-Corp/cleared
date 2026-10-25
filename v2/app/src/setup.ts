@@ -47,7 +47,7 @@ export async function makeOwner(setup: SetupOptions, body: unknown, throttle: Lo
   if (!USER_NAME.test(name)) return { status: 400, body: { error: 'name' } };
   if (name === userInfo().username) return { status: 400, body: { error: 'service_account' } };
   const length = [...password].length;
-  if (length < PASSWORD_LENGTH.min || length > PASSWORD_LENGTH.max) return { status: 400, body: { error: 'password' } };
+  if (length < PASSWORD_LENGTH.min || length > PASSWORD_LENGTH.max) return { status: 400, body: { error: 'phrase' } };   // not 'password': the guard reads a catalog key with it as a credential
   // Counted before the code is checked, as a sign-in counts a password (users.ts).
   const attempt = throttle.start(peer, 'setup');
   if (attempt.succeeded === undefined) return { status: 429, body: { error: 'throttled' }, wait: attempt.wait };

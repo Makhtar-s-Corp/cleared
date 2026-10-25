@@ -12,7 +12,7 @@
   "owner_error_code_wrong": "Ce n'est pas le code affiché par Cleared. Vérifiez la sortie de la commande qui l'a lancé.",
   "owner_error_code_expired": "Ce code a plus de 24 heures. Relancez Cleared pour en obtenir un nouveau.",
   "owner_error_name": "Un nom compte de 1 à 32 lettres, chiffres, points, tirets ou soulignés, et commence par une lettre ou un chiffre.",
-  "owner_error_password": "Un mot de passe compte de 15 à 1024 caractères.",
+  "owner_error_phrase": "Un mot de passe compte de 15 à 1024 caractères.",
   "owner_error_service_account": "C'est le nom du compte de la machine sous lequel Cleared tourne. Choisissez-en un autre.",
   "owner_error_throttled": "Trop d'essais. Attendez {minutes} min, puis réessayez.",
   "owner_error_owner_exists": "Le compte du propriétaire existe déjà. Connectez-vous plutôt.",

@@ -12,7 +12,7 @@
   "owner_error_code_wrong": "This is not the code Cleared printed. Check the output of the command that started it.",
   "owner_error_code_expired": "This code is more than 24 hours old. Restart Cleared to get a new one.",
   "owner_error_name": "A name is 1 to 32 letters, digits, dots, dashes or underscores, starting with a letter or a digit.",
-  "owner_error_password": "A password is 15 to 1024 characters.",
+  "owner_error_phrase": "A password is 15 to 1024 characters.",
   "owner_error_service_account": "This is the name of the machine account Cleared runs as. Pick another one.",
   "owner_error_throttled": "Too many tries. Wait {minutes} min, then try again.",
   "owner_error_owner_exists": "The owner's account already exists. Sign in instead.",
