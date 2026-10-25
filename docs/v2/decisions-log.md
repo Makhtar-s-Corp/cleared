@@ -5435,3 +5435,21 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 
 - Pull request: 354, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-prompt-cache`.
+
+## 2026-10-25: the lanes' MCP route reads its words and its cleaner at start, and no module starts without a ledger (the author's choices, lane `j3-mcp-startup`, P220, issues #348 and #349)
+
+**The need.** Two follow-ups of P216 (pull request 344). #348: the flow module built `POST /mcp` with `CLEARED_V2_APP_LANGUAGE` and `createRedactor` read when the module was imported, so an environment set between the import and the start was not seen. The cleaner matters more than the words: `createRedactor` takes the secret values of the environment when it is made, and a secret set after the import was never removed. #349: the comment of `ledgerFolder` said that when the ledger's folder cannot be told, "the service stops at start", with no test named. The brief pointed at sections 9 and 10 of `milestone-2-plan.md`, which has eight; the conventions followed are those of section 10 of `milestone-1-plan.md` (a lane fills its own module, never `main.ts`), as the P216 lane did.
+
+**Decision.**
+1. **Read at start, engine or not.** The flow module's `start` reads the language and makes the cleaner first, before it looks for an engine: without one, `POST /mcp` still answers, and its refusals are in that language. A request before any start reads them then, once. A second start reads them again.
+2. **Getters in `McpRouteDeps`.** `language` and `redactor` are functions, read per request. The tool server of an engine is made again when either changed, so a new start is seen without a new engine. The refusal's words are looked up per refusal; the catalog itself is read once per language, as before.
+3. **#349: the claim holds, the comment now says why.** `main.ts` opens the ledger at `ledgerPath()` before it listens and exits with 64 when it has no place, and the modules start in the listen callback: a module's start never runs without a ledger. The test that proves it was already there, `test/main.test.ts` ("a ledger the service cannot place stops it before it listens"); it now names #349 and says so. The empty folder list is left for a start without `main.ts` (a test), whose `POST /mcp` then has no token and answers `503`.
+4. **Not done.** No test sets a secret between the import and the start and reads it cleaned: that needs an engine and a tool call. The cleaner goes through the same path as the language, which the test checks. The token is still made once per process, as P216 left it.
+
+**Tests first.** The tests were committed alone in `bf9eb1c`. There, `test/flow/mcp-startup.test.ts` imports the flow module with `CLEARED_V2_APP_LANGUAGE=fr`, sets `en`, starts it and sends `POST /mcp` with a wrong token: the refusal comes back in French. The renamed test in `test/main.test.ts` passes there, as it did before. Changed after that commit: the three calls of `lanesMcpRoutes` in `test/mcp/lanes-http.test.ts`, to the getters.
+
+**Checks.** `npm run typecheck` passes. `npm test` (the build, `node --test` and Vitest): 2049 Node tests, 1981 pass, 68 skipped (66 because `CLEARED_V2_PLAYWRIGHT` is not set, 2 because `CLEARED_V2_REAL_HARNESS` is not), 0 fail; 321 Vitest tests pass. No browser test was run: nothing of the app changed.
+
+**Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, no tunnel, no secret: the test's service listens on port 0 on loopback.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-mcp-startup`.
