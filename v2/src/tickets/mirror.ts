@@ -1,5 +1,5 @@
 // The mirrors of the ticket store on GitHub Issues and Linear (milestone 4,
-// issue #381, P229 to P231; the rule for a person: docs/v2/mirrors.md).
+// issue #381, P230 to P232; the rule for a person: docs/v2/mirrors.md).
 //
 // A pass reads each tracker's issues changed since the last pass (polling:
 // a webhook would need an address the tracker reaches, and the brief allows

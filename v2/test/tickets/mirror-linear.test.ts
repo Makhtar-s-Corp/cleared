@@ -1,4 +1,4 @@
-// The Linear tracker of the mirror (P229) against a fake of Linear's GraphQL
+// The Linear tracker of the mirror (P230) against a fake of Linear's GraphQL
 // API, never a real account or key: a state is the team's workflow state of
 // the same name, and who made each change is read from the issue's history.
 import test, { after, before } from 'node:test';

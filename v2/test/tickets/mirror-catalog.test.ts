@@ -1,4 +1,4 @@
-// The mirror's words (P231): one English and one French catalog, kept as the
+// The mirror's words (P232): one English and one French catalog, kept as the
 // chat's are (test/flow/chat-catalog.test.ts).
 import test from 'node:test';
 import assert from 'node:assert/strict';

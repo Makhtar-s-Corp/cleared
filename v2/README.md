@@ -158,7 +158,7 @@ A slash command `@cleared <task>` posted to `POST /hooks/chat` creates a ticket 
 
 ## GitHub Issues and Linear
 
-With `CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE` or `CLEARED_V2_MIRROR_LINEAR_TOKEN_FILE` set, the service keeps its tickets on GitHub Issues or Linear too, and brings back what people change there, every minute (P229 to P231, `src/tickets/mirror.ts`). A person's change wins over an agent's; a tracker never approves a ticket, never starts a session, and never writes as the owner. Settings, what is mirrored and the conflict rule: [docs/v2/mirrors.md](../docs/v2/mirrors.md). Linear is tested against a fake only.
+With `CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE` or `CLEARED_V2_MIRROR_LINEAR_TOKEN_FILE` set, the service keeps its tickets on GitHub Issues or Linear too, and brings back what people change there, every minute (P230 to P232, `src/tickets/mirror.ts`). A person's change wins over an agent's; a tracker never approves a ticket, never starts a session, and never writes as the owner. Settings, what is mirrored and the conflict rule: [docs/v2/mirrors.md](../docs/v2/mirrors.md). Linear is tested against a fake only.
 
 ## The harness pick
 

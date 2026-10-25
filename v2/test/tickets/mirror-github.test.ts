@@ -1,4 +1,4 @@
-// The GitHub Issues tracker of the mirror (P229) against a fake of GitHub's
+// The GitHub Issues tracker of the mirror (P230) against a fake of GitHub's
 // REST API: a state is one `status:<state>` label on an open issue, Done is
 // the issue closed as completed; who made each change is read from the
 // issue's events.

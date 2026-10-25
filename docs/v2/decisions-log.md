@@ -6180,7 +6180,7 @@ P224's axe test reads the phone's screens at 390 in both languages and themes, t
 - Pull request: 377, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-visual-redesign`.
 
-## 2026-10-25: the tickets mirrored on GitHub Issues and Linear, and the conflict rule (the author's choices, lane `v2-j4-issue-mirrors`, P229 to P231, issue #381)
+## 2026-10-25: the tickets mirrored on GitHub Issues and Linear, and the conflict rule (the author's choices, lane `v2-j4-issue-mirrors`, P230 to P232, issue #381)
 
 **The need.** Issue #381, milestone 4: the app's tickets kept in step with GitHub Issues and Linear both ways, the last change made by a person winning, an agent's change never beating a person's, and the conflict rule written in the docs (B5.8b, D17, B6.4, B6.4p). GitHub is used against the example repositories only; Linear against a fake server only, with no real key. The brief's section 6 is not in the repository: the plan takes milestone 4 from the matrix's B6.4 and B6.4p, which repeat it (the issue's "line 158" is B6.4p). `milestone-2-plan.md` has no sections 9 and 10, so the conventions followed are those of sections 9 and 10 of `milestone-1-plan.md`, as earlier lanes noted. The plan came first, in its own commit: [milestone-4-plan.md](milestone-4-plan.md), section 2 (the cleanup lane, issue #382, adds its own section).
 

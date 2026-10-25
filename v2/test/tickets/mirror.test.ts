@@ -1,4 +1,4 @@
-// The mirror's pass (P229 to P231, docs/v2/mirrors.md) on the real ticket
+// The mirror's pass (P230 to P232, docs/v2/mirrors.md) on the real ticket
 // store, with a tracker kept in memory: what is created and moved each way,
 // who wins a conflict, and what a tracker never does through the mirror.
 import test from 'node:test';

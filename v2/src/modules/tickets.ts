@@ -4,7 +4,7 @@
 // Milestone 2 (lane 14, decision 18): the workspace and its services, as
 // tables of this module beside the tracker's, their rows written at the
 // start from the configuration, and GET /api/workspace.
-// Milestone 4 (issue #381, P229): the mirrors on GitHub Issues and Linear
+// Milestone 4 (issue #381, P230): the mirrors on GitHub Issues and Linear
 // (tickets/mirror.ts), started with the service when their settings name a
 // token file, and stopped with it.
 import type { DatabaseSync } from 'node:sqlite';

@@ -1486,7 +1486,7 @@ export class FlowEngine {
   // that lands are refused. The multi-service proof sets its earlier runs'
   // tickets aside, so that each run starts with nothing of theirs open
   // (scripts/proof-base.ts).
-  // The mirror of a tracker (tickets/mirror.ts, P231) gives its own words:
+  // The mirror of a tracker (tickets/mirror.ts, P232) gives its own words:
   // a person moved the ticket there.
   async setAside(id: TicketId, by: UserId, words?: { readonly note: string; readonly message: string }): Promise<{ readonly sessions: number; readonly items: number }> {
     const note = words?.note ?? 'The owner set this ticket aside: its sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.';

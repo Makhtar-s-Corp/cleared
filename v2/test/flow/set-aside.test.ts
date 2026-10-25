@@ -92,7 +92,7 @@ test('a done ticket with a knowledge item still waiting: the item settled, the t
   assert.equal(t.startedSessions.length, 0);
 });
 
-test('set aside with words of its own (a person\'s move on a tracker, P231): the ticket\'s note and the session\'s message are those words', async () => {
+test('set aside with words of its own (a person\'s move on a tracker, P232): the ticket\'s note and the session\'s message are those words', async () => {
   const t = await setup();
   await t.engine.start(t.ticket.id, 'u1');
   const session = t.startedSessions[0]?.id as string;

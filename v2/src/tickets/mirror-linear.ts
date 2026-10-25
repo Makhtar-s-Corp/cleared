@@ -1,4 +1,4 @@
-// The mirror's Linear tracker (P229): the issues of one team, through
+// The mirror's Linear tracker (P230): the issues of one team, through
 // Linear's GraphQL API. A state is the team's workflow state of the same
 // name as the app's; any other (Backlog, Triage, Canceled) reads as no
 // state. Who made each change is read from the issue's history: the key's

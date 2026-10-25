@@ -1,4 +1,4 @@
-// The mirrors' conflict rule (P230, docs/v2/mirrors.md): against the state
+// The mirrors' conflict rule (P231, docs/v2/mirrors.md): against the state
 // both sides last agreed on, the side that changed wins; when both changed,
 // a person's change beats an agent's whatever the times, the later of two
 // people's wins, and the app's wins between two agents or at the same time.

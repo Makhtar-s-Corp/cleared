@@ -1,4 +1,4 @@
-// The mirror's GitHub Issues tracker (P229): the issues of one repository,
+// The mirror's GitHub Issues tracker (P230): the issues of one repository,
 // through GitHub's REST API. A state is one `status:<state>` label on an
 // open issue, as v1's GitHub adapter wrote it (lib/tracker/adapters/
 // github.mjs); an open issue with none is in Todo, one with two reads as no
