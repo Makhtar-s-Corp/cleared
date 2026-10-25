@@ -44,6 +44,7 @@ test('the screens with their chords, and the sessions by ticket and title', asyn
     ['Sessions', 'G S', { kind: 'navigate', href: '/sessions' }],
     ['Plans', 'G P', { kind: 'navigate', href: '/lead' }],
     ['Consumption', 'G C', { kind: 'navigate', href: '/consumption' }],
+    ['Service map', 'G M', { kind: 'navigate', href: '/services' }],
   ]);
   const sessions = list.filter((item) => item.group === 'sessions');
   const week = sessions.find((item) => item.label === 'Upcoming: group entries by week');

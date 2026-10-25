@@ -11,7 +11,11 @@
 // runner starts a schedule's tickets with the schedule's budget on their
 // Origin (schedules/budget.ts). The quota reading (issue #270) is its too,
 // beside the Consumption screen it feeds: each harness's windows read every
-// CLEARED_V2_QUOTA_MINUTES (60; 0 turns it off) into quota_readings.
+// CLEARED_V2_QUOTA_MINUTES (60; 0 turns it off) into quota_readings. The
+// service map (docs/v2/milestone-4-plan.md, section 12) is its too: its
+// table and its two routes, its refresh at the start and every
+// CLEARED_V2_MAP_MINUTES (10; 0 turns it off), and the lead's tool
+// service_impact, given with the plans' tools through the extensions.
 import { homedir } from 'node:os';
 import { workspaceOf } from '../flow/config.ts';
 import { runtime as flowRuntime } from '../flow/runtime.ts';
@@ -34,6 +38,9 @@ import { consumptionRoutes } from '../consumption/routes.ts';
 import { scheduleRoutes } from '../schedules/routes.ts';
 import { Scheduler } from '../schedules/scheduler.ts';
 import { SCHEDULE_TABLES } from '../schedules/store.ts';
+import { MAP_TABLES, ServiceMaps, mapMinutes } from '../map/service.ts';
+import { serviceMapRoutes } from '../map/routes.ts';
+import { mapExtensions } from '../map/tools.ts';
 import { cleanText, secretValues } from '../session/clean.ts';
 import type { Store } from '../store/db.ts';
 import { projectCheckout } from '../workspace/checkout.ts';
@@ -46,8 +53,13 @@ let plans: PlanRunner | undefined;
 let recipes: Recipes | undefined;
 let schedules: Scheduler | undefined;
 let quota: QuotaReader | undefined;
+let maps: ServiceMaps | undefined;
 
-export const leadRuntime = createLeadRuntime({ flow: flowRuntime, extensions: planExtensions(() => plans) });
+const planTools = planExtensions(() => plans);
+export const leadRuntime = createLeadRuntime({
+  flow: flowRuntime,
+  extensions: { ...planTools, tools: { ...planTools.tools, ...mapExtensions(() => maps).tools } },
+});
 
 // The plans, with the lead: undefined while the service runs no lead.
 export function plansOf(registry: Registry): PlanRunner | undefined {
@@ -108,6 +120,27 @@ export function quotaMinutes(value: string | undefined): number {
   return READ_MINUTES;
 }
 
+// The service map of the flow's workspace, once the flow runs: each
+// service's checkout fetched as the flow fetches it before an author's
+// first turn, then read at its base branch.
+export function mapsOf(registry: Registry): ServiceMaps | undefined {
+  if (maps) return maps;
+  const flow = flowRuntime.engine(registry);
+  if (!flow || !store) return undefined;
+  const env = process.env;
+  const services = workspaceOf(flow.config).services;
+  maps = new ServiceMaps({
+    db: store.db, project: flow.config.project, services,
+    fetch: async (name) => {
+      const service = services.find((candidate) => candidate.name === name);
+      if (service) await projectCheckout({ url: service.url, dir: service.dir, base: service.base, env: (await forgeEnvironments(service.dir, env)).git });
+    },
+  });
+  const minutes = mapMinutes(env.CLEARED_V2_MAP_MINUTES);
+  if (minutes > 0) maps.startTimer(minutes * 60_000);
+  return maps;
+}
+
 // The recipes and the scheduler, built with the plans.
 export function recipesOf(registry: Registry): Recipes | undefined {
   plansOf(registry);
@@ -120,7 +153,7 @@ export function schedulesOf(registry: Registry): Scheduler | undefined {
 }
 
 const lead: Module = {
-  tables: [...LEAD_TABLES, ...PLAN_TABLES, ...SCHEDULE_TABLES, LEVERS_TABLE, ...QUOTA_TABLES],
+  tables: [...LEAD_TABLES, ...PLAN_TABLES, ...SCHEDULE_TABLES, LEVERS_TABLE, ...QUOTA_TABLES, ...MAP_TABLES],
   routes: [
     // A lead route builds the plans too, so a service the tower polls runs its plans.
     ...createLeadRoutes({
@@ -144,6 +177,8 @@ const lead: Module = {
       },
       proof: () => flowRuntime.proof(),
     }),
+    // The service map (M6): its read and its refresh.
+    ...serviceMapRoutes({ maps: mapsOf, proof: () => flowRuntime.proof() }),
   ],
   provide: (deps) => {
     try {
@@ -167,6 +202,7 @@ const lead: Module = {
     plansOf(registry);
     leadRuntime.lead(registry);
     quotaOf(registry);
+    void mapsOf(registry)?.refresh().catch((error) => console.error(`cleared-v2: the service map's first refresh failed (${error instanceof Error ? error.name : typeof error})`));
     const first = schedules;
     if (first) void flowRuntime.engine(registry)?.recovered.then(() => first.tick()).catch((error) => console.error(`cleared-v2: the schedules' first tick failed (${error instanceof Error ? error.name : typeof error})`));
   },

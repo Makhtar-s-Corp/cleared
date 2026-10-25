@@ -106,6 +106,7 @@ const PAGES: readonly { readonly path: RegExp; readonly screen: Exclude<Screen, 
   { path: /^\/sessions(?:\/[A-Za-z0-9_-]{1,64})?$/, screen: 'session' },
   { path: /^\/(?:lead|plans\/[A-Za-z0-9_-]{1,64})$/, screen: 'lead' },
   { path: /^\/consumption$/, screen: 'consumption' },                    // the consumption of the agents (O15)
+  { path: /^\/services$/, screen: 'services' },                          // the service map (M6)
   { path: /^\/ask\/[A-Za-z0-9_-]{1,64}$/, screen: 'ask' },                // a question to the code (lane 27)
 ];
 
