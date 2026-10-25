@@ -7060,14 +7060,16 @@ French and English, accessible, against a fake GitLab only. As earlier lanes not
    - **The host** is free when no pipeline of the project runs or waits, and the base's last commit is ten minutes old with no container settling, as for GitHub.
    - **The merge** is `PUT …/merge` with `sha`, the commit that was checked (GitLab refuses it if the branch moved), and `should_remove_source_branch: false`.
    - **GitLab silent** (no answer, or a 5xx) is "not now" (exit 3, or 5 from the queue), as GitHub down is. Its 4xx is "could not be read" (exit 1).
+   - **The agreement.** `ask-validation.ts` reads the merge request's state and head from GitLab, so the version the user is shown, and the one `merge-pr.ts` then holds the merge to, is the head GitLab names. Without it, a GitLab service could never pass the agreement: the ask read the head through gh.
    - **gh is never called.** Other merge requests shown on the ticket are asked of GitLab through a reader `shownLeft` now takes. `lib/release.ts start` reads the merged merge request from GitLab (its merge commit and when) before the watch starts.
+   - **`release-request.ts` is unchanged**, though the plan lists it as this lane's file. It is only the broker's socket client, and which forge a merge goes through comes from the lock's own settings, never from the client.
 5. **The forge step.**
    - **The screen.** It offers GitHub and GitLab as two radio buttons of one labelled group. GitHub comes first, and stays chosen until a GitLab token is saved alone.
    - **The GitLab fields.** The address, gitlab.com by default. The api scope and the Developer role (Maintainer to merge into a protected branch), with what each is for. A link to the page that makes the token on that GitLab, its name and scope filled in.
    - **The check goes through the contract:** the adapter's listing. Then the token's own page (`/personal_access_tokens/self`) must hold the scope `api`. An older GitLab without that page is checked by the listing alone.
    - **Refusals:** `address`, `refused` (401), `forbidden` (403), `scope`, `empty`, `unreachable`, and `environment` when the environment names the token file.
    - **What is written.** The token goes to `<state>/forge-gitlab.token` (mode 600). The settings name it with the address. Both are set in the process at once, with no restart.
-6. **GitHub's check stays its direct read.** The plan says the step goes through the contract for both forges; for GitHub, it does not. The GitHub adapter is `gh`, and the step's direct read of one page (`GET /user/repos`) is what tells 401 from 403 and needs no `gh` before the forge is connected. The step's and the assistant's existing tests stay as they were. Moving it would change GitHub's behaviour for no gain the plan names, which section 6 asked not to do.
+6. **GitHub's check stays its direct read.** The plan says the step goes through the contract for both forges; for GitHub, it does not. The GitHub adapter is `gh`, and the step's direct read of one page (`GET /user/repos`) is what tells 401 from 403 and needs no `gh` before the forge is connected. Moving it would change GitHub's behaviour for no gain the plan names, which section 6 asked not to do. The step's service tests and the assistant's browser tests pass unchanged. What changed on GitHub's side is words: the step's title ("Connect GitHub or GitLab"), its intro, now shared by both forges, with GitHub's own sentence under its choice, and the progress line's label, "Forge" where it said "GitHub".
 7. **The doctor section `gitlab`** is run only when named (`node scripts/doctor.ts gitlab`, `cleared doctor gitlab`), as `mirror`, and is read only. It says, in order:
    - the address;
    - the token's file, looked at as the adapter reads it and never printed;
@@ -7095,6 +7097,39 @@ French and English, accessible, against a fake GitLab only. As earlier lanes not
 
 **Tests first.** `ef0dcb64` committed the tests alone. On it:
 - the adapter's file, the contract's GitLab cases, the step's, the doctor's and the screen's could not load what they test;
-- the workspace file still refused `forge = gitlab`;
-- `lib/forge.ts` still refused `adapter = gitlab`;
-- the lock's six GitLab cases failed, `merge-pr.ts` asking `gh`.
+- the workspace file still refused `forge = gitlab`, and `lib/forge.ts` still refused `adapter = gitlab`;
+- the lock's six GitLab cases failed, run on that commit in a scratch worktree: `merge-pr.ts` stopped on `unknown [forge] adapter "gitlab"`, then could not read pull request #7.
+
+The two agreement cases came after the review of the code (an advisor's read): with `ask-validation.ts` as it was, the ask stopped on "pull request #7 could not be read", seen by running the new case on the old file.
+
+**Files outside the lane's list**, each for GitLab's path, GitHub's left as it was:
+- `lib/forge.ts`: `adapter = gitlab` accepted, with no GitHub App key.
+- `lib/release.ts`: the watch reads the merged merge request from GitLab.
+- `lib/script.ts`: `shownLeft` takes a reader of a pull request's state.
+- `ask-validation.ts`: the shown head read from GitLab.
+- `lib/gitlab.ts`: new, the client (decision 1).
+- `agents.example.conf`: the lock's GitLab keys, as comments.
+- `v2/app/messages/setup.{en,fr}.json`: the step's label.
+- `v2/app/web/test/i18n-audit.test.tsx`: GitHub, GitLab and `api` written alike in both languages.
+- `v2/test/forge/contract-cases.ts` (decision 3), `v2/test/forge/workspace-config.test.ts` and `test/forge.test.ts`: GitLab accepted where it was refused.
+
+**Captures.**
+- `docs/v2/gitlab/`: the GitLab choice at 1440, 1280, 768 and 390 px, light and dark, in English, and the saved step at 1440 in French. Taken by `app/test/setup/forge-gitlab-browser.test.ts` with `CLEARED_V2_CAPTURES`.
+- `docs/v2/setup-assistant/forge-*.png`: taken again by `setup-browser.test.ts`, since the forge step now opens on the choice.
+
+**Checks.** Run on this branch at `origin/v2` `3c27792d`.
+- `npm run typecheck` passes, and so does the root type check (`v2/node_modules/.bin/tsc -p .`).
+- `npm test` with `CLEARED_V2_PLAYWRIGHT` set: 2738 Node tests, 2735 pass, 2 skipped, 1 fails, `app/test/notify/browser.test.ts`. It fails the same way on a clean checkout of `origin/v2` at `3c27792d` without this lane, run here, as P252's entry says.
+- 388 Vitest tests pass.
+- After the agreement's fix: the forge, setup and doctor tests (69) and the lock's eight GitLab cases pass.
+- The root suite (`node --test test/*.test.ts`, as the `checks` workflow runs it): 413 tests, 411 pass, 2 skipped.
+- The browser tests of the assistant (`setup-browser`, `workspace-browser`, `checks-browser`) and the new `forge-gitlab-browser` pass in both languages, axe finding nothing.
+- An earlier run found three i18n audit failures: a literal `api` in the screen, a type the audit read as text, and the two forge names written alike. They are fixed as listed above.
+- `npm run guard -- --base origin/v2`: nothing refused. A first run refused four lines: a constant named after a token that holds a setting's name, a test address with a user and a password, and two test values. The constant was renamed and the test values are built at run time.
+- The guard does not read `docs/v2/`, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
+
+**Resources.**
+- No Docker object, no real GitLab or GitHub account, no Claude Code login read.
+- No Slack, Cursor or Codex account used.
+- Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issues and the pull request, nothing else.
+- Ports: only the tests' own ephemeral loopback ones. No tunnel, no secret.

@@ -4,15 +4,17 @@
 // same order: open, not a draft, to the base, its checks green on the head
 // (a failure GitLab allows does not fail them, a manual job is not run, a
 // running one waits); its branch holds the base; reviewed at this version;
-// the agreement; the host free (no pipeline running or pending, the base
-// still for ten minutes). It merges the very commit it checked (`sha`), never
+// the agreement, asked for the head GitLab names (ask-validation.ts) and
+// given by the user's own move; the host free (no pipeline running or
+// pending, the base still for ten minutes). It merges the very commit it checked (`sha`), never
 // removes the branch, and starts the health watch on GitLab's merge commit.
-// gh is never called. Against a fake GitLab on loopback; merge-pr.ts runs as
-// its own process, so the fake can answer while it waits.
+// gh is never called. Against a fake GitLab on loopback; merge-pr.ts and
+// ask-validation.ts run as processes of their own, so the fake can answer
+// while they wait.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, writeFileSync, readFileSync, chmodSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { openLedger } from '../lib/ledger.ts';
 import { reviewedPull, type Pull } from './support.ts';
@@ -57,8 +59,8 @@ async function onGitLab(files: string[] = TOOLING, forge: (address: string, toke
     git('push', '-q', 'origin', 'HEAD:main');
     return git('rev-parse', 'HEAD');
   };
-  const run = (args: string[] = [], input?: string): Promise<Ran> => new Promise((resolve) => {
-    const child = spawn(join(pull.box.home, 'merge-pr.ts'), ['7', 'X-5', ...args], { env: pull.env });
+  const spawned = (script: string, args: string[], input?: string): Promise<Ran> => new Promise((resolve) => {
+    const child = spawn(join(pull.box.home, script), args, { env: pull.env });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -66,10 +68,12 @@ async function onGitLab(files: string[] = TOOLING, forge: (address: string, toke
     child.stdin.end(input ?? '');
     child.on('close', (status) => resolve({ status, stdout, stderr }));
   });
+  const run = (args: string[] = [], input?: string) => spawned('merge-pr.ts', ['7', 'X-5', ...args], input);
+  const ask = (input = '**Ce qui change.** Je la mets en ligne ?') => spawned('ask-validation.ts', ['X-5', '-', '--pr', '7'], input);
   const ghCalled = () => existsSync(join(pull.box.home, 'gh-called'));
   const merges = () => lab.requests.filter((r) => r.method === 'PUT' && r.path.endsWith('/merge'));
   labs.push(lab);
-  return { pull, lab, address, tokenFile, run, ghCalled, merges };
+  return { pull, lab, address, tokenFile, run, ask, ghCalled, merges };
 }
 
 const releases = (pull: Pull) => {
@@ -197,4 +201,40 @@ test('the lock\'s GitLab settings are checked before anything is read: an addres
   assert.notEqual(open.status, 0);
   assert.match(open.stderr, /600/);
   assert.equal(lab.requests.length, 0);
+});
+
+test('what the user of the app sees goes live on GitLab only on his own move, for the version GitLab named when he was asked', async () => {
+  const { pull, lab, run, ask, ghCalled, merges } = await onGitLab(['server/core.mjs', 'frontend/pages/Today.jsx']);
+  const live = (input = 'Annonce.') => run(['-'], input);
+  const none = await live();
+  assert.equal(none.status, 6);
+  assert.match(none.stderr, /the user has not agreed/);
+  // Asked: the version is the head GitLab names, kept in the record merge-pr.ts reads.
+  writeFileSync(join(pull.box.home, 'tracker-moved'), '5');
+  const asked = await ask();
+  assert.equal(asked.status, 0, asked.stderr);
+  assert.ok(lab.requests.some((r) => r.method === 'GET' && r.path === '/api/v4/projects/example%2Fguestbook/merge_requests/7'));
+  assert.deepEqual(JSON.parse(readFileSync(join(pull.box.state, 'validations', 'X-5.json'), 'utf8')).pulls, [{ pr: 7, head: pull.headOf() }]);
+  // Put in his status by him: it goes, at that version, and the ticket is closed.
+  writeFileSync(join(pull.box.home, 'tracker-moved'), '0');
+  const done = await live('**Mise en ligne** : ce qui change, où le voir, comment vérifier.');
+  assert.equal(done.status, 0, done.stderr);
+  assert.deepEqual(merges().map((r) => r.body), [{ sha: pull.headOf(), should_remove_source_branch: false }]);
+  assert.deepEqual(pull.ledgerKinds(), ['merged_by_script']);
+  assert.deepEqual(pull.moves().slice(-1), ['X-5 -> Done']);
+  assert.equal(ghCalled(), false, 'neither the ask nor the go-live reached gh');
+});
+
+test('a version on GitLab that is not the one he was shown is refused, and the ticket goes back to him', async () => {
+  const { pull, run, merges } = await onGitLab(['server/core.mjs']);
+  const before = pull.git('rev-parse', 'HEAD~1').trim();
+  mkdirSync(join(pull.box.state, 'validations'), { recursive: true });
+  writeFileSync(join(pull.box.state, 'validations', 'X-5.json'), JSON.stringify({ ticket: 'X-5', at: '2026-01-02T10:00:00Z', pulls: [{ pr: 7, head: before }] }));
+  writeFileSync(join(pull.box.home, 'tracker-moved'), '0');
+  const stale = await run(['-'], 'Annonce.');
+  assert.equal(stale.status, 6);
+  assert.match(stale.stderr, /is not the version he was shown/);
+  assert.deepEqual(pull.moves(), ['X-5 -> À valider']);
+  assert.deepEqual(pull.ledgerKinds(), ['merge_refused']);
+  assert.equal(merges().length, 0);
 });

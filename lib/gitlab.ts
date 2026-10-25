@@ -195,6 +195,19 @@ export function gitlabLockClient(settings: GitLabLockSettings, options: { readon
   return new GitLabClient({ address: settings.address, token: readGitLabToken(settings.tokenFile, '[forge] gitlab_token_file'), ...options });
 }
 
+const LOCK_KEYS = ['gitlab_url', 'gitlab_project', 'gitlab_token_file', ...APP_KEYS];
+
+export type GitLabLock = { readonly client: GitLabClient; readonly project: string };
+
+// The lock of a service on GitLab, from its [forge] section as `read` gives
+// each key ('' when unset); null for a service on GitHub. Throws, naming the
+// key, when the settings or the token's file cannot work.
+export function gitlabLockOf(read: (key: string) => string, checkout: string | null): GitLabLock | null {
+  if (read('adapter') !== 'gitlab') return null;
+  const settings = gitlabLockSettings(Object.fromEntries(LOCK_KEYS.map((key) => [key, read(key)])), checkout);
+  return { client: gitlabLockClient(settings), project: settings.project };
+}
+
 // A merge request as merge-pr.ts reads a pull request (gh pr view's fields),
 // its checks as the conclusions merge-pr.ts judges.
 export type LockPull = {

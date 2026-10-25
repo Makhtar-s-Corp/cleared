@@ -18,10 +18,16 @@
 // The port of ask-validation.sh (docs/v2/milestone-4-plan.md, step b): the
 // same arguments, record, messages and exit codes. The two teams on one
 // ticket, which only v1's lanes opened, are not carried over.
+//
+// A service on GitLab ([forge] adapter = gitlab, docs/v2/milestone-5-plan.md
+// section 11) has its merge requests' state and head read from GitLab's REST
+// API (lib/gitlab.ts), the version merge-pr.ts then holds it to; gh is never
+// called for it.
 import { createHash } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { agoUtc, confGet, die, ghShown, hasText, lockFile, main, nowUtc, projectEnv, readJson, ScriptExit, scratchDir, tracker, userMessage, writeWhole } from './lib/script.ts';
+import { agoUtc, confGet, confSoft, die, ghShown, hasText, lockFile, main, nowUtc, projectEnv, readJson, ScriptExit, scratchDir, tracker, userMessage, writeWhole } from './lib/script.ts';
+import { gitlabLockOf, lockPull, type GitLabLock } from './lib/gitlab.ts';
 
 const USAGE = 'usage: ask-validation.ts <ticket> <file|-> --pr <pull request>... [--capture <image> [<caption>]]...';
 
@@ -33,10 +39,13 @@ const requestTime = (): string => new Date().toISOString().replace(/\.(\d{3})Z$/
 
 const same = (a: Shown, b: Shown): boolean => a.pr === b.pr && a.head === b.head;
 
-await main(() => {
+await main(async () => {
   const args = process.argv.slice(2);
   if (args.length < 2 || !/^[A-Z]+-[0-9]+$/.test(args[0]!)) die(USAGE);
-  const { state } = projectEnv();
+  const { state, repo } = projectEnv();
+  let lab: GitLabLock | null = null;
+  try { lab = gitlabLockOf((key) => confSoft('forge', key), repo); }
+  catch (error) { die(error instanceof Error ? error.message : String(error)); }
   const ticket = args[0]!;
   const source = args[1]!;
   const pulls: string[] = [];
@@ -69,10 +78,15 @@ await main(() => {
     const shown: Shown[] = [];
     const versions: string[] = [];
     for (const pr of pulls) {
-      const viewed = ghShown(['pr', 'view', pr, '--json', 'state,headRefOid']);
-      if (viewed.status !== 0) die(`pull request #${pr} could not be read`);
       let pull: { state?: unknown; headRefOid?: unknown };
-      try { pull = JSON.parse(viewed.stdout) as typeof pull; } catch { die(`pull request #${pr} could not be read`); }
+      if (lab) {
+        try { pull = await lockPull(lab.client, lab.project, Number(pr)); }
+        catch (error) { die(`merge request !${pr} could not be read: ${error instanceof Error ? error.message : String(error)}`); }
+      } else {
+        const viewed = ghShown(['pr', 'view', pr, '--json', 'state,headRefOid']);
+        if (viewed.status !== 0) die(`pull request #${pr} could not be read`);
+        try { pull = JSON.parse(viewed.stdout) as typeof pull; } catch { die(`pull request #${pr} could not be read`); }
+      }
       if (pull.state !== 'OPEN') die(`#${pr} is not open: nothing asked`);
       const head = String(pull.headRefOid ?? '');
       if (!/^[0-9a-f]{40}$/.test(head)) die(`the version of #${pr} could not be read`);

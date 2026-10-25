@@ -51,7 +51,7 @@ import { spawnSync } from 'node:child_process';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { confGet, confSoft, die, gh, ghShown, git, githubDown, hasText, idsOf, ledgerEvent, ledgerInit, ledgerRows, lockFile, main, nowUtc, ORCH_HOME, onlyBaseMerges, projectEnv, readJson, say, ScriptExit, scratchDir, shownLeft, tracker, userMessage, writeWhole } from './lib/script.ts';
-import { GitLabClient, GitLabError, gitlabLockClient, gitlabLockSettings, hostOnGitLab, lockPull, mergeOnGitLab } from './lib/gitlab.ts';
+import { GitLabError, gitlabLockOf, hostOnGitLab, lockPull, mergeOnGitLab, type GitLabLock as Lab } from './lib/gitlab.ts';
 
 const USAGE = 'usage: merge-pr.ts <pull request> <ticket> [<announcement file|->] [--dry-run]';
 
@@ -60,9 +60,6 @@ type Asked = { at?: unknown; pulls?: { pr: number; head?: string; merged_at?: st
 
 const jqOr = (...values: unknown[]): unknown => values.find((value) => value !== null && value !== undefined && value !== false) ?? values.at(-1);
 
-// A GitLab service's project and the client that holds its token.
-type Lab = { readonly client: GitLabClient; readonly project: string };
-const FORGE_KEYS = ['gitlab_url', 'gitlab_project', 'gitlab_token_file', 'app_id', 'installation_id', 'app_private_key_file', 'app_login', 'app_user_id', 'use_tracker_app'];
 // GitLab gave no answer, or one of its own trouble: not now.
 const silent = (error: unknown): boolean => error instanceof GitLabError && (error.status === undefined || error.status >= 500);
 
@@ -137,12 +134,8 @@ await main(async () => {
   if (args.length < 2 || !/^[0-9]+$/.test(args[0]!) || !/^[A-Z]+-[0-9]+$/.test(args[1]!)) die(USAGE);
   // A GitLab service: its settings and its token are checked before anything is read.
   let lab: Lab | null = null;
-  if (confSoft('forge', 'adapter') === 'gitlab') {
-    try {
-      const settings = gitlabLockSettings(Object.fromEntries(FORGE_KEYS.map((key) => [key, confSoft('forge', key)])), projectEnv().repo);
-      lab = { client: gitlabLockClient(settings), project: settings.project };
-    } catch (error) { refuse(error instanceof Error ? error.message : String(error)); }
-  }
+  try { lab = gitlabLockOf((key) => confSoft('forge', key), projectEnv().repo); }
+  catch (error) { refuse(error instanceof Error ? error.message : String(error)); }
   const pr = args[0]!;
   const ticket = args[1]!;
   let announcement = '';
