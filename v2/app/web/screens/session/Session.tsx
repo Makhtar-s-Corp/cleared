@@ -24,7 +24,7 @@ import {
   ArrowCounterClockwise, ArrowRight, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, Terminal, WarningCircle, X, type Icon,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react';
-import type { ConfirmableRule, EditorLinks, ProductionCheck, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketCost, TicketStep } from '../../../../src/api/types.ts';
+import type { ConfirmableRule, EditorLinks, ProductionCheck, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketCost, TicketStep, Workspace } from '../../../../src/api/types.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import { Choices, OwnChoices } from '@/components/choices/Choices.tsx';
 import { sentText, type Answers } from '@/components/choices/model.ts';
@@ -54,13 +54,13 @@ import {
   type EditsRow, type LocalAnswer, type QuestionRow, type ReadRow, type ReplayRow, type RequestState, type Row, type SessionThread, type SessionView, type StreamLike, type ToolRow,
 } from './model.ts';
 import { CloseTicket } from './CloseTicket.tsx';
-import { BrowserTab, Confidence, Criteria, EditorTab, OpenInEditor, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown } from './Tabs.tsx';
-import { browserView, changeProblem, CHANGE_MAX, editorOffer, goLine, handoverFor, nextTab, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
+import { BrowserTab, Confidence, Criteria, EditorTab, OpenInEditor, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown, type PlanAsk } from './Tabs.tsx';
+import { browserView, changeProblem, CHANGE_MAX, editorOffer, goLine, handoverFor, nextTab, planAskBody, planAskProblem, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import {
   actingSession, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketCostFacts, productionFacts, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
   type Filter, type Handover, type ThreadEntry, type TicketPart,
 } from './ticket.ts';
-import { askHref } from '@/screens/ask/model.ts';
+import { askFailure, askHref, startAsk } from '@/screens/ask/model.ts';
 import './session.css';
 import { Counts } from './Counts.tsx';
 
@@ -731,6 +731,8 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const [changing, setChanging] = useState(false);
   const [change, setChange] = useState('');
   const [planNote, setPlanNote] = useState('');
+  const [ask, setAsk] = useState<PlanAsk>({ text: '', busy: false, status: '' });   // the Plan tab's question to the code
+  const navigate = useGo();
   const [files, setFiles] = useState<SessionFiles['files'] | null>(null);
   const [scope, setScope] = useState<Scope>('all');
   const [selected, setSelected] = useState<string | undefined>(undefined);
@@ -1121,6 +1123,27 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     if (await planPost('/plan/change', { message: change.trim() }, 'plan_change_failed')) { setChanging(false); setChange(''); }
   };
 
+  // A question to the code (decision 28): the reader's route, about the
+  // session's service unless it names a line of another, then its screen.
+  const askCode = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const problem = planAskProblem(ask.text, t);
+    if (problem) {
+      setAsk((before) => ({ ...before, status: problem }));
+      document.getElementById('plan-ask-input')?.focus();
+      return;
+    }
+    setAsk((before) => ({ ...before, busy: true, status: '' }));
+    try {
+      const workspace = await context.api<Workspace>('/workspace').catch(() => null);
+      const asked = await startAsk(context.api, planAskBody(ask.text, view.summary.service, workspace?.services.map((s) => s.name) ?? []));
+      setAsk({ text: '', busy: false, status: '' });
+      navigate(askHref(asked.id));
+    } catch (error) {
+      setAsk((before) => ({ ...before, busy: false, status: t(askFailure(error, 'ask')) }));
+    }
+  };
+
   // The trial environment: the live session's, else the newest author's that has one.
   const previewOf = [id, ...authors].find((s) => details.get(s)?.previewKey);
   const browser = browserView({ id: previewOf ?? id, previewKey: previewOf ? details.get(previewOf)?.previewKey : null, previewOrigin: document.body.dataset.preview, pageHost: window.location.hostname });
@@ -1166,7 +1189,8 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
           </div>
           <div className="tab-panel scroll" {...panel('plan')}>
             <PlanTab view={view} plan={ticketPlan(parts) ?? view.thread.plan} t={t} changing={changing} change={change} busy={gesture} note={planNote}
-              onGo={go} onChangeOpen={() => { setChanging(true); setPlanNote(''); }} onChangeText={setChange} onChangeSend={(event) => void sendChange(event)} onChangeCancel={() => { setChanging(false); setPlanNote(''); }} />
+              onGo={go} onChangeOpen={() => { setChanging(true); setPlanNote(''); }} onChangeText={setChange} onChangeSend={(event) => void sendChange(event)} onChangeCancel={() => { setChanging(false); setPlanNote(''); }}
+              ask={ask} onAskText={(text) => setAsk((before) => ({ ...before, text }))} onAskSend={(event) => void askCode(event)} />
           </div>
           <div className="tab-panel scroll" {...panel('editor')}>
             {tab === 'editor' || files !== null ? (

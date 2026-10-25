@@ -211,6 +211,13 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .plan-change textarea:focus { outline: 2px solid transparent; box-shadow: 0 0 0 2px var(--link); }
 .plan-note { margin-top: 8px; font-size: var(--text-sm); color: var(--text-secondary); }
 .plan-note:empty { display: none; }
+/* The question to the code (decision 28): the Change's field, its Ask with the note of where the answer opens. */
+.plan-ask form { display: grid; gap: 6px; max-width: 640px; }
+.plan-ask textarea { min-height: 76px; padding: 8px 10px; border-radius: 8px; background: var(--surface); box-shadow: var(--e-control); resize: vertical; }
+.plan-ask textarea:focus { outline: 2px solid transparent; box-shadow: 0 0 0 2px var(--link); }
+.plan-ask .plan-actions { align-items: center; margin-top: 4px; }
+.plan-ask-note { font-size: var(--text-sm); color: var(--text-secondary); }
+.plan-ask-note:empty { display: none; }
 /* Resume from here (issue #272): under a step's detail, its corrected instruction as a plan's change. */
 .resume-open { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; }
 .resume-form { display: grid; gap: 6px; margin-top: 4px; max-width: 640px; }

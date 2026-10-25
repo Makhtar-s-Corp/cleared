@@ -53,11 +53,11 @@ test('the card is there with no plan, while the plan waits, and on an ended sess
 });
 
 test('while the question is sent, the field and Ask wait; a note says what went wrong', () => {
-  const sending = card(html(<PlanTab view={viewOf()} plan={SESSION_PLAN} t={en} ask={{ text: 'Where is an entry stored?', busy: true, note: '' }} />));
+  const sending = card(html(<PlanTab view={viewOf()} plan={SESSION_PLAN} t={en} ask={{ text: 'Where is an entry stored?', busy: true, status: '' }} />));
   assert.match(sending, /<textarea[^>]*disabled=""/);
   assert.match(sending, /<button[^>]*data-act="plan_ask"[^>]*disabled=""|<button[^>]*disabled=""[^>]*data-act="plan_ask"/);
   assert.match(sending, />Where is an entry stored\?<\/textarea>/);
-  const refused = card(html(<PlanTab view={viewOf()} plan={SESSION_PLAN} t={en} ask={{ text: '', busy: false, note: 'Write the question first.' }} />));
+  const refused = card(html(<PlanTab view={viewOf()} plan={SESSION_PLAN} t={en} ask={{ text: '', busy: false, status: 'Write the question first.' }} />));
   assert.match(refused, /<p class="plan-ask-note" role="status">Write the question first\.<\/p>/);
   assert.doesNotMatch(refused, /disabled=""/);
 });

@@ -10,14 +10,17 @@
 //   Browser: the session's trial environment from the preview listener's
 //     own origin (decision 20), else milestone 1's "Screen so far".
 // The Plan tab also lists the ticket's steps across services (decision 26,
-// lane 27), this session's marked, once the ticket has two or more.
+// lane 27), this session's marked, once the ticket has two or more, and
+// asks about the code (decision 28, matrix C11): the tower bar's ask to the
+// reader, about the session's service, opened on its /ask/:id screen.
 //
 // The browser may only `import type` from v2/src, so the container's name
 // is copied here and a test keeps it equal to session-runtime.ts's.
-import type { EditorLinks, SessionFile, SessionPlan, TakenOver, TicketStep } from '../../../../src/api/types.ts';
+import type { AskBody, EditorLinks, SessionFile, SessionPlan, TakenOver, TicketStep } from '../../../../src/api/types.ts';
 import type { Harness, Role } from '../../../../src/session/contract.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { fixed } from '../../lib/time.ts';
+import { QUESTION_MAX, askBody, questionProblem } from '../ask/model.ts';
 import { clock, who } from './model.ts';
 
 export const TABS = ['plan', 'terminal', 'editor', 'browser'] as const;
@@ -65,6 +68,21 @@ export function changeProblem(text: string): 'empty' | 'too_long' | undefined {
   if (!text.trim()) return 'empty';
   return text.length > CHANGE_MAX ? 'too_long' : undefined;
 }
+
+// The ask from the Plan tab: the tower bar's rules, the session's service
+// picked. A `service:path:line` of the workspace names its own service.
+export const planAskBody = (text: string, service: string | undefined, services: readonly string[]): AskBody =>
+  askBody(text, services, service ? [service] : []);
+
+export function planAskProblem(text: string, t: Translate): string | undefined {
+  const problem = questionProblem(text);
+  if (!problem) return undefined;
+  return problem === 'empty' ? t('ask_question_empty') : t('ask_question_long', { n: QUESTION_MAX });
+}
+
+// What the reader reads: the base branch, never the session's checkout.
+export const planAskScope = (service: string | undefined, t: Translate): string =>
+  service ? t('plan_ask_scope', { service }) : t('plan_ask_scope_platform');
 
 // --------------------------------------------------------------- terminal
 

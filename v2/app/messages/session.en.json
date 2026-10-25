@@ -282,5 +282,19 @@
   "close_conflict": "The ticket could not be closed: it was approved, it is done, or it moved.",
   "close_invalid": "The service refused the reason: some text of at most 2000 characters.",
   "close_failed": "Closing did not reach the service. Try again.",
-  "closed_done": "Closed at {time}. Nothing was merged. The card stays in the history."
+  "closed_done": "Closed at {time}. Nothing was merged. The card stays in the history.",
+  "plan_ask_title": "Ask about the code",
+  "plan_ask_label": "Your question about the code",
+  "plan_ask_placeholder": "Where is an entry stored? Name a line as service:path:line.",
+  "plan_ask_send": "Ask",
+  "plan_ask_scope": "Read only, on the base branch of {service}: the reader does not see this session's changes, and never edits, commits or pushes.",
+  "plan_ask_scope_platform": "Read only, on the base branch of every service: the reader does not see this session's changes, and never edits, commits or pushes.",
+  "plan_ask_opens": "The answer opens on its own page, with each turn's cost.",
+  "ask_question_empty": "Write the question first.",
+  "ask_question_long": "A question has at most {n} characters.",
+  "ask_failed_busy": "Three questions are being answered: ask again once one is answered.",
+  "ask_failed_invalid": "The service refused the question: check the service, the file and the line it names.",
+  "ask_failed_gone": "The service does not know this question.",
+  "ask_failed_off": "Questions to the code are off on this service.",
+  "ask_failed": "The question was not sent. Try again."
 }
