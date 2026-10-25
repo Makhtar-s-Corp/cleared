@@ -5,6 +5,7 @@
 // The answers are the reader's words, as the service stores them: text,
 // with the code they cite, each linked by the service to the commit the
 // reader read (P215).
+import { randomUUID } from 'node:crypto';
 import type { Ask, AskAnswer, AskCitation } from '../../src/api/types.ts';
 import { FIXTURE_NOW } from './tower.ts';
 
@@ -51,5 +52,19 @@ export function platformAsk(now: Date = FIXTURE_NOW): Ask {
     id: PLATFORM_ASK_ID, question: 'Where does the guestbook call the filter API, and what does it do when the call fails?', service: null, target: null,
     session: null, state: 'starting', turns: [turn('Where does the guestbook call the filter API, and what does it do when the call fails?', null, ago(now, 0), null, 0, 0)],
     costUsd: 0, inputTokens: 0, outputTokens: 0, weekPercent: null, createdAt: ago(now, 0), by: ASK_USER,
+  };
+}
+
+// A new ask as the service answers POST /api/asks, for both fixture
+// sources: starting, about the target's service, else the service the body
+// names, else the whole platform. The service's own checks are not made.
+export function startedAsk(body: { readonly question: string; readonly service?: unknown; readonly target?: unknown }, by: string, at: string): Ask {
+  const question = body.question.trim();
+  const named = typeof body.target === 'string' ? /^([^:]+):(.+):([0-9]+)$/.exec(body.target) : null;
+  const target = named ? { service: named[1] as string, path: named[2] as string, line: Number(named[3]) } : null;
+  const service = target?.service ?? (typeof body.service === 'string' ? body.service : null);
+  return {
+    id: `ask-${randomUUID()}`, question, service, target, session: null, state: 'starting', turns: [turn(question, null, at, null, 0, 0)],
+    costUsd: 0, inputTokens: 0, outputTokens: 0, weekPercent: null, createdAt: at, by,
   };
 }

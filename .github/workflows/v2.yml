@@ -103,7 +103,8 @@ jobs:
             app/test/tower-templates-browser.test.ts
             app/test/consumption/wins-browser.test.ts
             app/test/ask/citations-browser.test.ts app/test/inbox/mobile-browser.test.ts
-            app/test/session/production-browser.test.ts test/flow/production-capture.test.ts"
+            app/test/session/production-browser.test.ts test/flow/production-capture.test.ts
+            app/test/session/plan-ask-browser.test.ts"
           node --test --test-reporter=tap $files | tee "$RUNNER_TEMP/browser.tap"
           count() { grep -E "^# $1 " "$RUNNER_TEMP/browser.tap" | awk '{print $3}'; }
           test "$(count skipped)" = 0 || { echo "::error::$(count skipped) browser test(s) skipped"; exit 1; }

@@ -27,7 +27,6 @@
 // that holds the ticket's sessions; with `resolved`, the landed ticket
 // LOCAL-149 has its author's and its reviewer's sessions (fixtures/cost.ts),
 // and its production page's check (P218), read by the service's own reader.
-import { randomUUID } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { KEEPALIVE_MS } from '../../src/api/events.ts';
 import { changeFrame, leadFrame, sseFrame, type Ask, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
@@ -42,7 +41,7 @@ import { applyAll, emptyModel } from '../web/screens/session/model.ts';
 import { sendJson, type DataSource } from '../src/proxy.ts';
 import { leadFixture } from './lead.ts';
 import { ENVELOPE_BODY, ENVELOPE_RESUMED, ENVELOPE_TICKET, PREVIEW_KEY, envelopeStory, fixtureFile, fixtureHuman, workspaceFixture } from './session.ts';
-import { askFixture } from './ask.ts';
+import { askFixture, startedAsk } from './ask.ts';
 import { consumptionFixture } from './consumption.ts';
 import { RESOLVED_TICKET, resolvedStory } from './cost.ts';
 import { contractItem, knowledgeItem, requestItems } from './inbox.ts';
@@ -261,12 +260,13 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
         return ask ? sendJson(response, 200, ask) : sendJson(response, 404, { error: 'no such ask' });
       }
       if (method === 'POST') {
-        const question = ((await readJson(request)) as { question?: unknown } | undefined)?.question;
+        const body = ((await readJson(request)) ?? {}) as { question?: unknown; service?: unknown; target?: unknown };
+        const question = body.question;
         if (typeof question !== 'string' || !question.trim() || question.length > 4000) return sendJson(response, 400, { error: 'a question is a non-empty text of at most 4000 characters' });
         const at = now().toISOString();
         const turn = { question: question.trim(), answer: null, at, costUsd: null, inputTokens: 0, outputTokens: 0, citations: [] };
         if (parts.length === 1) {
-          const ask: Ask = { id: `ask-${randomUUID()}`, question: question.trim(), service: null, target: null, session: null, state: 'starting', turns: [turn], costUsd: 0, inputTokens: 0, outputTokens: 0, weekPercent: null, createdAt: at, by: user };
+          const ask = startedAsk({ ...body, question }, user, at);
           asks.set(ask.id, ask);
           return sendJson(response, 200, ask);
         }
