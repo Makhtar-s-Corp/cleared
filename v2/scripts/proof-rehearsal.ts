@@ -24,7 +24,7 @@ import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import type { FakeStep } from '../src/session/adapters/fake.ts';
 import { toolArgs, toolResult } from '../src/session/events.ts';
@@ -530,7 +530,7 @@ coalesce_minutes = 1
 
   // The stand-ins on PATH.
   writeGhStub(bin, forge, { 'rehearsal/guestbook': origin });
-  writeFileSync(join(bin, 'sendmail'), `#!/bin/sh\n{ printf '%s\\n' "---- $(date -u +%FT%TZ)"; cat; } >> "${mail}"\n`, { mode: 0o755 });
+  writeSendmailStub(bin, mail);
 
   // The scripts and the owner.
   const script = join(root, 'script.json');
@@ -598,7 +598,21 @@ coalesce_minutes = 1
 export function writeGhStub(bin: string, forge: string, origins: Readonly<Record<string, string>>): void {
   const map = `${forge}.origins.json`;
   writeFileSync(map, JSON.stringify(origins), { mode: 0o600 });
-  writeFileSync(join(bin, 'gh'), `#!/bin/sh\nexec "${process.execPath}" --no-warnings "${SELF}" gh-stub "${forge}" "${map}" "$@"\n`, { mode: 0o755 });
+  writeNodeStub(join(bin, 'gh'), SELF, ['gh-stub', forge, map]);
+}
+
+// A stand-in on PATH that runs `script` with `words` before the caller's
+// arguments, with no shell (D11). Node is its interpreter and the script is
+// imported in the same process, as `exec` did: the caller's pid, input and
+// exit code are the script's. Linux gives a shebang one argument, so the
+// words go into process.argv before the import.
+export function writeNodeStub(file: string, script: string, words: readonly string[]): void {
+  writeFileSync(file, `#!${process.execPath} --no-warnings\nprocess.argv.splice(1, 1, ${JSON.stringify(script)}, ...${JSON.stringify(words)});\nimport(${JSON.stringify(pathToFileURL(script).href)});\n`, { mode: 0o755 });
+}
+
+// The sendmail stand-in: each message appended to `mail` after a dated line.
+export function writeSendmailStub(bin: string, mail: string): void {
+  writeFileSync(join(bin, 'sendmail'), `#!${process.execPath}\nconst fs = process.getBuiltinModule('node:fs');\nfs.appendFileSync(${JSON.stringify(mail)}, '---- ' + new Date().toISOString().slice(0, 19) + 'Z\\n' + fs.readFileSync(0, 'utf8'));\n`, { mode: 0o755 });
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === SELF && process.argv[2] === 'gh-stub') {
