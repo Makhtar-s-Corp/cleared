@@ -1,7 +1,6 @@
 // The `forge` key of a service in the workspace file (milestone 5 plan,
-// decision 10): github by default, the only forge until GitLab's adapter
-// (section 11); never shown by GET /api/workspace, whose types are not
-// changed by milestone 5.
+// decision 10): github by default, or gitlab (section 11); never shown by
+// GET /api/workspace, whose types are not changed by milestone 5.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { loadWorkspace, parseWorkspace, publicWorkspace, WorkspaceError } from '../../src/workspace/config.ts';
@@ -19,10 +18,16 @@ test('a service with no forge key is on GitHub, and `forge = github` says the sa
   assert.equal(forgeKindOf(named), 'github');
 });
 
+test('`forge = gitlab` puts a service on GitLab', () => {
+  const [service] = parseWorkspace(file('forge = gitlab\n'), options).services;
+  assert.equal(service?.forge, 'gitlab');
+  assert.equal(forgeKindOf(service), 'gitlab');
+});
+
 test('a forge Cleared has no adapter for is refused, and the message names the ones it has', () => {
-  for (const forge of ['gitlab', 'GitHub', 'bitbucket', ''])
+  for (const forge of ['GitLab', 'GitHub', 'bitbucket', ''])
     assert.throws(() => parseWorkspace(file(`forge = ${forge}\n`), options), (error: unknown) =>
-      error instanceof WorkspaceError && /\[service guestbook\] forge is github/.test(error.message), forge);
+      error instanceof WorkspaceError && /\[service guestbook\] forge is github or gitlab/.test(error.message), forge);
 });
 
 test('the one-service workspace of the milestone 1 variables is on GitHub', () => {

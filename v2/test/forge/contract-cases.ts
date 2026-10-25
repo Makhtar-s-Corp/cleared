@@ -1,8 +1,8 @@
 // The forge contract's cases (milestone 5 plan, decision 10, section 6): what
 // Cleared asks of a forge, run on any adapter from a seeded world. `make`
 // gives the forge to test and a way to read the world after the calls. The
-// in-memory fake and the GitHub adapter run them (contract.test.ts); the
-// GitLab adapter (section 11) runs them over its own fake of GitLab.
+// in-memory fake, the GitHub adapter and the GitLab adapter (section 11) run
+// them (contract.test.ts), each over its own fake of the forge.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import type { Forge } from '../../src/forge/contract.ts';
@@ -93,12 +93,14 @@ export function forgeContractCases(name: string, make: MakeForge): void {
 
   test(`${name}: sums up the checks: pending with none or one running, failed with one failed or cancelled, else passed`, async () => {
     const check = (bucket: 'pass' | 'fail' | 'pending' | 'skipping' | 'cancel', n = 1) => ({ name: `check ${n}`, bucket, url: null });
+    // Checks belong to a commit: each pull request is on a head of its own.
+    const head = (n: number) => String(n).repeat(40);
     const { forge } = at([
-      pull({ number: 1 }),
-      pull({ number: 2, checks: [check('pass'), check('skipping', 2)] }),
-      pull({ number: 3, checks: [check('pass'), check('pending', 2)] }),
-      pull({ number: 4, checks: [check('pending'), check('fail', 2)] }),
-      pull({ number: 5, checks: [check('cancel')] }),
+      pull({ number: 1, headCommit: head(1) }),
+      pull({ number: 2, headCommit: head(2), checks: [check('pass'), check('skipping', 2)] }),
+      pull({ number: 3, headCommit: head(3), checks: [check('pass'), check('pending', 2)] }),
+      pull({ number: 4, headCommit: head(4), checks: [check('pending'), check('fail', 2)] }),
+      pull({ number: 5, headCommit: head(5), checks: [check('cancel')] }),
     ]);
     assert.deepEqual(await Promise.all([1, 2, 3, 4, 5].map((n) => forge.checks(REPO, n))), ['pending', 'passed', 'pending', 'failed', 'failed']);
   });

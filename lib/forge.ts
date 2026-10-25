@@ -60,7 +60,14 @@ export const AMBIENT = 'ambient credential';
 export function forgeSettings(conf: ConfSections): ForgeSettings | null {
   const forge = section(conf, 'forge');
   const tracker = section(conf, 'tracker');
-  if (forge.adapter && forge.adapter !== 'github') throw new Error(`unknown [forge] adapter "${forge.adapter}" (known: github)`);
+  if (forge.adapter && !['github', 'gitlab'].includes(forge.adapter)) throw new Error(`unknown [forge] adapter "${forge.adapter}" (known: github, gitlab)`);
+  // A GitLab service's lock reads GitLab itself (lib/gitlab.ts): no GitHub
+  // App, and git keeps its ambient credential.
+  if (forge.adapter === 'gitlab') {
+    const app = [...APP_KEYS, 'app_login', 'app_user_id', 'use_tracker_app'].filter((key) => forge[key]);
+    if (app.length) throw new Error(`[forge] adapter = gitlab takes no GitHub App key (${app.join(', ')})`);
+    return null;
+  }
   if (forge.use_tracker_app && !['yes', 'no'].includes(forge.use_tracker_app)) throw new Error('[forge] use_tracker_app must be yes or no');
   let source: 'forge' | 'tracker' | null = null;
   if (APP_KEYS.some((key) => forge[key])) source = 'forge';

@@ -297,7 +297,7 @@ Matrix line P254, pull request 427 (issue #422). What the author found and chose
 
 ## 11. GitLab, the second forge (`v2-j5-gitlab`)
 
-Matrix: M10 (GitLab after GitHub). Wave 3. Effort L.
+Matrix: M10 (GitLab after GitHub), and P255, the lane's own line, added when it delivered. Wave 3. Effort L.
 
 ### 11.1 Context
 

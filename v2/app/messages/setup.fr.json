@@ -4,7 +4,7 @@
   "setup_lead": "Quelques étapes, dans votre navigateur. Chacune dit ce qu'il lui faut et le vérifie aussitôt.",
   "setup_progress_label": "Étapes de l'installation",
   "setup_step_owner": "Votre compte",
-  "setup_step_forge": "GitHub",
+  "setup_step_forge": "Forge",
   "setup_step_model": "Claude Code",
   "setup_step_workspace": "Dépôts",
   "setup_step_environment": "Environnement",

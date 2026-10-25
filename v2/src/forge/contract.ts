@@ -4,19 +4,25 @@
 // read its state, its head and its checks, close it with a comment. Each
 // service names its forge in the workspace file (`forge = github` by
 // default). GitHub is the first adapter (github.ts, over gh); GitLab is the
-// second (section 11). The lock's merge stays outside the contract until
-// GitLab needs it (section 6.3).
+// second (gitlab.ts, over its REST API, section 11). The lock's merge stays
+// outside the contract: merge-pr.ts makes it, with gh for GitHub and
+// lib/gitlab.ts for a service whose agents.conf says [forge] adapter = gitlab.
 //
 // Every call runs on the host, where the forge's credential is: a session's
 // container never holds it. A repository is owner/name; a pull request is
 // its number on that repository.
 import type { CiFailures } from '../flow/ci-repair.ts';
 
-export const FORGE_KINDS = ['github'] as const;
+export const FORGE_KINDS = ['github', 'gitlab'] as const;
 export type ForgeKind = (typeof FORGE_KINDS)[number];
 
 export class ForgeError extends Error {
   override name = 'ForgeError';
+  readonly status: number | undefined;   // the forge's answer (401, 403...), when it gave one
+  constructor(message: string, options: { readonly status?: number | undefined } = {}) {
+    super(message);
+    this.status = options.status;
+  }
 }
 
 // A repository as the setup assistant and the workspace file need it.
