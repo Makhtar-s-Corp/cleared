@@ -1,13 +1,16 @@
 // The routes of the Consumption screen (docs/v2/requirements-matrix.md, O15),
 // registered by the lead module beside the schedules, whose pause is one of
 // the levers: GET /api/consumption (`?tz=<IANA zone>` for the days) and POST
-// /api/consumption/levers. Guarded as the recipes' are: the app's proof,
-// then the flow running, then for a write a user the service knows.
+// /api/consumption/levers; and the cost of a ticket from the ledger, GET
+// /api/tickets/:id/cost (P211, ticket-cost.ts). Guarded as the recipes' are:
+// the app's proof, then the flow running, then for a write a user the
+// service knows.
 import type { DatabaseSync } from 'node:sqlite';
 import { guard, HttpError, readJson, send } from '../recipes/routes.ts';
 import type { Registry, Route } from '../modules/registry.ts';
 import type { UserId } from '../session/contract.ts';
 import { LeverError, LeverStore, type LeversChange } from './levers.ts';
+import { ticketCost } from './ticket-cost.ts';
 import { consumption, leverChoices } from './usage.ts';
 
 export type ConsumptionTarget = {
@@ -51,6 +54,12 @@ export function consumptionRoutes(deps: ConsumptionRouteDeps): Route[] {
           if (error instanceof LeverError) throw new HttpError(400, error.message);
           throw error;
         }
+      }),
+    },
+    {
+      method: 'GET', path: '/api/tickets/:id/cost',
+      handle: guarded(false, async (target, _user, c) => {
+        send(c.response, 200, ticketCost(target.db, { project: target.project, ticket: c.params.id as string }));
       }),
     },
   ];
