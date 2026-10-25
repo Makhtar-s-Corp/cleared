@@ -80,11 +80,13 @@ test('the API lists every route the app lanes build against, once', () => {
     'GET /api/tickets/:id/cost',
     // The production page checked after a release landed (milestone 3, P218).
     'GET /api/tickets/:id/production',
+    // Whether the proof receipt takes captures, the human's choice on the ticket (milestone 3, P226).
+    'GET /api/tickets/:id/captures', 'POST /api/tickets/:id/captures',
   ].sort());
   assert.equal(new Set(API_ROUTES).size, API_ROUTES.length);
   // A route of the type map is a route of the list, and the reverse (checked by tsc).
   const keys: readonly (keyof ApiRoutes)[] = API_ROUTES;
-  assert.equal(keys.length, 66);
+  assert.equal(keys.length, 68);
   const ahead = [...SESSION_PLAN_ROUTES, ...SESSION_TABS_ROUTES, ...STEP_ROUTES, ...VARIANT_ROUTES, ...BATCH_ROUTES, ...KNOWLEDGE_ROUTES, ...ASK_ROUTES, ...RECIPE_ROUTES, ...TERMINAL_ROUTES, ...CONSUMPTION_ROUTES];
   assert.deepEqual(ahead.filter((route) => !API_ROUTES.includes(route)), []);
   assert.equal(new Set(ahead).size, ahead.length, 'each route of a later lane is in one list');

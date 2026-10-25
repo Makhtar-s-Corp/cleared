@@ -9,6 +9,7 @@ import { join } from 'node:path';
 import { SERVICE_PROOF_HEADER } from '../../src/api/types.ts';
 import { BATCH_TABLES } from '../../src/flow/batch.ts';
 import { CHAT_TABLES } from '../../src/flow/chat.ts';
+import { CAPTURE_CHOICES_TABLE } from '../../src/flow/capture-choice.ts';
 import { FlowConfigError } from '../../src/flow/config.ts';
 import { createRuntime } from '../../src/flow/runtime.ts';
 import approval from '../../src/modules/approval.ts';
@@ -38,16 +39,17 @@ test('the three modules of lane 7 declare the routes of the API that are theirs,
   // and the editor's save (lane 31), a ticket's variants and their choice
   // (issue #271, flow/variants.ts), and Resume from here (issue #272,
   // flow/replay.ts), a proof receipt's captures (P210, flow/proof-routes.ts) and the production
-  // page's checks (P218, the same file), and the lanes' MCP server (P216, mcp/http.ts) are the flow module's.
+  // page's checks (P218, the same file), and the human's choice of the captures (P226, the same file), and the lanes' MCP server (P216, mcp/http.ts) are the flow module's.
   assert.deepEqual(routeKeys(flow), [
-    'GET /api/batches', 'GET /api/batches/:id', 'GET /api/sessions/:id/editor', 'GET /api/sessions/:id/files', 'GET /api/sessions/:id/files/*', 'GET /api/sessions/:id/terminal/stream', 'GET /api/tickets', 'GET /api/tickets/:id', 'GET /api/tickets/:id/production', 'GET /api/tickets/:id/proof/:service/:file', 'GET /api/tickets/:id/steps',
+    'GET /api/batches', 'GET /api/batches/:id', 'GET /api/sessions/:id/editor', 'GET /api/sessions/:id/files', 'GET /api/sessions/:id/files/*', 'GET /api/sessions/:id/terminal/stream', 'GET /api/tickets', 'GET /api/tickets/:id', 'GET /api/tickets/:id/captures', 'GET /api/tickets/:id/production', 'GET /api/tickets/:id/proof/:service/:file', 'GET /api/tickets/:id/steps',
     'GET /api/tickets/:id/variants', 'POST /api/batches', 'POST /api/contracts/:id/approve', 'POST /api/contracts/:id/sendback',
     'POST /api/sessions/:id/giveback', 'POST /api/sessions/:id/handover', 'POST /api/sessions/:id/plan/change', 'POST /api/sessions/:id/plan/go', 'POST /api/sessions/:id/replay', 'POST /api/sessions/:id/takeover',
     'POST /api/sessions/:id/terminal/close', 'POST /api/sessions/:id/terminal/input', 'POST /api/sessions/:id/terminal/open', 'POST /api/sessions/:id/terminal/resize',
-    'POST /api/tickets', 'POST /api/tickets/:id/close', 'POST /api/tickets/:id/move', 'POST /api/tickets/:id/set-aside', 'POST /api/variants/:id/choose', 'POST /hooks/chat', 'POST /mcp', 'PUT /api/sessions/:id/files/*',
+    'POST /api/tickets', 'POST /api/tickets/:id/captures', 'POST /api/tickets/:id/close', 'POST /api/tickets/:id/move', 'POST /api/tickets/:id/set-aside', 'POST /api/variants/:id/choose', 'POST /hooks/chat', 'POST /mcp', 'PUT /api/sessions/:id/files/*',
   ]);
   assert.ok(BATCH_TABLES.every((table) => flow.tables.includes(table)), 'the batches\' tables are the flow module\'s');
   assert.ok(CHAT_TABLES.every((table) => flow.tables.includes(table)), 'the chat\'s tables are the flow module\'s');
+  assert.ok(flow.tables.includes(CAPTURE_CHOICES_TABLE), 'the choice of the captures is kept in the flow module\'s table');
   assert.deepEqual(routeKeys(inbox), ['GET /api/inbox']);
   assert.equal(inbox.tables.length, 1);
   assert.match(inbox.tables[0] as string, /CREATE TABLE IF NOT EXISTS flow_inbox/);
@@ -58,7 +60,7 @@ test('the modules assemble with the other lanes\' stubs: no route declared twice
   const store = openStore(':memory:');
   applyTables(store.db, [...sessions.tables, ...inbox.tables]);
   const app = assemble({ sessions, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox, lead: emptyModule, notify: emptyModule, knowledge: emptyModule }, { store });
-  assert.equal(routeKeys(app).length, 40);   // 20, lane 31's five terminal routes and the save, set aside (lane j2-proof-clean-base), the variants' two (issue #271), and Resume from here (issue #272), Close (issue #249), and Open in an editor (C19), and Hand over (B6.3), and the batches' three (requirement C6), and the proof receipt's captures (P210), and the chat's command (P212), and the lanes' MCP server (P216), and the production page's checks (P218)
+  assert.equal(routeKeys(app).length, 42);   // 20, lane 31's five terminal routes and the save, set aside (lane j2-proof-clean-base), the variants' two (issue #271), and Resume from here (issue #272), Close (issue #249), and Open in an editor (C19), and Hand over (B6.3), and the batches' three (requirement C6), and the proof receipt's captures (P210), and the chat's command (P212), and the lanes' MCP server (P216), and the production page's checks (P218), and the choice of the captures' two (P226)
   assert.deepEqual(Object.keys(app.registry.sessionAdapters), ['claude-code', 'cursor', 'codex']);
   assert.ok(!app.routes.some((r) => r.path === '/api/tickets/:id/approve'), 'the approval route is lane 8\'s');
 });
