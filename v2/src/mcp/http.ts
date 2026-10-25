@@ -98,8 +98,9 @@ export type McpRouteDeps = {
   readonly store: () => Store | undefined;
   // The token, or undefined when it could not be made or read (said in the service's log).
   readonly token: () => string | undefined;
-  readonly language: Language;
-  readonly redactor: Redactor;
+  // Read when a request comes, so the service's start decides them, not its import.
+  readonly language: () => Language;
+  readonly redactor: () => Redactor;
   readonly log?: (line: string) => void;
 };
 
@@ -134,17 +135,17 @@ async function readBody(request: IncomingMessage): Promise<string | undefined> {
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 export function lanesMcpRoutes(deps: McpRouteDeps): Route[] {
-  const t = translator(lanesCatalog(deps.language));
   const refuse = (context: RouteContext, status: number, key: string, values?: Record<string, string | number>, headers?: Record<string, string>) =>
-    send(context.response, status, { error: t(key, values) }, headers);
-  // One tool server per engine: the engine is made once the flow is set up.
-  const servers = new WeakMap<FlowEngine, ToolServer>();
+    send(context.response, status, { error: translator(lanesCatalog(deps.language()))(key, values) }, headers);
+  // One tool server per engine, made again when the language or the cleaner changed (a new start).
+  const servers = new WeakMap<FlowEngine, { server: ToolServer; language: Language; redactor: Redactor }>();
   const serverOf = (engine: FlowEngine): ToolServer => {
-    let server = servers.get(engine);
-    if (!server) {
-      server = createLanesServer({ engine, store: deps.store(), redactor: deps.redactor, language: deps.language, ...(deps.log ? { log: deps.log } : {}) });
-      servers.set(engine, server);
-    }
+    const language = deps.language();
+    const redactor = deps.redactor();
+    const known = servers.get(engine);
+    if (known && known.language === language && known.redactor === redactor) return known.server;
+    const server = createLanesServer({ engine, store: deps.store(), redactor, language, ...(deps.log ? { log: deps.log } : {}) });
+    servers.set(engine, { server, language, redactor });
     return server;
   };
 
