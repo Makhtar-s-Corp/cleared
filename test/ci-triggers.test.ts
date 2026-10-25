@@ -7,7 +7,7 @@ import { join } from 'node:path';
 import { ORCH_HOME } from '../lib/conf.ts';
 
 // The branches listed under `branches:` inside one trigger (`pull_request`, `push`), or null when it is absent.
-function blockBranches(block, trigger) {
+function blockBranches(block: string[], trigger: string) {
   const at = block.findIndex((line) => line === `  ${trigger}:`);
   if (at === -1) return null;
   const rest = block.slice(at + 1);
@@ -18,7 +18,7 @@ function blockBranches(block, trigger) {
 }
 
 // The `on:` block of a workflow: the lines from `on:` up to the next key at the top level of the file.
-function triggers(file) {
+function triggers(file: string) {
   const lines = readFileSync(join(ORCH_HOME, '.github', 'workflows', file), 'utf8').split('\n');
   const start = lines.indexOf('on:');
   assert.notEqual(start, -1, `${file} has an on: block`);
@@ -27,12 +27,12 @@ function triggers(file) {
 }
 
 // The branches listed under `push:` in an `on:` block, or null when there is no push trigger.
-function pushBranches(block) {
+function pushBranches(block: string[]) {
   const at = block.findIndex((line) => /^ {2}push:/.test(line));
   if (at === -1) return null;
   const branches = block.slice(at + 1).find((line) => /^ {4}branches:/.test(line));
   assert.notEqual(branches, undefined, 'push lists its branches');
-  return branches.replace(/^ {4}branches:\s*\[/, '').replace(/\]\s*$/, '').split(',').map((name) => name.trim());
+  return branches!.replace(/^ {4}branches:\s*\[/, '').replace(/\]\s*$/, '').split(',').map((name) => name.trim());
 }
 
 test('v2 workflow runs on pushes to v2 and on pull requests to v2', () => {

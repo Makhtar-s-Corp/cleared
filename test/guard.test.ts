@@ -15,10 +15,16 @@ import { conf, scratch, fixtureProject, sandbox, laneWithRemote, task, first } f
 
 test('[Linear adapter] a comment that the guard refuses never reaches tracker', () => {
   const dir = scratch('orch-tracker-');
-  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ntouch "${join(dir, 'called')}"\necho '{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}'\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'curl'), `#!${process.execPath}
+const fs = process.getBuiltinModule('node:fs');
+const called = ${JSON.stringify(join(dir, 'called'))};
+fs.closeSync(fs.openSync(called, 'a'));
+fs.utimesSync(called, new Date(), new Date());
+process.stdout.write('{"data":{"issue":{"id":"i"},"commentCreate":{"success":true,"comment":{"id":"c","url":"u"}}}}\\n');
+`, { mode: 0o755 });
   const repoRoot = fixtureProject();
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') };
-  const post = (text) => {
+  const post = (text: string) => {
     writeFileSync(join(dir, 'comment.md'), text);
     return spawnSync(join(ORCH_HOME, 'tracker.ts'), ['comment', 'X-1', join(dir, 'comment.md'), 'test'], { env, encoding: 'utf8' });
   };
@@ -29,7 +35,7 @@ test('[Linear adapter] a comment that the guard refuses never reaches tracker', 
   assert.match(refused.stderr, /not sent/);
   assert.throws(() => readFileSync(join(dir, 'called')), 'the network was reached');
   // A ticket goes through the same guard, title and description.
-  const open = (title, text) => {
+  const open = (title: string, text: string) => {
     writeFileSync(join(dir, 'ticket.md'), text);
     return spawnSync(join(ORCH_HOME, 'tracker.ts'), ['create', 'Projet', 'Bug', title, join(dir, 'ticket.md')], { env, encoding: 'utf8' });
   };
@@ -58,16 +64,19 @@ test('[Linear adapter] only an image, and only from the folder a lane sets apart
   writeFileSync(join(dir, 'elsewhere.png'), png);
   writeFileSync(join(dir, 'lanes', 'a-lane', 'test-results.png'), png);
   writeFileSync(join(dir, 'lanes', 'a-lane', 'deeper', 'to-send', 'apres.png'), png);
-  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash
-printf '%s\\n' "$@" >> "${join(dir, 'curl-args')}"
-case " $* " in *" PUT "*) exit 0 ;; esac
-cat > /dev/null
-echo '{"data":{"fileUpload":{"success":true,"uploadFile":{"uploadUrl":"https://storage.example.test/put","assetUrl":"https://uploads.example.test/asset","headers":[{"key":"x-goog-content-length-range","value":"25,25"}]}}}}'
+  writeFileSync(join(dir, 'curl'), `#!${process.execPath}
+const fs = process.getBuiltinModule('node:fs');
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(join(dir, 'curl-args'))}, args.map((arg) => arg + '\\n').join(''));
+if (!(' ' + args.join(' ') + ' ').includes(' PUT ')) {
+  try { fs.readFileSync(0); } catch { /* no input */ }
+  process.stdout.write('{"data":{"fileUpload":{"success":true,"uploadFile":{"uploadUrl":"https://storage.example.test/put","assetUrl":"https://uploads.example.test/asset","headers":[{"key":"x-goog-content-length-range","value":"25,25"}]}}}}\\n');
+}
 `, { mode: 0o755 });
   const confPath = join(dir, 'agents.conf');
   writeFileSync(confPath, `${readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').replace(/^capture_roots = .*$/m, `capture_roots = ${join(dir, 'lanes')}/*/to-send`)}`);
   const repoRoot = fixtureProject();
-  const upload = (file) => spawnSync(join(ORCH_HOME, 'tracker.ts'), ['upload', file], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: confPath } });
+  const upload = (file: string) => spawnSync(join(ORCH_HOME, 'tracker.ts'), ['upload', file], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_STATE_DIR: join(dir, 'state'), ORCH_CONF: confPath } });
   const sent = () => { try { return readFileSync(join(dir, 'curl-args'), 'utf8'); } catch { return ''; } };
   assert.match(upload(join(dir, 'elsewhere.png')).stderr, /not under a folder of captures/);
   assert.match(upload(join(captures, '..', 'to-send', '..', 'test-results.png')).stderr, /not under a folder of captures/);
@@ -87,13 +96,13 @@ echo '{"data":{"fileUpload":{"success":true,"uploadFile":{"uploadUrl":"https://s
 
 test('the guard reads project lists at the committed base and keeps generic checks when private lists are absent', () => {
   const box = sandbox();
-  const guard = (text, extra = {}) => {
+  const guard = (text: string, extra: NodeJS.ProcessEnv = {}) => {
     const file = join(box.home, 'out.txt');
     writeFileSync(file, text);
     return spawnSync(join(box.home, 'lib', 'tracker', 'guard.ts'), [file], { env: { ...box.env, ...extra }, encoding: 'utf8' });
   };
   const term = 'Le contrat avec Zorglub Industries est signé.\n';
-  const commit = (message) => { box.git('add', '-A'); box.git('commit', '-q', '-m', message); };
+  const commit = (message: string) => { box.git('add', '-A'); box.git('commit', '-q', '-m', message); };
   assert.equal(guard('Rien de privé ici.\n').status, 0, guard('Rien de privé ici.\n').stderr);
   // An invented private term of the project, which the tool knows only by its fingerprint: refused, and not shown.
   const refused = guard(term);
@@ -106,7 +115,7 @@ test('the guard reads project lists at the committed base and keeps generic chec
   box.git('checkout', '-q', '--', 'scripts/private-terms.json');
   // The project carries its own settings: what they say at the base comes before the example of the tool.
   mkdirSync(join(box.repo, '.cleared'), { recursive: true });
-  const settings = (text) => writeFileSync(join(box.repo, '.cleared', 'agents.conf'), `${text}\n[guard]\nsalt = cleared-example-only\n`);
+  const settings = (text: string) => writeFileSync(join(box.repo, '.cleared', 'agents.conf'), `${text}\n[guard]\nsalt = cleared-example-only\n`);
   settings('[guard]\nterms = none\nallowed = none\n');
   commit('chore: no private term');
   assert.equal(guard(term).status, 0, 'this project says it has no private term');
@@ -140,14 +149,14 @@ test('the guard reads project lists at the committed base and keeps generic chec
   execFileSync('git', ['clone', '-q', remote, copy], { stdio: 'ignore' });
   execFileSync('cp', ['-r', join(ORCH_HOME, 'lib'), copy]);
   writeFileSync(join(copy, 'agents.conf'), '[lanes]\nbase = main\n\n[guard]\nterms = scripts/private-terms.json\nallowed = scripts/codex-guard-allow.json\n');
-  const inTool = (...args) => execFileSync('git', ['-C', copy, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
+  const inTool = (...args: string[]) => execFileSync('git', ['-C', copy, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args]);
   inTool('checkout', '-q', '-b', 'main');
   inTool('add', '.');
   inTool('commit', '-q', '-m', 'the tool');
   inTool('push', '-q', 'origin', 'main');
   settings('[guard]\nsalt = cleared-example-only\nterms = scripts/private-terms.json\nallowed = scripts/codex-guard-allow.json\n');
   commit('chore: the lists again');
-  const fromCopy = (text) => {
+  const fromCopy = (text: string) => {
     const file = join(tool, 'out.txt');
     writeFileSync(file, text);
     return spawnSync(join(copy, 'lib', 'tracker', 'guard.ts'), [file], { env: { ...box.env, ORCH_CONF: join(copy, 'agents.conf'), ORCH_GUARD_TOOL_REF: 'origin/main' }, encoding: 'utf8' });

@@ -1,6 +1,7 @@
 // Shared by the writer tests: a scratch project, state directory, credentials directory and signing key,
 // a conf for the adapter under test, and the real writer process (app/human-write.ts) run against them.
 import http from 'node:http';
+import type { IncomingMessage, RequestListener, Server } from 'node:http';
 import { spawn } from 'node:child_process';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { generateKeyPairSync } from 'node:crypto';
@@ -11,10 +12,13 @@ import { ORCH_HOME, parseConf } from '../lib/conf.ts';
 
 export const HEAD = 'a'.repeat(40);
 export const VERSIONS = [{ pr: 7, head: HEAD }];
-const dirs = [];
+const dirs: string[] = [];
 after(() => { for (const d of dirs) rmSync(d, { recursive: true, force: true }); });
 
-export function box(adapter, { owner = 'alice', ticket, extra = '' } = {}) {
+// What the writer answers: whether it wrote, and why not.
+export type WriteResult = { ok: boolean; code?: string; verified?: boolean; [key: string]: unknown };
+
+export function box(adapter: string, { owner = 'alice', ticket, extra = '' }: { owner?: string; ticket?: string; extra?: string } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'cleared-writer-')); dirs.push(root);
   const repo = join(root, 'repo'), state = join(root, 'state'), creds = join(root, 'creds');
   for (const d of [repo, state, creds, join(state, 'validations')]) mkdirSync(d, { recursive: true });
@@ -27,11 +31,11 @@ export function box(adapter, { owner = 'alice', ticket, extra = '' } = {}) {
   const confPath = join(root, 'agents.conf'); writeFileSync(confPath, conf);
   const env = { PATH: process.env.PATH, HOME: root, ORCH_CONF: confPath, ORCH_REPO: repo, ORCH_STATE_DIR: state, ORCH_LEDGER: join(state, 'ledger.db'), XDG_CONFIG_HOME: join(root, 'cfg') };
   const approvalRecord = (head = HEAD) => writeFileSync(join(state, 'validations', `${ticket}.json`), JSON.stringify({ ticket, at, pulls: [{ pr: 7, head }] }));
-  const credentials = (token) => writeFileSync(join(creds, 'credentials.json'), JSON.stringify(token && typeof token === 'object' ? token : { [adapter]: token }), { mode: 0o600 });
-  const write = (request, over = {}) => new Promise((resolve) => {
+  const credentials = (token: string | object) => writeFileSync(join(creds, 'credentials.json'), JSON.stringify(token && typeof token === 'object' ? token : { [adapter]: token }), { mode: 0o600 });
+  const write = (request: object, over: NodeJS.ProcessEnv = {}) => new Promise<WriteResult>((resolve) => {
     const child = spawn(process.execPath, [join(ORCH_HOME, 'app/human-write.ts')], { env: { ...env, ...over }, stdio: ['pipe', 'pipe', 'pipe'] });
     let out = ''; child.stdout.on('data', (c) => { out += c; });
-    child.on('close', () => resolve(JSON.parse(out.trim().split('\n').at(-1))));
+    child.on('close', () => resolve(JSON.parse(out.trim().split('\n').at(-1)!)));
     child.stdin.end(JSON.stringify(request));
   });
   const at = '2026-10-13T09:00:00.000Z';
@@ -39,6 +43,6 @@ export function box(adapter, { owner = 'alice', ticket, extra = '' } = {}) {
 }
 
 
-export const listen = (handler) => new Promise((resolve) => { const s = http.createServer(handler).listen(0, '127.0.0.1', () => resolve(s)); });
-export const body = (request) => new Promise((resolve) => { let d = ''; request.on('data', (c) => { d += c; }); request.on('end', () => resolve(d)); });
-export const bearer = (request) => /^Bearer (\S+)$/.exec(request.headers.authorization ?? '')?.[1];
+export const listen = (handler: RequestListener) => new Promise<Server>((resolve) => { const s = http.createServer(handler).listen(0, '127.0.0.1', () => resolve(s)); });
+export const body = (request: IncomingMessage) => new Promise<string>((resolve) => { let d = ''; request.on('data', (c: Buffer) => { d += c; }); request.on('end', () => resolve(d)); });
+export const bearer = (request: IncomingMessage) => /^Bearer (\S+)$/.exec(request.headers.authorization ?? '')?.[1];

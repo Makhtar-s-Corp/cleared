@@ -7,13 +7,15 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { createMemory } from '../lib/memory/contract.ts';
 import { openLedger } from '../lib/ledger.ts';
 import { loadConf, ORCH_HOME } from '../lib/conf.ts';
+import type { ConfSections } from '../lib/conf.ts';
 import { LocalTracker } from '../lib/tracker/adapters/local.ts';
+import type { MemoryTracker } from '../lib/memory/adapters/local.ts';
 import { sandbox } from './support.ts';
 
 function fixture() {
   const project = mkdtempSync(join(tmpdir(), 'cleared-memory-'));
   const db = openLedger(':memory:');
-  const conf = { sections: { memory: { enabled: 'true', budget: '8000' }, tracker: { owner_id: 'owner' } } };
+  const conf: ConfSections = { sections: { memory: { enabled: 'true', budget: '8000' }, tracker: { owner_id: 'owner' } } };
   const memory = createMemory({ project, db, conf });
   return { project, db, conf, memory };
 }
@@ -36,9 +38,9 @@ test('an agent cannot archive or supersede an approved entry', () => {
   writeFileSync(join(project, 'docs', 'decisions', 'queue.md'), 'status: approved\nUse a queue.');
   execFileSync('git', ['-C', project, 'add', '.']);
   execFileSync('git', ['-C', project, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'docs: approve queue']);
-  const id = memory.search('queue')[0].id;
-  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id).status, 'proposed');
-  createMemory({ project, db, conf, tracker: { whoAmI: () => ({ kind: 'human', id: 'owner' }) } }).approve(id);
+  const id = memory.search('queue')[0]!.id;
+  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id)!.status, 'proposed');
+  createMemory({ project, db, conf, tracker: { whoAmI: () => ({ kind: 'human', id: 'owner' }) } as MemoryTracker }).approve(id);
   assert.throws(() => memory.archive(id), /human/i);
   assert.throws(() => memory.supersede(id, { type: 'decision', scope: 'ticket:LOCAL-1', content: 'Other', source_who: 'agent:dev/codex', source_where: 'ticket:LOCAL-1' }), /human/i);
   const proposed = memory.write({ type: 'decision', scope: 'ticket:LOCAL-1', content: 'Draft', source_who: 'agent:dev/codex', source_where: 'ticket:LOCAL-1' });
@@ -53,15 +55,15 @@ test('a quoted approval marker and an uncommitted edit do not approve a file', (
   writeFileSync(path, '# Proposal\n\nExample: status: approved\nUse a queue.');
   execFileSync('git', ['-C', project, 'add', '.']);
   execFileSync('git', ['-C', project, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'docs: proposal']);
-  const id = memory.search('queue')[0].id;
-  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id).status, 'proposed');
+  const id = memory.search('queue')[0]!.id;
+  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id)!.status, 'proposed');
   writeFileSync(path, 'status: approved\nUse a queue.');
   memory.search('queue');
-  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id).status, 'proposed');
+  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id)!.status, 'proposed');
   execFileSync('git', ['-C', project, 'add', '.']);
   execFileSync('git', ['-C', project, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'docs: mark approved']);
   memory.search('queue');
-  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id).status, 'proposed');
+  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id)!.status, 'proposed');
 });
 
 test('a file decision leaves the briefing when its approved content changes', () => {
@@ -72,12 +74,12 @@ test('a file decision leaves the briefing when its approved content changes', ()
   writeFileSync(path, 'Use a durable queue.');
   execFileSync('git', ['-C', project, 'add', '.']);
   execFileSync('git', ['-C', project, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'commit', '-q', '-m', 'docs: queue']);
-  const id = memory.search('queue')[0].id;
-  createMemory({ project, db, conf, tracker: { whoAmI: () => ({ kind: 'human', id: 'owner' }) } }).approve(id);
+  const id = memory.search('queue')[0]!.id;
+  createMemory({ project, db, conf, tracker: { whoAmI: () => ({ kind: 'human', id: 'owner' }) } as MemoryTracker }).approve(id);
   assert.match(memory.briefing({ role: 'dev', ticket: { id: 'LOCAL-1', title: 'queue' }, budget: 1000 }).text, /durable queue/);
   writeFileSync(path, 'Use a fast queue.');
   assert.doesNotMatch(memory.briefing({ role: 'dev', ticket: { id: 'LOCAL-1', title: 'queue' }, budget: 1000 }).text, /fast queue/);
-  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id).status, 'proposed');
+  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id)!.status, 'proposed');
 });
 
 test('invalid briefing budget is refused rather than growing without limit', () => {
@@ -90,11 +92,12 @@ test('a verified human tracker comment can approve memory; agent comments cannot
   const id = createMemory({ project, db, conf }).write({ type: 'decision', scope: 'ticket:LOCAL-1', content: 'Use an outbox', source_who: 'agent:dev/model', source_where: 'ticket:LOCAL-1', source_when: '2026-10-11T00:00:00.000Z' });
   const after = new Date(Date.now() + 1000).toISOString();
   const tracker = { whoAmI: () => ({ kind: 'agents', id: 'bot' }), comments: () => [{ id: 'c1', body: `Approve memory ${id}`, by: { kind: 'agents', id: 'owner' }, createdAt: after }] };
-  const memory = createMemory({ project, db, conf, tracker });
+  // (a tracker of the test: its comments carry only what the approval reads)
+  const memory = createMemory({ project, db, conf, tracker: tracker as unknown as MemoryTracker });
   assert.throws(() => memory.approve(id, { ticket: 'LOCAL-1', commentId: 'c1' }), /human/i);
   tracker.comments = () => [{ id: 'c1', body: `Approve memory ${id}`, by: { kind: 'human', id: 'owner' }, createdAt: after }];
   memory.approve(id, { ticket: 'LOCAL-1', commentId: 'c1' });
-  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id).status, 'approved');
+  assert.equal(db.prepare('SELECT status FROM memory_entries WHERE id = ?').get(id)!.status, 'approved');
 });
 
 test('agent entries receive server-side IDs and timestamps', () => {
@@ -102,14 +105,14 @@ test('agent entries receive server-side IDs and timestamps', () => {
   const id = memory.write({ id: 'file:replay', type: 'handover', scope: 'ticket:LOCAL-1', content: '## Done\nAn old run',
     source_who: 'agent:dev/model', source_where: 'session:one', source_when: '1999-01-01T00:00:00.000Z' });
   assert.notEqual(id, 'file:replay');
-  assert.notEqual(db.prepare('SELECT source_when FROM memory_entries WHERE id = ?').get(id).source_when, '1999-01-01T00:00:00.000Z');
+  assert.notEqual(db.prepare('SELECT source_when FROM memory_entries WHERE id = ?').get(id)!.source_when, '1999-01-01T00:00:00.000Z');
 });
 
 test('schema migration withdraws automatic file approvals from version 1', () => {
   const { project, db, conf } = fixture();
   db.exec("DROP TABLE memory_entries; DROP TABLE memory_files; DROP TABLE memory_meta; CREATE TABLE memory_entries(id TEXT PRIMARY KEY,type TEXT,scope TEXT,content TEXT,source_who TEXT,source_where TEXT,source_when TEXT,status TEXT,links TEXT,supersedes TEXT,last_used_at TEXT); CREATE TABLE memory_files(path TEXT PRIMARY KEY,hash TEXT,indexed_at TEXT,entry_id TEXT); CREATE TABLE memory_meta(key TEXT PRIMARY KEY,value TEXT); INSERT INTO memory_meta VALUES ('schema_version','1'); INSERT INTO memory_entries VALUES ('file:old','decision','project:x','Use a queue','script:file-index','docs/decisions/queue.md','2026-10-11T00:00:00Z','approved','[]',NULL,NULL); INSERT INTO memory_files VALUES ('/tmp/queue.md','old','2026-10-11T00:00:00Z','[\"file:old\"]');");
   createMemory({ project, db, conf });
-  assert.equal(db.prepare("SELECT status FROM memory_entries WHERE id = 'file:old'").get().status, 'proposed');
+  assert.equal(db.prepare("SELECT status FROM memory_entries WHERE id = 'file:old'").get()!.status, 'proposed');
   assert.equal(db.prepare('PRAGMA table_info(memory_files)').all().some((column) => column.name === 'committed'), true);
 });
 
@@ -118,12 +121,12 @@ test('search finds a decision and its source; changed files are reindexed once',
   mkdirSync(join(project, 'docs', 'decisions'), { recursive: true });
   const path = join(project, 'docs', 'decisions', 'queue.md');
   writeFileSync(path, 'Use a durable queue for notifications.');
-  assert.match(memory.search('durable')[0].source_where, /queue.md/);
-  const before = db.prepare('SELECT indexed_at FROM memory_files WHERE path = ?').get(path).indexed_at;
+  assert.match(memory.search('durable')[0]!.source_where, /queue.md/);
+  const before = db.prepare('SELECT indexed_at FROM memory_files WHERE path = ?').get(path)!.indexed_at;
   memory.search('durable');
-  assert.equal(db.prepare('SELECT indexed_at FROM memory_files WHERE path = ?').get(path).indexed_at, before);
+  assert.equal(db.prepare('SELECT indexed_at FROM memory_files WHERE path = ?').get(path)!.indexed_at, before);
   writeFileSync(path, 'Use a transactional outbox for notifications.');
-  assert.equal(memory.search('outbox')[0].type, 'decision');
+  assert.equal(memory.search('outbox')[0]!.type, 'decision');
   assert.equal(memory.search('durable').length, 0);
 });
 
@@ -132,10 +135,10 @@ test('accented search works with FTS5 and keeps one index row after edits', () =
   mkdirSync(join(project, 'docs', 'decisions'), { recursive: true });
   const path = join(project, 'docs', 'decisions', 'school.md');
   writeFileSync(path, 'École de quartier');
-  const id = memory.search('ecole')[0].id;
+  const id = memory.search('ecole')[0]!.id;
   writeFileSync(path, 'École de village');
-  assert.equal(memory.search('ecole')[0].id, id);
-  if (memory.fts) assert.equal(db.prepare('SELECT count(*) n FROM memory_fts WHERE id = ?').get(id).n, 1);
+  assert.equal(memory.search('ecole')[0]!.id, id);
+  if (memory.fts) assert.equal(db.prepare('SELECT count(*) n FROM memory_fts WHERE id = ?').get(id)!.n, 1);
 });
 
 test('indexing another role keeps the first role lessons', () => {
@@ -207,7 +210,7 @@ test('moving the configured project file removes the old indexed entry', () => {
   writeFileSync(join(project, 'docs', 'project.md'), 'Old project context');
   assert.equal(memory.search('Old').length, 1);
   writeFileSync(join(project, 'docs', 'new-project.md'), 'New project context');
-  conf.sections.memory.project = 'docs/new-project.md';
+  conf.sections.memory!.project = 'docs/new-project.md';
   assert.equal(memory.search('Old').length, 0);
   assert.equal(memory.search('New').length, 1);
 });
@@ -215,7 +218,7 @@ test('moving the configured project file removes the old indexed entry', () => {
 test('missing handover is recorded and called out next time', () => {
   const { memory, db, project } = fixture();
   memory.captureHandover({ worktree: project, role: 'dev', model: 'claude-sonnet', ticket: 'LOCAL-1', runId: 'run-1' });
-  assert.equal(db.prepare("SELECT count(*) n FROM events WHERE kind = 'handover_missing'").get().n, 1);
+  assert.equal(db.prepare("SELECT count(*) n FROM events WHERE kind = 'handover_missing'").get()!.n, 1);
   assert.match(memory.briefing({ role: 'dev', ticket: { id: 'LOCAL-1' }, budget: 1000 }).text, /handover missing/i);
   assert.match(memory.briefing({ role: 'dev', ticket: { id: 'LOCAL-1' }, budget: 170 }).text, /handover missing/i);
 });
@@ -226,7 +229,7 @@ test('valid handover is stored and removed before a commit for either harness', 
     const body = '## Done\nA\n## Tried and failed, and why\nB\n## Left to do\nC\n## Where the artifacts are (screenshots, logs, branches)\nD\n## Open questions\nE\n';
     writeFileSync(join(project, 'HANDOVER.md'), body);
     const id = memory.captureHandover({ worktree: project, role: 'dev', model, ticket: 'LOCAL-1', runId: 'run-1' });
-    assert.equal(memory.search('failed', { scope: 'ticket:LOCAL-1', types: ['handover'] })[0].id, id);
+    assert.equal(memory.search('failed', { scope: 'ticket:LOCAL-1', types: ['handover'] })[0]!.id, id);
     assert.throws(() => readFileSync(join(project, 'HANDOVER.md')));
   }
 });

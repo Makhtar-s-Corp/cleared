@@ -2,18 +2,20 @@
 // to adapter tests only (see the first test of tracker.test.ts).
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import type { AddressInfo } from 'node:net';
 import { bearer, body, box, listen, VERSIONS } from './app-box.ts';
 
 test('[Linear adapter] the three gestures use the human\'s own token and the history shows the human; the application of the agents is refused as an identity', async (t) => {
   const HUMAN = 'lin_oauth_humanhumanhuman1234';
   const APP = 'lin_oauth_agentsagentsagents99';
   const fake = async () => {
-    const state = { state: 'Needs Approval', history: [], comments: [], tokens: new Set() };
-    const viewer = (token) => (token === HUMAN ? { id: 'lin-human', app: false } : { id: 'lin-app', app: true });
+    const state = { state: 'Needs Approval', history: [] as { createdAt: string; actorId: string; actor: { id: string; app: boolean }; botActor: null; toState: { name: string } }[],
+      comments: [] as { body: string; by: string }[], tokens: new Set<string | undefined>() };
+    const viewer = (token: string) => (token === HUMAN ? { id: 'lin-human', app: false } : { id: 'lin-app', app: true });
     const server = await listen(async (request, response) => {
       const token = bearer(request); state.tokens.add(token);
-      const { query, variables } = JSON.parse(await body(request));
-      const reply = (data) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data }));
+      const { query, variables } = JSON.parse(await body(request)) as { query: string; variables: { input: { stateId: string; body: string } } };
+      const reply = (data: unknown) => response.writeHead(200, { 'content-type': 'application/json' }).end(JSON.stringify({ data }));
       if (!token) return response.writeHead(401).end('{}');
       if (query.includes('history(first')) return reply({ viewer: viewer(token), issue: { history: { nodes: state.history } } });
       if (query.includes('teams(filter')) return reply({ issue: { id: 'iid' }, teams: { nodes: [{ states: { nodes: ['Ready to Ship', 'In Progress', 'Needs Approval'].map((name) => ({ id: `id-${name}`, name })) } }] } });
@@ -29,21 +31,21 @@ test('[Linear adapter] the three gestures use the human\'s own token and the his
       return reply({ issue: { id: 'iid' } });
     });
     t.after(() => server.close());
-    return { state, env: { CLEARED_APP_LINEAR_API: `http://127.0.0.1:${server.address().port}/graphql` } };
+    return { state, env: { CLEARED_APP_LINEAR_API: `http://127.0.0.1:${(server.address() as AddressInfo).port}/graphql` } };
   };
   const scratch = () => box('linear', { owner: 'lin-human', ticket: 'ENG-12' });
 
   // The human's own token.
   let server = await fake(); let b = scratch();
   b.credentials(HUMAN); b.approvalRecord();
-  const run = (request) => b.write(request, server.env);
+  const run = (request: object) => b.write(request, server.env);
   assert.equal((await run({ op: 'answer', ticket: b.ticket, text: 'No' })).ok, true);
   assert.deepEqual(server.state.comments, [{ body: 'No', by: 'lin-human' }]);
   assert.equal((await run({ op: 'approve', ticket: b.ticket, versions: [{ pr: 7, head: 'd'.repeat(40) }], at: b.at })).code, 'version');
   assert.equal(server.state.state, 'Needs Approval', 'a version that is not the one shown moves nothing');
   const approved = await run({ op: 'approve', ticket: b.ticket, versions: VERSIONS, at: b.at });
   assert.equal(approved.ok, true, JSON.stringify(approved)); assert.equal(approved.verified, true);
-  assert.equal(server.state.state, 'Ready to Ship'); assert.equal(server.state.history.at(-1).actorId, 'lin-human');
+  assert.equal(server.state.state, 'Ready to Ship'); assert.equal(server.state.history.at(-1)!.actorId, 'lin-human');
   server.state.state = 'Needs Approval'; b.approvalRecord();
   const back = await run({ op: 'sendback', ticket: b.ticket, text: 'Round it.' });
   assert.equal(back.ok, true, JSON.stringify(back)); assert.equal(server.state.state, 'In Progress');

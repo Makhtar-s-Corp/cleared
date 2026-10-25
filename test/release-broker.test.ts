@@ -1,7 +1,8 @@
 import test from 'node:test';
+import type { TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { userInfo } from 'node:os';
 import { setTimeout as pause } from 'node:timers/promises';
@@ -9,7 +10,7 @@ import { ORCH_HOME } from '../lib/conf.ts';
 import { openLedger } from '../lib/ledger.ts';
 import { reviewedPull } from './support.ts';
 
-async function fixture(t, { humanUser = '', allowSharedUid = true } = {}) {
+async function fixture(t: TestContext, { humanUser = '', allowSharedUid = true }: { humanUser?: string; allowSharedUid?: boolean } = {}) {
   const pull = reviewedPull(['server/a.mjs']);
   const { home, state } = pull.box;
   chmodSync(state, 0o700);
@@ -26,10 +27,10 @@ async function fixture(t, { humanUser = '', allowSharedUid = true } = {}) {
   t.after(() => { broker.kill('SIGTERM'); });
   for (let i = 0; i < 100 && !existsSync(socket); i++) await pause(25);
   assert.ok(existsSync(socket), errors);
-  const call = (args, input = '') => spawnSync(process.execPath, [join(home, 'release-request.ts'), ...args], { env, input, encoding: 'utf8' });
+  const call = (args: string[], input = '') => spawnSync(process.execPath, [join(home, 'release-request.ts'), ...args], { env, input, encoding: 'utf8' });
   const events = () => {
     const db = openLedger(join(state, 'ledger.db'));
-    try { return db.prepare("SELECT detail FROM events WHERE kind = 'release_request' ORDER BY event_id").all().map((r) => JSON.parse(r.detail)); }
+    try { return db.prepare("SELECT detail FROM events WHERE kind = 'release_request' ORDER BY event_id").all().map((r) => JSON.parse(r.detail as string)); }
     finally { db.close(); }
   };
   return { pull, call, events };
@@ -45,7 +46,7 @@ test('broker refuses an unapproved release, records the peer UID and commit, and
   const refused = call(['request_release', 'X-5', '7'], 'Announcement');
   assert.equal(refused.status, 1, refused.stderr);
   assert.match(refused.stderr, /not agreed/);
-  assert.deepEqual(events().map((e) => [e.uid, e.accepted, e.commit]), [[process.getuid(), false, pull.headOf()]]);
+  assert.deepEqual(events().map((e) => [e.uid, e.accepted, e.commit]), [[process.getuid!(), false, pull.headOf()]]);
 });
 
 test('shared UID is refused by default and explicitly allowed with a permanent status warning', async (t) => {
@@ -75,7 +76,7 @@ test('shared UID is refused by default and explicitly allowed with a permanent s
 
 test('a transient GitHub failure returns a retryable code, never the definitive code 1', async (t) => {
   const { pull, call } = await fixture(t);
-  writeFileSync(join(pull.box.home, 'bin/gh'), '#!/bin/sh\nexit 1\n', { mode: 0o755 });
+  writeFileSync(join(pull.box.home, 'bin/gh'), `#!${process.execPath}\nprocess.exitCode = 1;\n`, { mode: 0o755 });
   const result = call(['request_release', 'X-5', '7'], 'Announcement');
   assert.equal(result.status, 69, result.stderr);
 });
@@ -108,16 +109,30 @@ test('broker posts the request in service state and rejects approval before it o
 
 test('broker accepts the shown, reviewed and approved commit and starts release monitoring', async (t) => {
   const { pull, call, events } = await fixture(t);
+  // The sandbox's gh, with a merge that lands: the branch merged into main and pushed, and the pull request then
+  // shown with its merge commit. Every other call is the sandbox's gh.
   const fakeGh = join(pull.box.home, 'bin/gh');
-  const oldGh = readFileSync(fakeGh, 'utf8');
-  const mergeCommand = `elif [ "$1 $2" = "pr merge" ]; then
-  printf '%s\n' "$@" > "${join(pull.box.home, 'pr-merged')}"
-  git -C "${pull.box.repo}" -c user.name=t -c user.email=t@localhost merge -q --no-ff --no-edit feat/w
-  git -C "${pull.box.repo}" push -q origin main
-  sha=$(git -C "${pull.box.repo}" rev-parse HEAD)
-  jq --arg sha "$sha" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '. + {mergeCommit:{oid:$sha},mergedAt:$at}' "${join(pull.box.home, 'pr-view.json')}" > "${join(pull.box.home, 'pr-view.next')}"
-  mv "${join(pull.box.home, 'pr-view.next')}" "${join(pull.box.home, 'pr-view.json')}"`;
-  writeFileSync(fakeGh, oldGh.replace(/elif \[ "\$1 \$2" = "pr merge" \]; then[^\n]*/, mergeCommand), { mode: 0o755 });
+  renameSync(fakeGh, join(pull.box.home, 'bin/gh-sandbox'));
+  writeFileSync(fakeGh, `#!${process.execPath}
+const fs = process.getBuiltinModule('node:fs');
+const { spawnSync } = process.getBuiltinModule('node:child_process');
+const args = process.argv.slice(2);
+const home = ${JSON.stringify(pull.box.home)};
+const repo = ${JSON.stringify(pull.box.repo)};
+if ((args[0] ?? '') + ' ' + (args[1] ?? '') === 'pr merge') {
+  fs.writeFileSync(home + '/pr-merged', args.map((arg) => arg + '\\n').join(''));
+  spawnSync('git', ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', 'merge', '-q', '--no-ff', '--no-edit', 'feat/w'], { stdio: 'inherit' });
+  spawnSync('git', ['-C', repo, 'push', '-q', 'origin', 'main'], { stdio: 'inherit' });
+  const sha = spawnSync('git', ['-C', repo, 'rev-parse', 'HEAD'], { stdio: ['inherit', 'pipe', 'inherit'], encoding: 'utf8' }).stdout.replace(/\\n+$/, '');
+  const at = new Date().toISOString().replace(/\\.\\d{3}Z$/, 'Z');
+  const view = JSON.parse(fs.readFileSync(home + '/pr-view.json', 'utf8'));
+  fs.writeFileSync(home + '/pr-view.next', JSON.stringify({ ...view, mergeCommit: { oid: sha }, mergedAt: at }, null, 2) + '\\n');
+  fs.renameSync(home + '/pr-view.next', home + '/pr-view.json');
+} else {
+  const sandbox = spawnSync(home + '/bin/gh-sandbox', args, { stdio: 'inherit' });
+  process.exitCode = sandbox.status ?? 1;
+}
+`, { mode: 0o755 });
   const confPath = join(pull.box.home, 'agents.conf');
   writeFileSync(confPath, readFileSync(confPath, 'utf8') + '\n[release]\nhealth_command = true\nwatch_minutes = 1\ndeploy_grace_minutes = 0\n');
   assert.equal(call(['request_release', 'X-5', '7', '--ask'], 'Please approve this version.').status, 0);
@@ -127,7 +142,7 @@ test('broker accepts the shown, reviewed and approved commit and starts release 
   assert.ok(pull.merged());
   assert.equal(events().at(-1).accepted, true);
   const db = openLedger(join(pull.box.state, 'ledger.db'));
-  try { assert.equal(db.prepare('SELECT status FROM releases WHERE ticket = ?').get('X-5').status, 'watching'); }
+  try { assert.equal(db.prepare('SELECT status FROM releases WHERE ticket = ?').get('X-5')!.status, 'watching'); }
   finally { db.close(); }
 });
 
@@ -157,7 +172,7 @@ test('broker refuses manual rollback from the service UID when a separate human 
   assert.equal(refused.status, 1, refused.stderr);
   assert.match(refused.stderr, /Only the configured human account/);
   assert.deepEqual(events().at(-1), {
-    operation: 'request_rollback', uid: process.getuid(), accepted: false,
+    operation: 'request_rollback', uid: process.getuid!(), accepted: false,
     reason: 'Only the configured human account can request manual rollback', commit: null,
   });
 });

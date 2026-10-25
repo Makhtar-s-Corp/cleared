@@ -10,16 +10,26 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ORCH_HOME } from '../lib/conf.ts';
+import type { Conf } from '../lib/conf.ts';
 import { openLedger } from '../lib/ledger.ts';
 import { foreignTest, scratch, toolCall } from './support.ts';
 
 const REAL_GIT = execFileSync('which', ['git'], { encoding: 'utf8' }).trim();
 const HOOKS = ['post-index-change', 'reference-transaction', 'post-checkout', 'post-merge', 'pre-auto-gc', 'post-rewrite', 'pre-commit', 'pre-push'];
 const OWNER = { GIT_TEST_ASSUME_DIFFERENT_OWNER: '1' };
+// git in a repository, and the repository it runs in.
+type Git = ((...args: string[]) => string) & { dir: string };
+type ReleaseRow = Parameters<typeof import('../lib/release.ts')['rollbackRelease']>[3];
+
+// A planted command: a Node script (the running Node, by its path) that writes `line`, then its arguments when it
+// is told to, to the marker when it runs.
+const planted = (marker: string, line: string, withArgs = false) => `#!${process.execPath}
+process.getBuiltinModule('node:fs').appendFileSync(${JSON.stringify(marker)}, ${JSON.stringify(line)}${withArgs ? " + process.argv.slice(2).join(' ')" : ''} + '\\n');
+`;
 
 // A copy of `sha` with a (fake) signature header: git log and show -s run gpg.program on it when
 // log.showSignature is true.
-function signed(git, sha) {
+function signed(git: Git, sha: string) {
   const lines = git('cat-file', 'commit', sha).split('\n');
   const committer = lines.findIndex((line) => line.startsWith('committer '));
   lines.splice(committer + 1, 0, 'gpgsig -----BEGIN PGP SIGNATURE-----', ' ', ' AAAA', ' -----END PGP SIGNATURE-----');
@@ -32,7 +42,7 @@ function plantedRepo() {
   const root = realpathSync(scratch('orch-planted-'));
   const repo = join(root, 'project');
   const marker = join(root, 'ran.log');
-  const git = (...args) => execFileSync(REAL_GIT, ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' }).trim();
+  const git = (...args: string[]) => execFileSync(REAL_GIT, ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' }).trim();
   git.dir = repo;
   mkdirSync(join(repo, '.cleared'), { recursive: true });
   mkdirSync(join(repo, 'scripts'));
@@ -54,13 +64,13 @@ function plantedRepo() {
   git('worktree', 'add', '-q', join(root, 'lanes', 'dev-x'), '-b', 'dev/x', head);
 
   const plant = join(root, 'plant');
-  writeFileSync(plant, `#!/bin/sh\necho "planted $*" >> '${marker}'\nexit 0\n`);
+  writeFileSync(plant, planted(marker, 'planted ', true));
   chmodSync(plant, 0o755);
   const hooks = join(root, 'hooks');
   mkdirSync(hooks);
   for (const hook of HOOKS) {
     for (const dir of [hooks, join(repo, '.git', 'hooks')]) {
-      writeFileSync(join(dir, hook), `#!/bin/sh\necho "hook ${hook}" >> '${marker}'\n`);
+      writeFileSync(join(dir, hook), planted(marker, `hook ${hook}`));
       chmodSync(join(dir, hook), 0o755);
     }
   }
@@ -75,7 +85,7 @@ function plantedRepo() {
     ['log.showSignature', 'true'], ['gpg.program', plant], ['gpg.ssh.program', plant],
     ['remote.origin.url', 'ssh://git@example.invalid/project.git'], ['remote.origin.uploadpack', plant],
     ['include.path', included],
-  ]) git('config', '--add', key, value);
+  ] as [string, string][]) git('config', '--add', key, value);
   const ran = () => (existsSync(marker) ? readFileSync(marker, 'utf8') : '');
   return { root, repo, marker, head, git, ran };
 }
@@ -90,7 +100,7 @@ function childEnv(extra = {}) {
 }
 
 // In this process, for one call: the project named, and git told the checkout is someone else's.
-async function asForeign(project, call) {
+async function asForeign<T>(project: string, call: () => T | Promise<T>): Promise<T> {
   const saved = { CLEARED_REPO: process.env.CLEARED_REPO, ORCH_REPO: process.env.ORCH_REPO, GIT_TEST_ASSUME_DIFFERENT_OWNER: process.env.GIT_TEST_ASSUME_DIFFERENT_OWNER };
   Object.assign(process.env, { CLEARED_REPO: project, ORCH_REPO: project }, OWNER);
   try { return await call(); }
@@ -133,7 +143,7 @@ foreignTest('the tool\'s own checkout, found by git when no project is named, ru
   assert.equal(p.ran(), '');
 });
 
-function seededLedger(p) {
+function seededLedger(p: ReturnType<typeof plantedRepo>) {
   const state = scratch('orch-planted-state-');
   const db = openLedger(join(state, 'ledger.db'));
   db.exec('CREATE TABLE IF NOT EXISTS releases (id INTEGER PRIMARY KEY, ticket TEXT, pr INTEGER, merge_sha TEXT, title TEXT, merged_at TEXT, status TEXT)');
@@ -175,11 +185,11 @@ foreignTest('the status of the lanes reads the checkout (worktrees, the date of 
   const { collectStatus } = await import('../lib/heartbeat.ts');
   const state = scratch('orch-planted-state-');
   const db = openLedger(join(state, 'ledger.db'));
-  const conf = { sections: { lanes: { root: join(p.root, 'lanes') }, security: { agent_user: 'agents' } }, roles: { dev: 'any' } };
+  const conf = { sections: { lanes: { root: join(p.root, 'lanes') }, security: { agent_user: 'agents' } }, roles: { dev: 'any' } } as unknown as Conf;
   const result = await asForeign(p.repo, () => collectStatus(db, conf, { repo: p.repo, state, probe: false, readUrls: false }));
   db.close();
   assert.deepEqual(result.snapshot.lanes.map((lane) => lane.name), ['dev/x']);
-  assert.ok(result.snapshot.lanes[0].branchMovedAt, 'the date of the lane was read');
+  assert.ok(result.snapshot.lanes[0]!.branchMovedAt, 'the date of the lane was read');
   assert.equal(p.ran(), '');
 });
 
@@ -211,7 +221,7 @@ foreignTest('the recovery of a pushed revert reads its message and runs nothing 
   const remote = join(root, 'remote.git');
   const repo = join(root, 'project');
   const marker = join(root, 'ran.log');
-  const git = (...args) => execFileSync(REAL_GIT, ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' }).trim();
+  const git = (...args: string[]) => execFileSync(REAL_GIT, ['-C', repo, '-c', 'user.name=t', '-c', 'user.email=t@localhost', ...args], { encoding: 'utf8' }).trim();
   git.dir = repo;
   execFileSync(REAL_GIT, ['init', '--bare', '-q', '-b', 'main', remote]);
   execFileSync(REAL_GIT, ['clone', '-q', remote, repo]);
@@ -225,9 +235,9 @@ foreignTest('the recovery of a pushed revert reads its message and runs nothing 
   activeRelease(db);
   db.prepare('INSERT INTO releases(ticket,pr,merge_sha,title,merged_at,status) VALUES (?,?,?,?,?,?)')
     .run('LOCAL-1', 1, git('rev-parse', 'HEAD'), 'Test release', new Date().toISOString(), 'watching');
-  const row = db.prepare('SELECT * FROM releases').get();
+  const row = db.prepare('SELECT * FROM releases').get() as ReleaseRow;
   const conf = { sections: { lanes: { base: 'origin/main' }, tracker: { owner_id: 'human' },
-    release: { health_command: 'true', deploy_grace_minutes: '0', watch_minutes: '2', failures_to_rollback: '3', auto_rollback: 'true', reopen_state: 'Todo' } } };
+    release: { health_command: 'true', deploy_grace_minutes: '0', watch_minutes: '2', failures_to_rollback: '3', auto_rollback: 'true', reopen_state: 'Todo' } } } as unknown as Conf;
   rollbackRelease(conf, db, repo, row, { trackerFactory: () => ({ moveTicket: () => {} }), announce: () => {} });
   // The pushed revert, signed: the read of its message is where a signature check would run.
   const revert = execFileSync(REAL_GIT, ['-C', remote, 'rev-parse', 'main'], { encoding: 'utf8' }).trim();
@@ -237,22 +247,22 @@ foreignTest('the recovery of a pushed revert reads its message and runs nothing 
   execFileSync(REAL_GIT, ['-C', remote, 'update-ref', 'refs/heads/main', signedRevert]);
   db.prepare("UPDATE releases SET status = 'rolling_back', rollback_sha = NULL, rollback_pushed_at = NULL, planned_rollback_sha = ? WHERE id = ?").run(signedRevert, row.id);
   const plant = join(root, 'plant');
-  writeFileSync(plant, `#!/bin/sh\necho "planted $*" >> '${marker}'\nexit 0\n`);
+  writeFileSync(plant, planted(marker, 'planted ', true));
   chmodSync(plant, 0o755);
   // Only what the fetch does not reach: the fetch is the service's, on its own checkout, with its own settings
   // (it reads the index, so it would run an fsmonitor of the checkout: the service's own).
-  for (const [key, value] of [['log.showSignature', 'true'], ['gpg.program', plant], ['diff.external', plant], ['core.pager', plant]]) git('config', key, value);
-  const resumed = [];
+  for (const [key, value] of [['log.showSignature', 'true'], ['gpg.program', plant], ['diff.external', plant], ['core.pager', plant]] as [string, string][]) git('config', key, value);
+  const resumed: number[] = [];
   resumeWatches(conf, db, repo, { running: () => false, lockAvailable: () => true, schedule: (_repo, id) => resumed.push(id), announce: () => {} });
   t.after(() => db.close());
-  assert.equal(db.prepare('SELECT status FROM releases WHERE id = ?').get(row.id).status, 'verifying_rollback', 'the revert was found by its message');
+  assert.equal(db.prepare('SELECT status FROM releases WHERE id = ?').get(row.id)!.status, 'verifying_rollback', 'the revert was found by its message');
   assert.equal(existsSync(marker) ? readFileSync(marker, 'utf8') : '', '');
 });
 
 // A git that refuses every checkout, as git does under another account than the owner's.
 function refusingGit() {
   const dir = scratch('orch-refusing-git-');
-  writeFileSync(join(dir, 'git'), `#!/bin/sh\necho "fatal: detected dubious ownership in repository at '$2'" >&2\nexit 128\n`);
+  writeFileSync(join(dir, 'git'), `#!${process.execPath}\nprocess.stderr.write("fatal: detected dubious ownership in repository at '" + (process.argv[3] ?? '') + "'\\n");\nprocess.exitCode = 128;\n`);
   chmodSync(join(dir, 'git'), 0o755);
   return dir;
 }
@@ -269,7 +279,7 @@ test('a refused checkout is not recorded as an untracked config', () => {
     { encoding: 'utf8', env: childEnv({ CLEARED_REPO: p.repo, PATH: `${refusingGit()}:${process.env.PATH}` }) });
   assert.equal(run.status, 0, run.stderr);
   const db = openLedger(join(state, 'ledger.db'), { readOnly: true });
-  const events = db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'untracked_config_ignored'").get().n;
+  const events = db.prepare("SELECT count(*) AS n FROM events WHERE kind = 'untracked_config_ignored'").get()!.n;
   db.close();
   assert.equal(events, 0);
 });
@@ -296,7 +306,7 @@ for (const command of [['status'], ['ticket', 'show', 'LOCAL-1'], ['rollback', '
 }
 
 test('a project path that is not there, or that starts with ~, is said as such', () => {
-  for (const [project, said] of [[join(scratch('orch-gone-'), 'gone'), /does not exist/], ['~/project', /starts with "~", which Cleared does not expand/]]) {
+  for (const [project, said] of [[join(scratch('orch-gone-'), 'gone'), /does not exist/], ['~/project', /starts with "~", which Cleared does not expand/]] as [string, RegExp][]) {
     for (const command of [['app', 'passkey'], ['rollback', 'LOCAL-1'], ['status']]) {
       const run = spawnSync(process.execPath, [join(ORCH_HOME, 'cleared'), ...command], { encoding: 'utf8', input: 'no\n', timeout: 30_000,
         env: childEnv({ CLEARED_REPO: project, CLEARED_STATE_DIR: scratch('orch-gone-state-') }) });

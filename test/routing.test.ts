@@ -12,13 +12,13 @@ import { conf, scratch, fixtureProject, sandbox, task, first } from './support.t
 test('every alias, fallback, role and rule of agents.conf points to a declared model', () => {
   const example = readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8');
   const reference = readFileSync(join(ORCH_HOME, 'docs', 'configuration.md'), 'utf8');
-  const sections = new Map();
+  const sections = new Map<string, Set<string>>();
   let section = '';
   for (const line of example.split('\n')) {
     const heading = line.match(/^\[([^\]]+)\]$/);
-    if (heading) { section = heading[1]; sections.set(section, new Set()); continue; }
+    if (heading) { section = heading[1]!; sections.set(section, new Set()); continue; }
     const key = line.match(/^\s*([a-zA-Z0-9_.-]+)\s*=/);
-    if (key && section !== 'rules') sections.get(section).add(key[1]);
+    if (key && section !== 'rules') sections.get(section)!.add(key[1]!);
   }
   for (const [name, keys] of sections) {
     const heading = `## \`[${name}]\``;
@@ -68,20 +68,20 @@ test('overrides by kind of task: engine, screen, and a screen pull request that 
 
 test('a condition on something unknown does not match', () => {
   const small = parseConf('[models]\na = x:1\nb = x:2\n[roles]\ndev = a\nrelease = a\n[rules]\ndev pr_lines>10 -> b\ndev path=server/ -> b\n');
-  assert.equal(route(small, task({})).chain[0].alias, 'a');
+  assert.equal(route(small, task({})).chain[0]!.alias, 'a');
 });
 
 
 test('the reviewer is never the model that wrote the pull request', () => {
-  const author = conf.roles.review;
+  const author = conf.roles.review!;
   const routed = route(conf, task({ role: 'review', authorModel: author }));
   assert.ok(routed.chain.length > 0);
-  for (const candidate of routed.chain) assert.notEqual(candidate.model, conf.models[author].model);
+  for (const candidate of routed.chain) assert.notEqual(candidate.model, conf.models[author]!.model);
   assert.equal(routed.notes.length, 1);
-  const byId = route(conf, task({ role: 'review', authorModel: conf.models[author].model }));
+  const byId = route(conf, task({ role: 'review', authorModel: conf.models[author]!.model }));
   assert.deepEqual(byId.chain, routed.chain);
-  const other = Object.keys(conf.models).find((alias) => conf.models[alias].model !== conf.models[author].model);
-  assert.equal(route(conf, task({ role: 'review', authorModel: other })).chain[0].alias, author);
+  const other = Object.keys(conf.models).find((alias) => conf.models[alias]!.model !== conf.models[author]!.model);
+  assert.equal(route(conf, task({ role: 'review', authorModel: other })).chain[0]!.alias, author);
 });
 
 
@@ -92,7 +92,7 @@ test('a review does not start when nobody knows who wrote the pull request', () 
 
 test('the chain follows the declared fallbacks and stops on a loop', () => {
   const routed = route(conf, task({ role: 'mechanical' }));
-  assert.equal(routed.chain[1].alias, conf.fallbacks[conf.roles.mechanical]);
+  assert.equal(routed.chain[1]!.alias, conf.fallbacks[conf.roles.mechanical!]);
   assert.equal(new Set(routed.chain.map((c) => c.alias)).size, routed.chain.length);
 });
 
@@ -106,7 +106,7 @@ test('an unknown model is an error that says what to add, never a silent default
 
 
 test('the core\'s scripts name no model and no provider', () => {
-  const names = new Set();
+  const names = new Set<string>();
   for (const [alias, model] of Object.entries(conf.models)) { names.add(alias); names.add(model.model); names.add(model.adapter); }
   for (const word of ['gpt', 'opus', 'sonnet', 'haiku', 'fable', 'gemini']) names.add(word);
   const files = ['lib/script.ts', 'lib/route.ts', 'lib/conf.ts'];
@@ -124,7 +124,7 @@ test('the ledger records a run, its cost and an event', () => {
   runStart(db, { runId: 'r1', ticket: 'EX-1', role: 'dev', model: 'm', provider: 'x', lane: 'dev/EX-1', requestedModel: 'alias' });
   const pricing = parseConf('[currency]\nusd_eur = 0.5\n[prices]\npriced = 1 2 0.5 4 8\n');
   runEnd(db, pricing, { runId: 'r1', outcome: 'done', exitCode: 0, usage: { model: 'actual', tokens_in: 10, tokens_out: 20, tokens_cache: 30, tokens_cache_write: 40, cost_usd: 2 } });
-  const row = db.prepare('select * from runs').get();
+  const row = db.prepare('select * from runs').get()!;
   assert.equal(row.model, 'actual');
   assert.equal(row.cost_eur, 1);
   assert.equal(row.cost_basis, 'cli');
@@ -132,7 +132,7 @@ test('the ledger records a run, its cost and an event', () => {
   assert.throws(() => runEnd(db, pricing, { runId: 'nope', outcome: 'done' }), /unknown run/);
   assert.throws(() => addEvent(db, { kind: 'made_up' }), /unknown event kind/);
   addEvent(db, { kind: 'lane_limit_reached', ticket: 'EX-1', value: 3 });
-  assert.equal(db.prepare('select count(*) n from events').get().n, 1);
+  assert.equal(db.prepare('select count(*) n from events').get()!.n, 1);
 });
 
 
@@ -160,10 +160,17 @@ test('a cost is computed from the price table only when the CLI gives none, and 
 
 
 
+// A curl that reads what it is sent and answers one line, whatever was asked.
+const answering = (line: string) => `#!${process.execPath}
+const fs = process.getBuiltinModule('node:fs');
+try { fs.readFileSync(0); } catch { /* no input */ }
+process.stdout.write(${JSON.stringify(`${line}\n`)});
+`;
+
 test('[Linear adapter] tracker saying no is an error: nothing is reported as sent or opened', () => {
   const dir = scratch('orch-tracker-');
   const no = { data: { issue: { id: 'i' }, teams: { nodes: [{ id: 't' }] }, projects: { nodes: [{ id: 'p' }] }, issueLabels: { nodes: [{ id: 'l' }] }, commentCreate: { success: false, comment: null }, issueCreate: { success: false, issue: null } } };
-  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\necho '${JSON.stringify(no)}'\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'curl'), answering(JSON.stringify(no)), { mode: 0o755 });
   writeFileSync(join(dir, 'text.md'), 'Fait : rien.');
   const repoRoot = fixtureProject();
   const env = { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') };
@@ -195,7 +202,7 @@ test('the scripts run as commands from a folder whose name has a space or an acc
 
 test('[Linear adapter] a comment on a ticket tracker does not know is an error', () => {
   const dir = scratch('orch-tracker-');
-  writeFileSync(join(dir, 'curl'), `#!/usr/bin/env bash\ncat > /dev/null\necho '{"data":{"issue":null}}'\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'curl'), answering('{"data":{"issue":null}}'), { mode: 0o755 });
   writeFileSync(join(dir, 'text.md'), 'Fait : rien.');
   const repoRoot = fixtureProject();
   const run = spawnSync(join(ORCH_HOME, 'tracker.ts'), ['comment', 'X-404', join(dir, 'text.md'), 'test'], { encoding: 'utf8', env: { ...process.env, PATH: `${dir}:${process.env.PATH}`, LINEAR_API_KEY: 'k', ORCH_REPO: repoRoot, ORCH_GUARD_REF: 'HEAD', ORCH_STATE_DIR: join(dir, 'state') } });

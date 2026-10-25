@@ -9,6 +9,7 @@ import { ORCH_HOME, parseConf } from '../lib/conf.ts';
 import { forgeEnv, forgeSettings, forgeToken } from '../lib/forge.ts';
 import { openLedger } from '../lib/ledger.ts';
 import { laneWithRemote, scratch } from './support.ts';
+import type { Lane } from './support.ts';
 
 // What the fake GitHub hands out: an installation token that must be seen by gh and git, and nowhere else.
 const TOKEN = 'ghs_forgeTestInstallationToken0123456789';
@@ -16,13 +17,13 @@ const BOT = 'cleared-test[bot]';
 const BOT_EMAIL = `98765+${BOT}@users.noreply.github.com`;
 const realGit = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim();
 
-function appKey(dir, mode = 0o600) {
+function appKey(dir: string, mode = 0o600) {
   const key = join(dir, 'github-app.pem');
   writeFileSync(key, generateKeyPairSync('rsa', { modulusLength: 2048 }).privateKey.export({ type: 'pkcs8', format: 'pem' }), { mode });
   chmodSync(key, mode);
   return key;
 }
-const forgeSection = (key) => `[forge]\nadapter = github\napp_id = 123\ninstallation_id = 456\napp_private_key_file = ${key}\napp_login = ${BOT}\napp_user_id = 98765\n`;
+const forgeSection = (key: string) => `[forge]\nadapter = github\napp_id = 123\ninstallation_id = 456\napp_private_key_file = ${key}\napp_login = ${BOT}\napp_user_id = 98765\n`;
 
 // A lane whose work leaves through the real scripts, with a fake GitHub around them: gh and the token endpoint
 // (curl) write down what they were given, git records what a push would authenticate with, and the account has an
@@ -32,40 +33,53 @@ function forgeLane({ forge = true, keyMode = 0o600 } = {}) {
   const { box } = lane;
   const bin = join(box.home, 'bin');
   const key = appKey(box.home, keyMode);
-  writeFileSync(join(bin, 'curl'), `#!/usr/bin/env bash
-printf '%s\\n' "$*" >> "${join(box.home, 'curl-args')}"
-cat > /dev/null
-[ -z "\${FAKE_CURL_FAIL:-}" ] || { echo 'curl: (22) The requested URL returned error: 403' >&2; exit 22; }
-printf '{"token":"${TOKEN}","expires_at":"%s"}\\n' "$(date -u -d '1 hour' +%Y-%m-%dT%H:%M:%SZ)"
+  writeFileSync(join(bin, 'curl'), `#!${process.execPath}
+const fs = process.getBuiltinModule('node:fs');
+fs.appendFileSync(${JSON.stringify(join(box.home, 'curl-args'))}, process.argv.slice(2).join(' ') + '\\n');
+try { fs.readFileSync(0); } catch { /* no input */ }
+if (process.env.FAKE_CURL_FAIL) { process.stderr.write('curl: (22) The requested URL returned error: 403\\n'); process.exitCode = 22; }
+else process.stdout.write('{"token":"${TOKEN}","expires_at":"' + new Date(Date.now() + 3_600_000).toISOString().replace(/\\.\\d{3}Z$/, 'Z') + '"}\\n');
 `, { mode: 0o755 });
   renameSync(join(bin, 'gh'), join(bin, 'gh-original'));
-  writeFileSync(join(bin, 'gh'), `#!/usr/bin/env bash
-printf '%s|%s|%s\\n' "\${GH_TOKEN:-}" "\${GITHUB_TOKEN:-}" "$*" >> "${join(box.home, 'gh-seen')}"
-exec "${join(bin, 'gh-original')}" "$@"
+  writeFileSync(join(bin, 'gh'), `#!${process.execPath}
+const fs = process.getBuiltinModule('node:fs');
+const { spawnSync } = process.getBuiltinModule('node:child_process');
+const args = process.argv.slice(2);
+fs.appendFileSync(${JSON.stringify(join(box.home, 'gh-seen'))}, (process.env.GH_TOKEN ?? '') + '|' + (process.env.GITHUB_TOKEN ?? '') + '|' + args.join(' ') + '\\n');
+process.exitCode = spawnSync(${JSON.stringify(join(bin, 'gh-original'))}, args, { stdio: 'inherit' }).status ?? 1;
 `, { mode: 0o755 });
-  writeFileSync(join(bin, 'git'), `#!/usr/bin/env bash
-for arg in "$@"; do
-  if [ "$arg" = push ]; then
-    { env | grep -E '^(GIT_CONFIG_|GH_TOKEN|GITHUB_TOKEN|GIT_AUTHOR|GIT_COMMITTER)' || true; } >> "${join(box.home, 'git-push-env')}"
-    printf 'protocol=https\\nhost=github.com\\npath=example/project.git\\n\\n' | "${realGit}" credential fill >> "${join(box.home, 'git-credential')}" 2>&1 || echo "fill failed" >> "${join(box.home, 'git-credential')}"
-    break
-  fi
-done
-exec "${realGit}" "$@"
+  // A push: the environment it runs with (the lines of env that name git settings, identities or tokens) and what
+  // the credential helpers git would ask answer for github.com.
+  writeFileSync(join(bin, 'git'), `#!${process.execPath}
+const fs = process.getBuiltinModule('node:fs');
+const { spawnSync } = process.getBuiltinModule('node:child_process');
+const args = process.argv.slice(2);
+if (args.includes('push')) {
+  const lines = Object.entries(process.env).map(([name, value]) => name + '=' + value).join('\\n').split('\\n');
+  fs.appendFileSync(${JSON.stringify(join(box.home, 'git-push-env'))}, lines.filter((line) => /^(GIT_CONFIG_|GH_TOKEN|GITHUB_TOKEN|GIT_AUTHOR|GIT_COMMITTER)/.test(line)).map((line) => line + '\\n').join(''));
+  const credential = ${JSON.stringify(join(box.home, 'git-credential'))};
+  const fd = fs.openSync(credential, 'a');
+  const fill = spawnSync(${JSON.stringify(realGit)}, ['credential', 'fill'], { input: 'protocol=https\\nhost=github.com\\npath=example/project.git\\n\\n', stdio: ['pipe', fd, fd] });
+  fs.closeSync(fd);
+  if (fill.status !== 0) fs.appendFileSync(credential, 'fill failed\\n');
+}
+process.exitCode = spawnSync(${JSON.stringify(realGit)}, args, { stdio: 'inherit' }).status ?? 1;
 `, { mode: 0o755 });
   // The account's own git credential, as gh auth setup-git would have left it.
   writeFileSync(join(box.home, '.gitconfig'), '[credential]\n\thelper = "!f() { echo username=ambient; echo password=AMBIENT-PASSWORD; }; f"\n');
   const confPath = join(box.home, 'agents.conf');
   writeFileSync(confPath, `${readFileSync(confPath, 'utf8')}\n[adapter.first]\ncommits = no\nrunner = container\n${forge ? forgeSection(key) : ''}`);
   const env = { ...box.env, HOME: box.home, GH_TOKEN: 'ambient-gh-token', GITHUB_TOKEN: 'ambient-github-token', GIT_TERMINAL_PROMPT: '0' };
-  const read = (name) => { try { return readFileSync(join(box.home, name), 'utf8'); } catch { return ''; } };
+  const read = (name: string) => { try { return readFileSync(join(box.home, name), 'utf8'); } catch { return ''; } };
   return { ...lane, bin, key, env, read, confPath };
 }
+
+type ForgeLane = ReturnType<typeof forgeLane>;
 
 // A step of the kept commands, as they run it: the lane's copy of lib/script.ts (s), lib/forge.ts (f) and
 // lib/conf.ts (c) imported, the project's environment set, then the code. out() prints a line; shown() passes a
 // command's output on and takes its exit code; quiet() only its error output and its code.
-const script = (lane, code, extra = {}, input = undefined) => spawnSync(process.execPath, ['--no-warnings', '--input-type=module', '-e', `
+const script = (lane: ForgeLane, code: string, extra: NodeJS.ProcessEnv = {}, input: string | undefined = undefined) => spawnSync(process.execPath, ['--no-warnings', '--input-type=module', '-e', `
 const s = await import(${JSON.stringify(pathToFileURL(join(lane.box.home, 'lib', 'script.ts')).href)});
 const f = await import(${JSON.stringify(pathToFileURL(join(lane.box.home, 'lib', 'forge.ts')).href)});
 const c = await import(${JSON.stringify(pathToFileURL(join(lane.box.home, 'lib', 'conf.ts')).href)});
@@ -77,9 +91,9 @@ ${code}`], { env: { ...lane.env, ...extra }, encoding: 'utf8', input, cwd: lane.
 // What the forge mode is, then a gh call of the scripts, its output left out.
 const MODE = "out(f.forgeMode(c.loadConf()).mode); quiet(s.gh(['pr', 'list', '--state', 'open']));";
 const LIST = "shown(s.gh(['pr', 'list', '--state', 'open']));";
-const FILL = (host) => `shown(s.git(['credential', 'fill'], { input: 'protocol=https\\nhost=${host}\\n\\n' }));`;
+const FILL = (host: string) => `shown(s.git(['credential', 'fill'], { input: 'protocol=https\\nhost=${host}\\n\\n' }));`;
 // What the kept commands ask of the forge: a commit, a push of the lane's branch, and two gh calls.
-const forgeCalls = (lane, extra = {}) => ({ run: script(lane, `
+const forgeCalls = (lane: ForgeLane, extra: NodeJS.ProcessEnv = {}) => ({ run: script(lane, `
 const steps = [
   () => s.git(['-c', 'user.name=dispatcher', '-c', 'user.email=dispatcher@localhost', 'commit', '-q', '--allow-empty', '-m', 'feat: the work'], { cwd: ${JSON.stringify(lane.path)} }),
   () => s.git(['push', '-q', 'origin', 'dev/X-1'], { cwd: ${JSON.stringify(lane.path)} }),
@@ -87,8 +101,8 @@ const steps = [
   () => s.gh(['run', 'list', '--limit', '1']),
 ];
 for (const step of steps) { if (quiet(step()).status !== 0) break; }`, extra) });
-const filesUnder = (dir) => readdirSync(dir, { recursive: true }).map((name) => join(dir, String(name))).filter((path) => statSync(path).isFile());
-const author = (lane) => execFileSync(realGit, ['--git-dir', lane.remote, 'log', '-1', '--format=%an <%ae>|%cn <%ce>', 'dev/X-1'], { encoding: 'utf8' }).trim();
+const filesUnder = (dir: string) => readdirSync(dir, { recursive: true }).map((name) => join(dir, String(name))).filter((path) => statSync(path).isFile());
+const author = (lane: Lane) => execFileSync(realGit, ['--git-dir', lane.remote, 'log', '-1', '--format=%an <%ae>|%cn <%ce>', 'dev/X-1'], { encoding: 'utf8' }).trim();
 
 test('without [forge], gh and git use the ambient credential exactly as before, and no token is minted', () => {
   const lane = forgeLane({ forge: false });
@@ -119,7 +133,7 @@ test('with [forge], gh gets the installation token, a push authenticates through
     const [token, github, args] = line.split('|');
     assert.equal(token, TOKEN);
     assert.equal(github, TOKEN);
-    assert.ok(!args.includes(TOKEN));
+    assert.ok(!args!.includes(TOKEN));
   }
   // git: the helper named in GIT_CONFIG_* answers for github.com, and the account's own helper is dropped.
   const credential = lane.read('git-credential');
@@ -153,12 +167,12 @@ test('the installation token is reused within its hour and renewed five minutes 
   const conf = parseConf(forgeSection(appKey(state)));
   let clock = Date.parse('2026-10-14T08:00:00Z');
   let minted = 0;
-  const request = (url) => {
+  const request = (url: string) => {
     assert.equal(url, 'https://api.github.com/app/installations/456/access_tokens');
     minted += 1;
     return { token: `token-${minted}`, expires_at: new Date(clock + 60 * 60_000).toISOString() };
   };
-  const ask = () => forgeToken(conf, { state, now: () => clock, request }).token;
+  const ask = () => forgeToken(conf, { state, now: () => clock, request })!.token;
   assert.equal(ask(), 'token-1');
   clock += 30 * 60_000;
   assert.equal(ask(), 'token-1', 'another process, half an hour later, reads the cache');
@@ -177,18 +191,18 @@ test('the installation token is reused within its hour and renewed five minutes 
 test('[forge] use_tracker_app = yes lends the GitHub tracker\'s app to the forge, one app for both; without it, other trackers and partial settings, nothing is guessed', () => {
   const keys = 'app_login = cleared-test\napp_id = 11\ninstallation_id = 22\napp_private_key_file = /srv/keys/app.pem\n';
   const tracker = (extra = '[forge]\nuse_tracker_app = yes\n') => parseConf(`[tracker]\nadapter = github\nrepository = example/project\n${keys}${extra}`);
-  const shared = forgeSettings(tracker());
+  const shared = forgeSettings(tracker())!;
   assert.equal(shared.source, 'tracker');
   assert.equal(shared.app_id, '11');
   assert.equal(shared.installation_id, '22');
   assert.equal(shared.login, BOT);
   assert.equal(shared.identity, null, 'no bot user ID: commits keep the local identity');
-  assert.deepEqual(forgeSettings(tracker('[forge]\nuse_tracker_app = yes\napp_user_id = 98765\n')).identity, { name: BOT, email: BOT_EMAIL });
+  assert.deepEqual(forgeSettings(tracker('[forge]\nuse_tracker_app = yes\napp_user_id = 98765\n'))!.identity, { name: BOT, email: BOT_EMAIL });
   // An installation of the GitHub tracker that has not opted in keeps its ambient forge credential.
   assert.equal(forgeSettings(tracker('')), null);
   assert.equal(forgeSettings(tracker('[forge]\nuse_tracker_app = no\n')), null);
   // [forge] keys win over the tracker's.
-  assert.equal(forgeSettings(tracker(forgeSection('/srv/keys/forge.pem'))).app_private_key_file, '/srv/keys/forge.pem');
+  assert.equal(forgeSettings(tracker(forgeSection('/srv/keys/forge.pem')))!.app_private_key_file, '/srv/keys/forge.pem');
   // Neither: the ambient credential.
   assert.equal(forgeSettings(parseConf(`[tracker]\nadapter = local\n${keys}`)), null);
   assert.equal(forgeSettings(parseConf('[tracker]\nadapter = local\n[forge]\nadapter = github\n')), null);
@@ -214,7 +228,7 @@ test('the GitHub tracker\'s app is the forge\'s only once [forge] use_tracker_ap
   const run = script(lane, "const m = f.forgeMode(c.loadConf()); out(`${m.mode} ${m.login}`); quiet(s.gh(['pr', 'list', '--state', 'open']));");
   assert.equal(run.status, 0, run.stderr);
   assert.equal(run.stdout.trim(), `app ${BOT}`);
-  assert.match(lane.read('gh-seen').trim().split('\n').at(-1), new RegExp(`^${TOKEN}\\|`));
+  assert.match(lane.read('gh-seen').trim().split('\n').at(-1)!, new RegExp(`^${TOKEN}\\|`));
 });
 
 test('a token that cannot be minted stops forge calls with the setting to look at, and never falls back to the ambient credential', () => {
@@ -230,17 +244,17 @@ test('a token that cannot be minted stops forge calls with the setting to look a
   assert.doesNotMatch(fill.stdout, /AMBIENT/);
   assert.match(fill.stderr, /forge credential/);
   // Nor an askpass program of the account: the helper tells git to quit.
-  writeFileSync(join(lane.bin, 'askpass'), '#!/bin/sh\necho AMBIENT-ASKPASS\n', { mode: 0o755 });
+  writeFileSync(join(lane.bin, 'askpass'), `#!${process.execPath}\nprocess.stdout.write('AMBIENT-ASKPASS\\n');\n`, { mode: 0o755 });
   const asked = script(lane, FILL('github.com'), { ...failing, GIT_ASKPASS: join(lane.bin, 'askpass') });
   assert.notEqual(asked.status, 0);
   assert.doesNotMatch(asked.stdout, /AMBIENT/);
   // Said in the ledger once an hour, without the token or the key.
   const db = openLedger(join(lane.box.state, 'ledger.db'));
-  const said = db.prepare("select detail from events where kind = 'forge_token_failed'").all();
+  const said = db.prepare("select detail from events where kind = 'forge_token_failed'").all() as { detail: string }[];
   db.close();
   assert.equal(said.length, 1);
-  assert.match(said[0].detail, /installation_id/);
-  assert.ok(!said[0].detail.includes(lane.key));
+  assert.match(said[0]!.detail, /installation_id/);
+  assert.ok(!said[0]!.detail.includes(lane.key));
   // Another host stays with its own credential: only github.com is the forge's.
   const elsewhere = script(lane, FILL('example.com'), failing);
   assert.match(elsewhere.stdout, /password=AMBIENT-PASSWORD/);
@@ -267,19 +281,19 @@ test('the account\'s own git configuration cannot send a forge push to SSH: its 
 
 test('[forge] adapter = github alone, or the example copied as it is, names no app: nothing changes', () => {
   const lane = forgeLane({ forge: false });
-  for (const added of ['[forge]\nadapter = github\n', readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').match(/\[forge\]\n(?:#.*\n|\s*\n)*/)[0]]) {
+  for (const added of ['[forge]\nadapter = github\n', readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8').match(/\[forge\]\n(?:#.*\n|\s*\n)*/)![0]]) {
     writeFileSync(lane.confPath, `${readFileSync(lane.confPath, 'utf8')}\n${added}`);
     const run = script(lane, MODE);
     assert.equal(run.status, 0, run.stderr);
     assert.equal(run.stdout.trim(), 'ambient');
     assert.equal(lane.read('curl-args'), '', 'no token is asked for');
-    assert.match(lane.read('gh-seen').trim().split('\n').at(-1), /^ambient-gh-token\|/);
+    assert.match(lane.read('gh-seen').trim().split('\n').at(-1)!, /^ambient-gh-token\|/);
   }
   assert.equal(forgeSettings(parseConf(readFileSync(join(ORCH_HOME, 'agents.example.conf'), 'utf8'))), null);
 });
 
 test('the rest of the account\'s git configuration still applies under the app: signing, excludes, proxy, includeIf identity, other hosts; only what touches github.com is dropped', () => {
-  const read = (forge) => {
+  const read = (forge: boolean) => {
     const lane = forgeLane({ forge });
     writeFileSync(join(lane.box.home, 'included.conf'), '[user]\n\temail = included@example.org\n');
     writeFileSync(join(lane.box.home, '.gitconfig'), `${readFileSync(join(lane.box.home, '.gitconfig'), 'utf8')}[commit]
@@ -309,21 +323,23 @@ test('the rest of the account\'s git configuration still applies under the app: 
   const app = read(true);
   for (const key of ['commit.gpgsign', 'core.excludesfile', 'http.proxy', 'user.email', 'url.ssh://git@example.org/.insteadof']) {
     assert.ok(ambient[key], key);
-    assert.equal(app[key].replace(/\/tmp\/orch-home-[^/]+/, ''), ambient[key].replace(/\/tmp\/orch-home-[^/]+/, ''), key);
+    assert.equal(app[key]!.replace(/\/tmp\/orch-home-[^/]+/, ''), ambient[key]!.replace(/\/tmp\/orch-home-[^/]+/, ''), key);
   }
   assert.equal(app['user.email'], 'included@example.org|');
   assert.equal(app['url.git@github.com:.pushinsteadof'], '');
-  assert.doesNotMatch(app['credential.https://github.com.helper'], /AMBIENT/);
-  assert.match(app['credential.https://github.com.helper'], /forge\.ts' credential\|$/);
-  assert.doesNotMatch(app['http.https://github.com/.extraheader'], /AMBIENT/);
+  assert.doesNotMatch(app['credential.https://github.com.helper']!, /AMBIENT/);
+  assert.match(app['credential.https://github.com.helper']!, /forge\.ts' credential\|$/);
+  assert.doesNotMatch(app['http.https://github.com/.extraheader']!, /AMBIENT/);
 });
 
 test('the debug switches of gh and git are off wherever the token is: the gh call and the scripts\' git', () => {
   const lane = forgeLane();
   const debug = { GH_DEBUG: 'api', DEBUG: 'api', GIT_TRACE: '1', GIT_TRACE_CURL: '1', GIT_CURL_VERBOSE: '1', GIT_TRACE_REDACT: '0' };
-  writeFileSync(join(lane.bin, 'gh'), `#!/usr/bin/env bash
-env | grep -E '^(GH_DEBUG|DEBUG|GIT_TRACE|GIT_TRACE_CURL|GIT_CURL_VERBOSE|GIT_TRACE_REDACT)=' >> "${join(lane.box.home, 'gh-debug')}"
-printf '%s|%s|%s\\n' "\${GH_TOKEN:-}" "\${GITHUB_TOKEN:-}" "$*" >> "${join(lane.box.home, 'gh-seen')}"
+  writeFileSync(join(lane.bin, 'gh'), `#!${process.execPath}
+const fs = process.getBuiltinModule('node:fs');
+const lines = Object.entries(process.env).map(([name, value]) => name + '=' + value).join('\\n').split('\\n');
+fs.appendFileSync(${JSON.stringify(join(lane.box.home, 'gh-debug'))}, lines.filter((line) => /^(GH_DEBUG|DEBUG|GIT_TRACE|GIT_TRACE_CURL|GIT_CURL_VERBOSE|GIT_TRACE_REDACT)=/.test(line)).map((line) => line + '\\n').join(''));
+fs.appendFileSync(${JSON.stringify(join(lane.box.home, 'gh-seen'))}, (process.env.GH_TOKEN ?? '') + '|' + (process.env.GITHUB_TOKEN ?? '') + '|' + process.argv.slice(2).join(' ') + '\\n');
 `, { mode: 0o755 });
   const run = script(lane, "quiet(s.gh(['pr', 'list'])); out(String(Object.keys(f.forgeEnv(c.loadConf())).filter((name) => /^(GH_DEBUG|GIT_TRACE|GIT_TRACE_CURL|GIT_CURL_VERBOSE|GIT_TRACE_REDACT)$/.test(name)).length));", debug);
   assert.equal(run.status, 0, run.stderr);
@@ -338,7 +354,7 @@ printf '%s|%s|%s\\n' "\${GH_TOKEN:-}" "\${GITHUB_TOKEN:-}" "$*" >> "${join(lane.
 
 test('a url rewrite in the repository\'s own git configuration that sends the origin to SSH stops every forge call', () => {
   const lane = forgeLane();
-  const git = (...args) => execFileSync(realGit, ['-C', lane.box.repo, ...args]);
+  const git = (...args: string[]) => execFileSync(realGit, ['-C', lane.box.repo, ...args]);
   git('remote', 'set-url', 'origin', 'https://github.com/example/project.git');
   const state = () => script(lane, MODE);
   assert.equal(state().stdout.trim(), 'app', 'an https origin on github.com is the app\'s');
@@ -388,10 +404,11 @@ test('a key file other accounts can read is refused before anything is asked of 
 });
 
 test('cleared status says which identity the forge calls use, and reports a configured app that cannot give a token', () => {
-  const status = (lane) => {
+  type Problem = { code: string; message: string };
+  const status = (lane: ForgeLane) => {
     const json = spawnSync(process.execPath, [join(lane.box.home, 'lib', 'heartbeat.ts'), 'status', '--json'], { env: lane.env, encoding: 'utf8' });
     const text = spawnSync(process.execPath, [join(lane.box.home, 'lib', 'heartbeat.ts'), 'status'], { env: lane.env, encoding: 'utf8' });
-    return { json: JSON.parse(json.stdout), text: text.stdout };
+    return { json: JSON.parse(json.stdout) as { services: { forge: { identity: unknown; reachable: boolean } }; problems: Problem[] }, text: text.stdout };
   };
   const ambient = status(forgeLane({ forge: false }));
   assert.deepEqual(ambient.json.services.forge.identity, { kind: 'ambient' });
@@ -409,11 +426,11 @@ test('cleared status says which identity the forge calls use, and reports a conf
   const broken = status(lane);
   assert.equal(broken.json.services.forge.reachable, false);
   const [failure] = broken.json.problems.filter((p) => p.code === 'forge_credential');
-  assert.match(failure.message, /\[forge\] app_private_key_file/);
+  assert.match(failure!.message, /\[forge\] app_private_key_file/);
   assert.match(broken.text, /^Forge · GitHub\s+unreachable · as cleared-test\[bot\]$/m);
   assert.ok(!JSON.stringify(broken.json).includes(lane.key));
 });
-const rmCache = (lane) => execFileSync('rm', ['-rf', join(lane.box.state, 'forge')]);
+const rmCache = (lane: ForgeLane) => execFileSync('rm', ['-rf', join(lane.box.state, 'forge')]);
 
 // A tripwire over the source text, not a proof. It finds: shell scripts that call gh or a network git command
 // without sourcing lib/common.sh; shell code that runs gh around the gh function of lib/common.sh (command, exec,
@@ -443,7 +460,7 @@ test('scripts that call the forge source lib/common.sh, none runs gh around its 
   const node = [...readdirSync(ORCH_HOME).filter((name) => /\.(mjs|ts)$/.test(name)), 'cleared',
     ...['lib', 'serve', 'app'].flatMap((dir) => readdirSync(join(ORCH_HOME, dir), { recursive: true })
       .map((name) => join(dir, String(name))).filter((name) => /\.(mjs|ts)$/.test(name) && !name.includes('node_modules')))];
-  const ghFiles = [];
+  const ghFiles: string[] = [];
   for (const name of node) {
     if (name === 'lib/tracker/adapters/github.ts') continue; // the tracker's own calls, with the tracker's token
     const text = readFileSync(join(ORCH_HOME, name), 'utf8');
