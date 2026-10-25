@@ -33,9 +33,9 @@ const shown = (item: ReleaseItem, t: Translate, language: 'en' | 'fr' = 'en') =>
 
 test('on the fast lane the card says the approval can be given while the full checks run, in English and in French', () => {
   const cases: [ReleaseItem['pr']['checks'], string, string][] = [
-    ['pending', 'Fast lane: approve now, it lands once the full checks are green', 'Voie rapide : validez dès maintenant, la mise en ligne attend que les vérifications complètes soient vertes'],
-    ['passed', 'Fast lane: full checks green', 'Voie rapide : vérifications complètes vertes'],
-    ['failed', 'Fast lane: full checks failed', 'Voie rapide : vérifications complètes en échec'],
+    ['pending', 'Fast lane: approve now, it lands once all checks are green', 'Voie rapide\u00a0: approuvez dès maintenant, la mise en production attend que tous les contrôles soient au vert'],
+    ['passed', 'Fast lane: all checks green', 'Voie rapide\u00a0: tous les contrôles au vert'],
+    ['failed', 'Fast lane: checks failed', 'Voie rapide\u00a0: contrôles en échec'],
   ];
   for (const [checks, english, french] of cases) {
     const item = card({ state: 'fast', reasons: [] }, checks);
@@ -53,13 +53,13 @@ test('sent back to the full circuit, or not fast at this version, the card says 
   const back = card({ state: 'full', reasons: ['outside_safe', 'dependency'] });
   assert.match(renderDetail(viewOf(back), en), /data-lane="full"/);
   assert.ok(shown(back, en).includes('Back to the full circuit: a file outside the safe list, it changes a dependency'));
-  assert.ok(shown(back, fr, 'fr').includes('Repassé en circuit complet : un fichier hors de la liste sûre, il change une dépendance'));
+  assert.ok(shown(back, fr, 'fr').includes('Repassé en circuit complet\u00a0: un fichier hors de la liste sûre, il change une dépendance'));
   const off = card({ state: 'off', reasons: ['disabled'] });
   assert.ok(shown(off, en).includes('Full circuit for this version: the fast lane is off for this service'));
-  assert.ok(shown(off, fr, 'fr').includes('Circuit complet pour cette version : la voie rapide est désactivée pour ce service'));
+  assert.ok(shown(off, fr, 'fr').includes('Circuit complet pour cette version\u00a0: la voie rapide est désactivée pour ce service'));
   const several = card({ state: 'full', reasons: ['several_services'] });
   assert.ok(shown(several, en).includes('Back to the full circuit: the ticket changes several services'));
-  assert.ok(shown(several, fr, 'fr').includes('Repassé en circuit complet : le ticket change plusieurs services'));
+  assert.ok(shown(several, fr, 'fr').includes('Repassé en circuit complet\u00a0: le ticket change plusieurs services'));
 });
 
 test('every reason the service can give has its words in both languages', () => {

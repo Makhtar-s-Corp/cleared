@@ -10,6 +10,7 @@ import { stateDirectory } from '../approval/service.ts';
 import { flatBriefing, levelContext, readLeveledBriefing, writeBriefing, type MemoryContext, type MemoryLevel } from '../workspace/briefing.ts';
 import { checkBranchName, git, projectCheckout, readTip, ticketBranch, ticketCheckout } from '../workspace/checkout.ts';
 import { variantFolder } from './variants.ts';
+import { judgeDiff } from './fast-lane.ts';
 import { captureHandover } from '../workspace/handover.ts';
 import { ensureProjectPage, readProjectPage, updateProjectPage } from '../workspace/project-page.ts';
 import { forgeEnvironments, publish } from '../workspace/publish.ts';
@@ -344,6 +345,23 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       const files = (await git(dir, ['diff', '--no-color', '--no-ext-diff', '--no-renames', '--name-only', range, '--'])).split('\n').filter(Boolean);
       const diff = (await git(dir, ['diff', '--no-color', '--no-ext-diff', '--no-renames', range, '--'])).slice(0, MAX_DIFF);
       return { files, diff };
+    },
+
+    // The fast lane's rules on what merging the ticket's branch would land
+    // (matrix B2.2, flow/fast-lane.ts): the session's branch fetched as a
+    // step's is, or a head the publish left in the service's checkout,
+    // against the base as a fetch finds it now, with the [fast_lane]
+    // settings of the base's agents.conf, never the branch's.
+    async fastLane({ ticket, service, workdir, head }) {
+      await refresh(service);
+      const { dir, base } = of(service);
+      const baseRef = `refs/remotes/origin/${base}`;
+      const sections = parseConf(await git(dir, ['show', `${baseRef}:.cleared/agents.conf`]));
+      let commit: string;
+      if (workdir) commit = (await fetchBranch(ticket, sessionService(service), workdir)).ref;
+      else if (head && /^[0-9a-f]{40}$/.test(head)) commit = head;
+      else throw new Error('no branch and no commit to judge');
+      return judgeDiff({ sections, repo: dir, base: baseRef, commit, env });
     },
 
     // What a step's branch changes against the service's base (decision 26,
