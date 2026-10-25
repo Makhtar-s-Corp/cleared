@@ -245,3 +245,30 @@ for (const language of ['en', 'fr'] as const) {
     }, true, language);
   });
 }
+
+// Issue #380: at 390 the project's name was cut ("Guestb…") between the mark and the gauge, with the sample-data pill
+// shown. On a phone the name is the bar's title: it is whole, the pill's word too, and the gauge keeps its 44 px.
+for (const language of ['en', 'fr'] as const) {
+  test(`${language} on a phone (390): the project's name is whole in the top bar, beside the gauge and the sample pill`, { skip }, async () => {
+    await signedIn(390, async (page) => {
+      await page.locator('#quota-gauge').waitFor();
+      await fontsReady(page);
+      const cut = (selector: string) => page.locator(selector).evaluate((el: any) => ({ text: el.textContent, scroll: el.scrollWidth, client: el.clientWidth, shown: getComputedStyle(el).display !== 'none' }));
+      const name = await cut('.side-brand .project');
+      assert.ok(name.shown && name.text.length > 0, 'the project is named');
+      assert.ok(name.scroll <= name.client, `"${name.text}" is cut: ${name.scroll} px in ${name.client}`);
+      assert.equal(await page.locator('.side-brand').getAttribute('href'), '/');
+      assert.equal((await page.locator('.side-brand').innerText()).trim(), name.text, 'the link reads the name alone');
+      const pill = await cut('.side-foot .source-pill .short');
+      assert.ok(pill.shown, 'the sample pill is shown');
+      assert.ok(pill.scroll <= pill.client, `the pill's "${pill.text}" is cut`);
+      const gauge = await page.locator('#quota-gauge').evaluate((el: any) => { const r = el.getBoundingClientRect(); return { width: r.width, height: r.height }; });
+      assert.ok(gauge.width >= 44 && gauge.height >= 44, `the gauge is ${gauge.width} by ${gauge.height}`);
+      for (const selector of ['.side-brand', '#palette-open', '#person', '#notify']) {
+        const target = await box(page, selector);
+        assert.ok(target.height >= 44, `${selector} is ${target.height} px tall`);
+      }
+      assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= 390), 'no sideways scroll');
+    }, true, language);
+  });
+}

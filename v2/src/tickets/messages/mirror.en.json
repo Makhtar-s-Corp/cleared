@@ -1,0 +1,7 @@
+{
+  "refused_go": "“{state}” is the owner's approval, and it is given in Cleared only. {ticket} is back in “{back}”.",
+  "refused_approved": "{ticket} was approved in Cleared: until it is released, its state changes in Cleared only. It is back in “{back}”.",
+  "refused_landing": "{ticket} is being released by Cleared: until then, its state changes in Cleared only. It is back in “{back}”.",
+  "set_aside_note": "{who} moved this ticket on {tracker}, to “{state}”. Its sessions were stopped and nothing of it waits in the Inbox. Move it to Todo in Cleared to start it again.",
+  "set_aside_message": "{who} moved the ticket on {tracker}: this session was stopped."
+}

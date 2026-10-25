@@ -6179,3 +6179,99 @@ P224's axe test reads the phone's screens at 390 in both languages and themes, t
 
 - Pull request: 377, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-visual-redesign`.
+
+## 2026-10-25: the project's name whole in the phone's top bar (the author's choices, lane `j3-mobile-title`, P229, issue #380)
+
+**The problem.** At 390, with the sample-data pill shown (the fixtures), the project's name in the top bar was cut: "Guestbook" took 78 px and had 63 in English, 58 in French ("Guestb…"). The bar holds the mark, the name, the search, the quota gauge, the pill, the person and the bell. This entry replaces the choice of P227's entry of 12:20, which kept the name shortened with an ellipsis whenever the pill is shown.
+
+**The author's choices.**
+- **The name is the bar's title.** Below 768 px the product's mark is hidden. That gives the name 26 px, the width of the 18 px mark and its gap. On a phone the name says where the person is, as a native app's title does; the mark is still on the login page and on a computer. The mark is `aria-hidden`, so the link's name does not change: the project's name, a link to the tower, 44 px tall.
+- **The bar's foot keeps the bar's own gap.** The gauge, the pill and the person were 8 px apart, against 4 px between the bar's other items. They are now 4 px apart, which gives the name 8 px more. In French at 390, the name has 14 px to spare.
+- **Not a smaller gauge.** It is at its 44 px target already. Its percent, its bar and its name are unchanged.
+- **The pill keeps its ground and its word.** Taking off its fill would put muted text on the sidebar's ground, a new pair for contrast, and the room was not needed.
+- **A longer name** is still shortened with an ellipsis, and the link still reads it whole.
+- **Words.** No string changed, so neither catalog changed.
+- **Widths.** Nothing changes on a computer or a tablet: the rules are inside `max-width: 767px`. At 375 in English the name is whole too.
+
+**Tests first.** `5b9e229` commits two tests alone, in `app/test/redesign/redesign-browser.test.ts`, in English and in French at 390 on a touch screen. Both fail on the code before it ("Guestbook" is cut: 78 px in 63, and 78 px in 58). They check:
+- the project's name is whole and the link reads it alone;
+- the pill's word is whole;
+- the gauge is at least 44 by 44, and the name's link, the search, the person and the bell are 44 px tall;
+- the page has no sideways scroll.
+
+P227's test of the gauge on a phone still checks that nothing of the top bar overlaps, and P224's axe test reads the screens at 390 in both languages and themes.
+
+**Captures.** The 16 after captures at 390 (inbox, session, sessions and consumption; light and dark; English and French) were taken again at this head with `scripts/capture-screens.ts --widths 390`. They were compressed with `pngquant --quality=80-95 --skip-if-larger` then `optipng -o2`: from 1,007,716 bytes to 339,862, in place of 409,616. The other widths were not taken again. The French Consumption page is now 2,559 px tall where the committed capture was 2,475: `origin/v2` draws it at 2,559 too, so that comes from a change merged after that capture, not from this lane.
+
+**Checks** (at `origin/v2` `2cf78d4`):
+- `npm run typecheck` passes.
+- `npm test` runs 2178 Node tests: 2080 pass, 98 skipped, 0 fail. 349 Vitest tests pass.
+- With Playwright's Chromium, the CI's browser list passes 82 of 83 in one parallel run, under a load average of 15. The one failure is `app/test/session/tabs-browser.test.ts` ("the four tabs switch, and the Go of a waiting plan calls its route": "Go given by a teammate" where it waits for "by you"). That is a plan's Go and the user who gave it, which this lane's two CSS rules do not reach. Alone it passes 4 of 4, twice.
+- The budget runs alone at a p95 of 22.9 ms, with no document and no request per switch.
+- `npm run guard -- --base origin/v2`: nothing refused.
+
+**What was read.** `docs/v2/milestone-2-plan.md` ends at its section 8. The sections 9 and 10 read were the milestone 1 plan's (waves, conventions that keep lanes apart) and the interface overhaul plan's (questions for the owner: the phone's bar of four, the default kept; out of scope).
+
+- Pull request: 383, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `j3-mobile-title`.
+
+## 2026-10-25: the tickets mirrored on GitHub Issues and Linear, and the conflict rule (the author's choices, lane `v2-j4-issue-mirrors`, P230 to P232, issue #381)
+
+**The need.** Issue #381, milestone 4: the app's tickets kept in step with GitHub Issues and Linear both ways, the last change made by a person winning, an agent's change never beating a person's, and the conflict rule written in the docs (B5.8b, D17, B6.4, B6.4p). GitHub is used against the example repositories only; Linear against a fake server only, with no real key. The brief's section 6 is not in the repository: the plan takes milestone 4 from the matrix's B6.4 and B6.4p, which repeat it (the issue's "line 158" is B6.4p). `milestone-2-plan.md` has no sections 9 and 10, so the conventions followed are those of sections 9 and 10 of `milestone-1-plan.md`, as earlier lanes noted. The plan came first, in its own commit: [milestone-4-plan.md](milestone-4-plan.md), section 2 (the cleanup lane, issue #382, adds its own section).
+
+**Decision.**
+1. **Polling.** A pass every minute by default (`CLEARED_V2_MIRROR_POLL_SECONDS`, 15 at least), started and stopped by the tickets module (`modules/tickets.ts`, start and stop), so `main.ts` and the module list stay as they are. No webhook: it would need an address the tracker can reach, and the brief allows no tunnel and no new listener.
+2. **What goes both ways.** New tickets and new issues, but only those created after a tracker's first pass, so turning the mirror on copies nothing old. Then the state, both ways. Title, body and GitHub's labels are copied at creation only: the app has no edit of them, and the approval binds them (`content_hash`). Comments, assignees, Linear's labels and projects are not mirrored.
+3. **The rule** (`decide()` in `src/tickets/mirror.ts`, written for a person in [mirrors.md](mirrors.md)). It is a three-way comparison: the mirror keeps, per ticket and tracker, the state both sides last agreed on (`mirror_links.agreed`).
+   - A side that moved from it wins.
+   - When both moved: a person beats an agent whatever the times; the later of two people wins; between two agents, or at the same second, the app wins.
+   - Comparing states, not events, means the mirror's own writes are never read as a change once the agreed state is recorded.
+4. **Who is a person.**
+   - In the app, only the owner's signed row. Anything else is an agent, a guest user of the app included, since the store cannot prove who they are.
+   - On a tracker, an agent is a bot, an app or an unnamed actor. Any other actor is a person, the mirror's own account included: `gh` here is signed in as a person's account.
+   - A change by the mirror's account is the mirror's own write only when `mirror_writes` holds a write of the same state within a minute of it. Such a change that differs from the agreed state is a stale read, and is ignored.
+5. **Never through a tracker.**
+   - An approval: a move to Ready to Ship is put back, with a comment in `CLEARED_V2_APP_LANGUAGE`.
+   - A move of an approved ticket, or of one whose release is landing: put back, with a comment.
+   - A session started: a ticket moved to Todo there waits in the app's Todo, since starting one needs a user of the app. A ticket of a plan the owner approved goes on as the plan says: the plan runner (`lead/plans/runner.ts`, `#reconcile`) marks such a ticket ready again, as after a move in the app.
+   - An agent's change over a person's state the app does not have: a tracker closed as not planned, or in Linear's Canceled or Backlog, reads as no state, and only the owner's change is written over it. Found in review: before, an agent's next move reopened the issue.
+   - A signed row: the mirror writes as `agents`, `cleared-mirror`. Who made the change on the tracker is kept in `mirror_applied`, and the rule reads it from there.
+   - A person's move of a ticket the flow works on goes through `FlowEngine.setAside`, which takes the mirror's words (an optional third argument, the one change to `flow/engine.ts`), then the state is written. When the engine refuses (a landing train), the tracker is put back.
+6. **GitHub.**
+   - One tracker per service repository. A ticket goes to its first service's repository, else to the workspace's first service's.
+   - A state is one `status:<state>` label on an open issue, as v1 wrote it. Done is the issue closed as completed, not planned is no state, and an open issue with no status label is Todo.
+   - A move puts the new label on before taking the old one off, so the issue never reads as having no state in between.
+   - Who made each change is replayed from the issue's events. Events made at the same second by one account are one change, as a label swap on GitHub's page is.
+7. **Linear.**
+   - One team (`CLEARED_V2_MIRROR_LINEAR_TEAM`); its workflow states are matched to the app's by name, and the others (Backlog, Triage, Canceled) read as no state.
+   - Who made each change comes from the issue's history: `actor` is a person, unless it is the key's own user; `botActor` is an agent.
+   - The key is sent as its file holds it, so an OAuth token is written `Bearer <token>`.
+8. **Secrets and addresses.** The tokens are read from files, never from a variable, and no log or error carries one (tested). Another API address than GitHub's or Linear's must be on loopback, which is what the tests' fakes use.
+9. **Branch.** `v2/j4-issue-mirrors` cannot be made while a local branch `v2` exists (git refuses a ref under another ref), so the branch is `v2-j4-issue-mirrors`, B4.1's form.
+
+**Tests first.** `9e35567` committed the tests before any code: the rule, the pass on the real ticket store with a tracker in memory, the two trackers against fakes of GitHub's REST API and Linear's GraphQL API on loopback (port 0), B6.4p's steps 1 to 3 on both, the catalog, and Set aside with given words. On the old code the mirror's files failed to load, and the Set aside test failed: the owner's note was written whatever was given. Two test mistakes were found when the code ran, and fixed in the code's commit:
+- one case of `mirror-rule.test.ts` expected `none` where its own comment described `push`;
+- the Linear test of a long list counted one issue of the test before it, made at the same instant.
+
+After review, `4f0312d` changed one more expectation of the tests first: the rule's case of a tracker in a state the app does not have expected `push` for an agent's move, and now expects `none` (the owner's move still pushes), with a test of the pass beside it; both failed on the code before. That test's last step was itself wrong (the owner moved the ticket back to the agreed state, which is no change) and is corrected in the fix's commit, where it still fails on the code before.
+
+The pinned list of the tickets module's tables in `test/tickets/services.test.ts` now has the mirror's tables after the others.
+
+**The real GitHub run** (2026-10-25 12:17 to 12:18 UTC, the example repository `cleared-example-guestbook` of the organisation this repository lives in, the mirror's code on a ledger in memory, the token of the `gh` login read from a file and never printed):
+- Step 1: LOCAL-1 in In Progress became issue #23 with `status:In Progress`.
+- Step 3: a person swapped the label to In Review while an agent moved the ticket to Needs Approval after it. After the pass, both sides held In Review.
+- The refusal: a person put Ready to Ship. The app stayed in In Review, the label came back to In Review, and the French comment was written on #23.
+- Step 2: issue #24, created on GitHub with no label, came into the app as LOCAL-2 in Todo.
+- Both tickets were then moved to Done in the app, and both issues were closed as completed, with `status:Done`.
+- The mirror logged nothing.
+
+The run made the labels `status:In Progress`, `status:In Review`, `status:Ready to Ship` and `status:Done` in that repository. Nothing ran against Linear for real.
+
+**Checks.** See the pull request. `npm run guard -- --base origin/v2` is run before the READY.
+
+**Resources.** No Docker object, no port opened outside the tests (port 0 on loopback), no tunnel, no secret written; no Linear key asked for or used; two issues made and closed on the example repository, nothing on any other.
+
+**The merge of 383** (lane `j3-mobile-title`, at `origin/v2` `068dd0f`). 383 took P229, so this lane's lines are P230 to P232; the log keeps 383's entry before this one, and the matrix keeps the ids in order. 383 changes the phone's top bar and its tests, none of this lane's files. After the merge: `npm run typecheck` passes; `npm test` runs 2226 Node tests, 2128 pass, 98 skipped, 0 fail, and 349 Vitest tests pass; `npm run guard -- --base origin/v2`: nothing refused.
+
+- Pull request: 384, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j4-issue-mirrors`.
