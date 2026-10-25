@@ -7,6 +7,9 @@
 // a contract changes without its consumer.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { ServiceConfig, WorkspaceConfig } from '../../src/workspace/config.ts';
 import type { MergeOutcome, ServiceLock } from '../../src/release/lock.ts';
 import type { FlowEffects } from '../../src/flow/engine.ts';
@@ -77,12 +80,12 @@ const effects = (changed: Record<string, string[]>): Partial<FlowEffects> => ({
   },
 });
 
-async function train(options: { services?: string[]; changed?: Record<string, string[]>; outcomes?: Record<string, MergeOutcome['outcome'][]>; drift?: string; rollback?: { ok: boolean; message: string }; pages?: string[]; extra?: Partial<FlowEffects> } = {}) {
+async function train(options: { services?: string[]; changed?: Record<string, string[]>; outcomes?: Record<string, MergeOutcome['outcome'][]>; drift?: string; rollback?: { ok: boolean; message: string }; pages?: string[]; extra?: Partial<FlowEffects>; workdirRoot?: string } = {}) {
   const calls: Call[] = [];
   let t: Setup | undefined;
   const pages = options.pages;
   t = await setup({
-    scripts: { author: quickAuthor }, config: { workspace: WORKSPACE },
+    scripts: { author: quickAuthor }, config: { workspace: WORKSPACE, ...(options.workdirRoot ? { workdirRoot: options.workdirRoot } : {}) },
     effects: { ...effects(options.changed ?? { guestbook: ['src/page.ts'], 'filter-api': ['src/check.ts'] }), ...options.extra, ...(pages ? { async updateProjectPages(input: { ticket: string; pr: number }) { pages.push(`${input.ticket}:${input.pr}`); } } : {}) },
     locks: locks(() => t as Setup, calls, options),
   });
@@ -417,4 +420,44 @@ test('a Close closes the pull request of each service of the train, each on its 
   const last = (await t.tickets.comments(ticket.id)).at(-1)?.body ?? '';
   assert.match(last, /guestbook/);
   assert.match(last, /not closed on GitHub/);
+});
+
+test('a landed train: the production page of each service that configures one is captured once the last watch is healthy (P218)', async () => {
+  const root = mkdtempSync(join(tmpdir(), 'cleared-v2-train-production-'));
+  const captured: { url: string; dir: string; at: number }[] = [];
+  const PAGES: Record<string, string> = { guestbook: 'https://guestbook.example.invalid/', 'filter-api': 'https://filter.example.invalid/status' };
+  try {
+    const { t, ticket, approve } = await train({
+      workdirRoot: root,
+      extra: {
+        async settings(svc) { return { verdict: 'no blocking issues', safeCommands: [], hosts: [], services: [], scripts: [], productionUrl: PAGES[svc?.name ?? 'guestbook'] as string }; },
+        async captureProduction(input) { captured.push({ ...input, at: t.clock.now }); return { file: 'production.png' }; },
+      },
+    });
+    await approve();
+    const providerHealthy = t.clock.now + 400_000;
+    healthy(t, ticket.id, providerHealthy);
+    t.clock.now = providerHealthy;
+    await tick(t, 30_000);
+    await tick(t, 30_000);
+    assert.deepEqual(captured, [], 'nothing before the train has landed');
+    const consumerHealthy = t.clock.now + 400_000;
+    healthy(t, ticket.id, consumerHealthy);
+    t.clock.now = consumerHealthy;
+    await tick(t, 30_000);
+    assert.equal((await t.tickets.get(ticket.id))?.status, 'Done');
+    assert.deepEqual(captured.map((c) => [c.url, c.dir]).sort(), [
+      [PAGES['filter-api'], join(root, '.proof', ticket.id, 'filter-api')],
+      [PAGES.guestbook, join(root, '.proof', ticket.id, 'guestbook')],
+    ]);
+    assert.deepEqual((await t.engine.productionChecks(ticket.id)).map((c) => [c.service, c.url, c.file]), [
+      ['guestbook', 'https://guestbook.example.invalid/', 'production.png'],
+      ['filter-api', 'https://filter.example.invalid/status', 'production.png'],
+    ], 'in the workspace\'s order');
+    await tick(t, 600_000);
+    assert.equal(captured.length, 2);
+    await t.engine.close();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
 });

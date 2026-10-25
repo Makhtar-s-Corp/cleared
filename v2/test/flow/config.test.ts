@@ -31,6 +31,16 @@ test('projectSettings gives the verdict phrase, the safe commands and the hosts 
   assert.deepEqual(settings.hosts, ['registry.npmjs.org', 'example.org']);
 });
 
+test('projectSettings gives [release] production_url, the page the post-deploy check opens (P218): http or https, without credentials, none by default', () => {
+  const read = (conf: string) => projectSettings(parseConf(`[merge]\nverdict = ok\n${conf}`));
+  assert.equal(read('[release]\nproduction_url = https://guestbook.example.invalid/?view=all\n').productionUrl, 'https://guestbook.example.invalid/?view=all');
+  assert.equal(read('[release]\nhealth_url = http://127.0.0.1:8793/health\n').productionUrl, undefined, 'never the health address: the configured page only');
+  assert.equal(read('').productionUrl, undefined);
+  for (const bad of ['ftp://example.invalid/', 'not an address', 'https://user:secret@example.invalid/', 'https://token@example.invalid/']) {
+    assert.throws(() => read(`[release]\nproduction_url = ${bad}\n`), (error: unknown) => error instanceof FlowConfigError && /production_url/.test(error.message) && !/secret|token@/.test(error.message), bad);
+  }
+});
+
 test('projectSettings gives the declared test services, in the form the guestbook commits, and none by default', () => {
   const settings = projectSettings(parseConf('[merge]\nverdict = no blocking issues\n[session]\nservices = postgres:16 POSTGRES_HOST_AUTH_METHOD=trust\n'));
   assert.deepEqual(settings.services.map((s) => [s.alias, s.image, s.sessionEnv.DATABASE_URL]), [['postgres', 'postgres:16', 'postgres://postgres@postgres:5432/postgres']]);
