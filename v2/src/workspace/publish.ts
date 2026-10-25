@@ -175,7 +175,9 @@ async function receiptFor(input: PublishInput, base: string, file: string): Prom
   const language = confSetting(conf, 'owner', 'language')?.toLowerCase().startsWith('fr') ? 'fr' : 'en';
   const receipt = renderReceipt(input.receipt, language);
   writeFileSync(file, receipt);
-  return (await runGuard(input.project, base, [file])) === undefined ? receipt : '';
+  if ((await runGuard(input.project, base, [file])) === undefined) return receipt;
+  console.error(`cleared-v2: the proof receipt of ${input.ticket} was left out: the guard refuses it`);
+  return '';
 }
 
 // The report as lib/pr-body.mjs cleans it: no path of this machine, no

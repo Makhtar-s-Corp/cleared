@@ -44,7 +44,8 @@ export function proofRoutes(deps: ProofRoutesDeps): Route[] {
         'content-type': TYPES[file.slice(file.lastIndexOf('.'))] ?? 'application/octet-stream',
         'content-length': String(stat.size), 'cache-control': 'no-store', 'x-content-type-options': 'nosniff',
       });
-      createReadStream(path).pipe(context.response);
+      // A file gone between the check and the read ends the answer, never the process.
+      createReadStream(path).on('error', () => context.response.destroy()).pipe(context.response);
     },
   }];
 }
