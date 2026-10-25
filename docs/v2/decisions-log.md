@@ -5451,4 +5451,5 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 
 **Resources.** No Docker object, no account, no network beyond `git fetch` and GitHub, no port, no secret.
 
+- Pull request: 356, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-mcp-lanes-perf`.
