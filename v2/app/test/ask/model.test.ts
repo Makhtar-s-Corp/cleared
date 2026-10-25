@@ -156,6 +156,17 @@ test('an answer is cut around the citations the service linked, every place each
   assert.deepEqual(nested.map((part) => part.text), ['see ', 'guestbook/src/page.ts:12-14', '.']);
 });
 
+test('a linked mention is drawn only where it stands whole, never inside a longer one the service did not link', () => {
+  const answer = 'guestbook/src/page.ts:1 and guestbook/src/page.ts:150, guestbook/src/page.ts:12-99, vendor/guestbook/src/page.ts:1, guestbook/src/page.ts:1.';
+  const parts = answerParts(answer, [citation({ text: 'guestbook/src/page.ts:1', from: 1, to: 1 }), citation({}), citation({ text: 'guestbook/src/page.ts:150', from: 150, to: 150, url: null, problem: 'no_line' })]);
+  assert.deepEqual(parts.filter((part) => part.url).map((part) => [part.text, answer.indexOf(part.text) >= 0]), [['guestbook/src/page.ts:1', true], ['guestbook/src/page.ts:1', true]]);
+  assert.equal(parts.map((part) => part.text).join(''), answer);
+  const linkedAt = [];
+  let at = 0;
+  for (const part of parts) { if (part.url) linkedAt.push(at); at += part.text.length; }
+  assert.deepEqual(linkedAt, [0, answer.lastIndexOf('guestbook/src/page.ts:1.')], 'the first and the last, not :150, :12-99 or vendor/');
+});
+
 test('only a GitHub link the service built is drawn; a citation it could not check, and an address the reader wrote, stay text', () => {
   const answer = 'guestbook/src/page.ts:12 and guestbook/src/made-up.ts:3, see https://github.com/evil/x; guestbook/src/page.ts:13 and guestbook/src/page.ts:14.';
   const parts = answerParts(answer, [

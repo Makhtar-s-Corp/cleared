@@ -108,3 +108,10 @@ test('a link the model wrote is never taken: only the service builds one', async
   const cited = await citationsOf('See https://github.com/evil/x/blob/main/a.ts#L1 and [guestbook/src/page.ts:5](https://evil.example/).', deps());
   assert.deepEqual(cited.map(({ text, url }) => [text, url]), [['guestbook/src/page.ts:5', `https://github.com/acme/guestbook/blob/${COMMIT}/src/page.ts#L5`]]);
 });
+
+test('a bare path is read when the ask read one service, whatever the workspace holds', async () => {
+  assert.deepEqual(mentionsIn('In src/page.ts:14.', ['guestbook', 'filter-api'], ['guestbook']).map((m) => [m.service, m.path, m.bare]), [['guestbook', 'src/page.ts', true]]);
+  const cited = await citationsOf('In src/page.ts:14, and filter-api/src/check.ts:2.', { ...deps(), read: ['guestbook'] });
+  assert.deepEqual(cited.map(({ text, url, problem }) => [text, url !== null, problem]), [['src/page.ts:14', true, null], ['filter-api/src/check.ts:2', false, 'no_file']],
+    'a service the ask did not read is no code it read');
+});

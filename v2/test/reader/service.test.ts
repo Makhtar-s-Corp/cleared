@@ -261,3 +261,10 @@ test('an ask stored before citations existed reads with none', () => {
   assert.deepEqual(t.reader.get('ask-old')?.turns[0]?.citations, []);
   assert.deepEqual(asks.get('ask-old')?.turns[0]?.citations, []);
 });
+
+test('an ask scoped to one service of the workspace links a bare path of that service', async () => {
+  const t = readerSetup({ script: turn('t1', 'In src/page.ts:14.', 0.01) });
+  const ask = await t.reader.ask({ question: 'What does line 12 do?', target: 'guestbook:src/page.ts:12' }, 'u1');
+  await answered(t, ask.id);
+  assert.deepEqual(t.reader.get(ask.id)?.turns[0]?.citations.map((c) => c.url), [`https://github.com/acme/guestbook/blob/${COMMIT_1}/src/page.ts#L14`]);
+});
