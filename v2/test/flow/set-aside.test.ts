@@ -91,3 +91,15 @@ test('a done ticket with a knowledge item still waiting: the item settled, the t
   assert.equal(t.flowEvents.filter((e) => e.type === 'ticket_put_back').length, 0);
   assert.equal(t.startedSessions.length, 0);
 });
+
+test('set aside with words of its own (a person\'s move on a tracker, P231): the ticket\'s note and the session\'s message are those words', async () => {
+  const t = await setup();
+  await t.engine.start(t.ticket.id, 'u1');
+  const session = t.startedSessions[0]?.id as string;
+  const words = { note: 'Jane a déplacé ce ticket sur Linear.', message: 'Jane a déplacé le ticket sur Linear : cette session est arrêtée.' };
+  assert.deepEqual(await t.engine.setAside(t.ticket.id, 'cleared-mirror', words), { sessions: 1, items: 0 });
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Todo');
+  assert.equal((await t.tickets.comments(t.ticket.id)).at(-1)?.body, words.note);
+  const last = t.store.events.after(session).filter((e) => e.event.type === 'RUN_ERROR').at(-1)?.event;
+  assert.equal(last?.type === 'RUN_ERROR' ? last.message : undefined, words.message);
+});
