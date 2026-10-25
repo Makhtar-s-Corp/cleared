@@ -11,6 +11,8 @@
 // label, or assigned to the token's own account, is handed over to Cleared
 // (C3, P244), by whoever the latest `labeled` or `assigned` event names, or
 // by the issue's author when no event does.
+// The doctor (tickets/mirror-doctor.ts) reads the repository and its
+// labels, and writes nothing.
 import { DEFAULT_STATES, type TicketStates } from './contract.ts';
 import {
   DELEGATION_LABEL, TrackerError, trackerFetch, type Tracker, type TrackerChange, type TrackerComment, type TrackerDelegation, type TrackerEdit, type TrackerIssue,
@@ -73,7 +75,7 @@ export class GitHubTracker implements Tracker {
     });
     if (!response.ok) {
       await response.body?.cancel();
-      throw new TrackerError(`GitHub answered ${response.status} to ${method} ${path.split('?')[0]}`);
+      throw new TrackerError(`GitHub answered ${response.status} to ${method} ${path.split('?')[0]}`, response.status);
     }
     return (await response.json()) as T;
   }
@@ -188,6 +190,18 @@ export class GitHubTracker implements Tracker {
       out.push(this.#issueOf(issue, this.#changes(issue, events, me), this.#edits(events, me), this.#delegationOf(issue, events, me)));
     }
     return out;
+  }
+
+  // Whether the repository's issues are on, and what the token's account may
+  // do there, when GitHub says it.
+  async repository(): Promise<{ readonly issues: boolean; readonly permissions: Readonly<Record<string, boolean>> | undefined }> {
+    const repo = await this.#request<{ has_issues?: boolean; permissions?: Record<string, boolean> }>('GET', `/repos/${this.#repo}`);
+    return { issues: repo.has_issues !== false, permissions: repo.permissions };
+  }
+
+  // The names of the repository's labels, every page.
+  async labels(): Promise<string[]> {
+    return (await this.#pages<{ name: string }>(`/repos/${this.#repo}/labels`)).map((label) => label.name);
   }
 
   async create(input: { readonly title: string; readonly body: string; readonly labels: readonly string[]; readonly status: string }): Promise<TrackerIssue> {

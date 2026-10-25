@@ -17,6 +17,15 @@ The service reads them at start, from its environment. A token is read from a fi
 | `CLEARED_V2_DELEGATION_LABEL` | `cleared` | The label that hands an issue over to Cleared, compared without case. A name that starts with `status:` is refused. |
 | `CLEARED_V2_APP_LANGUAGE` | `fr` | The language of what the mirror writes on a tracker and on a ticket, the first line of a mirrored comment included. |
 
+To check the GitHub mirror's settings before or after the service starts, run `npm run doctor -- mirror` in `v2/`, with the service's environment (issue #400). It reads them as the service does and says, in `CLEARED_V2_APP_LANGUAGE`, one line per check:
+
+- the token file can be read and is not empty, its content never shown; a link, a file of another account, or a file the group or others can read is a notice;
+- each repository of the workspace's services answers, its issues are on, and the token's account may label and close them (the triage role at least);
+- the status labels a person picks on GitHub's page exist: `status:In Progress`, `status:In Review`, `status:Needs Approval` and `status:Ready to Ship`, or the names `[tracker] *_state` sets (Todo and Done need none);
+- the mirror's last full pass, from the service's ledger, read only: none yet is a notice, and one older than `CLEARED_V2_HEARTBEAT_TRACKER_MINUTES` (10 minutes) fails, as `npm run status` says it.
+
+It exits 1 when a check fails. It creates no label and writes nothing, on GitHub or in the ledger. Linear has no such section: its real trial is the owner's.
+
 Give the mirror an account of its own, a bot or an application, as v1 already asked of the agents (`[merge] separate_identity`). With a token of a person's own account, that person's moves on the tracker still count as theirs, unless they make a move the mirror made less than a minute before.
 
 ## What is mirrored
@@ -105,7 +114,7 @@ The tables are in the service's ledger: `mirror_trackers` (each tracker's first 
 - Tests: `v2/test/tickets/mirror-rule.test.ts` (the rule), `mirror.test.ts` (the pass on the real ticket store), `mirror-github.test.ts` and `mirror-linear.test.ts` (each tracker against a fake of its API), and `mirror-proof.test.ts` (milestone 4's proof, the mirrors' steps, and a comment and an edit each way, on both). The delegation: `mirror-delegation.test.ts` (the pass), `delegation.test.ts` (the plan bound to the ticket and its approval) and `delegation-proof.test.ts` (C3's steps on both fakes).
 - GitHub ran for real three times, on the example repository: the pull requests of issues #381, #386 and #398 quote the runs. The last one found that GitHub records a `labeled` event for an issue opened with the label, and that its list of issues can show a new issue only after a pass or two; the next pass reads it.
 - Linear has run against a fake only. A real trial needs a Linear account and a key, and that trial is the owner's to run. Until it has run, four things are unknown: how Linear shows an OAuth application acting as itself (`actor=app`) in an issue's history; whether a comment of an integration carries its `botActor`; whether the history's `toTitle` and `updatedDescription` are filled as its schema says; and whether its `addedLabelIds` and `toAssigneeId` are, for a delegation. A change no one is named for reads as an agent's; a delegation no history entry names is read as the issue's creator's.
-- The real GitHub run was a one-off script; there is no `doctor` section for the mirrors yet.
+- The real GitHub runs of issues #381, #386 and #398 were one-off scripts. Since issue #400, `doctor mirror` checks the GitHub mirror's settings, its repositories, their labels and its last pass, and ran on the example repository (its pull request quotes the run). It checks nothing of Linear.
 - The app shows no comment yet: a comment that came from a tracker is read by the lead (its last five) and by v1's tools.
 - The lead's tool names every comment that no person signed `cleared`. A comment from a tracker therefore reaches the lead as `cleared: jane, on GitHub: ...`. On a public repository, anyone can write that text, and it reaches the lead under Cleared's name.
 - Known limit: if the service stops between the tracker's creation of an issue, or of a comment, and the mirror's record of it, the next pass creates it again.

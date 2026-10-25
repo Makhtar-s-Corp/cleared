@@ -3,7 +3,8 @@
 // issue as a person or a bot through the methods, the mirror through HTTP.
 // As GitHub's, its issue events say a change of the title (`renamed`) and
 // nothing of a change of the body. An assignment is an `assigned` event
-// naming its assignee (a delegation, C3, P244).
+// naming its assignee (a delegation, C3, P244). The repository itself and
+// its labels answer the doctor's reads (scripts/doctor.ts mirror).
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 
@@ -17,6 +18,7 @@ type Event = {
   id: number; event: string; actor: FakeAccount | null; created_at: string; label?: Label; state_reason?: string | null;
   rename?: { from: string; to: string }; assignee?: FakeAccount; performed_via_github_app: unknown;
 };
+export type FakeRepo = { has_issues: boolean; permissions?: Record<string, boolean>; labels: string[] };
 export type FakeComment = { id: number; body: string; user: FakeAccount; created_at: string; updated_at: string; issue_url: string; performed_via_github_app: unknown };
 
 export class FakeGitHub {
@@ -24,7 +26,7 @@ export class FakeGitHub {
   readonly comments = new Map<number, FakeComment[]>();
   #server: Server | undefined;
   #accounts = new Map<string, FakeAccount>();
-  #repos = new Map<string, { issues: Map<number, Issue>; events: Map<number, Event[]> }>();
+  #repos = new Map<string, { issues: Map<number, Issue>; events: Map<number, Event[]>; meta: FakeRepo }>();
   #next = 1;
   #event = 1;
   #comment = 1;
@@ -33,7 +35,14 @@ export class FakeGitHub {
   constructor(options: { readonly clock: () => string; readonly accounts: Record<string, FakeAccount>; readonly repos: readonly string[] }) {
     this.#clock = options.clock;
     for (const [token, account] of Object.entries(options.accounts)) this.#accounts.set(token, account);
-    for (const repo of options.repos) this.#repos.set(repo, { issues: new Map(), events: new Map() });
+    for (const repo of options.repos) {
+      this.#repos.set(repo, { issues: new Map(), events: new Map(), meta: { has_issues: true, permissions: { admin: false, maintain: false, push: true, triage: true, pull: true }, labels: [] } });
+    }
+  }
+
+  // What GET /repos/{repo} and its labels answer: issues on, the push role, no label.
+  repoMeta(repo: string): FakeRepo {
+    return this.#repo(repo).meta;
   }
 
   async listen(): Promise<string> {
@@ -175,6 +184,16 @@ export class FakeGitHub {
     const body = chunks.length > 0 ? JSON.parse(Buffer.concat(chunks).toString('utf8')) as Record<string, unknown> : {};
     const method = request.method;
     if (method === 'GET' && url.pathname === '/user') return send(200, { login: account.login, type: account.type });
+    const own = /^\/repos\/([^/]+\/[^/]+)(\/labels)?$/.exec(url.pathname);
+    if (own && method === 'GET') {
+      const held = this.#repos.get(own[1] as string);
+      if (!held) return send(404, { message: 'Not Found' });
+      const { has_issues, permissions, labels } = held.meta;
+      if (!own[2]) return send(200, { full_name: own[1], has_issues, ...(permissions ? { permissions } : {}) });
+      const page = Number(url.searchParams.get('page') ?? '1');
+      const perPage = Number(url.searchParams.get('per_page') ?? '30');
+      return send(200, labels.slice((page - 1) * perPage, page * perPage).map((name) => ({ name, color: 'ededed' })));
+    }
     const listed = /^\/repos\/([^/]+\/[^/]+)\/issues\/comments$/.exec(url.pathname);
     if (listed && method === 'GET') {
       const held = this.#repos.get(listed[1] as string);

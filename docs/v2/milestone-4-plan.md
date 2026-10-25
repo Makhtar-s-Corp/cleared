@@ -553,3 +553,48 @@ Calls found through a protobuf or JSON Schema contract, or with no contract; the
 | --- | --- |
 | Whether the first piloted project's calls are found by the rule of 12.3 (its code may build its addresses another way) | the owner, on its map: a call declared and not found says it |
 | Whether the caps (2 000 files, 16 MB) fit the first piloted project's repositories | the map says a service past a cap; the caps are constants of `map/source.ts` |
+
+## 13. The GitHub mirror's doctor section (`v2-j4-mirror-doctor`, issue #400)
+
+This section was written on 2026-10-25 by the author of issue #400 (Opus 5.5), before the lane's tests and code. Inputs: issue #400, [mirrors.md](mirrors.md) ("there is no `doctor` section for the mirrors yet"), the [decisions log](decisions-log.md) (the entries of lanes `v2-j4-issue-mirrors`, `v2-j4-mirror-followups` and `v2-j4-heartbeat`, and the ten ideas of 2026-10-25), the [requirements matrix](requirements-matrix.md) (B5.8b, P230, B4.6), and the code at `origin/v2` `d849c6e`. As earlier lanes noted, the brief's section 6 and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), whose "one doctor" rule this lane applies. Section 10 is the week's figures (pull request 399), section 11 the delegation (pull request 401, P244) and section 12 the service map (pull request 402, P245), merged while this lane ran; this section, first written as 12, is 13. The branch is `v2-j4-mirror-doctor`: `v2/j4-mirror-doctor` cannot exist beside the local branch `v2`.
+
+### 13.1 Context
+
+The GitHub mirror (pull requests 384 and 390) ran for real twice, each time from a one-off script quoted in its pull request. B4.6 asks that every adapter's real run be one `cleared doctor` runs, and `v2/scripts/doctor.ts` has no section for the mirror. An operator who sets `CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE` learns that something is wrong only from a line in the service's log, or from `tracker_stale` ten minutes later.
+
+### 13.2 What exists at the end, and how it is proven
+
+- `src/tickets/mirror-doctor.ts`: `githubMirrorChecks({ env, fetch, now })`, the checks of 13.3, each one passed, failed, a notice, or not run, its words in `src/tickets/messages/mirror-doctor.{en,fr}.json` over the shell's units of time, in `CLEARED_V2_APP_LANGUAGE` (French by default).
+- `node scripts/doctor.ts mirror` (`npm run doctor -- mirror`): the section, run only when named, as `cursor` and `codex` are. It never runs by default: it calls GitHub.
+- Two read-only methods of `GitHubTracker`, `repository()` (its `has_issues` and `permissions`) and `labels()` (its labels' names, every page), through the same requests and headers as the mirror's other calls; `TrackerError` carries GitHub's status code when GitHub answered.
+- Proven by `test/tickets/mirror-doctor.test.ts` (each check against the fake GitHub on loopback, in English and French, and the token never in a line), `test/tickets/mirror-doctor-catalog.test.ts`, `test/tickets/mirror-doctor-cli.test.ts` (the section run by `doctor.ts` against the fake: its exit code, and the token in no output on any path, only in the fake's `authorization` header), and one real run on the example repository `cleared-example-guestbook`, quoted in the pull request.
+
+### 13.3 The checks
+
+1. **The settings.** `loadMirrorConfig(env)`, the service's own reading: no `CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE`, the section says the GitHub mirror is off and runs nothing, which is not a failure (D17: the app alone is enough). A setting the service refuses fails, with the service's own line, which never holds the token.
+2. **The token file.** Readable and not empty, read once and never printed, never in an address. Its kind and its mode are a notice: a link, or a file readable by the group or others, is said, with `chmod 600`.
+3. **Each repository.** The repositories of the workspace's services, each once, as `createMirror` lists them. `GET /repos/{repo}`: it answers, its issues are turned on, and the token's account may write them (`permissions`: admin, maintain, push or triage; triage is the least that labels and closes an issue). A refusal says GitHub's status code, never the body of its answer.
+4. **The status labels.** `GET /repos/{repo}/labels`, every page: one `status:<state>` label for each state a person picks on GitHub's page, in the names the service uses (`[tracker] *_state`, as the approval reads them), matched exactly, as the mirror reads them. That is four of the six: Todo is an open issue with no status label and Done is the issue closed, so neither needs one (the real run on the example repository, which has no `status:Todo`, showed a first version that asked for all six failing for nothing). The missing ones are named. The doctor creates none: it writes nothing on GitHub.
+5. **The last pass.** `mirror_trackers.read_at` for `github:<repo>`, from the service's ledger opened read-only: said as a time a person reads ("3 min ago"). None yet is a notice (the service has not run the mirror). Older than `CLEARED_V2_HEARTBEAT_TRACKER_MINUTES` (10 by default) fails, as the status's `tracker_stale` does.
+
+### 13.4 Decisions this lane takes
+
+- **A missing label fails.** The mirror's own write creates a label GitHub does not have, but a person cannot move an issue on GitHub's page to a state whose label does not exist yet, so that half of the two-way mirror does not work. A question for the owner, default applied (the log entry).
+- **A token file others can read is a notice**, not a failure: the service accepts it today, and the doctor says what the service does. The heartbeat's address files are refused in that case; aligning the token files with them is a change of the service, not of its doctor (question for the owner, in the log entry).
+- **Nothing about the account is printed**, neither its login nor its name: a person's login may be a person's name. Only what the checks need.
+- **Language.** The section's words in its catalogs, French and English; the time since the last pass through `app/web/lib/time.ts`.
+- **Matrix lines.** P246; B5.8b and P230 updated (`doctor mirror` in their proof).
+
+### 13.5 Out of scope
+
+Linear (its real trial is the owner's, and a section for it would only run against a fake); creating the labels; a repair of anything; a screen of the app; running the section by default.
+
+### 13.6 Files this lane owns
+
+`v2/src/tickets/mirror-doctor.ts`, `v2/src/tickets/messages/mirror-doctor.{en,fr}.json`, `repository()` and `labels()` in `v2/src/tickets/mirror-github.ts`, the `status` of `TrackerError` in `v2/src/tickets/mirror-tracker.ts`, the `mirror` section of `v2/scripts/doctor.ts`, the repository and labels routes of `v2/test/tickets/fakes/github.ts`, `v2/test/tickets/mirror-doctor*.test.ts`; `docs/v2/mirrors.md`, a sentence in `v2/README.md`'s paragraph on the mirrors; this section, its matrix lines and its log entry.
+
+### 13.7 Unknowns, and who closes them
+
+| Unknown on 2026-10-25 | Closed by |
+| --- | --- |
+| Whether GitHub fills `permissions` for a fine-grained token with the token's rights or the account's | the real run of this lane: GitHub filled `permissions` for the `gh` login's token; a fine-grained token is the owner's set-up, and a missing `permissions` is said, not failed |
