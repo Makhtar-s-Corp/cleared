@@ -266,7 +266,7 @@ A comment edited or deleted after it was mirrored; a screen of the app that show
 
 ## 8. The project page, per service (`v2-j4-project-page`, issue #394)
 
-Written on 2026-10-25 by the author of issue #394 (Opus 5.5), before the lane's tests and code. Sections 5 to 7 are left to the lanes open at that time (pull requests 391 and 393). Inputs: issues #394 and #274, the [decisions log](decisions-log.md) (the entries of lanes `j3-project-page` and `j3-flaky-page`, and the ten ideas of 2026-10-25), the matrix (P59, P101 to P105), and sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), since `milestone-2-plan.md` has no sections 9 and 10.
+Written on 2026-10-25 by the author of issue #394 (Opus 5.5), before the lane's tests and code. Sections 6 and 7 are left to the lanes of the pull requests open at that time, 391 and 393. Inputs: issues #394 and #274, the [decisions log](decisions-log.md) (the entries of lanes `j3-project-page` and `j3-flaky-page`, and the ten ideas of 2026-10-25), the matrix (P59, P101 to P105), and sections 9 and 10 of [milestone-1-plan.md](milestone-1-plan.md), since `milestone-2-plan.md` has no sections 9 and 10.
 
 ### 8.1 Context
 
