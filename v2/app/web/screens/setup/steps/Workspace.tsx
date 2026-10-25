@@ -62,7 +62,8 @@ export function WorkspaceStep({ t, api, onDone, initial }: StepProps<Initial>) {
   const ask = (repositories: readonly string[], keptWhole: ReadonlySet<string>) => {
     setBusy(true);
     setError('');
-    const body: ProposeBody = { repositories, whole: [...keptWhole] };
+    // Kept whole: only repositories of this request, so an earlier choice of one no longer picked is not sent.
+    const body: ProposeBody = { repositories, whole: [...keptWhole].filter((repo) => repositories.includes(repo)) };
     void api.post<WorkspaceProposal>('/workspace/propose', body).then((answer) => {
       if (answer.status !== 200) return setError(refusal(t, 'workspace', answer.body));
       setProposal(answer.body);
@@ -82,8 +83,9 @@ export function WorkspaceStep({ t, api, onDone, initial }: StepProps<Initial>) {
     if (!proposal) return;
     setBusy(true);
     setError('');
+    const repositories = proposal.repositories.map((r) => r.repo);
     const body: ConfirmBody = {
-      repositories: proposal.repositories.map((r) => r.repo), whole: [...whole],
+      repositories, whole: [...whole].filter((repo) => repositories.includes(repo)),
       services: proposal.services.filter((s) => !left.has(s.name)).map((s) => s.name), links: [...links], contracts: [...contracts],
     };
     void api.post<WorkspaceWritten>('/workspace', body).then((answer) => {
@@ -170,16 +172,17 @@ export function WorkspaceStep({ t, api, onDone, initial }: StepProps<Initial>) {
           <section className="ws-proposal" data-workspace-proposal aria-labelledby="workspace-proposal-title" aria-busy={busy}>
             <h3 id="workspace-proposal-title">{t('workspace_proposal_title')}</h3>
             <p className="setup-note">{t('workspace_read_in', { time: lasted(proposal.machineMs, t) })} {t('workspace_tick_hint')}</p>
+            {/* The radios follow the person's choice at once (whole); the proposal of that choice follows. */}
             {proposal.repositories.filter((r) => r.folders.length > 0).map((r, i) => (
               <fieldset key={r.repo} className="ws-group">
                 <legend>{r.from === 'workspaces' ? t('workspace_layout_workspaces', { repo: r.repo }) : t('workspace_layout_manifests', { repo: r.repo })}</legend>
                 <ul className="ws-list">
                   <li>
-                    <input type="radio" id={`workspace-layout-${i}-folders`} name={`layout-${i}`} value="folders" checked={r.layout === 'folders'} onChange={() => layout(r.repo, false)} disabled={busy} />
+                    <input type="radio" id={`workspace-layout-${i}-folders`} name={`layout-${i}`} value="folders" checked={!whole.has(r.repo)} onChange={() => layout(r.repo, false)} disabled={busy} />
                     <label htmlFor={`workspace-layout-${i}-folders`}>{t('workspace_layout_folders', { count: r.folders.length })}</label>
                   </li>
                   <li>
-                    <input type="radio" id={`workspace-layout-${i}-whole`} name={`layout-${i}`} value="whole" checked={r.layout === 'whole'} onChange={() => layout(r.repo, true)} disabled={busy} />
+                    <input type="radio" id={`workspace-layout-${i}-whole`} name={`layout-${i}`} value="whole" checked={whole.has(r.repo)} onChange={() => layout(r.repo, true)} disabled={busy} />
                     <label htmlFor={`workspace-layout-${i}-whole`}>{t('workspace_layout_whole')}</label>
                   </li>
                 </ul>

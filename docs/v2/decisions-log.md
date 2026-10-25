@@ -6870,6 +6870,7 @@ French and English, accessible, fakes only. As earlier lanes noted, the brief's 
 3. **The clones** go to `<state>/repositories/<owner>/<name>`, through `projectCheckout` (cloned when absent, fetched when present; a folder holding another repository is refused and left as it is).
    - Each clone's git environment names `gh auth git-credential` as GitHub's credential helper, the line `gh auth setup-git` writes. `gh` reads `GH_TOKEN` itself, so the value is in no URL and no git setting.
    - Nothing else in the Compose image gives git the credential: `lib/forge.ts` adds a helper in app mode only.
+   - Checked on this server with a dummy value and an empty `gh` configuration, nothing sent over the network: `gh auth git-credential get` for `github.com` answers one password line with `GH_TOKEN` set and none without it. The output was counted, never printed. A clone of a real private repository through it is the rehearsal's.
 4. **The guess** (`src/workspace/guess.ts`) reads the base branch from git's objects, as the map does, never the working tree. It reads the paths, plus the few files `wantedFiles` names.
    - **Folders.** A monorepo's folders come from its `package.json` workspaces (or `pnpm-workspace.yaml`): a folder, or a folder's children with `/*`, each with a manifest of its own. An entry that leaves the repository is not read. Without workspaces, two top folders or more with a manifest of their own count (`package.json`, `go.mod`, `pyproject.toml`, `Cargo.toml` and the like), never `test`, `docs`, `examples`, `scripts` or the like.
    - **Layout.** A monorepo is proposed as its folders, with the whole repository as the other choice of a pair of radio buttons.
@@ -6920,7 +6921,7 @@ French and English, accessible, fakes only. As earlier lanes noted, the brief's 
 - the assistant's stub case was moved from the workspace step to the environment step's stub;
 - the assistant's browser test gained a fake `gh` (its workspace page now lists through `gh` once the forge step is done) and waits for the filled step.
 
-Changes that came with the code: the i18n audit names `setup-workspace.workspace_services` ("Services") among the words French writes as English does, and French puts a no-break space before `:` and `?`, as the services catalog does.
+After the review, the screen had sent a repository kept whole after it was no longer picked, which the service refuses. The proposal and the write now send only the repositories they name, and the layout's radio buttons follow the choice at once. The browser test takes that path: a monorepo kept whole, then unpicked, then the two examples. Changes that came with the code: the i18n audit names `setup-workspace.workspace_services` ("Services") among the words French writes as English does, and French puts a no-break space before `:` and `?`, as the services catalog does.
 
 **Captures** (`docs/v2/workspace-connect/`): the proposal of the two examples, at 1440, 1280, 768 and 390 px, light and dark, in English, and at 1440 in French. Taken by `app/test/setup/workspace-browser.test.ts` with `CLEARED_V2_CAPTURES`, on loopback ports the kernel picked.
 

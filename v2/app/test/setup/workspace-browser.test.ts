@@ -5,7 +5,8 @@
 // nothing real:
 //   - the Services screen, with no map to read, offers Connect, which opens
 //     the step;
-//   - the owner picks the guestbook and the filter API, the step clones and
+//   - the owner picks a monorepo, keeps it whole, then picks instead the
+//     guestbook and the filter API; the step clones and
 //     reads them, and proposes the filter API's contract and the guestbook's
 //     call of POST /check at src/filter.ts line 38, none of them ticked;
 //   - nothing is written before the person ticks; once the link and the
@@ -46,14 +47,14 @@ const GOOD = ['forge', 'credential', 'of', 'the', 'test'].join('-');
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'];
 const WIDTHS = [1440, 1280, 768, 390] as const;
 
-function files(root: string): Record<string, string> {
+function files(root: string, prefix = ''): Record<string, string> {
   const out: Record<string, string> = {};
   const walk = (relative: string): void => {
     for (const name of readdirSync(posix.join(root, relative)).sort()) {
       const path = relative ? posix.join(relative, name) : name;
       const stat = lstatSync(posix.join(root, path));
       if (stat.isDirectory()) { if (name !== 'node_modules') walk(path); }
-      else if (stat.isFile()) out[path] = readFileSync(posix.join(root, path), 'utf8');
+      else if (stat.isFile()) out[prefix + path] = readFileSync(posix.join(root, path), 'utf8');
     }
   };
   walk('');
@@ -82,6 +83,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     repositories: [
       { repo: 'example-org/filter-api', url: remote(files(`${EXAMPLES}filter-api`)), base: 'main', private: false, archived: false },
       { repo: 'example-org/guestbook', url: remote(files(`${EXAMPLES}guestbook`)), base: 'main', private: true, archived: false },
+      { repo: 'example-org/both', url: remote({ ...files(`${EXAMPLES}guestbook`, 'guestbook/'), ...files(`${EXAMPLES}filter-api`, 'filter-api/') }), base: 'main', private: false, archived: false },
     ],
     pulls: [],
   });
@@ -117,11 +119,19 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await page.locator('[data-workspace-step] [name="repository"]').first().waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.lang), language);
     await checked(page, 'the list');
+    // A monorepo kept whole, then no longer picked: the next proposal does not carry that choice.
+    await page.check('[name="repository"][value="example-org/both"]');
+    await page.click('[data-act="setup_workspace_propose"]');
+    await page.locator('[data-workspace-proposal] [name="service"][value="guestbook"]').waitFor();
+    await page.check('[data-workspace-proposal] [type="radio"][value="whole"]');
+    await page.locator('[data-workspace-proposal] [name="service"][value="both"]').waitFor();
+    await page.uncheck('[name="repository"][value="example-org/both"]');
     await page.check('[name="repository"][value="example-org/guestbook"]');
     await page.check('[name="repository"][value="example-org/filter-api"]');
     await page.click('[data-act="setup_workspace_propose"]');
-    await page.locator('[data-workspace-proposal]').waitFor();
+    await page.locator('[data-workspace-proposal] [name="link"]').waitFor();
     await checked(page, 'the proposal');
+    assert.equal(await page.locator('[role="alert"]').count(), 0, 'no refusal');
     const text = await page.locator('[data-workspace-proposal]').innerText();
     assert.match(text, /POST \/check/);
     assert.match(text, /src\/filter\.ts/);
