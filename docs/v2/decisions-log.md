@@ -6819,5 +6819,5 @@ The three issues were then closed by hand as not planned. Nothing ran against Li
 
 **Resources.** No Docker object (the container is proven against the fake docker CLI), no Claude Code login read, no GitHub, Slack, Cursor or Codex account used, no network beyond `npm ci` of the lock file, `git fetch`, GitHub's documentation page and GitHub for the issue and the pull request. No port but the tests' own ephemeral loopback ones, no tunnel, no secret.
 
-- Pull request: <n>, against `v2`.
+- Pull request: 412, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-assistant`.
