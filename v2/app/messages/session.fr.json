@@ -10,7 +10,7 @@
   "timeline_label": "La session",
   "right_label": "Avancement de la session",
   "ticket_label": "Ticket",
-  "ticket_cost_tokens": "Coût\u00a0: {tokens} jetons",
+  "ticket_cost_use": "Coût\u00a0: {count} jetons",
   "ticket_cost_time": "{work} de travail des agents sur {elapsed}",
   "ticket_cost_usd": "{usd} en équivalent API, déclarés par les agents",
   "criteria_title": "Terminé quand",

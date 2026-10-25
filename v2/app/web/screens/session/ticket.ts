@@ -153,7 +153,7 @@ export function editsOf(parts: readonly TicketPart[]): TimedEdit[] {
 // finished. Never euros.
 export function ticketCostFacts(cost: TicketCost | null | undefined, language: 'en' | 'fr', t: Translate): string[] {
   if (!cost || cost.tokens === null) return [];
-  const facts = [t('ticket_cost_tokens', { tokens: quantity(cost.tokens, t) }), t('ticket_cost_time', { work: lasted(cost.workMs, t), elapsed: lasted(cost.elapsedMs, t) })];
+  const facts = [t('ticket_cost_use', { count: quantity(cost.tokens, t) }), t('ticket_cost_time', { work: lasted(cost.workMs, t), elapsed: lasted(cost.elapsedMs, t) })];
   if (cost.costUsd === null) return facts;
   const usd = new Intl.NumberFormat(language, { style: 'currency', currency: 'USD', minimumFractionDigits: 2, maximumFractionDigits: cost.costUsd < 1 ? 4 : 2 }).format(cost.costUsd);
   return [...facts, t('ticket_cost_usd', { usd })];
