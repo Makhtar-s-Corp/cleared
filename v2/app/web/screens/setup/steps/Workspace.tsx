@@ -213,14 +213,14 @@ export function WorkspaceStep({ t, api, onDone, initial }: StepProps<Initial>) {
             </fieldset>
             <fieldset className="ws-group">
               <legend>{t('workspace_links')}</legend>
-              {shownLinks.length === 0 ? <p className="setup-note">{t('workspace_links_none')}</p> : (
+              {shownLinks.length === 0 ? <><p className="setup-note">{t('workspace_links_none')}</p><p className="setup-note">{t('workspace_links_note')}</p></> : (
                 <ul className="ws-list">
                   {shownLinks.map((link, i) => (
                     <li key={link.id}>
                       <input type="checkbox" id={`workspace-link-${i}`} name="link" value={link.id} checked={links.has(link.id)}
                         onChange={(event) => setLinks(toggled(links, link.id, event.currentTarget.checked))} />
                       <label htmlFor={`workspace-link-${i}`}>
-                        <span className="ws-name">{t('workspace_link', { from: link.from, to: link.to, items: link.items.join(', ') })}</span>
+                        <span className="ws-name">{t('workspace_link', { from: link.from, to: link.to, operations: link.items.join(', ') })}</span>
                         <span className="ws-meta">{t('workspace_link_found', { places: placesLine(t, link) })}</span>
                       </label>
                     </li>
