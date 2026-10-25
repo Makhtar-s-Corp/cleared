@@ -5147,7 +5147,7 @@ The contract step of a multi-service ticket read OpenAPI 3 only: `contract = <ot
 
 **The merge of 339.** The matrix keeps every line: P210 as this lane has it, and P211 as pull request 339 wrote it. P211's delivery now also names 338, its proof names `test/flow/proof-receipt.test.ts` (the receipt's figures equal `ticketCost`'s), and its status is `done`. The receipt's cost rule tests went with `ticketUsage`, since `test/consumption/ticket-cost.test.ts` covers that rule. Both lanes moved `test/api/types.test.ts` from 63 to 64 routes, and git kept 64; there are 65.
 
-**Checks** (after the merge of `origin/v2` at `2d3ff4e`, pull request 339). `npm run typecheck` passes. `npm test` passes: 1914 Node tests, 1867 pass, 47 skipped (the browser tests, with no `CLEARED_V2_PLAYWRIGHT`), 0 fail; Vitest, 295 tests pass. With `CLEARED_V2_PLAYWRIGHT`, `test/flow/proof-capture.test.ts` passes 6 of 6, the confinement included. `npm run guard -- --base origin/v2`: nothing refused. The v1 suite as the `checks` workflow runs it (`test/*.test.mjs`): 630 tests, 628 pass, 2 skipped, 0 fail.
+**Checks** (after the merge of `origin/v2` at `2d3ff4e`, pull request 339). `npm run typecheck` passes. `npm test` passes: 1926 Node tests, 1877 pass, 49 skipped (the browser tests, with no `CLEARED_V2_PLAYWRIGHT`), 0 fail; Vitest, 301 tests pass. With `CLEARED_V2_PLAYWRIGHT`, `test/flow/proof-capture.test.ts` passes 6 of 6, the confinement included. `npm run guard -- --base origin/v2`: nothing refused. The v1 suite as the `checks` workflow runs it (`test/*.test.mjs`): 630 tests, 628 pass, 2 skipped, 0 fail.
 
 **Resources.** No Docker object, no tunnel, no secret, no real account, no real GitHub call (a fake gh). The tests and the hand run listen on port 0 on loopback.
 
