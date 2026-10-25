@@ -12,7 +12,7 @@ import { Progress } from '../../screens/setup/Setup.tsx';
 import { OwnerFirst, OwnerStep } from '../../screens/setup/steps/Owner.tsx';
 import { ForgeStep } from '../../screens/setup/steps/Forge.tsx';
 import { ModelStep } from '../../screens/setup/steps/Model.tsx';
-import { WorkspaceStep } from '../../screens/setup/steps/Workspace.tsx';
+import { EnvironmentStep } from '../../screens/setup/steps/Environment.tsx';
 import { html, visibleText } from '../render.tsx';
 
 const en = setupTranslator('en');
@@ -110,8 +110,8 @@ test('the model step: the command to run, a terminal to run it in, and the field
 
 test('a step a later lane fills says so, and offers Skip', () => {
   each((t, language) => {
-    const markup = html(<WorkspaceStep t={t} step={step('workspace')} api={api} onDone={noop} />);
-    noMark(markup, `workspace ${language}`);
-    assert.match(markup, /data-step-stub="workspace"/);
+    const markup = html(<EnvironmentStep t={t} step={step('environment')} api={api} onDone={noop} />);
+    noMark(markup, `environment ${language}`);
+    assert.match(markup, /data-step-stub="environment"/);
   });
 });

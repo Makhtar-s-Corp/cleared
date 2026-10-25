@@ -27,6 +27,7 @@ import type { SessionContainer, TerminalProcess } from '../../../src/terminal/co
 import { serviceSource } from '../../src/proxy.ts';
 import { SESSION_TABLES } from '../../src/session-cookie.ts';
 import { FakeForge } from '../../../test/setup/fakes/github.ts';
+import { fakeGh } from '../../../test/forge/fake-gh.ts';
 import { FAST, PASSWORD, startSetup } from '../../../test/setup/support.ts';
 import { startApp } from '../support.ts';
 
@@ -77,7 +78,9 @@ async function checked(page: any, what: string): Promise<void> {
 async function run(language: 'en' | 'fr'): Promise<void> {
   const fake = new FakeForge({ [GOOD]: ['org/guestbook', 'org/filter-api'] });
   const api = await fake.listen();
-  const service = await startSetup({ env: { CLEARED_V2_FORGE_GITHUB_API: api }, container: echoContainer() });
+  // The workspace step lists through gh once the forge step is done: a fake on PATH, so no call reaches GitHub.
+  const gh = fakeGh({ repositories: [{ repo: 'org/guestbook', url: 'https://forge.invalid/org/guestbook.git', base: 'main', private: false, archived: false }], pulls: [] });
+  const service = await startSetup({ env: { CLEARED_V2_FORGE_GITHUB_API: api, PATH: gh.env.PATH as string }, container: echoContainer() });
   service.start();
   const code = SETUP_CODE_LINE.exec(service.lines.find((line) => SETUP_CODE_LINE.test(line)) ?? '')?.[1] ?? '';
   assert.ok(code, 'the service printed a code');
@@ -145,8 +148,9 @@ async function run(language: 'en' | 'fr'): Promise<void> {
 
     for (const id of ['workspace', 'environment', 'secrets', 'checks', 'first-ticket']) {
       await page.waitForURL(`${app.base}/setup/${id}`);
-      await page.locator(`[data-step-stub="${id}"]`).waitFor();
-      if (id === 'workspace') await checked(page, 'a stub');
+      // The workspace step is filled (lane v2-j5-connect, its own browser test); the others are stubs.
+      await page.locator(id === 'workspace' ? '[data-workspace-step] [name="repository"]' : `[data-step-stub="${id}"]`).first().waitFor();
+      if (id === 'environment') await checked(page, 'a stub');
       await page.click('[data-act="setup_skip"]');
     }
     await page.locator('[data-setup-finished]').waitFor();
