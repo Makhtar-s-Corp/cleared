@@ -163,14 +163,15 @@ const flow: Module = {
   // starts with it, once a minute, and so does the batches' runner, whose
   // queue a restart finishes, and the chat's replies, which a restart
   // still sends. The lanes' MCP token is made then, for its install line,
-  // and the MCP route's language and cleaner are read then, engine or not.
+  // with or without a project (issue #350), and the MCP route's language
+  // and cleaner are read then, engine or not.
   start: (registry) => {
+    mcpTokenOf();
     mcpSettings = readMcpSettings();
     const engine = runtime.engine(registry);
     if (!engine || !store) return;
     batchesOf(registry);
     chatOf(registry);
-    mcpTokenOf();
     if (watchdog) return;
     const docker = new Docker();
     watchdog = new IdleWatchdog({
