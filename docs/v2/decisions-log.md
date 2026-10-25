@@ -6083,13 +6083,20 @@ With the CPU slowed four times the budget is at its edge: what is left is the ne
 - The palette test waits for the palette's field and its selected item before Enter: a fix to the new test, in the implementation's commit.
 - `app/test/polish/copy.test.ts` (an empty state says one sentence) refused the first `quota_name_none`. It became one sentence, "Weekly quota not measured" ("Quota de la semaine non mesuré"); the key was not renamed around the rule.
 
-**Captures.** The after set was taken again at this head with the same commands: the gauge at the sidebar's foot on every screen, and the phone's bar of four screens. It was compressed with `pngquant --quality=80-95 --skip-if-larger` then `optipng -o2`, from 3,905,055 bytes to 1,313,838. The before set is unchanged.
+**Captures.** The after set was taken again at this head with the same commands: the gauge at the sidebar's foot on every screen, and the phone's bar of four screens. It was compressed with `pngquant --quality=80-95 --skip-if-larger` then `optipng -o2`, and taken once more after the merge of 378 below, from 3,248,631 bytes to 1,127,636. The before set is unchanged.
 
 **Checks** (at `origin/v2` `2b2314e`):
 - `npm run typecheck` passes.
 - `npm test` runs 2145 Node tests: 2054 pass, 91 skipped, 0 fail. 344 Vitest tests pass.
 - With the CI's Chromium, 79 of 79 pass in one parallel run: the CI's browser list with 374's axe test, this lane's file, and `consumption-browser.test.ts`. The notify file is left out, for the host reason already logged.
 - The budget runs alone at a p95 of 18.0, 25.4 and 20.5 ms, with no request per switch, during a load average of 25.
+- `npm run guard -- --base origin/v2`: nothing refused.
+
+**The merge of 378** (lane `j3-capture-detect`, P226, at `origin/v2` `2165da3`). The log keeps 378's entry, then this lane's two; the matrix keeps P226, then P227, every id once. 378 adds a capture switch to the session's left column, where it lies on the page as this lane's sections do; the after set was taken again for it. After the merge:
+- `npm run typecheck` passes.
+- `npm test` runs 2173 Node tests: 2079 pass, 94 skipped, 0 fail. 349 Vitest tests pass.
+- The CI's browser list with `consumption-browser.test.ts`, the notify file left out: 78 of 78.
+- The budget runs alone at 20.9, 19.6 and 20.6 ms, with no request per switch.
 - `npm run guard -- --base origin/v2`: nothing refused.
 
 - Pull request: 377, against `v2`.
