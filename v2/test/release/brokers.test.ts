@@ -2,8 +2,8 @@
 // (docs/v2/milestone-2-plan.md, decision 21, lane 16): each started with
 // ORCH_LEDGER naming the service's ledger and its own state folder, over its
 // own temporary repository, both pull requests numbered 7. The real v1
-// scripts (serve/release-broker.mjs, ask-validation.sh, merge-pr.sh,
-// tracker.sh, lib/release.mjs) run unchanged; gh and docker are fakes, so
+// scripts (serve/release-broker.ts, ask-validation.ts, merge-pr.ts,
+// tracker.ts, lib/release.ts) run unchanged; gh and docker are fakes, so
 // nothing reaches GitHub or Docker. The train's own pieces drive them: the
 // per-service locks of approval/service.ts and the train's approval.
 import test from 'node:test';
@@ -27,7 +27,7 @@ import { CLEARED_HOME, OWNER, lockBox, lockConf } from '../approval/harness.ts';
 import { FakeTimers, PROOF } from '../approval/support.ts';
 
 async function startBroker(env: NodeJS.ProcessEnv, socket: string): Promise<ChildProcess> {
-  const child = spawn(process.execPath, ['--no-warnings', join(CLEARED_HOME, 'serve/release-broker.mjs')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['--no-warnings', join(CLEARED_HOME, 'serve/release-broker.ts')], { env, stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
   child.stderr?.on('data', (chunk) => { stderr += chunk; });
   for (let i = 0; i < 100 && !existsSync(socket); i++) {
@@ -81,7 +81,7 @@ test('two brokers on one shared ledger: each finds the ticket and its own review
     assert.equal(ticket.id, 'LOCAL-1');
     await store.move(ticket.id, 'In Review', { kind: 'agents', id: 'cleared-v2' });
 
-    // The publish step of the train: each review recorded where that service's merge-pr.sh reads it, then each approval asked on its own broker.
+    // The publish step of the train: each review recorded where that service's merge-pr.ts reads it, then each approval asked on its own broker.
     const at = new Date().toISOString();
     await filterLock.recordReview({ ticket: ticket.id, pr: 7, session: reviewRun('3f0c5e2a-9d1b-4c47-8a55-7b2f1e0d9c64', 'filter-api'), model: 'claude-sonnet-5-5', verdict: 'pass', round: 1, report: 'Read the diff and ran the tests.', at, commit: provider.head(), verdictPhrase: 'no blocking issues' });
     await guestbookLock.recordReview({ ticket: ticket.id, pr: 7, session: reviewRun('3f0c5e2a-9d1b-4c47-8a55-7b2f1e0d9c64', 'guestbook'), model: 'claude-sonnet-5-5', verdict: 'pass', round: 1, report: 'Read the diff and ran the tests.', at, commit: consumer.head(), verdictPhrase: 'no blocking issues' });
@@ -94,7 +94,7 @@ test('two brokers on one shared ledger: each finds the ticket and its own review
     const dry = (box: typeof provider, label: string) => {
       // As the broker runs it: with the secret it wrote in its own state folder at start.
       const secret = readFileSync(join(box.state, 'release-broker.secret'), 'utf8');
-      const run = box.run('merge-pr.sh', ['7', ticket.id, '-', '--dry-run'], { ORCH_LEDGER: ledger, ORCH_BROKER_SECRET: secret, CLEARED_BROKER_SECRET: secret }, ANNOUNCEMENT);
+      const run = box.run('merge-pr.ts', ['7', ticket.id, '-', '--dry-run'], { ORCH_LEDGER: ledger, ORCH_BROKER_SECRET: secret, CLEARED_BROKER_SECRET: secret }, ANNOUNCEMENT);
       said(label, run);
       return run;
     };
@@ -123,7 +123,7 @@ test('two brokers on one shared ledger: each finds the ticket and its own review
     const guestbookEarly = dry(consumer, 'guestbook before its own move');
     assert.equal(guestbookEarly.status, 6, 'the owner\'s first move is bound to the filter API\'s record, not the guestbook\'s');
 
-    // The provider lands for real through its broker: merge-pr.sh merges (the fake gh records it) and closes the ticket on its own record.
+    // The provider lands for real through its broker: merge-pr.ts merges (the fake gh records it) and closes the ticket on its own record.
     const landed = await filterLock.release({ ticket: ticket.id, pr: 7, announcement: ANNOUNCEMENT });
     console.log(`[filter-api release] ${JSON.stringify(landed)}`);
     assert.equal(landed.outcome, 'merged', landed.message);
@@ -131,7 +131,7 @@ test('two brokers on one shared ledger: each finds the ticket and its own review
     assert.equal(existsSync(join(consumer.fake, 'pr-merged')), false, 'the guestbook is not merged with it');
     const afterFirst = provider.tracker('state', ticket.id).stdout.trim();
     console.log(`[after the filter API's merge] the ticket is in ${afterFirst}`);
-    assert.equal(afterFirst, 'Done', 'merge-pr.sh closes the ticket once its own record is merged: why the train signs again');
+    assert.equal(afterFirst, 'Done', 'merge-pr.ts closes the ticket once its own record is merged: why the train signs again');
     const closed = dry(consumer, 'guestbook on the closed ticket');
     assert.equal(closed.status, 6);
 
@@ -143,11 +143,11 @@ test('two brokers on one shared ledger: each finds the ticket and its own review
     assert.equal(guestbookWould.status, 0, guestbookWould.stderr);
     const theirs = JSON.parse(guestbookWould.stdout) as { would_merge?: number; head?: string; reviewed_commit?: string };
     assert.deepEqual([theirs.would_merge, theirs.head, theirs.reviewed_commit], [7, consumer.head(), consumer.head()], 'its own review of its own #7, not the filter API\'s');
-    // The two brokers' merge-pr.sh at once on the one ledger, five times: each
+    // The two brokers' merge-pr.ts at once on the one ledger, five times: each
     // answers what it answers alone, and neither stops on the database.
     const at_once = (box: typeof provider) => new Promise<{ status: number | null; stderr: string }>((resolve) => {
       const secret = readFileSync(join(box.state, 'release-broker.secret'), 'utf8');
-      const child = spawn(join(CLEARED_HOME, 'merge-pr.sh'), ['7', ticket.id, '-', '--dry-run'], { env: { ...box.env, ORCH_LEDGER: ledger, ORCH_BROKER_SECRET: secret, CLEARED_BROKER_SECRET: secret } });
+      const child = spawn(join(CLEARED_HOME, 'merge-pr.ts'), ['7', ticket.id, '-', '--dry-run'], { env: { ...box.env, ORCH_LEDGER: ledger, ORCH_BROKER_SECRET: secret, CLEARED_BROKER_SECRET: secret } });
       let stderr = '';
       child.stderr.on('data', (chunk) => { stderr += chunk; });
       child.on('close', (status) => resolve({ status, stderr }));
@@ -156,7 +156,7 @@ test('two brokers on one shared ledger: each finds the ticket and its own review
     for (let round = 0; round < 5; round++) {
       const [one, two] = await Promise.all([at_once(provider), at_once(consumer)]);
       assert.equal(two.status, 0, two.stderr);
-      assert.equal(one.status, 6, 'the filter API\'s merge-pr.sh refuses a move bound to the guestbook\'s record, as alone');
+      assert.equal(one.status, 6, 'the filter API\'s merge-pr.ts refuses a move bound to the guestbook\'s record, as alone');
       assert.doesNotMatch(`${one.stderr}${two.stderr}`, /locked|SQLITE_BUSY|busy/i);
     }
     console.log('[at once] five rounds of both dry runs together: 0 and 6 each time, no lock error');
@@ -173,14 +173,14 @@ test('two brokers on one shared ledger: each finds the ticket and its own review
     const none = await filterLock.rollback({ ticket: ticket.id });
     console.log(`[filter-api request_rollback, no release row] ${JSON.stringify(none)}`);
     assert.doesNotMatch(none.message, /Only the configured human account|not an authorized/, 'the broker accepts the service account as its human account');
-    assert.match(none.message, /No Cleared release recorded for LOCAL-1/, 'it reached lib/release.mjs rollback');
+    assert.match(none.message, /No Cleared release recorded for LOCAL-1/, 'it reached lib/release.ts rollback');
 
     // The fake gh merges nothing on the forge, so no watch started. The
     // merges are made on each repository's base as the forge would, and the
-    // rows lib/release.mjs writes for them are written: the filter API's,
+    // rows lib/release.ts writes for them are written: the filter API's,
     // then the guestbook's, which its own watch reverted. On the shared
     // ledger the ticket's newest row is the guestbook's; the filter API's
-    // broker reverts the filter API's own merge (lib/release.mjs ownRelease).
+    // broker reverts the filter API's own merge (lib/release.ts ownRelease).
     const mergeOnBase = (box: typeof provider): string => {
       box.git(box.repo, 'checkout', '-q', 'main');
       box.git(box.repo, 'merge', '-q', '--no-ff', '-m', 'Merge pull request #7', 'cleared/LOCAL-1');

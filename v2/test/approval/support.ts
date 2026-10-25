@@ -59,7 +59,7 @@ export async function service(options: { broker?: FakeBroker | null; withKey?: b
   });
   const store = parts.ticketStore;
   const writer = parts.approvalWriter;
-  // What ask-validation.sh keeps for a ticket (the shown versions).
+  // What ask-validation.ts keeps for a ticket (the shown versions).
   const ask = (heads: { pr: number; head: string }[], at = '2026-10-21T09:59:00.123456789Z', ticket = 'LOCAL-1') => {
     mkdirSync(join(box.state, 'validations'), { recursive: true });
     writeFileSync(join(box.state, 'validations', `${ticket}.json`), JSON.stringify({ ticket, at, pulls: heads }));

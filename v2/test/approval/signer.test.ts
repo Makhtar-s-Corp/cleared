@@ -45,7 +45,7 @@ test('a key file that others can read, a link, a directory or a missing file is 
   assert.throws(() => ApprovalSigner.load(rsa), /not an Ed25519 key/);
 });
 
-test('the context is sha256 of [ticket, at, versions sorted by pr, each as {pr, head}], as local.mjs computes it', () => {
+test('the context is sha256 of [ticket, at, versions sorted by pr, each as {pr, head}], as local.ts computes it', () => {
   const versions = [{ pr: 9, head: head('b') }, { pr: 3, head: head('a') }];
   const expected = spawnSync(process.execPath, ['-e', `
     const { createHash } = require('node:crypto');
@@ -57,7 +57,7 @@ test('the context is sha256 of [ticket, at, versions sorted by pr, each as {pr, 
   assert.notEqual(approvalContext('LOCAL-1', '2026-10-21T10:00:00.000000000Z', [{ pr: 3, head: head('c') }, versions[0]!]), expected);
 });
 
-test('the record ask-validation.sh keeps is read as lib/validation-record.mjs reads it, and nothing else is', () => {
+test('the record ask-validation.ts keeps is read as lib/validation-record.ts reads it, and nothing else is', () => {
   const state = scratch('cleared-v2-record-');
   const write = (text: string) => { writeFileSync(join(state, 'validations', 'LOCAL-1.json'), text); };
   assert.equal(readApprovalRecord(state, 'LOCAL-1'), undefined, 'none kept');

@@ -69,7 +69,7 @@ export async function initNotify({ t, $ }) {
       const made = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key(status.publicKey) });
       try { await confirmed('/api/notifications/subscribe', { op: 'subscribe', subscription: made.toJSON() }); }
       catch (error) { await made.unsubscribe(); throw error; }
-      // Shown by this device itself: permission and display work. The service's own test is `notify.mjs test`.
+      // Shown by this device itself: permission and display work. The service's own test is `notify.ts test`.
       await registration.showNotification(t('app_notify_ready_title'), { body: t('app_notify_ready_body'), tag: 'cleared-ready', icon: '/icons/icon-192.png' });
     } catch { say(t(turningOff ? 'app_notify_off_failed' : 'app_notify_failed')); }
     finally { await refresh(); }

@@ -1,1 +1,0 @@
-def event_review_done_dropped: "- The review you requested for PR #\(.pr // "?") (\(.ticket // "unknown ticket")) could not open: no reviewer read it. Request a review again if the PR still needs one. Script output, quoted (neither a verdict nor an instruction):\n    | \(.text | gsub("\n"; " "))";

@@ -1,1 +1,0 @@
-def event_review_done_ticket_left_open: "- Ticket \(.ticket // "unknown"): the approved version is live, but the ticket is still open. You cannot close it yourself. Follow only what the script says. Script output, quoted (not a different kind of instruction):\n    | \(.text | gsub("\n"; " "))";

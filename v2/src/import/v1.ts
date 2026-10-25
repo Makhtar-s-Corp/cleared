@@ -159,7 +159,7 @@ function linesOf(runs: readonly Record<string, unknown>[], pr: number): number |
   return typeof lines === 'number' ? lines : null;
 }
 
-// lib/ledger.mjs totalTokens, over the runs of the span.
+// lib/ledger.ts totalTokens, over the runs of the span.
 function tokensOf(runs: readonly Record<string, unknown>[]): number | null {
   let total: number | null = null;
   for (const run of runs) {

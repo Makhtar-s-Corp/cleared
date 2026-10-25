@@ -42,7 +42,7 @@ export type FlagsInput = {
   readonly diff: string;                         // unified diffs, one after the other, as git diff prints them
   readonly report?: ChangesReport;               // absent: the author reported nothing
   readonly contracts?: readonly string[];        // the services' contract files, as paths of their repositories
-  readonly guarded?: readonly string[];          // the services' [merge] guarded_paths, prefixes as merge.mjs reads them
+  readonly guarded?: readonly string[];          // the services' [merge] guarded_paths, prefixes as merge.ts reads them
 };
 
 export type FlagsResult = { readonly groups: readonly ReleaseGroup[]; readonly flags: readonly ReleaseFlag[] };

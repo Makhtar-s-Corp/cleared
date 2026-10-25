@@ -1,4 +1,4 @@
-// The fast lane's real reading (matrix B2.2): v1's rules (lib/fast-lane.mjs,
+// The fast lane's real reading (matrix B2.2): v1's rules (lib/fast-lane.ts,
 // docs/fast-lane.md) on what merging the ticket's branch would land on the
 // base, read out of the service's own checkout, with the [fast_lane]
 // settings of the service's base branch, never the branch's own. Real git in

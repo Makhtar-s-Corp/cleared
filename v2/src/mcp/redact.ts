@@ -15,7 +15,7 @@ export const TIMELINE_TEXT_LIMIT = COMMAND_OUTPUT_LIMIT;
 
 const removed = (what: string) => `[removed: ${what}]`;
 
-// [category, pattern], each a whole token: the prefixes lib/board-scrub.mjs
+// [category, pattern], each a whole token: the prefixes lib/board-scrub.ts
 // knows, and the forms GitHub, Slack, Linear, AWS, Google, Stripe and npm
 // give their keys. A prefix this distinctive is looked for even glued to
 // other letters (a word boundary would miss "keyghp_..."); the guard's

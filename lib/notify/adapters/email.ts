@@ -1,0 +1,79 @@
+// E-mail, through the machine's own sendmail program (CLEARED_NOTIFY_SENDMAIL
+// in the service's environment, else a well-known path: Postfix, msmtp,
+// OpenSMTPD...; never agents.conf). Cleared holds
+// no mail password: the mail program does. The addresses are the human's
+// private data, so they live in the service's private credentials file
+// ("email": {"to", "from"}), never in agents.conf. The recipient is given as an
+// argument (never read from the headers), and every header is encoded, so no
+// text can add a header or a recipient.
+import { spawn } from 'node:child_process';
+import { statSync } from 'node:fs';
+import type { Adapter, NotifyMessage, SendOptions } from '../contract.ts';
+
+type EmailTarget = { to: string; from: string };
+export type SendmailRun = (file: string, args: string[], input: string, options: SendOptions) => unknown;
+
+// The well-known places of the mail program, in order. The default is the first
+// that is a file no one but its owner can write; none is null (the adapter is not ready).
+export const SENDMAIL_PATHS = ['/usr/sbin/sendmail', '/usr/lib/sendmail', '/sbin/sendmail', '/usr/bin/sendmail'];
+export function sendmailDefault(paths = SENDMAIL_PATHS): string | null {
+  for (const path of paths) {
+    try { const info = statSync(path); if (info.isFile() && (info.mode & 0o002) === 0) return path; } catch { /* not there */ }
+  }
+  return null;
+}
+
+const ADDRESS = /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/;
+export function emailTarget(value: { to?: unknown; from?: unknown } | null | undefined): EmailTarget | null {
+  const to = value?.to, from = value?.from ?? value?.to;
+  if (typeof to !== 'string' || !ADDRESS.test(to) || typeof from !== 'string' || !ADDRESS.test(from)) return null;
+  return { to, from };
+}
+// RFC 2047: a header in UTF-8 that cannot carry a line break.
+const encoded = (text: string) => `=?UTF-8?B?${Buffer.from(String(text)).toString('base64')}?=`;
+// A longer header is folded into encoded words of at most 75 characters (RFC 2047, section 2): 45 bytes
+// make 60 base64 characters, and the word's own 12 make 72. Each word is cut between two characters, never inside one.
+const WORD_BYTES = 45;
+const encodedWords = (text: string) => {
+  const words: string[] = [];
+  let chunk = '';
+  for (const character of String(text)) {
+    if (chunk && Buffer.byteLength(chunk + character) > WORD_BYTES) { words.push(chunk); chunk = ''; }
+    chunk += character;
+  }
+  words.push(chunk);
+  return words.map(encoded).join('\r\n ');
+};
+const wrap = (text: string) => text.match(/.{1,76}/g)!.join('\r\n');
+
+export function mailOf(message: NotifyMessage, { to, from }: EmailTarget, now = new Date()): string {
+  const body = [message.body, message.url].filter(Boolean).join('\n\n');
+  return [`From: ${encoded('Cleared')} <${from}>`, `To: <${to}>`, `Subject: ${encodedWords(message.title)}`, `Date: ${now.toUTCString()}`,
+    'MIME-Version: 1.0', 'Content-Type: text/plain; charset=utf-8', 'Content-Transfer-Encoding: base64', 'Auto-Submitted: auto-generated', '',
+    wrap(Buffer.from(`${body}\n`).toString('base64')), ''].join('\r\n');
+}
+
+// Not synchronous: the dispatcher's deadline must be able to give up on a mail program that hangs.
+const sendmailRun = (file: string, args: string[], input: string, { signal }: SendOptions = {}) => new Promise<void>((resolve, reject) => {
+  const child = spawn(file, args, { stdio: ['pipe', 'ignore', 'ignore'], timeout: 15000, ...(signal ? { signal } : {}) });
+  child.on('error', reject);
+  child.on('close', (code) => (code === 0 ? resolve() : reject(new Error('exit'))));
+  child.stdin.on('error', () => {});
+  child.stdin.end(input);
+});
+
+export function emailAdapter({ credentials, sendmail = sendmailDefault(), run = sendmailRun }: { credentials: () => unknown; sendmail?: string | null; run?: SendmailRun }): Adapter {
+  const target = () => { try { return emailTarget(credentials() as { to?: unknown; from?: unknown } | null | undefined); } catch { return null; } };
+  return {
+    name: 'email',
+    ready: () => (!target() ? 'no_credentials' : sendmail ? null : 'no_sendmail'),
+    async send(message: NotifyMessage, { signal }: SendOptions = {}) {
+      const to = target();
+      if (!to) throw new Error('no credentials');
+      // -i: a line with a single dot does not end the message.
+      try { await run(sendmail as string, ['-i', '-f', to.from, '--', to.to], mailOf(message, to), { signal }); }
+      catch { throw new Error('sendmail failed'); }
+      return { delivered: 1 };
+    },
+  };
+}

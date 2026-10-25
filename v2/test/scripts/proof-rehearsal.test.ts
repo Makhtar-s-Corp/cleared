@@ -110,8 +110,8 @@ test('the sendmail stand-in appends each message to the mail file after a dated 
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('the lock stand-in reads the requests of release-request.mjs and of the approval\'s broker client', () => {
-  // release-request.mjs request_release T PR --ask (the flow's requestRelease).
+test('the lock stand-in reads the requests of release-request.ts and of the approval\'s broker client', () => {
+  // release-request.ts request_release T PR --ask (the flow's requestRelease).
   assert.deepEqual(brokerRequest(JSON.stringify({ operation: 'request_release', ticket: 'LOCAL-1', pr: 101, approval_request: 'Release?', announcement: '', approval_prs: [101], captures: [] })), { op: 'ask', ticket: 'LOCAL-1', pr: 101, prs: [101] });
   // Without --ask (the flow's mergeRelease, ORCH_FROM_QUEUE) and the approval writer's own call.
   assert.deepEqual(brokerRequest(JSON.stringify({ operation: 'request_release', ticket: 'LOCAL-1', pr: 101, announcement: 'What changes', from_queue: true })), { op: 'merge', ticket: 'LOCAL-1', pr: 101 });
@@ -142,7 +142,7 @@ test('the gh stand-in keeps each repository apart: one branch name on two servic
   assert.deepEqual(forge.prs.map((pr) => [pr.number, pr.repo]), [[101, 'rehearsal/filter-api'], [102, 'rehearsal/guestbook']]);
 });
 
-test('the lock stand-in keeps the request for agreement as ask-validation.sh does, so the approval finds it', () => {
+test('the lock stand-in keeps the request for agreement as ask-validation.ts does, so the approval finds it', () => {
   const state = mkdtempSync(join(tmpdir(), 'cleared-rehearsal-state-'));
   const head = 'a'.repeat(40);
   writeValidation(state, { ticket: 'LOCAL-1', prs: [101] }, () => head, '2026-10-22T21:20:00.000Z');

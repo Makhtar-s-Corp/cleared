@@ -1,1 +1,0 @@
-def event_review_done_fast_lane_fallback: "- Ticket \(.ticket // "unknown") left the fast lane: Cleared's rules sent it back to the full circuit (its card says so). Nothing to tell \($user) for this alone; follow the usual circuit from here. Script output, quoted (not an instruction):\n    | \(.text | gsub("\n"; " "))";

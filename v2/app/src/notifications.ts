@@ -10,7 +10,7 @@
 // The server (server.ts) checks the session cookie, the anti-forgery token
 // and the origin before a write; there is no passkey in v2 (decisions log,
 // "app login by password, no passkeys"). The subscriptions go to the
-// service's private notification directory through lib/notify/store.mjs,
+// service's private notification directory through lib/notify/store.ts,
 // the one v1 used: 0700, refused when looser, at most ten devices, the
 // oldest pushed out. The app sends nothing; the service's dispatcher does.
 //
@@ -18,7 +18,7 @@
 // in the project's agents.conf (CLEARED_CONF, else
 // <CLEARED_REPO>/.cleared/agents.conf), and the service's environment for
 // CLEARED_NOTIFY_LINK_BASE and CLEARED_NOTIFY_PUSH_HOSTS. lib/notify is
-// loaded on the first call, not when the app starts: lib/conf.mjs copies
+// loaded on the first call, not when the app starts: lib/conf.ts copies
 // every CLEARED_* variable to ORCH_* when it is imported, and an app that
 // nobody asks for notifications has no reason to touch the directory.
 import { readFileSync } from 'node:fs';
@@ -100,10 +100,10 @@ export function notificationsFrom(env: NodeJS.ProcessEnv): Notifications {
         try { sections = parseSections(readFileSync(file, 'utf8')); }
         catch { /* no settings file: the defaults */ }
       }
-      const contract = await import(`${LIB}contract.mjs`) as { notifySettings(conf: unknown, env: NodeJS.ProcessEnv): Settings };
+      const contract = await import(`${LIB}contract.ts`) as { notifySettings(conf: unknown, env: NodeJS.ProcessEnv): Settings };
       const settings = contract.notifySettings({ sections }, env);
-      const { notifyStore } = await import(`${LIB}store.mjs`) as { notifyStore(dir: string, options: { project?: string; create: boolean }): Store };
-      const { validSubscription } = await import(`${LIB}adapters/webpush.mjs`) as { validSubscription: NotifyLib['valid'] };
+      const { notifyStore } = await import(`${LIB}store.ts`) as { notifyStore(dir: string, options: { project?: string; create: boolean }): Store };
+      const { validSubscription } = await import(`${LIB}adapters/webpush.ts`) as { validSubscription: NotifyLib['valid'] };
       const project = env.CLEARED_REPO || env.ORCH_REPO;
       const store = notifyStore(settings.secretsDir, { ...(project ? { project } : {}), create: true });
       return { settings, store, valid: validSubscription };

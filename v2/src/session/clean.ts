@@ -3,9 +3,9 @@
 // kept, command output cut to COMMAND_OUTPUT_LIMIT, reasoning reduced to its
 // ids, and anything outside the AG-UI subset dropped.
 //
-// The guard's patterns are copied from lib/guard/codex-guard.mjs, not
+// The guard's patterns are copied from lib/guard/codex-guard.ts, not
 // imported: that file is a command line that reads its arguments and exits
-// when loaded, and lib/guard/private-terms.mjs runs git when loaded. A test
+// when loaded, and lib/guard/private-terms.ts runs git when loaded. A test
 // keeps the copies word for word equal to the guard's.
 import { createHash } from 'node:crypto';
 import type { StopReason, ToolKind } from './contract.ts';
@@ -41,7 +41,7 @@ const SHORTEST_SECRET = 8;
 
 export type PrivateTerms = {
   readonly salt: string;                         // [guard] salt of the project
-  readonly fingerprints: ReadonlySet<string>;    // sha256(salt + term), as lib/guard/private-terms.mjs makes them
+  readonly fingerprints: ReadonlySet<string>;    // sha256(salt + term), as lib/guard/private-terms.ts makes them
 };
 
 export type CleanOptions = {

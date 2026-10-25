@@ -129,12 +129,12 @@ test('a session that stops without HANDOVER.md is asked for it once, with the fi
 });
 
 test('the handover headings are those lib/memory checks, in its order', () => {
-  const memory = readFileSync(new URL('../../../lib/memory/adapters/local.mjs', import.meta.url), 'utf8');
+  const memory = readFileSync(new URL('../../../lib/memory/adapters/local.ts', import.meta.url), 'utf8');
   assert.ok(memory.includes(`const HEADINGS = [${HANDOVER_HEADINGS.map((h) => `'${h}'`).join(', ')}];`));
 });
 
-test('the hook keeps the guard patterns word for word (lib/guard/codex-guard.mjs)', () => {
-  const guard = readFileSync(new URL('../../../lib/guard/codex-guard.mjs', import.meta.url), 'utf8');
+test('the hook keeps the guard patterns word for word (lib/guard/codex-guard.ts)', () => {
+  const guard = readFileSync(new URL('../../../lib/guard/codex-guard.ts', import.meta.url), 'utf8');
   assert.equal(GUARD_PATTERNS.length, 10);
   for (const [category, pattern] of GUARD_PATTERNS) {
     assert.ok(guard.includes(`/${pattern.source}/${pattern.flags}`), `${category}: /${pattern.source}/${pattern.flags} is not in the guard`);

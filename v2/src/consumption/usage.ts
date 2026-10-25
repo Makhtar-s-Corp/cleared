@@ -2,7 +2,7 @@
 // all from the ledger's session_events and sessions, nothing invented:
 //
 //   tokens   the four counts of each finished turn's `usage` (RUN_FINISHED),
-//            in + out + cache read + cache write, the way lib/session-usage.mjs
+//            in + out + cache read + cache write, the way lib/session-usage.ts
 //            totals a session, by day in the person's time zone, over the
 //            last seven days, per the harness of the session
 //   quota    the newest figure of each window of a harness, from the hourly

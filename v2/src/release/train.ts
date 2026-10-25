@@ -6,7 +6,7 @@
 // rolls its own service back (its `auto_rollback`); the train then asks
 // `request_rollback` of each service that landed before it, newest first.
 //
-// One approval, several locks. merge-pr.sh of each service reads the
+// One approval, several locks. merge-pr.ts of each service reads the
 // owner's move to go against its own validations record, and closes the
 // ticket once every pull request that record shows is merged, which is its
 // own one. So the owner's signed move of the approval is bound to the first
@@ -153,7 +153,7 @@ export class TrainRunner {
     }
   }
 
-  // merge-pr.sh closes the ticket once its own record is merged: while
+  // merge-pr.ts closes the ticket once its own record is merged: while
   // services are still to land, the ticket waits in the validate state, not Done.
   async #notDone(train: Train, index: number): Promise<void> {
     const { tickets } = this.#deps;

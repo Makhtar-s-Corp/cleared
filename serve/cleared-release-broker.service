@@ -6,7 +6,7 @@ Type=simple
 Environment=PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin
 Environment=ORCH_REPO=@ORCH_REPO@
 Environment=LANG=C.UTF-8
-ExecStart=/usr/bin/node @ORCH_HOME@/serve/release-broker.mjs
+ExecStart=/usr/bin/node @ORCH_HOME@/serve/release-broker.ts
 Restart=on-failure
 RestartSec=3
 
