@@ -5516,5 +5516,5 @@ These pass on that code and are kept as guards: the map test, the tools assertio
 
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no network beyond `npm ci` of the lock file, `git fetch` and GitHub, no port, no secret.
 
-- Pull request: PR_NUMBER, against `v2`.
+- Pull request: 359, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-js-convert`.
