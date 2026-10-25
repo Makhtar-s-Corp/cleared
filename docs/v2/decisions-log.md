@@ -5965,5 +5965,5 @@ With both fixes (`8dd564d`), the final code, all again: the committed test 10 co
 
 **Resources.** No Docker object, no Claude Code, Slack, Cursor or Codex account, no login read; the app on port 0 on loopback; no network beyond `npm ci` of the lock file, `git fetch` and GitHub (the CI's logs read with `gh`); no tunnel, no secret.
 
-- Pull request: PRNUM, against `v2`.
+- Pull request: 379, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `j3-flaky-ci`.
