@@ -6,12 +6,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { MAX_QUESTION } from '../../../src/reader/service.ts';
 import { loadCatalog } from '../../src/catalog.ts';
-import { ASK_ID, askFixture, platformAsk } from '../../fixtures/ask.ts';
+import { ASK_ANSWER, ASK_CITATIONS, ASK_COMMIT, ASK_ID, askFixture, platformAsk } from '../../fixtures/ask.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
+import type { AskCitation } from '../../../src/api/types.ts';
 import { translator } from '../../web/lib/i18n.ts';
 import { ApiError, type ScreenContext } from '../../web/lib/screen.ts';
 import {
-  POLL_MS, QUESTION_MAX, askBody, askFailure, askHref, askIdOf, followAsk, pollDelay, questionProblem, readAsk, startAsk, stateLine, targetLine, totalLine, turnsOf, usageLine,
+  POLL_MS, QUESTION_MAX, answerParts, askBody, citationNote, citationTitle, uncheckedOf, askFailure, askHref, askIdOf, followAsk, pollDelay, questionProblem, readAsk, startAsk, stateLine, targetLine, totalLine, turnsOf, usageLine,
 } from '../../web/screens/ask/model.ts';
 
 const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('ask', 'en') });
@@ -135,4 +136,62 @@ test('a refusal of the service reads as what it means', () => {
   assert.equal(askFailure(error(500), 'follow'), 'ask_failed');
   assert.equal(askFailure(new Error('network'), 'read'), 'ask_load_failed');
   for (const key of ['ask_failed_busy', 'ask_failed_running', 'ask_failed_invalid', 'ask_failed_gone', 'ask_failed_off', 'ask_failed', 'ask_load_failed']) assert.ok(t(key) && fr(key));
+});
+
+// P215 (issue #331): the code an answer cites, linked by the service.
+
+const citation = (over: Partial<AskCitation>): AskCitation => ({
+  text: 'guestbook/src/page.ts:12', service: 'guestbook', path: 'src/page.ts', from: 12, to: 12, commit: ASK_COMMIT, problem: null,
+  url: `https://github.com/example-org/cleared-example-guestbook/blob/${ASK_COMMIT}/src/page.ts#L12`, ...over,
+});
+
+test('an answer is cut around the citations the service linked, every place each is written', () => {
+  const parts = answerParts(ASK_ANSWER, ASK_CITATIONS);
+  assert.equal(parts.map((part) => part.text).join(''), ASK_ANSWER, 'nothing of the answer is lost');
+  assert.deepEqual(parts.filter((part) => part.url).map((part) => [part.text, part.url]), ASK_CITATIONS.map((c) => [c.text, c.url]));
+  const twice = answerParts('a guestbook/src/page.ts:12 b guestbook/src/page.ts:12', [citation({})]);
+  assert.deepEqual(twice.map((part) => [part.text, part.url !== undefined]), [['a ', false], ['guestbook/src/page.ts:12', true], [' b ', false], ['guestbook/src/page.ts:12', true]]);
+  // The longer mention wins where one starts inside the other.
+  const nested = answerParts('see guestbook/src/page.ts:12-14.', [citation({}), citation({ text: 'guestbook/src/page.ts:12-14', to: 14, url: `https://github.com/example-org/cleared-example-guestbook/blob/${ASK_COMMIT}/src/page.ts#L12-L14` })]);
+  assert.deepEqual(nested.map((part) => part.text), ['see ', 'guestbook/src/page.ts:12-14', '.']);
+});
+
+test('a linked mention is drawn only where it stands whole, never inside a longer one the service did not link', () => {
+  const answer = 'guestbook/src/page.ts:1 and guestbook/src/page.ts:150, guestbook/src/page.ts:12-99, vendor/guestbook/src/page.ts:1, guestbook/src/page.ts:1.';
+  const parts = answerParts(answer, [citation({ text: 'guestbook/src/page.ts:1', from: 1, to: 1 }), citation({}), citation({ text: 'guestbook/src/page.ts:150', from: 150, to: 150, url: null, problem: 'no_line' })]);
+  assert.deepEqual(parts.filter((part) => part.url).map((part) => [part.text, answer.indexOf(part.text) >= 0]), [['guestbook/src/page.ts:1', true], ['guestbook/src/page.ts:1', true]]);
+  assert.equal(parts.map((part) => part.text).join(''), answer);
+  const linkedAt = [];
+  let at = 0;
+  for (const part of parts) { if (part.url) linkedAt.push(at); at += part.text.length; }
+  assert.deepEqual(linkedAt, [0, answer.lastIndexOf('guestbook/src/page.ts:1.')], 'the first and the last, not :150, :12-99 or vendor/');
+});
+
+test('only a GitHub link the service built is drawn; a citation it could not check, and an address the reader wrote, stay text', () => {
+  const answer = 'guestbook/src/page.ts:12 and guestbook/src/made-up.ts:3, see https://github.com/evil/x; guestbook/src/page.ts:13 and guestbook/src/page.ts:14.';
+  const parts = answerParts(answer, [
+    citation({}),
+    citation({ text: 'guestbook/src/made-up.ts:3', path: 'src/made-up.ts', from: 3, to: 3, url: null, problem: 'no_file' }),
+    citation({ text: 'guestbook/src/page.ts:13', from: 13, to: 13, url: 'javascript:alert(1)' }),
+    citation({ text: 'guestbook/src/page.ts:14', from: 14, to: 14, url: 'http://github.com/x' }),
+  ]);
+  assert.deepEqual(parts.filter((part) => part.url).map((part) => part.text), ['guestbook/src/page.ts:12'],
+    'the reader\'s own address is no citation, and an address that is not https://github.com/ is never drawn');
+  assert.equal(parts.map((part) => part.text).join(''), answer);
+  assert.deepEqual(answerParts('plain', []), [{ text: 'plain' }]);
+});
+
+test('what was cited but not found is said with its reason and the commit the reader read', () => {
+  const short = ASK_COMMIT.slice(0, 7);
+  const unchecked = uncheckedOf({ citations: [citation({}), citation({ text: 'x/a.ts:3', problem: 'no_file', url: null }), citation({ text: 'x/a.ts:90', problem: 'no_line', url: null })] });
+  assert.deepEqual(unchecked.map((c) => c.text), ['x/a.ts:3', 'x/a.ts:90']);
+  assert.equal(citationNote(citation({ text: 'x/a.ts:3', problem: 'no_file', url: null }), t), `x/a.ts:3: no such file at commit ${short}`);
+  assert.equal(citationNote(citation({ text: 'x/a.ts:90', problem: 'no_line', url: null }), t), `x/a.ts:90: the file has no such lines at commit ${short}`);
+  assert.equal(citationNote(citation({ text: 'x/a.ts:3', problem: 'no_file', url: null, commit: null }), t), 'x/a.ts:3: guestbook was not in the code the reader read');
+  assert.equal(citationNote(citation({ text: 'x/a.ts:3', problem: 'no_repository', url: null }), t), 'x/a.ts:3: no GitHub repository is known for guestbook');
+  assert.equal(citationNote(citation({ text: 'x/a.ts:3', problem: 'unchecked', url: null }), t), 'x/a.ts:3: could not be checked');
+  assert.equal(citationNote(citation({ text: 'x/a.ts:3', problem: 'no_file', url: null }), fr), `x/a.ts:3\u00a0: aucun fichier de ce nom au commit ${short}`);
+  assert.equal(citationTitle(citation({}), t), `Open on GitHub at commit ${short}`);
+  assert.equal(citationTitle(citation({}), fr), `Ouvrir sur GitHub au commit ${short}`);
+  assert.deepEqual(uncheckedOf({ citations: undefined as never }), [], 'an ask the service stored before P215');
 });

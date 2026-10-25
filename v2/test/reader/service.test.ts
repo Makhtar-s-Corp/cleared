@@ -7,7 +7,7 @@ import assert from 'node:assert/strict';
 import { AskStore } from '../../src/reader/store.ts';
 import { MAX_QUESTION, READER_TICKET_PREFIX } from '../../src/reader/service.ts';
 import { ReaderError } from '../../src/reader/target.ts';
-import { PAGE, readerSetup, turn, until, week } from './support.ts';
+import { COMMIT_1, COMMIT_2, PAGE, readerSetup, turn, until, week } from './support.ts';
 
 const answered = (t: ReturnType<typeof readerSetup>, id: string, turns = 1) =>
   until(() => t.reader.get(id)?.state === 'answered' && t.reader.get(id)?.turns.length === turns && t.reader.get(id)?.turns.at(-1)?.answer !== null, `answer ${turns} of ${id}`);
@@ -194,4 +194,77 @@ test('after a restart, the asks the last process left live are stopped and clean
   assert.equal(second.store.sessions.get(first.ids[0] as string)?.status, 'stopped');
   assert.equal(second.reader.get(ask.id)?.turns[0]?.answer, 'Line 12 renders the entries.', 'what was answered stays');
   assert.equal(PAGE.split('\n').length, 41);
+});
+
+// P215 (issue #331): the code an answer cites, linked by the service.
+
+test('an answer\'s citations get a GitHub link to the commit the reader read, written with the answer, never before', async () => {
+  const t = readerSetup({ script: turn('t1', 'guestbook/src/page.ts:12-14 renders them; guestbook/src/nothing.ts:3 does not exist.', 0.05) });
+  let release: () => void = () => {};
+  t.holdLines(new Promise<void>((resolve) => { release = resolve; }));
+  const ask = await t.reader.ask({ question: 'What does line 12 do?', target: 'guestbook:src/page.ts:12' }, 'u1');
+  await until(() => t.lineReads.length > 0, 'the citations\' check');
+  const pending = t.reader.get(ask.id);
+  assert.equal(pending?.state, 'running', 'the answer waits for its links');
+  assert.equal(pending?.turns[0]?.answer, null);
+  release();
+  await answered(t, ask.id);
+  const done = t.reader.get(ask.id);
+  assert.equal(done?.turns[0]?.answer, 'guestbook/src/page.ts:12-14 renders them; guestbook/src/nothing.ts:3 does not exist.', 'the answer is kept as the reader wrote it');
+  assert.deepEqual(done?.turns[0]?.citations, [
+    { text: 'guestbook/src/page.ts:12-14', service: 'guestbook', path: 'src/page.ts', from: 12, to: 14, commit: COMMIT_1, url: `https://github.com/acme/guestbook/blob/${COMMIT_1}/src/page.ts#L12-L14`, problem: null },
+    { text: 'guestbook/src/nothing.ts:3', service: 'guestbook', path: 'src/nothing.ts', from: 3, to: 3, commit: COMMIT_1, url: null, problem: 'no_file' },
+  ]);
+  assert.deepEqual(t.lineReads, [`guestbook@${COMMIT_1}:src/page.ts`, `guestbook@${COMMIT_1}:src/nothing.ts`], 'checked at the exported commit');
+  assert.match(t.prepared[0]?.briefing ?? '', /service\/path:from-to/, 'the briefing asks for the form the service links');
+});
+
+test('a folder service\'s link holds its folder inside its repository', async () => {
+  const t = readerSetup({ script: turn('t1', 'filter-api/src/check.ts:2 checks it.', 0.01) });
+  t.landed[`filter-api@${COMMIT_1}:src/check.ts`] = 'a\nb\n';
+  const ask = await t.reader.ask({ question: 'Where is a word checked?' }, 'u1');
+  await answered(t, ask.id);
+  assert.equal(t.reader.get(ask.id)?.turns[0]?.citations[0]?.url, `https://github.com/acme/platform/blob/${COMMIT_1}/filter-api/src/check.ts#L2`);
+});
+
+test('a follow-up after the idle stop links the commit its new reader read, and the first turn keeps its own', async () => {
+  const t = readerSetup({ script: turn('t1', 'guestbook/src/page.ts:3 does it.', 0.01) });
+  const ask = await t.reader.ask({ question: 'What does line 3 do?', service: 'guestbook' }, 'u1');
+  await answered(t, ask.id);
+  t.advance(15 * 60_000);
+  await t.reader.tick();
+  assert.equal(t.reader.get(ask.id)?.state, 'stopped');
+  t.commits.guestbook = COMMIT_2;
+  await t.reader.follow(ask.id, 'And now?', 'u1');
+  await answered(t, ask.id, 2);
+  const done = t.reader.get(ask.id);
+  assert.equal(done?.turns[0]?.citations[0]?.commit, COMMIT_1, 'what was linked stays');
+  assert.equal(done?.turns[1]?.citations[0]?.commit, COMMIT_2, 'the new reader read the base as it is now');
+  assert.match(done?.turns[1]?.citations[0]?.url ?? '', new RegExp(`/blob/${COMMIT_2}/src/page\\.ts#L3$`));
+});
+
+test('a citation check that breaks leaves the answer answered, its citation unchecked', async () => {
+  const t = readerSetup({ script: turn('t1', 'guestbook/src/page.ts:3 does it.', 0.01) });
+  const broken = Promise.reject(new Error('git died'));
+  broken.catch(() => {});
+  t.holdLines(broken);
+  const ask = await t.reader.ask({ question: 'q', service: 'guestbook' }, 'u1');
+  await answered(t, ask.id);
+  assert.deepEqual(t.reader.get(ask.id)?.turns[0]?.citations.map((c) => [c.url, c.problem]), [[null, 'unchecked']]);
+});
+
+test('an ask stored before citations existed reads with none', () => {
+  const t = readerSetup();
+  const asks = new AskStore(t.store.db);
+  asks.create({ id: 'ask-old', project: 'guestbook', question: 'q', service: null, target: null, by: 'u1', at: '2026-10-22T10:00:00.000Z' });
+  t.store.db.prepare('UPDATE asks SET turns = ? WHERE id = ?').run(JSON.stringify([{ question: 'q', answer: 'a', at: '2026-10-22T10:00:00.000Z', costUsd: 0.01, inputTokens: 1, outputTokens: 1 }]), 'ask-old');
+  assert.deepEqual(t.reader.get('ask-old')?.turns[0]?.citations, []);
+  assert.deepEqual(asks.get('ask-old')?.turns[0]?.citations, []);
+});
+
+test('an ask scoped to one service of the workspace links a bare path of that service', async () => {
+  const t = readerSetup({ script: turn('t1', 'In src/page.ts:14.', 0.01) });
+  const ask = await t.reader.ask({ question: 'What does line 12 do?', target: 'guestbook:src/page.ts:12' }, 'u1');
+  await answered(t, ask.id);
+  assert.deepEqual(t.reader.get(ask.id)?.turns[0]?.citations.map((c) => c.url), [`https://github.com/acme/guestbook/blob/${COMMIT_1}/src/page.ts#L14`]);
 });

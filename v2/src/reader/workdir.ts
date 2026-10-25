@@ -14,7 +14,8 @@
 // A file named by a question is read from git's objects in the service's
 // own checkout, which no session writes: a committed link is refused, never
 // followed, and the policy's secret names are refused as a session's Read
-// of them would be.
+// of them would be. A file an answer cites is read the same way, at the
+// commit the folder was exported at (citations.ts, P215).
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, posix } from 'node:path';
 import { Docker } from '../container/docker.ts';
@@ -37,6 +38,7 @@ export type ReaderService = {
 };
 
 const ASK_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
+const COMMIT = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
 
 export function realReaderEffects(options: { readonly root: string; readonly services: readonly ReaderService[]; readonly docker?: Docker }): ReaderEffects {
   const docker = options.docker ?? new Docker();
@@ -49,40 +51,51 @@ export function realReaderEffects(options: { readonly root: string; readonly ser
     if (!ASK_ID.test(id)) throw new ReaderError('invalid', `not an ask id: ${JSON.stringify(id)}`);
     return join(options.root, id);
   };
+  // A plain text file of a service at a revision, from git's objects.
+  const blobAt = async (name: string, revision: string, path: string, at: string): Promise<string> => {
+    const service = serviceOf(name);
+    const inside = servicePath(path);
+    if (inside === undefined) throw new ReaderError('invalid', `${path} is not a path inside ${name}`);
+    const verdict = evaluate({ tool: 'Read', input: { file_path: posix.join(WORKDIR_MOUNT, name, inside), limit: 1 } }, {
+      role: 'reader', base: service.base, workdir: WORKDIR_MOUNT, scripts: [], credentialFile: LOGIN_FILE_MOUNT,
+      safeCommands: [], allowedHosts: [], forbiddenHosts: [], ticketFiles: [], learned: [],
+    });
+    if (verdict.decision === 'deny') throw new ReaderError('invalid', verdict.message);
+    const full = service.path === null ? inside : posix.join(service.path, inside);
+    const absent = () => new ReaderError('invalid', `${inside} is not a file of ${name} at ${at}`);
+    let entry: string;
+    try {
+      entry = (await git(service.dir, ['ls-tree', '-z', '--long', revision, '--', full])).split('\0')[0] ?? '';
+    } catch (error) {
+      if (error instanceof CheckoutError) throw absent();
+      throw error;
+    }
+    // <mode> SP <type> SP <object> SP+ <size> TAB <path>
+    const match = /^(\d+) (\w+) ([0-9a-f]+) +(\d+|-)\t(.*)$/s.exec(entry);
+    if (!match || match[5] !== full) throw absent();
+    if (match[2] !== 'blob' || (match[1] !== '100644' && match[1] !== '100755')) throw new ReaderError('invalid', `${inside} is not a plain file of ${name}: a link or a folder is not read`);
+    if (Number(match[4]) > READER_FILE_MAX_BYTES) throw new ReaderError('invalid', `${inside} is larger than ${READER_FILE_MAX_BYTES} bytes`);
+    const text = await git(service.dir, ['cat-file', 'blob', match[3] as string]);
+    if (text.includes('\0') || text.includes('�')) throw new ReaderError('invalid', `${inside} is not a text file`);
+    return text;
+  };
 
   return {
     async fileAt(name, path) {
-      const service = serviceOf(name);
-      const inside = servicePath(path);
-      if (inside === undefined) throw new ReaderError('invalid', `${path} is not a path inside ${name}`);
-      const verdict = evaluate({ tool: 'Read', input: { file_path: posix.join(WORKDIR_MOUNT, name, inside), limit: 1 } }, {
-        role: 'reader', base: service.base, workdir: WORKDIR_MOUNT, scripts: [], credentialFile: LOGIN_FILE_MOUNT,
-        safeCommands: [], allowedHosts: [], forbiddenHosts: [], ticketFiles: [], learned: [],
-      });
-      if (verdict.decision === 'deny') throw new ReaderError('invalid', verdict.message);
-      const full = service.path === null ? inside : posix.join(service.path, inside);
-      const absent = () => new ReaderError('invalid', `${inside} is not a file of ${name} at its base branch ${service.base}`);
-      let entry: string;
-      try {
-        entry = (await git(service.dir, ['ls-tree', '-z', '--long', `refs/remotes/origin/${service.base}`, '--', full])).split('\0')[0] ?? '';
-      } catch (error) {
-        if (error instanceof CheckoutError) throw absent();
-        throw error;
-      }
-      // <mode> SP <type> SP <object> SP+ <size> TAB <path>
-      const match = /^(\d+) (\w+) ([0-9a-f]+) +(\d+|-)\t(.*)$/s.exec(entry);
-      if (!match || match[5] !== full) throw absent();
-      if (match[2] !== 'blob' || (match[1] !== '100644' && match[1] !== '100755')) throw new ReaderError('invalid', `${inside} is not a plain file of ${name}: a link or a folder is not read`);
-      if (Number(match[4]) > READER_FILE_MAX_BYTES) throw new ReaderError('invalid', `${inside} is larger than ${READER_FILE_MAX_BYTES} bytes`);
-      const text = await git(service.dir, ['cat-file', 'blob', match[3] as string]);
-      if (text.includes('\0') || text.includes('�')) throw new ReaderError('invalid', `${inside} is not a text file`);
-      return text;
+      return await blobAt(name, `refs/remotes/origin/${serviceOf(name).base}`, path, 'its base branch');
+    },
+
+    async linesAt(name, commit, path) {
+      if (!COMMIT.test(commit)) throw new ReaderError('invalid', `not a commit: ${JSON.stringify(commit)}`);
+      const text = await blobAt(name, commit, path, `commit ${commit}`);
+      return text === '' ? 0 : text.split('\n').length - (text.endsWith('\n') ? 1 : 0);
     },
 
     async prepare(input) {
       const dir = folderOf(input.id);
       rmSync(dir, { recursive: true, force: true });
       mkdirSync(dir, { recursive: true, mode: 0o755 });
+      const commits: Record<string, string> = {};
       for (const name of input.services) {
         const service = serviceOf(name);
         // Exported next to the folder, then moved into it: the export is of the commit, its own folder.
@@ -90,8 +103,10 @@ export function realReaderEffects(options: { readonly root: string; readonly ser
         rmSync(staging, { recursive: true, force: true });
         try {
           const exported = await exportBase({ project: service.dir, base: service.base, root: staging, ...(service.path === null ? {} : { only: service.path }) });
-          if (exported) renameSync(exported.dir, join(dir, name));
-          else mkdirSync(join(dir, name));
+          if (exported) {
+            renameSync(exported.dir, join(dir, name));
+            commits[name] = exported.commit;
+          } else mkdirSync(join(dir, name));
         } finally {
           rmSync(staging, { recursive: true, force: true });
         }
@@ -99,7 +114,7 @@ export function realReaderEffects(options: { readonly root: string; readonly ser
       writeFileSync(join(dir, 'CLAUDE.md'), input.briefing);
       writeFileSync(join(dir, 'HANDOVER.md'), HANDOVER_PLACEHOLDER);
       writeFileSync(join(dir, READ_ONLY_MARK), '');
-      return dir;
+      return { dir, commits };
     },
 
     async release(input) {
