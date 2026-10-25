@@ -90,8 +90,15 @@
 // the new card carries the attempt. At most CI_REPAIR_ATTEMPTS attempts;
 // then the card says the checks still fail and the owner decides. A train
 // is not repaired.
+//
+// A Quick ticket is on the fast lane kept from v1 (matrix B2.2,
+// flow/fast-lane.ts): its author is Haiku, and v1's rules judge its real
+// diff after each author session and at the head it publishes. A rule it
+// breaks, a question its team asks the owner, or several services send it
+// back to the full circuit for good: its card says why, the lead is told,
+// and its later authors run on the full model, never a resumed Haiku.
 import { posix } from 'node:path';
-import { VARIANT_DIFF_MAX, VARIANTS_MAX, VARIANTS_MIN, type CiRepair, type InboxItem, type PermissionItem, type ProductionCheck, type QuestionItem, type QuestionTimeout, type ReleaseItem, type SessionDetail, type SessionPlan, type SessionSummary, type TakenOver, type TicketStep, type TicketVariant } from '../api/types.ts';
+import { VARIANT_DIFF_MAX, VARIANTS_MAX, VARIANTS_MIN, type CiRepair, type InboxItem, type PermissionItem, type ProductionCheck, type QuestionItem, type QuestionTimeout, type FastLane, type ReleaseItem, type SessionDetail, type SessionPlan, type SessionSummary, type TakenOver, type TicketStep, type TicketVariant } from '../api/types.ts';
 import { isSessionId } from '../container/docker.ts';
 import type { SiblingSpec } from '../container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
@@ -135,6 +142,7 @@ import { productionChecksOf, productionComment } from './production.ts';
 import type { ReceiptCapture, ReceiptData, ReceiptTest } from './receipt.ts';
 import { ticketCost } from '../consumption/ticket-cost.ts';
 import { CI_REPAIR_ATTEMPTS, onBase, repairComment, repairMessage, type CiFailures } from './ci-repair.ts';
+import { FastLaneStore, cardLane, fallbackComment, type FastVerdict } from './fast-lane.ts';
 import type { PrClose } from './pr-close.ts';
 import { authorPrompt, contractSendBackMessage, fileDiff, handoverMessage, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
 import { humanEdits } from './human-edits.ts';
@@ -148,6 +156,7 @@ export type { ProjectSettings } from './config.ts';
 export type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
 // What the lock answered a merge (effects.ts mergeRelease, release/lock.ts).
 export type { MergeOutcome } from '../release/lock.ts';
+export type { FastVerdict } from './fast-lane.ts';
 
 // What the flow does outside this process. `service` names the service of
 // a workspace of several the call is for; absent, the one-service
@@ -233,6 +242,11 @@ export type FlowEffects = {
   // read out of its checkout as a step's branch is: committed changes only.
   // Absent: the variants item says the change could not be read.
   variantChanges?(input: { readonly ticket: TicketId; readonly workdir: string; readonly variant: VariantKey }): Promise<{ readonly files: readonly string[]; readonly diff: string }>;
+  // The fast lane's rules on a Quick ticket's change (matrix B2.2,
+  // flow/fast-lane.ts): the session's branch in `workdir`, or a published
+  // `head`, against the base. Absent: no Quick ticket is judged, and no card
+  // says a lane.
+  fastLane?(input: { readonly ticket: TicketId; readonly service?: ServiceConfig; readonly workdir?: string; readonly head?: string }): Promise<FastVerdict>;
 };
 
 export type StepChanges = {
@@ -403,6 +417,7 @@ export class FlowEngine {
   #replays: ReplayStore;                                            // the tickets resumed from a step (issue #272)
   #replaying = new Set<TicketId>();                                 // tickets whose resume is under way
   #tips = new Map<SessionId, string>();                             // the last commit journaled as an author's checkpoint
+  #fastLanes: FastLaneStore;                                        // the Quick tickets the rules kept fast or sent back (B2.2)
 
   constructor(deps: FlowDeps) {
     this.registry = deps.registry;
@@ -421,6 +436,7 @@ export class FlowEngine {
     this.#steps = new StepStore(deps.store.db, this.#now);
     this.#variants = new VariantStore(deps.store.db, this.#now);
     this.#replays = new ReplayStore(deps.store.db, this.#now);
+    this.#fastLanes = new FastLaneStore(deps.store.db);
     this.#runner = new TrainRunner({
       db: deps.store.db, trains: this.#trains, tickets: this.registry.ticketStore, project: this.config.project, retryMs: this.config.mergeRetryMs,
       lock: (name) => this.#lockOf(this.#service(name)), now: this.#now, clean: this.#clean, emit: (event) => this.#emit(event),
@@ -1960,7 +1976,7 @@ export class FlowEngine {
   // Haiku for a Quick ticket, unless Haiku reviews it or a service it
   // touches is `full` (decision 24), which refuses the fast lane.
   #authorModel(ticket: Ticket): string {
-    if (!ticket.labels.includes(QUICK_LABEL) || this.#reviewerModel(ticket) === QUICK_MODEL) return this.#chosenModel(ticket);
+    if (!ticket.labels.includes(QUICK_LABEL) || this.#fastLanes.demoted(ticket.id) || this.#reviewerModel(ticket) === QUICK_MODEL) return this.#chosenModel(ticket);
     return this.#servicesOf(ticket).some((service) => service.sensitivity === 'full') ? this.#chosenModel(ticket) : QUICK_MODEL;
   }
 
@@ -2368,6 +2384,7 @@ export class FlowEngine {
           const item = this.inbox.addQuestion({ ticket: session.ticket, project: session.project, sessionId: live.id, requestId: event.value.requestId, questions, timeout: (since) => this.#questionTimeout(since, questions, live.settings) });
           this.#waitStarts(live);
           this.#emit({ type: 'question_raised', at: this.#at(), project: session.project, ticket: session.ticket, session: live.id, requestId: event.value.requestId, item: item.id });
+          if (live.input.role === 'author') await this.#askedOnFastLane(session.ticket, session.project);
           return;
         }
         case 'cleared.permission_answered':
@@ -2553,6 +2570,7 @@ export class FlowEngine {
     const tickets = this.registry.ticketStore;
     const ticket = await tickets.get(id);
     if (!ticket) return;
+    await this.#judgeFast(ticket, { workdir: author.input.workdir });
     await tickets.move(id, tickets.states.review, SERVICE);
     const open = this.#channels.get(id);
     if (open) {
@@ -2707,7 +2725,9 @@ export class FlowEngine {
     const began = this.#now();
     const lastSeq = authorRow ? (this.#store.events.after(authorRow.id).at(-1)?.seq ?? 0) : 0;
     let journaled = false;
-    if (authorRow && kept) {
+    // A ticket sent back to the full circuit is not answered by its light author (B2.2).
+    const light = kept?.input.model === QUICK_MODEL && this.#fastLanes.demoted(id);
+    if (authorRow && kept && !light) {
       let handle: SessionHandle | undefined;
       try { handle = await this.#resume(adapter, authorRow.id); } catch { handle = undefined; }
       if (handle) {
@@ -2972,6 +2992,7 @@ export class FlowEngine {
       return;
     }
     for (const old of this.inbox.waitingReleases().filter((item) => item.ticket === id)) this.#settleRelease(old.id, id, project, 'system');
+    const lane = await this.#judgeFast(ticket, { head: published.head });
     const changed = await this.#changes(id, published.head);
     const card = flags({ diff: changed?.diff ?? '', ...this.#report(id), ...this.#guarded(ticket, [reviewer.settings]) });
     // A repair's commit: the new card carries its attempt (issue #273).
@@ -2983,7 +3004,7 @@ export class FlowEngine {
       pr: { number: published.number, url: published.url, checks: 'pending' },
       heads: [{ pr: published.number, head: published.head }],
       captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } },
-      sessions: this.#releaseSessions(id, round), groups: card.groups, flags: card.flags, ...(repair ? { repair } : {}),
+      sessions: this.#releaseSessions(id, round), groups: card.groups, flags: card.flags, ...(repair ? { repair } : {}), ...this.#cardLane(ticket, lane),
     }, reviewer.id);
     if (repair) await this.#repairSaid(item, repair);
     // The lock has the request: the flow is over. What follows is the human's, and a person
@@ -2992,6 +3013,58 @@ export class FlowEngine {
     this.#step(session, 'STEP_FINISHED', 'release');
     this.#step(session, 'STEP_STARTED', 'approval');
     this.#emit({ type: 'release_requested', at: this.#at(), project, ticket: id, session: reviewer.id, item: item.id, pr: published.number, url: published.url });
+  }
+
+  // ---- the fast lane (matrix B2.2, flow/fast-lane.ts) ------------------------
+
+  // A Quick ticket's change judged by v1's rules: the session's branch in
+  // `workdir`, or the published `head`. Undefined when nothing was read: no
+  // label, no reading of the rules here, a ticket already sent back, or one
+  // of several services, which is sent back without a reading.
+  async #judgeFast(ticket: Ticket, at?: { readonly workdir: string } | { readonly head: string }): Promise<FastVerdict | undefined> {
+    const judge = this.#effects.fastLane;
+    if (!judge || !ticket.labels.includes(QUICK_LABEL) || this.#fastLanes.demoted(ticket.id)) return undefined;
+    const project = ticket.project ?? this.config.project;
+    const services = this.#servicesOf(ticket);
+    if (services.length > 1) {
+      await this.#fallback(ticket.id, project, { reasons: ['several_services'] });
+      return undefined;
+    }
+    if (!at) return undefined;
+    let verdict: FastVerdict;
+    try {
+      verdict = await judge({ ticket: ticket.id, ...(this.#several ? { service: services[0] as ServiceConfig } : {}), ...at });
+    } catch (error) {
+      console.error(`cleared-v2: the fast lane's rules could not read ${ticket.id} (${error instanceof Error ? error.name : typeof error})`);
+      verdict = { state: 'full', reasons: ['unreadable'], keep: false };
+    }
+    if (verdict.problem) console.error(`cleared-v2: the fast lane of ${ticket.id}: ${this.#clean(verdict.problem)}`);
+    if (verdict.state === 'fast') this.#fastLanes.kept(ticket.id, project, verdict, this.#at());
+    else if (verdict.keep) await this.#fallback(ticket.id, project, verdict);
+    return verdict;
+  }
+
+  // A team that asks the owner leaves the fast lane (docs/fast-lane.md, "What qualifies").
+  async #askedOnFastLane(id: TicketId, project: string): Promise<void> {
+    if (!this.#effects.fastLane || this.#fastLanes.demoted(id)) return;
+    const ticket = await this.registry.ticketStore.get(id);
+    if (ticket?.labels.includes(QUICK_LABEL)) await this.#fallback(id, project, { reasons: ['asked'] });
+  }
+
+  // Sent back for good: written, said on the ticket, then on the bus, once.
+  async #fallback(id: TicketId, project: string, verdict: Pick<FastVerdict, 'reasons' | 'head' | 'lines' | 'files' | 'first'>): Promise<void> {
+    if (!this.#fastLanes.demote(id, project, verdict, this.#at())) return;
+    await this.registry.ticketStore.comment(id, fallbackComment(verdict.reasons), SERVICE).catch(() => undefined);
+    this.#emit({
+      type: 'fast_lane_fallback', at: this.#at(), project, ticket: id, reasons: verdict.reasons,
+      head: verdict.head ?? null, lines: verdict.lines ?? null, files: verdict.files ?? null, first: verdict.first ? this.#clean(verdict.first) : null,
+    });
+  }
+
+  // The card's lane, for a Quick ticket the rules follow.
+  #cardLane(ticket: Ticket, verdict: FastVerdict | undefined): { fastLane?: FastLane } {
+    if (!this.#effects.fastLane || !ticket.labels.includes(QUICK_LABEL)) return {};
+    return { fastLane: cardLane(this.#fastLanes.get(ticket.id), verdict) };
   }
 
   // What a published head changes, for the card's flags and the
@@ -3054,6 +3127,8 @@ export class FlowEngine {
       }
     }
     if (published.length === 0) return fail(`The branch was not published: no service of the ticket (${order.map((s) => s.name).join(', ')}) has a commit of its own.`, 'publish_refused');
+    // A ticket of one service of several publishes one pull request, whose head is judged as a one-service ticket's.
+    const lane = await this.#judgeFast(ticket, published.length === 1 ? { head: (published[0] as (typeof published)[number]).pr.head } : undefined);
     const announcement = [
       `Ticket ${id}: ${ticket.title}`,
       '',
@@ -3093,7 +3168,7 @@ export class FlowEngine {
       pr: { number: first.pr.number, url: first.pr.url, checks: 'pending' },
       heads: stops.map((stop) => ({ pr: stop.pr.number, head: stop.head })),
       captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } },
-      sessions: this.#releaseSessions(id, round), train: view({ ...train, item: '', approver: null }), groups: card.groups, flags: card.flags,
+      sessions: this.#releaseSessions(id, round), train: view({ ...train, item: '', approver: null }), groups: card.groups, flags: card.flags, ...this.#cardLane(ticket, lane),
     }, reviewer.id);
     this.#trains.haltActive(id);
     this.#trains.add({ ...train, item: item.id });

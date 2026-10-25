@@ -29,7 +29,7 @@ import {
   ROW_ANSWERS_MIN, closesOnEscape, foldOf, foldOpen, inboxKey, permissionAsk, permissionTitle, reasonOf, rowAnswers, type Answer,
   CHANGE_MAX, CHECKS, GRACE_MS, SEND_BACK_MAX, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approveContract, approveKnowledge, approvePlan,
   changeMessage, chooseVariant, chosen, chosenLine, clock, deadlineLine, decidedLine, decisionFor, detailKey, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
-  kept, known, ordered, outcomeLine, pausedLine, planChange, planGo, planOf, readPlan, rejectKnowledge, releaseSession, sameOrigin, sendBack, sendBackContract, sendBackMessage,
+  kept, known, laneLine, ordered, outcomeLine, pausedLine, planChange, planGo, planOf, readPlan, rejectKnowledge, releaseSession, sameOrigin, sendBack, sendBackContract, sendBackMessage,
   repairLine, sessionLink, sessionOf, sessionsLine, shareLine, short, variantFacts, variantHarness, variantTests,
   ticketTitle, trainLine, stopState, undoApproval, type Gesture, type InboxView, type Item, type Local,
 } from './model.ts';
@@ -231,6 +231,7 @@ function ReleaseBody({ item, view, t, onFrame }: { readonly item: ReleaseItem; r
   const pictures = !train || [item.captures.before, item.captures.after].some((c) => c.desktop || c.phone);
   const waits = item.state === 'waiting' && approvable(item);
   const repair = repairLine(item, t);
+  const lane = laneLine(item, t);
   return (
     <>
       <Eyebrow item={item} kind={t(waits ? 'eyebrow_release' : 'kind_release')} open={open && sessionLink(open.id)} openKey="open_sessions" t={t} />
@@ -243,6 +244,7 @@ function ReleaseBody({ item, view, t, onFrame }: { readonly item: ReleaseItem; r
       <dl className="facts">
         {item.sessions.length > 0 ? <Fact label={t('facts_sessions')}>{sessionsLine(item, t)}</Fact> : null}
         {repair ? <Fact label={t('facts_repair')}><span data-repair={item.repair?.state}>{repair}</span></Fact> : null}
+        {lane ? <Fact label={t('facts_lane')}><span data-lane={item.fastLane?.state}>{lane}</span></Fact> : null}
         {train ? <Fact label={t('facts_checks')}>{t(`checks_${CHECKS[item.pr.checks]}`)}</Fact> : (
           <Fact label={t('facts_change')}>
             {isWebLink(item.pr.url) ? <a href={item.pr.url} rel="noopener noreferrer">{pr}</a> : pr}

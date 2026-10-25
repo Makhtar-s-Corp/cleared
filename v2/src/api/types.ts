@@ -155,7 +155,24 @@ export type ReleaseItem = InboxBase & {
   readonly repair?: CiRepair;
   // The owner closed the ticket with this card waiting (issue #249): the reason, who and when.
   readonly outcome?: { readonly decision: 'close'; readonly reason: string; readonly by: UserId; readonly at: string };
+  // A Quick ticket's lane at the card's head (matrix B2.2, flow/fast-lane.ts): absent for any other ticket.
+  readonly fastLane?: FastLane;
 };
+
+// The fast lane of a Quick ticket, judged by v1's rules (lib/fast-lane.mjs)
+// on what merging its head would land: `fast`, every rule holds; `full`,
+// sent back to the full circuit for good, with the rules it broke; `off`,
+// not fast at this head and not sent back (the service's [fast_lane] is off
+// or unreadable, git could not read the merge).
+export type FastLane = { readonly state: 'fast' | 'full' | 'off'; readonly reasons: readonly FastReason[] };
+
+// v1's RULE_REASONS, then what says nothing of the change (unreadable,
+// settings, disabled), then v2's own: a ticket of several services is never fast.
+export const FAST_REASONS = [
+  'empty', 'too_many_files', 'too_many_lines', 'too_large', 'unusual_change', 'binary', 'path_form', 'protected', 'dependency', 'migration',
+  'outside_safe', 'file_type', 'content', 'link', 'asked', 'unreadable', 'settings', 'disabled', 'several_services',
+] as const;
+export type FastReason = (typeof FAST_REASONS)[number];
 
 // `started`: a failed check reopened the author on the ticket branch, the
 // card is handled; `pushed`: the attempt's commit is published, its checks

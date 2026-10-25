@@ -295,3 +295,26 @@ test('a note a step\'s session leaves says step_note, after the note is journale
   record(t);
   await t.engine.close();
 });
+
+// B2.2 (lane j3-fast-lane): a Quick ticket whose diff breaks a rule of the fast lane goes back to the full circuit, said after the ticket's comment.
+test('a Quick ticket sent back to the full circuit says fast_lane_fallback, after its comment is written', async () => {
+  const t = await setup({
+    scripts: { author: quickAuthor },
+    effects: { async fastLane() { return { state: 'full', reasons: ['dependency'], keep: true, head: 'abc123', lines: 2, files: 1, first: 'dependency: package.json' }; } },
+  });
+  const ticket = await t.tickets.create({ title: 'Pin a version', project: 'guestbook', labels: ['Quick'] }, { kind: 'human', id: 'u1' });
+  let commented = false;
+  t.engine.subscribe(async (event) => {
+    if (event.type === 'fast_lane_fallback') commented = (await t.tickets.comments(ticket.id)).some((c) => c.body.startsWith('Back to the full circuit'));
+  });
+  await t.engine.start(ticket.id, 'u1');
+  await until(() => of(t, 'fast_lane_fallback').length === 1, 'the fallback');
+  const [event] = of(t, 'fast_lane_fallback');
+  assert.deepEqual({ ...event, at: undefined }, {
+    type: 'fast_lane_fallback', at: undefined, project: 'guestbook', ticket: ticket.id, reasons: ['dependency'], head: 'abc123', lines: 2, files: 1, first: 'dependency: package.json',
+  });
+  await until(() => commented, 'the comment, before the event');
+  record(t);
+  await t.engine.settled();
+  await t.engine.close();
+});
