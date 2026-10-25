@@ -7236,3 +7236,6 @@ The two agreement cases came later, from a second read of the lock's path: with 
 - Ports: only the tests' own ephemeral loopback ones. No tunnel, no secret.
 
 **The merge of 427** (lane `v2-j5-images`, issue #422, at `origin/v2` `996bde5`). 427 took the id P254 for the prepared images, so this lane's line is P255: the matrix, section 11 of the plan and this entry say so. Both log entries and matrix lines are kept.
+
+- Pull request: 428, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-gitlab`.
