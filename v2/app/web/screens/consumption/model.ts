@@ -235,7 +235,7 @@ export function weekView(week: WeekFigures, language: Language, t: Translate): W
       });
   return {
     merged: n === 0 ? t('consumption_week_merged_none') : n === 1 ? t('consumption_week_merged_one') : t('consumption_week_merged', { n: count(n, language) }),
-    tokens: worked ? t('consumption_week_tokens', { n: tokensText(week.spend.tokens ?? 0, language) }) : null,
+    tokens: worked ? t('consumption_week_used', { n: tokensText(week.spend.tokens ?? 0, language) }) : null,
     time: worked ? t('consumption_week_work', { time: lasted(week.spend.workMs, t) }) : null,
     idle: worked ? null : t('consumption_week_idle'),
     dollars: worked && week.spend.costUsd !== null ? t('consumption_week_dollars', { amount: dollars(week.spend.costUsd, language) }) : null,

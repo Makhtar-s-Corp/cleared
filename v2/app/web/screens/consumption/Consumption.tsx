@@ -202,7 +202,7 @@ function Week({ week, failed, t, language }: { readonly week: WeekFigures | unde
                 <tr>
                   <th scope="col">{t('consumption_week_service')}</th>
                   <th scope="col" className="n">{t('consumption_week_col_merged')}</th>
-                  <th scope="col" className="n">{t('consumption_week_col_tokens')}</th>
+                  <th scope="col" className="n">{t('consumption_week_col_used')}</th>
                   <th scope="col" className="n">{t('consumption_week_col_time')}</th>
                   <th scope="col" className="n">{t('consumption_week_col_dollars')}</th>
                 </tr>
