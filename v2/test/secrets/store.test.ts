@@ -53,7 +53,7 @@ test('a value is encrypted at rest: neither the ledger nor its log holds it, and
   const rows = db.prepare('SELECT * FROM test_secrets').all() as Record<string, unknown>[];
   assert.equal(rows.length, 2);
   for (const row of rows) for (const cell of Object.values(row)) assert.ok(!Buffer.from(cell as never).includes(value), 'no column holds the value');
-  const [a, b] = rows as [Record<string, Uint8Array>, Record<string, Uint8Array>];
+  const [a, b] = rows as [{ iv: Uint8Array; sealed: Uint8Array }, { iv: Uint8Array; sealed: Uint8Array }];
   assert.notDeepEqual(Buffer.from(a.iv), Buffer.from(b.iv), 'a fresh nonce for every write');
   assert.notDeepEqual(Buffer.from(a.sealed), Buffer.from(b.sealed));
   db.exec('PRAGMA wal_checkpoint(TRUNCATE)');

@@ -26,7 +26,9 @@ import { parseAllowList } from '../../images/egress/proxy.ts';
 import { DockerError, assertSessionId, type ContainerSpec, type Docker, type Limits } from './docker.ts';
 import type { ImageChoice } from './devcontainer.ts';
 import { PreparedImages, type PreparedChoice } from './prepared.ts';
-import { ServiceError, dependencyChange, ticketLayerDockerfile, type ServiceSpec, type SiblingSpec } from './services.ts';
+import { testVariablesOf } from '../secrets/live.ts';
+import type { Role } from '../session/contract.ts';
+import { ServiceError, dependencyChange, testVariables, ticketLayerDockerfile, type ServiceSpec, type SiblingSpec } from './services.ts';
 
 // The session image pins Claude Code's version; the tag follows it.
 export const SESSION_IMAGE = 'cleared-v2-session:2.1.306';
@@ -104,6 +106,12 @@ export type SessionRuntimeSpec = {
   readonly fakeImage?: string;
   readonly limits?: Limits;
   readonly env?: Readonly<Record<string, string>>;
+  // The service the session works on and its role: an author's or a
+  // reviewer's session, and each real sibling, get their service's test
+  // secrets (C16, src/secrets/); a reader, the lead or a session that
+  // names no service get none.
+  readonly service?: string;
+  readonly role?: Role;
   // Created but not started: the adapter starts it attached (Docker.attach).
   readonly interactive?: boolean;
   readonly readyTimeoutMs?: number;
@@ -355,6 +363,10 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
     // A sibling runs code the session wrote: no capability, on the session
     // network only, with the test services' variables (its database).
     const servicesEnv: Record<string, string> = Object.assign({}, ...spec.services.map((service) => service.sessionEnv));
+    // The test secrets of a service, under what its container sets: through
+    // the client's environment (Docker's privateEnv), never on a command line.
+    const tested = spec.service !== undefined && (spec.role === 'author' || spec.role === 'reviewer');
+    const secretsOf = (service: string, own: Readonly<Record<string, string>>): Record<string, string> => (tested ? testVariables(testVariablesOf(service), own) : {});
     for (const { spec: sibling, container: name, image } of siblings) {
       // An image's VOLUME paths are tmpfs: Docker would otherwise create an
       // anonymous volume for each, without Cleared's label.
@@ -373,7 +385,8 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
           },
         });
       } else {
-        await container({ ...common, role: 'sibling', image: image.image, limits: SERVICE_LIMITS, env: { ...servicesEnv, ...sibling.env } });
+        const env = { ...servicesEnv, ...sibling.env };
+        await container({ ...common, role: 'sibling', image: image.image, limits: SERVICE_LIMITS, env, privateEnv: secretsOf(sibling.name, env) });
       }
       await docker.start(session, name);
     }
@@ -412,6 +425,14 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
     }
 
     const noProxy = ['localhost', '127.0.0.1', ...spec.services.map((service) => service.alias), ...siblings.map((sibling) => sibling.spec.name)].join(',');
+    const sessionEnv: Record<string, string> = {
+      HTTPS_PROXY: PROXY_URL, HTTP_PROXY: PROXY_URL, https_proxy: PROXY_URL, http_proxy: PROXY_URL,
+      NO_PROXY: noProxy, no_proxy: noProxy,
+      HOME: '/tmp',
+      CLAUDE_CONFIG_DIR: CONFIG_MOUNT,
+      ...servicesEnv,
+      ...spec.env,
+    };
     await container({
       name: names.container, session, role: 'session', image: image.image,
       networks: [{ name: names.network }],
@@ -423,14 +444,8 @@ export async function startSession(docker: Docker, spec: SessionRuntimeSpec): Pr
         { type: 'volume', source: names.volume, target: CONFIG_MOUNT },
         ...(spec.skills === undefined ? [] : [{ type: 'bind' as const, source: spec.skills, target: SKILLS_MOUNT, readonly: true }]),
       ],
-      env: {
-        HTTPS_PROXY: PROXY_URL, HTTP_PROXY: PROXY_URL, https_proxy: PROXY_URL, http_proxy: PROXY_URL,
-        NO_PROXY: noProxy, no_proxy: noProxy,
-        HOME: '/tmp',
-        CLAUDE_CONFIG_DIR: CONFIG_MOUNT,
-        ...servicesEnv,
-        ...spec.env,
-      },
+      env: sessionEnv,
+      privateEnv: spec.service === undefined ? {} : secretsOf(spec.service, sessionEnv),
       workdir: WORKDIR_MOUNT,
       interactive: spec.interactive,
       command: spec.command,

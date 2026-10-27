@@ -56,7 +56,7 @@ async function withBrowser(options: { language: 'en' | 'fr'; width?: number; the
     await page.click('button[type=submit]');
     await page.waitForURL(`${app.base}/`);
     await page.goto(`${app.base}/services`);
-    await page.locator('[data-test-values] [data-service="guestbook"]').waitFor();
+    await page.locator('[data-test-values-service="guestbook"]').waitFor();
     await run(page);
     assert.deepEqual(errors, [], 'no page error');
     assert.doesNotMatch(await page.evaluate(() => document.body.innerText), /⟦/, 'no missing key drawn');
@@ -75,7 +75,7 @@ const shot = async (page: any, name: string) => {
 test('the panel lists the services under the map; a value added is listed by name, then removed', { skip }, async () => {
   await withBrowser({ language: 'en' }, async (page) => {
     await axeClean(page, 'listed');
-    assert.equal(await page.locator('[data-test-values] [data-service]').count(), 2);
+    assert.equal(await page.locator('[data-test-values-service]').count(), 2);
     await page.selectOption('#services-test-value-service', 'filter-api');
     await page.fill('#services-test-value-name', 'FILTER_TEST_KEY');
     await page.fill('#services-test-value-value', 'short');
@@ -84,13 +84,13 @@ test('the panel lists the services under the map; a value added is listed by nam
     assert.match(await page.locator('[data-test-values] [role="alert"]').innerText(), /8 characters/);
     await page.fill('#services-test-value-value', VALUE);
     await page.keyboard.press('Enter');
-    await page.locator('[data-service="filter-api"] [data-test-value="FILTER_TEST_KEY"]').waitFor();
+    await page.locator('[data-test-values-service="filter-api"] [data-test-value="FILTER_TEST_KEY"]').waitFor();
     assert.equal(await page.inputValue('#services-test-value-value'), '');
     assert.ok(!(await page.content()).includes(VALUE), 'the page never holds the value');
     await axeClean(page, 'saved');
     await shot(page, 'test-values-en-1440-light');
-    await page.locator('[data-service="filter-api"] [data-act="test_value_remove"]').click();
-    await page.locator('[data-service="filter-api"] [data-test-value="FILTER_TEST_KEY"]').waitFor({ state: 'detached' });
+    await page.locator('[data-test-values-service="filter-api"] [data-act="test_value_remove"]').click();
+    await page.locator('[data-test-values-service="filter-api"] [data-test-value="FILTER_TEST_KEY"]').waitFor({ state: 'detached' });
   });
 });
 

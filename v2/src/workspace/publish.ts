@@ -22,7 +22,8 @@
 //      it, then the commits; the proof receipt first (P210, flow/receipt.ts),
 //      in the project's language ([owner] language at the base), guarded on
 //      its own and left out when the guard refuses it. A reused pull
-//      request gets the new receipt in place of the old one.
+//      request gets the new receipt in place of the old one. The title
+//      and the body go without the test secrets' values (C16).
 import { execFile, spawn } from 'node:child_process';
 import { copyFileSync, lstatSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -33,6 +34,7 @@ import { CheckoutError, checkBranchName, git, gitPath } from './checkout.ts';
 import { renderReceipt, withReceipt, type ReceiptData } from '../flow/receipt.ts';
 import { ForgeError, type Forge } from '../forge/contract.ts';
 import { forgeFor } from '../forge/index.ts';
+import { withoutTestValues } from '../session/clean.ts';
 
 const run = promisify(execFile);
 
@@ -278,7 +280,7 @@ async function guardPushOpen(input: PublishInput, at: { base: string; ref: strin
       // The branch is pushed: a receipt that cannot be put in place is said, and the pull request stays as it is.
       try {
         const seen = await forge.pullRequestBody(input.repo, existing.number);
-        await forge.editPullRequestBody(input.repo, existing.number, withReceipt(seen, receipt));
+        await forge.editPullRequestBody(input.repo, existing.number, withoutTestValues(withReceipt(seen, receipt)));
       } catch (error) {
         console.error(`cleared-v2: the proof receipt of pull request ${existing.number} was not updated (${error instanceof Error ? error.name : typeof error})`);
       }
@@ -295,8 +297,9 @@ async function guardPushOpen(input: PublishInput, at: { base: string; ref: strin
   writeFileSync(file, body);
   if (report && (await runGuard(input.project, base, [file])) !== undefined) body = first(bare);
 
+  // A session holds its service's test secrets (C16): none reaches the forge in the title or the body.
   try {
-    const opened = await forge.createPullRequest({ repo: input.repo, base: input.base, head: input.branch, title: subjects[0] ?? input.branch, body });
+    const opened = await forge.createPullRequest({ repo: input.repo, base: input.base, head: input.branch, title: withoutTestValues(subjects[0] ?? input.branch), body: withoutTestValues(body) });
     return { url: opened.url, number: opened.number, head, created: true };
   } catch (error) {
     throw error instanceof ForgeError ? new PublishError(`${input.branch} is pushed, but ${error.message}`) : error;

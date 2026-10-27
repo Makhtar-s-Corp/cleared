@@ -8,6 +8,7 @@
 // when loaded, and lib/guard/private-terms.ts runs git when loaded. A test
 // keeps the copies word for word equal to the guard's.
 import { createHash } from 'node:crypto';
+import { knownTestValues } from '../secrets/live.ts';
 import type { StopReason, ToolKind } from './contract.ts';
 import { CUSTOM_NAMES, STEP_NAMES, isSubsetType, toolArgs, toolResult, type AgUiEvent, type ToolInput, type ToolOutput } from './events.ts';
 
@@ -85,10 +86,8 @@ export const GENERATED_ID = /^(?:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}
 export const ID_KEYS: ReadonlySet<string> = new Set(['requestId', 'toolCallId', 'sessionId', 'session', 'messageId', 'runId', 'threadId']);
 
 export function cleanText(text: string, options: CleanOptions): string {
-  let out = text;
+  let out = removeValues(text, options.secrets ?? []);
   const longestFirst = (values: readonly string[]) => [...values].sort((a, b) => b.length - a.length);
-  for (const secret of longestFirst(options.secrets ?? []))
-    if (secret.length >= SHORTEST_SECRET) out = out.split(secret).join(removed('secret'));
   for (const path of longestFirst((options.servicePaths ?? []).map((p) => p.replace(/\/+$/, ''))))
     if (path.length > 1) out = out.split(path).join(removed('service path'));
   out = out.replace(KEY_BLOCK, removed('private key'));
@@ -99,11 +98,28 @@ export function cleanText(text: string, options: CleanOptions): string {
   return out;
 }
 
-// The values of the environment whose names say they are secrets.
+// The values of the environment whose names say they are secrets, and the
+// test secrets (C16, src/secrets/): every value the service held since it
+// started, given to sessions, so removed from what Cleared writes.
 export function secretValues(env: NodeJS.ProcessEnv): string[] {
-  return Object.entries(env)
+  return [...Object.entries(env)
     .filter(([name, value]) => /PASS|SECRET|TOKEN|API_?KEY|PEPPER|CREDENTIAL|PRIVATE_KEY/i.test(name) && value !== undefined && value.length >= SHORTEST_SECRET)
-    .map(([, value]) => value as string);
+    .map(([, value]) => value as string), ...knownTestValues()];
+}
+
+// Text with the test secrets' values alone replaced, everything else kept as
+// it was: for what Cleared sends out without cleaning it otherwise, a pull
+// request's title and body (workspace/publish.ts).
+export function withoutTestValues(text: string): string {
+  return removeValues(text, knownTestValues());
+}
+
+// Each value of at least SHORTEST_SECRET characters, longest first, replaced by its marker.
+function removeValues(text: string, values: readonly string[]): string {
+  let out = text;
+  for (const secret of [...values].sort((a, b) => b.length - a.length))
+    if (secret.length >= SHORTEST_SECRET) out = out.split(secret).join(removed('secret'));
+  return out;
 }
 
 // Text cut to the limit: its start and its end, never half a character.

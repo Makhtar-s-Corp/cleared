@@ -241,6 +241,8 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
       allowHosts: input.policy.allowedHosts, hostAddresses: runtime.hostAddresses, services: input.services ?? runtime.services ?? [],
       ...(input.siblings === undefined ? {} : { siblings: input.siblings }), ...(input.skills === undefined ? {} : { skills: input.skills }),
       user: runtime.user, command: RUNNER_COMMAND, interactive: true,
+      // Its service's test secrets, for an author or a reviewer (C16).
+      ...(service === undefined ? {} : { service }), role: input.role,
       ...(runtime.image === undefined ? {} : { image: runtime.image }),
       ...(runtime.limits === undefined ? {} : { limits: runtime.limits }),
       // The service's prepared image (C15), when the runtime names none; a wait for its build is said on the ticket.

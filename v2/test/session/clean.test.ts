@@ -292,10 +292,10 @@ test('a test secret\'s value is removed from an event, a comment and a pull requ
 
   const cleaner = createCleaner({ secrets: secretValues({}) });
   const events = [
-    ...cleaner.clean({ type: 'TEXT_MESSAGE_START', messageId: 'msg_0123456789', role: 'assistant' } as AgUiEvent),
-    ...cleaner.clean({ type: 'TEXT_MESSAGE_CONTENT', messageId: 'msg_0123456789', delta: `The key is ${testValue(1).slice(0, 7)}` } as AgUiEvent),
-    ...cleaner.clean({ type: 'TEXT_MESSAGE_CONTENT', messageId: 'msg_0123456789', delta: `${testValue(1).slice(7)}, from the sandbox.` } as AgUiEvent),
-    ...cleaner.clean({ type: 'TEXT_MESSAGE_END', messageId: 'msg_0123456789' } as AgUiEvent),
+    ...cleaner.clean({ type: 'TEXT_MESSAGE_START', messageId: 'msg_sandboxTalk', role: 'assistant' } as AgUiEvent),
+    ...cleaner.clean({ type: 'TEXT_MESSAGE_CONTENT', messageId: 'msg_sandboxTalk', delta: `The key is ${testValue(1).slice(0, 7)}` } as AgUiEvent),
+    ...cleaner.clean({ type: 'TEXT_MESSAGE_CONTENT', messageId: 'msg_sandboxTalk', delta: `${testValue(1).slice(7)}, from the sandbox.` } as AgUiEvent),
+    ...cleaner.clean({ type: 'TEXT_MESSAGE_END', messageId: 'msg_sandboxTalk' } as AgUiEvent),
   ];
   const text = JSON.stringify(events);
   assert.ok(!text.includes(testValue(1)), 'not in the event, even split across deltas');

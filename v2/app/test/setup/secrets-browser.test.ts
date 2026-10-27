@@ -82,7 +82,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await page.waitForURL(`${app.base}/`);
     await page.goto(`${app.base}/setup/secrets`);
 
-    await page.locator('[data-test-values] [data-service="web"]').waitFor();
+    await page.locator('[data-test-values-service="web"]').waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.lang), language);
     await checked(page, 'empty');
     assert.equal(await page.locator('[data-act="setup_test_values_done"]').isDisabled(), true, 'Done waits for a value');
@@ -96,7 +96,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
 
     await page.fill('#setup-test-value-value', VALUE);
     await page.click('[data-act="setup_test_values_save"]');
-    await page.locator('[data-service="api"] [data-test-value="PAYMENT_SANDBOX_KEY"]').waitFor();
+    await page.locator('[data-test-values-service="api"] [data-test-value="PAYMENT_SANDBOX_KEY"]').waitFor();
     await checked(page, 'saved');
     assert.equal(await page.inputValue('#setup-test-value-value'), '', 'the field is emptied once saved');
     assert.ok(!(await page.content()).includes(VALUE), 'the page never holds the value');
