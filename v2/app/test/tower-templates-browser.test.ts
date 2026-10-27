@@ -1,9 +1,11 @@
 // Ready-made tickets in a real browser, in French and in English (P214, issue
-// #330): the bar's Template chip shows Bug, Review, CI and Question; a pick
+// #330): the bar's Template chip shows Bug, Review, CI and Question, and
+// Environment, the setup session (C4, lane v2-j5-env-setup); a pick
 // fills the empty description with its sections and gives the title its
 // placeholder; another pick replaces untouched sections and keeps written
 // ones, saying so; New ticket sends the template's type label, which the
 // ticket keeps. On a 390-pixel phone, in French, nothing scrolls sideways.
+// With CLEARED_V2_CAPTURES=<folder>, the phone's row of five is captured.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/tower-templates-browser.test.ts
 import test from 'node:test';
@@ -22,8 +24,8 @@ declare const window: any;
 declare const fetch: any;
 
 const WORDS = {
-  fr: { chip: 'Modèle', toggles: ['Bug', 'Revue', 'CI', 'Question'], bugTitle: 'Ce qui casse', kept: 'Votre description est gardée, un modèle ne remplit qu\'une description vide.', created: /^LOCAL-\d+ créé/ },
-  en: { chip: 'Template', toggles: ['Bug', 'Review', 'CI', 'Question'], bugTitle: 'What breaks', kept: 'Your description is kept: a template only fills an empty one.', created: /^LOCAL-\d+ created/ },
+  fr: { chip: 'Modèle', toggles: ['Bug', 'Revue', 'CI', 'Question', 'Environnement'], bugTitle: 'Ce qui casse', kept: 'Votre description est gardée, un modèle ne remplit qu\'une description vide.', created: /^LOCAL-\d+ créé/ },
+  en: { chip: 'Template', toggles: ['Bug', 'Review', 'CI', 'Question', 'Environment'], bugTitle: 'What breaks', kept: 'Your description is kept: a template only fills an empty one.', created: /^LOCAL-\d+ created/ },
 } as const;
 
 type Viewport = { readonly width: number; readonly height: number };
@@ -113,10 +115,11 @@ for (const language of ['fr', 'en'] as const) {
 test('Ready-made tickets on a 390-pixel phone, in French: every template reachable, nothing scrolls sideways', { skip }, async () => {
   await withApp('fr', { width: 390, height: 844 }, async (page) => {
     await page.locator('[data-bar="template"]').click();
-    await page.locator('[data-template="question"]').click();
-    for (const template of ['bug', 'review', 'ci', 'question']) assert.ok(await page.locator(`[data-template="${template}"]`).isVisible(), template);
+    await page.locator('[data-template="environment"]').click();
+    for (const template of ['bug', 'review', 'ci', 'question', 'environment']) assert.ok(await page.locator(`[data-template="${template}"]`).isVisible(), template);
     assert.ok(await page.locator('#ask button[type=submit]').isVisible(), 'New ticket stays');
-    assert.equal(await page.inputValue('#ask-body'), loadCatalog('tower', 'fr').template_question_body);
+    assert.equal(await page.inputValue('#ask-body'), loadCatalog('tower', 'fr').template_environment_body);
+    if (process.env.CLEARED_V2_CAPTURES) await page.screenshot({ path: join(process.env.CLEARED_V2_CAPTURES, 'tower-templates-390-light-fr.png') });
     const width = await page.evaluate(() => ({ scroll: document.documentElement.scrollWidth, view: window.innerWidth }));
     assert.ok(width.scroll <= width.view, `no sideways scroll (${width.scroll} > ${width.view})`);
   });

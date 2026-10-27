@@ -1,0 +1,248 @@
+// A fake of the part of Linear's GraphQL API the Linear mirror uses, on
+// loopback, port 0. It answers the mirror's named operations only, checks
+// that each query asks for the fields it answers with, and never needs a
+// real key: each token is an account of the fake. A comment does not change
+// its issue's time here: the mirror reads comments by their own. A label
+// put on and an assignment are history entries (`addedLabelIds`,
+// `toAssigneeId`), as Linear's schema names them (a delegation, C3, P244).
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from 'node:http';
+import type { AddressInfo } from 'node:net';
+
+type State = { id: string; name: string; type: string };
+type Label = { id: string; name: string };
+type Named = { id: string; name: string };
+type HistoryEntry = {
+  createdAt: string; actor: Named | null; botActor: Named | null; toState: State | null;
+  fromTitle: string | null; toTitle: string | null; updatedDescription: boolean | null;
+  addedLabelIds: string[] | null; toAssigneeId: string | null;
+};
+type Comment = { id: string; body: string; createdAt: string; updatedAt: string; user: Named | null; botActor: Named | null; issueId: string };
+type Issue = {
+  id: string; identifier: string; url: string; title: string; description: string | null;
+  createdAt: string; updatedAt: string; stateId: string; teamId: string; history: HistoryEntry[]; comments: Comment[];
+  labels: Label[]; assigneeId: string | null; creator: Named | null;
+};
+export type FakeLinearActor = { readonly user: { id: string; name: string } } | { readonly bot: { id: string; name: string } };
+
+// The fields each operation must ask for, so that a query that drops one fails here.
+const ASKS: Record<string, readonly string[]> = {
+  MirrorSetup: ['viewer', 'teams', 'states', 'name'],
+  MirrorIssues: ['issues', 'identifier', 'url', 'description', 'createdAt', 'updatedAt', 'state', 'type', 'history', 'actor', 'botActor', 'toState', 'fromTitle', 'toTitle', 'updatedDescription', 'addedLabelIds', 'toAssigneeId', 'labels', 'assignee', 'creator', 'pageInfo', 'hasNextPage', 'endCursor'],
+  MirrorCreate: ['issueCreate', 'success', 'identifier', 'url', 'state', 'history'],
+  MirrorMove: ['issueUpdate', 'success'],
+  MirrorEdit: ['issueUpdate', 'success'],
+  MirrorComment: ['commentCreate', 'success', 'comment', 'id'],
+  MirrorComments: ['comments', 'body', 'createdAt', 'user', 'botActor', 'issue', 'pageInfo', 'hasNextPage', 'endCursor'],
+};
+
+export class FakeLinear {
+  readonly operations: { name: string; auth: string | undefined }[] = [];
+  readonly team = { id: 'team-1', key: 'ENG' };
+  readonly states: State[] = ([
+    ['Backlog', 'backlog'], ['Todo', 'unstarted'], ['In Progress', 'started'], ['In Review', 'started'], ['Needs Approval', 'started'],
+    ['Ready to Ship', 'started'], ['Done', 'completed'], ['Canceled', 'canceled'],
+  ] as const).map(([name, type], i) => ({ id: `state-${i}`, name, type }));
+  readonly labels: Label[] = [];
+  readonly issues = new Map<string, Issue>();
+  #server: Server | undefined;
+  #accounts = new Map<string, { id: string; name: string }>();
+  #clock: () => string;
+  #next = 1;
+  #comment = 1;
+
+  constructor(options: { readonly clock: () => string; readonly accounts: Record<string, { id: string; name: string }> }) {
+    this.#clock = options.clock;
+    for (const [token, user] of Object.entries(options.accounts)) this.#accounts.set(token, user);
+  }
+
+  async listen(): Promise<string> {
+    this.#server = createServer((request, response) => void this.#serve(request, response));
+    await new Promise<void>((resolve) => this.#server?.listen(0, '127.0.0.1', resolve));
+    return `http://127.0.0.1:${(this.#server.address() as AddressInfo).port}/graphql`;
+  }
+
+  async close(): Promise<void> {
+    await new Promise<void>((resolve) => (this.#server ? this.#server.close(() => resolve()) : resolve()));
+  }
+
+  #state(name: string): State {
+    const state = this.states.find((s) => s.name === name);
+    if (!state) throw new Error(`no state ${name}`);
+    return state;
+  }
+
+  #entry(by: FakeLinearActor, toState: State | null, edit: Partial<Pick<HistoryEntry, 'fromTitle' | 'toTitle' | 'updatedDescription' | 'addedLabelIds' | 'toAssigneeId'>> = {}): HistoryEntry {
+    return {
+      createdAt: this.#clock(), actor: 'user' in by ? by.user : null, botActor: 'bot' in by ? by.bot : null, toState,
+      fromTitle: null, toTitle: null, updatedDescription: null, addedLabelIds: null, toAssigneeId: null, ...edit,
+    };
+  }
+
+  // The team's label of that name, made on first use.
+  #label(name: string): Label {
+    const found = this.labels.find((l) => l.name === name);
+    if (found) return found;
+    const made = { id: `label-${this.labels.length + 1}`, name };
+    this.labels.push(made);
+    return made;
+  }
+
+  // An issue created on Linear by a person or an integration; labels put on
+  // at its creation leave no history entry.
+  create(by: FakeLinearActor, input: { title: string; description?: string; state: string; labels?: string[] }): Issue {
+    const at = this.#clock();
+    const number = this.#next++;
+    const issue: Issue = {
+      id: `issue-${number}`, identifier: `${this.team.key}-${number}`, url: `https://linear.app/example/issue/${this.team.key}-${number}`,
+      title: input.title, description: input.description ?? null, createdAt: at, updatedAt: at, stateId: this.#state(input.state).id, teamId: this.team.id,
+      history: [], comments: [], labels: (input.labels ?? []).map((name) => this.#label(name)), assigneeId: null, creator: 'user' in by ? by.user : null,
+    };
+    this.issues.set(issue.id, issue);
+    return issue;
+  }
+
+  move(id: string, by: FakeLinearActor, state: string): void {
+    const issue = this.issues.get(id);
+    if (!issue) throw new Error(`no issue ${id}`);
+    issue.stateId = this.#state(state).id;
+    issue.updatedAt = this.#clock();
+    issue.history.push(this.#entry(by, this.#state(state)));
+  }
+
+  label(id: string, by: FakeLinearActor, name: string): void {
+    const issue = this.issues.get(id);
+    if (!issue) throw new Error(`no issue ${id}`);
+    const label = this.#label(name);
+    if (issue.labels.some((l) => l.id === label.id)) return;
+    issue.labels.push(label);
+    issue.updatedAt = this.#clock();
+    issue.history.push(this.#entry(by, null, { addedLabelIds: [label.id] }));
+  }
+
+  unlabel(id: string, name: string): void {
+    const issue = this.issues.get(id);
+    if (!issue) throw new Error(`no issue ${id}`);
+    issue.labels = issue.labels.filter((l) => l.name !== name);
+    issue.updatedAt = this.#clock();
+  }
+
+  // The issue assigned to a user, or to no one.
+  assign(id: string, by: FakeLinearActor, user: string | null): void {
+    const issue = this.issues.get(id);
+    if (!issue) throw new Error(`no issue ${id}`);
+    issue.assigneeId = user;
+    issue.updatedAt = this.#clock();
+    issue.history.push(this.#entry(by, null, { toAssigneeId: user }));
+  }
+
+  // A change of the title or the description: one history entry that says both.
+  edit(id: string, by: FakeLinearActor, fields: { title?: string; description?: string }): void {
+    const issue = this.issues.get(id);
+    if (!issue) throw new Error(`no issue ${id}`);
+    const retitled = fields.title !== undefined && fields.title !== issue.title;
+    const described = fields.description !== undefined && fields.description !== issue.description;
+    if (!retitled && !described) return;
+    const entry = this.#entry(by, null, {
+      ...(retitled ? { fromTitle: issue.title, toTitle: fields.title as string } : {}), ...(described ? { updatedDescription: true } : {}),
+    });
+    if (retitled) issue.title = fields.title as string;
+    if (described) issue.description = fields.description as string;
+    issue.updatedAt = this.#clock();
+    issue.history.push(entry);
+  }
+
+  comment(id: string, by: FakeLinearActor, body: string): Comment {
+    const issue = this.issues.get(id);
+    if (!issue) throw new Error(`no issue ${id}`);
+    const at = this.#clock();
+    const comment: Comment = { id: `comment-${this.#comment++}`, body, createdAt: at, updatedAt: at, user: 'user' in by ? by.user : null, botActor: 'bot' in by ? by.bot : null, issueId: id };
+    issue.comments.push(comment);
+    return comment;
+  }
+
+  stateOf(id: string): string | undefined {
+    const issue = this.issues.get(id);
+    return this.states.find((s) => s.id === issue?.stateId)?.name;
+  }
+
+  #view(issue: Issue) {
+    return {
+      id: issue.id, identifier: issue.identifier, url: issue.url, title: issue.title, description: issue.description,
+      createdAt: issue.createdAt, updatedAt: issue.updatedAt, state: this.states.find((s) => s.id === issue.stateId),
+      labels: { nodes: issue.labels }, assignee: issue.assigneeId ? { id: issue.assigneeId } : null, creator: issue.creator,
+      // Linear lists an issue's history newest first.
+      history: { nodes: [...issue.history].reverse() },
+    };
+  }
+
+  async #serve(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const send = (status: number, body: unknown) => {
+      response.writeHead(status, { 'content-type': 'application/json' });
+      response.end(JSON.stringify(body));
+    };
+    const chunks: Buffer[] = [];
+    for await (const chunk of request) chunks.push(chunk as Buffer);
+    const auth = request.headers.authorization;
+    if (request.method !== 'POST' || request.url !== '/graphql') return send(404, {});
+    const { query, variables, operationName } = JSON.parse(Buffer.concat(chunks).toString('utf8')) as { query: string; variables: Record<string, unknown>; operationName: string };
+    this.operations.push({ name: operationName, auth });
+    const viewer = auth ? this.#accounts.get(auth) : undefined;
+    if (!viewer) return send(401, { errors: [{ message: 'Authentication required, not authenticated', extensions: { code: 'AUTHENTICATION_ERROR' } }] });
+    const asks = ASKS[operationName];
+    if (!asks || !query.includes(operationName)) return send(400, { errors: [{ message: `Unknown operation ${operationName}` }] });
+    for (const field of asks) if (!new RegExp(`\\b${field}\\b`).test(query)) return send(400, { errors: [{ message: `${operationName} does not ask for ${field}` }] });
+    const by: FakeLinearActor = { user: viewer };
+    if (operationName === 'MirrorSetup') {
+      const teams = variables.key === this.team.key ? [{ ...this.team, states: { nodes: this.states } }] : [];
+      return send(200, { data: { viewer: { id: viewer.id }, teams: { nodes: teams } } });
+    }
+    if (operationName === 'MirrorIssues') {
+      const filter = variables.filter as { team: { id: { eq: string } }; updatedAt: { gte: string } };
+      const all = [...this.issues.values()]
+        .filter((i) => i.teamId === filter.team.id.eq && i.updatedAt >= filter.updatedAt.gte)
+        .sort((a, b) => a.updatedAt.localeCompare(b.updatedAt) || a.id.localeCompare(b.id));
+      const start = variables.after ? Number(variables.after) : 0;
+      const first = Number(variables.first);
+      const page = all.slice(start, start + first);
+      const end = start + page.length;
+      return send(200, { data: { issues: { nodes: page.map((i) => this.#view(i)), pageInfo: { hasNextPage: end < all.length, endCursor: String(end) } } } });
+    }
+    if (operationName === 'MirrorCreate') {
+      const input = variables.input as { teamId: string; title: string; description: string; stateId: string };
+      const state = this.states.find((s) => s.id === input.stateId);
+      if (input.teamId !== this.team.id || !state) return send(200, { errors: [{ message: 'Entity not found' }] });
+      const issue = this.create(by, { title: input.title, description: input.description, state: state.name });
+      issue.history.push(this.#entry(by, state));
+      return send(200, { data: { issueCreate: { success: true, issue: this.#view(issue) } } });
+    }
+    if (operationName === 'MirrorComments') {
+      const filter = variables.filter as { issue: { team: { id: { eq: string } } }; updatedAt: { gte: string } };
+      const all = [...this.issues.values()].filter((i) => i.teamId === filter.issue.team.id.eq).flatMap((i) => i.comments)
+        .filter((c) => c.updatedAt >= filter.updatedAt.gte).sort((a, b) => a.updatedAt.localeCompare(b.updatedAt) || a.id.localeCompare(b.id));
+      const start = variables.after ? Number(variables.after) : 0;
+      const page = all.slice(start, start + Number(variables.first));
+      const end = start + page.length;
+      const nodes = page.map(({ issueId, updatedAt: _u, ...c }) => ({ ...c, issue: { id: issueId } }));
+      return send(200, { data: { comments: { nodes, pageInfo: { hasNextPage: end < all.length, endCursor: String(end) } } } });
+    }
+    if (operationName === 'MirrorEdit') {
+      const issue = this.issues.get(String(variables.id));
+      if (!issue) return send(200, { errors: [{ message: 'Entity not found' }] });
+      const input = variables.input as { title?: string; description?: string };
+      this.edit(issue.id, by, input);
+      return send(200, { data: { issueUpdate: { success: true } } });
+    }
+    if (operationName === 'MirrorMove') {
+      const issue = this.issues.get(String(variables.id));
+      const state = this.states.find((s) => s.id === (variables.input as { stateId: string }).stateId);
+      if (!issue || !state) return send(200, { errors: [{ message: 'Entity not found' }] });
+      this.move(issue.id, by, state.name);
+      return send(200, { data: { issueUpdate: { success: true } } });
+    }
+    const input = variables.input as { issueId: string; body: string };
+    const issue = this.issues.get(input.issueId);
+    if (!issue) return send(200, { errors: [{ message: 'Entity not found' }] });
+    const made = this.comment(issue.id, by, input.body);
+    return send(200, { data: { commentCreate: { success: true, comment: { id: made.id } } } });
+  }
+}

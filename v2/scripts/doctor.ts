@@ -1,7 +1,12 @@
 // Checks this server can run v2 sessions, with real objects, labelled
 // cleared.dev=v2 only. One section per lane that needs a real run
-// (milestone 1 plan, section 10); `cleared doctor` will run it in milestone 5.
-//   node scripts/doctor.ts [docker] [claude-code] [host-tools] [lead] [workspace] [pool] [cursor] [codex] [--no-build] [--model <id>]
+// (milestone 1 plan, section 10); `cleared doctor --full` runs it (milestone 5).
+//   node scripts/doctor.ts [docker] [claude-code] [host-tools] [lead] [workspace] [pool] [cursor] [codex] [mirror] [<section file>] [--no-build] [--model <id>]
+//
+// The files of src/doctor/sections/ are sections too (milestone 5 plan,
+// section 3.1), each named as its file: ready (milestone 5), and those later
+// lanes add there, never here. Each runs when named, or with no name when
+// it says byDefault; its lines are printed as mirror's.
 //
 // docker (lane 2): builds the two images, starts a session with a postgres:16
 // service, proves from inside the session container what it can and cannot
@@ -43,6 +48,12 @@
 //
 // pool (issue 265): the free subnets of Docker's address pools, from the
 // host's interfaces and the labelled networks; run by default and by name.
+//
+// mirror (milestone 4, issue 400): the GitHub mirror, with the service's own
+// settings: its token file readable (never printed), each repository of the
+// workspace reached with the rights to label and close its issues, its
+// status labels, and the mirror's last full pass in the ledger, read-only.
+// It writes nothing on GitHub. In CLEARED_V2_APP_LANGUAGE; run only when named.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -73,6 +84,10 @@ import { DEFAULT_SAFE_COMMANDS, type Policy } from '../src/session/policy.ts';
 import { LEAD_TICKET } from '../src/lead/contract.ts';
 import { HANDOVER_HEADINGS } from '../images/session/runner/hooks.ts';
 import { leadChecks } from './doctor-lead.ts';
+import { githubMirrorChecks, mirrorDoctorTitle } from '../src/tickets/mirror-doctor.ts';
+import { languageOf } from '../src/cli/cleared.ts';
+import { loadSections, sectionsDir } from '../src/doctor/sections.ts';
+import type { DoctorSection } from '../src/doctor/section.ts';
 
 const V2 = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SERVICE_PORT = 8791;
@@ -1196,11 +1211,32 @@ async function codexSection(): Promise<void> {
   say('NOT RUN a Codex session: the adapter is proven with fakes only; its real trial is the owner\'s (docs/adapters.md, Codex)');
 }
 
+async function mirrorSection(): Promise<void> {
+  say(`\n== ${mirrorDoctorTitle(process.env)}`);
+  for (const { level, text } of await githubMirrorChecks({ env: process.env })) {
+    if (level === 'pass' || level === 'fail') check(text, level === 'pass');
+    else say(`${level === 'off' ? 'NOT RUN' : 'NOTE'} ${text}`);
+  }
+}
+
+// A section file's lines, in CLEARED_V2_APP_LANGUAGE: a failure counts, and
+// what to do is said under it.
+async function fileSection(section: DoctorSection): Promise<void> {
+  const language = languageOf(process.env);
+  say(`\n== ${section.title(language)}`);
+  for (const { level, text, todo } of await section.run(process.env, language)) {
+    if (level === 'ok' || level === 'fail') check(text, level === 'ok');
+    else say(`${level === 'off' ? 'NOT RUN' : 'NOTE'} ${text}`);
+    if (todo && level !== 'ok') say(`    ${todo}`);
+  }
+}
+
 const args = process.argv.slice(2);
 const modelAt = args.indexOf('--model');
 const model = modelAt >= 0 ? args[modelAt + 1] ?? '' : 'claude-haiku-5-5';
 const sections = args.filter((arg, index) => !arg.startsWith('--') && (modelAt < 0 || index !== modelAt + 1));
-const known = ['docker', 'claude-code', 'host-tools', 'lead', 'workspace', 'pool', 'cursor', 'codex'];
+const files = await loadSections(sectionsDir(process.env));
+const known = ['docker', 'claude-code', 'host-tools', 'lead', 'workspace', 'pool', 'cursor', 'codex', 'mirror', ...files.map((section) => section.name)];
 const unknown = sections.filter((section) => !known.includes(section));
 if (unknown.length > 0) {
   console.error(`usage: node scripts/doctor.ts [${known.join('|')}] [--no-build] [--model <id>]; unknown: ${unknown.join(', ')}`);
@@ -1214,5 +1250,7 @@ if (sections.includes('workspace')) await workspaceSection(!args.includes('--no-
 if (sections.length === 0 || sections.includes('pool')) await poolSection();
 if (sections.includes('cursor')) await cursorSection();
 if (sections.includes('codex')) await codexSection();
+if (sections.includes('mirror')) await mirrorSection();
+for (const section of files) if (sections.length === 0 ? section.byDefault : sections.includes(section.name)) await fileSection(section);
 say(failures === 0 ? 'doctor: all checks passed' : `doctor: ${failures} check(s) failed`);
 process.exit(failures === 0 ? 0 : 1);

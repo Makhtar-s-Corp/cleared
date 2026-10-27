@@ -90,8 +90,10 @@ export class LockApprovalWriter implements GraceApprovalWriter {
   async #owner(by: string): Promise<{ id: string; name: string }> {
     const user = await this.#options.users.get(by);
     if (!user) throw new ApprovalError('user', 'unknown user');
-    if (!this.#options.ownerId || !this.#options.store.canSign) throw new ApprovalError('setup', 'approval is not set up: no signing key or [tracker] owner_id (npm run setup)');
-    if (user.name !== this.#options.ownerId) throw new ApprovalError('owner', 'only the owner approves');
+    // The owner given, else the store's as its keys say now (approval/service.ts reads them at each need).
+    const owner = this.#options.ownerId ?? this.#options.store.ownerId;
+    if (!owner || !this.#options.store.canSign) throw new ApprovalError('setup', 'approval is not set up: no signing key or [tracker] owner_id (npm run setup)');
+    if (user.name !== owner) throw new ApprovalError('owner', 'only the owner approves');
     return user;
   }
 

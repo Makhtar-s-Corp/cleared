@@ -1,15 +1,15 @@
-// The review record merge-pr.sh reads (lane 8; the contract is registry.ts
+// The review record merge-pr.ts reads (lane 8; the contract is registry.ts
 // ReviewRecorder). A review is a `runs` row with role review, source
 // dispatcher, outcome done, its pull request and ticket, and a report file
-// <state>/reports/<run id>.md in the format lib/reviews.mjs readReport
+// <state>/reports/<run id>.md in the format lib/reviews.ts readReport
 // parses: a front matter with the reviewed commit, then the report, whose
-// first « Verdict : » line is what lib/merge.mjs verdictIs reads.
+// first « Verdict : » line is what lib/merge.ts verdictIs reads.
 import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import type { ReviewRecord, ReviewRecorder } from '../modules/registry.ts';
 
-// One statement each, as lib/ledger.mjs SCHEMA writes them (a test keeps them identical).
+// One statement each, as lib/ledger.ts SCHEMA writes them (a test keeps them identical).
 export const RUNS_TABLES: string[] = [
   `CREATE TABLE IF NOT EXISTS runs (
   run_id TEXT PRIMARY KEY,
@@ -57,16 +57,9 @@ export class ReviewRecordError extends Error {
   override name = 'ReviewRecordError';
 }
 
-export type ReviewInput = ReviewRecord & {
-  // The commit the reviewer read. Lane 7 knows it (the reviewer's checkout)
-  // and passes it; ReviewRecord (registry.ts) has no field for it yet, so the
-  // recorder takes it from here, else from resolveHead, else refuses.
-  readonly commit?: string;
-};
-
 export type ReviewRecorderOptions = {
   readonly stateDir: string;
-  readonly verdict: string;                          // [merge] verdict: what a passing report concludes
+  readonly verdict: string;                          // [merge] verdict: what a passing report concludes; empty: the record's
   readonly resolveHead?: (pr: number) => Promise<string | undefined>;
 };
 
@@ -90,20 +83,26 @@ export class LedgerReviewRecorder implements ReviewRecorder {
     this.#options = options;
   }
 
-  async record(review: ReviewInput): Promise<void> {
+  // The commit the reviewer read is the record's, else resolveHead's, else
+  // refused. The verdict phrase is the options', from the file the lock
+  // reads (CLEARED_CONF, or the project CLEARED_REPO names), else the
+  // record's, the one the flow judged the review by: an install by the setup
+  // assistant names neither variable (issue #445).
+  async record(review: ReviewRecord): Promise<void> {
     if (!TICKET.test(review.ticket)) throw new ReviewRecordError(`not a ticket: ${review.ticket}`);
     if (!Number.isSafeInteger(review.pr) || review.pr <= 0) throw new ReviewRecordError('not a pull request number');
     if (!Number.isSafeInteger(review.round) || review.round <= 0) throw new ReviewRecordError('not a review round');
     if (!SESSION.test(review.session)) throw new ReviewRecordError('not a session id');
     if (!Number.isFinite(Date.parse(review.at))) throw new ReviewRecordError('not a time');
-    if (!this.#options.verdict.trim()) throw new ReviewRecordError('[merge] verdict is not set: the record cannot say what a passing review concludes');
+    const verdict = this.#options.verdict.trim() || review.verdictPhrase?.trim() || '';
+    if (!verdict) throw new ReviewRecordError('[merge] verdict is not set: the record cannot say what a passing review concludes');
     const commit = review.commit ?? await this.#options.resolveHead?.(review.pr);
     if (!commit || !COMMIT.test(commit)) throw new ReviewRecordError(`the version (commit) the review read is not known for #${review.pr}`);
 
     const runId = `${review.ticket}-pr${review.pr}-r${review.round}-${review.session}`;
     const reports = join(this.#options.stateDir, 'reports');
     const file = join(reports, `${runId}.md`);
-    const said = review.verdict === 'pass' ? this.#options.verdict.trim() : 'not passed: changes requested';
+    const said = review.verdict === 'pass' ? verdict : 'not passed: changes requested';
     const text = `---\ncommit: ${commit}\noutcome: done\nended_at: ${review.at}\n---\n## Report\nVerdict: ${said}\n\n${neutralise(String(review.report).slice(0, MAX_REPORT))}\n`;
     mkdirSync(reports, { recursive: true, mode: 0o700 });
     this.#db.exec('BEGIN IMMEDIATE');

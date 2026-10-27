@@ -19,7 +19,7 @@ import { LocalTicketStore, TICKET_TABLES } from '../../src/tickets/local-store.t
 import { DatabaseSync } from 'node:sqlite';
 
 async function startBroker(box: ReturnType<typeof lockBox>): Promise<ChildProcess> {
-  const child = spawn(process.execPath, ['--no-warnings', join(CLEARED_HOME, 'serve/release-broker.mjs')], { env: box.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, ['--no-warnings', join(CLEARED_HOME, 'serve/release-broker.ts')], { env: box.env, stdio: ['ignore', 'pipe', 'pipe'] });
   let stderr = '';
   child.stderr?.on('data', (chunk) => { stderr += chunk; });
   const socket = box.socket as string;
@@ -43,7 +43,7 @@ test('the broker starts with an app user as owner_id and the service account as 
   } finally { await stop(broker); }
 });
 
-test('after the approval the service asks the broker, and the broker runs merge-pr.sh: the fake gh records the merge of exactly the checked head', async () => {
+test('after the approval the service asks the broker, and the broker runs merge-pr.ts: the fake gh records the merge of exactly the checked head', async () => {
   // The service and the broker share one state directory.
   const box = lockBox({ socket: true });
   const db = new DatabaseSync(join(box.state, 'ledger.db'));
@@ -71,7 +71,7 @@ test('after the approval the service asks the broker, and the broker runs merge-
     await timers.fire();
     for (let i = 0; i < 100 && box.merged() === null; i++) await new Promise((resolve) => setTimeout(resolve, 100));
     const merged = box.merged();
-    assert.ok(merged, 'the broker ran merge-pr.sh, which merged through gh');
+    assert.ok(merged, 'the broker ran merge-pr.ts, which merged through gh');
     assert.ok(merged.includes('--match-head-commit') && merged.includes(box.head()), merged.join(' '));
     assert.match(box.tracker('state', 'LOCAL-1').stdout.trim(), /^(Ready to Ship|Done)$/);
   } finally { await stop(broker); }

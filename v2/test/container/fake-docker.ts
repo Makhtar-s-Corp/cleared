@@ -12,6 +12,7 @@ export type FakeObject = {
   state?: string;
   readonly args?: readonly string[];
   readonly subnet?: string;                 // a network's IPAM subnet, when the test gives one
+  readonly created?: string;                // an image's build time: the order of the builds
 };
 
 export type Call = { readonly args: readonly string[]; readonly options: RunOptions; readonly result: DockerResult };
@@ -19,7 +20,7 @@ export type Call = { readonly args: readonly string[]; readonly options: RunOpti
 // Flags of `docker create` that take a value, as docker.ts writes them.
 const CREATE_VALUE_FLAGS = new Set([
   '--name', '--label', '--network', '--user', '--tmpfs', '--mount', '--env', '--memory', '--memory-swap',
-  '--cpus', '--pids-limit', '--workdir', '--cap-drop', '--security-opt',
+  '--cpus', '--pids-limit', '--workdir', '--cap-drop', '--security-opt', '--entrypoint',
 ]);
 
 const ok = (stdout = ''): DockerResult => ({ code: 0, stdout, stderr: '' });
@@ -126,7 +127,8 @@ export class FakeDocker {
         const tag = args[args.indexOf('--tag') + 1] ?? '';
         const at = this.images.findIndex((image) => image.name === tag);
         if (at >= 0) this.images.splice(at, 1);
-        this.images.push({ id: `sha256:${this.id()}`, name: tag, labels: labelsOf(args), args: [...args] });
+        const id = this.id();
+        this.images.push({ id: `sha256:${id}`, name: tag, labels: labelsOf(args), args: [...args], created: new Date(Date.UTC(2026, 9, 25) + parseInt(id, 16) * 1000).toISOString() });
         return ok('');
       }
       case 'image ls':
@@ -137,7 +139,7 @@ export class FakeDocker {
         return ok(JSON.stringify(found.map((image) => {
           const volumes = this.volumesOf(image?.name ?? '');
           return {
-            Id: image?.id, RepoTags: [image?.name],
+            Id: image?.id, RepoTags: [image?.name], Created: image?.created ?? '',
             Config: { Labels: Object.keys(image?.labels ?? {}).length ? image?.labels : null, WorkingDir: this.workdirOf(image?.name ?? ''), Volumes: volumes.length ? Object.fromEntries(volumes.map((path) => [path, {}])) : null },
           };
         })));

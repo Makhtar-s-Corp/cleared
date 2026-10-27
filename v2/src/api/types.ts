@@ -21,6 +21,9 @@
 import type { LeversChange } from '../consumption/levers.ts';
 import type { TicketCost } from '../consumption/ticket-cost.ts';
 import type { Consumption, HarnessConsumption, LeverChoices, Projection, Quota } from '../consumption/usage.ts';
+import type { ServiceMap, ServiceMapDatabase, ServiceMapLink, ServiceMapPlace, ServiceMapProblem, ServiceMapService } from '../map/build.ts';
+import type { Impact, ImpactCaller, ServiceImpact } from '../map/impact.ts';
+import type { WeekFigures, WeekService, WeekTicket } from '../consumption/week.ts';
 import type { Decision, Harness, Role, SessionId, UserId } from '../session/contract.ts';
 import type { ContextShare, Question, SessionEvent, SessionPhase, SessionState, ToolInput } from '../session/events.ts';
 import type { Verdict } from '../session/policy.ts';
@@ -159,7 +162,7 @@ export type ReleaseItem = InboxBase & {
   readonly fastLane?: FastLane;
 };
 
-// The fast lane of a Quick ticket, judged by v1's rules (lib/fast-lane.mjs)
+// The fast lane of a Quick ticket, judged by v1's rules (lib/fast-lane.ts)
 // on what merging its head would land: `fast`, every rule holds; `full`,
 // sent back to the full circuit for good, with the rules it broke; `off`,
 // not fast at this head and not sent back (the service's [fast_lane] is off
@@ -731,6 +734,13 @@ export type ProductionCheck = {
   readonly missing: 'unwatched' | 'no_browser' | 'failed' | null;
 };
 
+// The human's choice of the proof receipt's captures on a ticket (P226,
+// issue #368, flow/capture-choice.ts): `auto`, the rule decides from the
+// diff (captures only when it changes what a person sees); `on` and `off`
+// win over it. `by` and `at` are null while nobody chose.
+export type CaptureChoice = { readonly choice: 'auto' | 'on' | 'off'; readonly by: UserId | null; readonly at: string | null };
+export type CaptureChoiceBody = { readonly choice: CaptureChoice['choice'] };
+
 export type EditorLinks = { readonly mode: 'local' | 'ssh'; readonly links: readonly { readonly editor: EditorName; readonly url: string }[] };
 
 // Every route: its body (null for none) and its answer. `events` answers
@@ -824,10 +834,18 @@ export type ApiRoutes = {
   // Milestone 3, the Consumption screen (O15): `?tz=<IANA zone>` gives the days.
   'GET /api/consumption': { readonly body: null; readonly response: Consumption };
   'POST /api/consumption/levers': { readonly body: LeversChange; readonly response: LeverChoices };
+  // Milestone 4, the week's figures (C17, issue #396).
+  'GET /api/consumption/week': { readonly body: null; readonly response: WeekFigures };
   // Milestone 3, the cost of a ticket from the ledger (P211, issue #327).
   'GET /api/tickets/:id/cost': { readonly body: null; readonly response: TicketCost };
   // Milestone 3, the production page checked after a release landed (P218, issue #334, flow/proof-routes.ts).
   'GET /api/tickets/:id/production': { readonly body: null; readonly response: ProductionCheck[] };
+  // Milestone 3, whether the proof receipt takes captures: the human's choice on the ticket (P226, issue #368, flow/proof-routes.ts).
+  'GET /api/tickets/:id/captures': { readonly body: null; readonly response: CaptureChoice };
+  'POST /api/tickets/:id/captures': { readonly body: CaptureChoiceBody; readonly response: CaptureChoice };
+  // Milestone 4, the service map (M6, issue #397, map/routes.ts): built at the first read; the refresh for a known user.
+  'GET /api/service-map': { readonly body: null; readonly response: ServiceMap };
+  'POST /api/service-map/refresh': { readonly body: null; readonly response: ServiceMap };
 };
 
 export type ApiRoute = keyof ApiRoutes;
@@ -898,10 +916,16 @@ const routes = {
   'GET /api/events': true,
   'GET /api/consumption': true,
   'POST /api/consumption/levers': true,
+  'GET /api/consumption/week': true,
   'GET /api/tickets/:id/cost': true,
   'GET /api/tickets/:id/production': true,
+  'GET /api/tickets/:id/captures': true,
+  'POST /api/tickets/:id/captures': true,
+  'GET /api/service-map': true,
+  'POST /api/service-map/refresh': true,
 } satisfies Record<ApiRoute, true>;
-export type { Consumption, HarnessConsumption, LeverChoices, LeversChange, Projection, Quota, TicketCost };
+export type { Consumption, HarnessConsumption, LeverChoices, LeversChange, Projection, Quota, TicketCost, WeekFigures, WeekService, WeekTicket };
+export type { Impact, ImpactCaller, ServiceImpact, ServiceMap, ServiceMapDatabase, ServiceMapLink, ServiceMapPlace, ServiceMapProblem, ServiceMapService };
 export const API_ROUTES = Object.keys(routes) as ApiRoute[];
 
 // The preview route: lane 15 serves it (container/preview.ts), not the flow's API.
@@ -926,8 +950,11 @@ export const TERMINAL_ROUTES: readonly ApiRoute[] = [   // lane 31, terminal/ an
   'GET /api/sessions/:id/terminal/stream', 'PUT /api/sessions/:id/files/*',
 ];
 
-// The routes of the Consumption screen (milestone 3, O15) and a ticket's cost (P211): the lead module's, with the schedules'.
-export const CONSUMPTION_ROUTES: readonly ApiRoute[] = ['GET /api/consumption', 'POST /api/consumption/levers', 'GET /api/tickets/:id/cost'];
+// The routes of the Consumption screen (milestone 3, O15), its week's figures (C17) and a ticket's cost (P211): the lead module's, with the schedules'.
+export const CONSUMPTION_ROUTES: readonly ApiRoute[] = ['GET /api/consumption', 'POST /api/consumption/levers', 'GET /api/consumption/week', 'GET /api/tickets/:id/cost'];
+
+// The routes of the service map (milestone 4, M6): the lead module's.
+export const MAP_ROUTES: readonly ApiRoute[] = ['GET /api/service-map', 'POST /api/service-map/refresh'];
 
 // The routes milestone 2 adds: the lead module's (lanes 5 and 7), not the flow's.
 export const MILESTONE_2_ROUTES: readonly ApiRoute[] = API_ROUTES.filter((route) => route.includes('/api/lead') || route.includes('/api/plans'));

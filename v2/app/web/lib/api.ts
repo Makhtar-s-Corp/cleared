@@ -5,7 +5,10 @@ import { ApiError, type Me, type ScreenContext } from './screen.ts';
 
 export async function json<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, { credentials: 'same-origin', ...init });
-  if (!response.ok) throw new ApiError(response.status, `${url}: ${response.status}`);
+  if (!response.ok) {
+    const reason = await response.json().then((body: { error?: unknown }) => (typeof body?.error === 'string' ? body.error : undefined), () => undefined);
+    throw new ApiError(response.status, `${url}: ${response.status}`, reason);
+  }
   return response.status === 204 ? (undefined as T) : await response.json() as T;
 }
 

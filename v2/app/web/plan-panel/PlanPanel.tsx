@@ -68,7 +68,7 @@ export function PlanPanel({ plan, t, options = {}, onAction }: {
           {actions.map((action) => action === 'change' || action === 'pause'
             ? <Button key={action} variant="outline" className={`plain plan-${action === 'change' ? 'change' : 'quiet'}`} data-plan-action={action} disabled={busy} onClick={() => onAction?.(action)}>{t(ACTION_KEYS[action])}</Button>
             : <Button key={action} variant="ink" className="primary plan-go" data-plan-action={action} disabled={busy} onClick={() => onAction?.(action)}>{t(ACTION_KEYS[action])}</Button>)}
-          {options.note ? <p className="plan-note" role="status">{options.note}</p> : null}
+          <p className="plan-note" role="status">{options.note ?? ''}</p>
         </div>
       ) : null}
     </section>

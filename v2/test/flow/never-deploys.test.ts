@@ -63,10 +63,10 @@ function sources(dir: string): string[] {
 
 test('the service\'s code, and the lock\'s scripts and v1\'s lib/ it runs for a release, run no deploy command', () => {
   const root = join(import.meta.dirname, '..', '..', '..');
-  const scripts = readdirSync(root).filter((name) => name.endsWith('.sh')).map((name) => join(root, name));
+  const scripts = readdirSync(root).filter((name) => /\.(sh|ts)$/.test(name)).map((name) => join(root, name));
   const files = [...sources(join(root, 'v2', 'src')), ...sources(join(root, 'v2', 'app', 'src')), ...sources(join(root, 'lib')), ...scripts];
   assert.ok(files.length > 150, 'the sources were read');
-  assert.ok(scripts.some((file) => file.endsWith('merge-pr.sh')), 'the lock\'s scripts were read');
+  assert.ok(scripts.some((file) => file.endsWith('merge-pr.ts')), 'the lock\'s scripts were read');
   const found = files.flatMap((file) => {
     const text = readFileSync(file, 'utf8');
     return COMMANDS.filter((command) => command.test(text)).map((command) => `${file.slice(root.length + 1)}: ${command}`);

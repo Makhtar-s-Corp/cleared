@@ -1,5 +1,5 @@
 // The few settings of the project's agents.conf that the approval needs,
-// read the way lib/conf.mjs reads the file: sections in brackets, `key =
+// read the way lib/conf.ts reads the file: sections in brackets, `key =
 // value` lines, the first value of a repeated key. The file is the one the
 // lock reads: CLEARED_CONF (or ORCH_CONF), else <project>/.cleared/agents.conf.
 import { readFileSync } from 'node:fs';
@@ -53,7 +53,8 @@ export function readLockConf(env: NodeJS.ProcessEnv = process.env): LockConf {
       todo: state('todo', DEFAULT_STATES.todo), progress: state('progress', DEFAULT_STATES.progress), review: state('review', DEFAULT_STATES.review),
       validate: state('validate', DEFAULT_STATES.validate), go: state('go', DEFAULT_STATES.go), done: state('done', DEFAULT_STATES.done),
     },
-    ownerId: value(tracker.owner_id),
+    // The setup assistant names the owner in its settings (setup/settings.ts) when the file does not.
+    ownerId: value(tracker.owner_id) ?? value(env.CLEARED_V2_OWNER_ID),
     publicKey: value(tracker.human_public_key),
     privateKeyFile: value(tracker.human_private_key),
     verdict: value(sections.merge?.verdict),

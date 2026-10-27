@@ -1,0 +1,304 @@
+#!/usr/bin/env node
+// The notification dispatcher: at the end of every wake, tells the human on
+// his phone what waits for him. No model, and no text of anyone's choosing.
+//
+//   notify.ts dispatch      (wake.ts runs it; takes no other argument)
+//   notify.ts test          (the service account, by hand) sends the fixed test message to each adapter
+//
+// What it looks at, all of it written by the service itself:
+//   approval   a card Ready to land in the board snapshot (Cleared holds a request for a version)
+//   question   a card Question in the board snapshot (a team ended on a question for the user)
+//   rollback   rollback_pushed or prod_revert in the ledger
+//   health     heartbeat_problem and the release watch's failures in the ledger
+//   blocked    a ticket whose team could not open (lane_limit_reached) or that the
+//              rules cannot move (lane_stuck), still so after [notify] blocked_minutes
+//
+// An agent can make one of these happen (a team that asks a question, a
+// release request through the broker); it cannot choose what the notification
+// says: lib/notify/contract.ts builds it from the kind, the ticket's
+// identifier and title, a health code and a number of minutes. Nothing here
+// reads a ledger event's detail beyond the health code.
+//
+// Each occurrence waits in a queue (in the ledger's database) until it is sent,
+// folded into another one for the same ticket, or gone (the human answered,
+// the card left). The quiet hours hold approval, question and blocked until
+// they end (rollback and health go through); at most one notification per
+// ticket every [notify] coalesce_minutes (a rollback or a health problem is
+// held only by another one of those). Every notification sent is one
+// notification_sent event: kind, ticket, adapter, time.
+//
+// It runs inside the wake's lock, so it is short: the adapters of one
+// notification are called together (Web Push tells a few browsers at a time),
+// and after CLEARED_NOTIFY_DEADLINE_SECONDS (30 by default, the service's
+// environment) what is still on its way is given up and waits for the next
+// wake: still pending, not counted as a try, not recorded as sent. wake.ts also
+// stops the whole process after 60 seconds.
+import { readFileSync } from 'node:fs';
+import type { DatabaseSync } from 'node:sqlite';
+import { join } from 'node:path';
+import { loadConfForCommand, projectDir, runAsCommand, stateDir } from './conf.ts';
+import { addEvent, ledgerPath, openLedger } from './ledger.ts';
+import { createAdapters, HEALTH_CODES, isQuiet, notifySettings, render, testMessage, URGENT } from './notify/contract.ts';
+import { notifyStore } from './notify/store.ts';
+import type { Adapter, NotifyMessage, NotifySettings } from './notify/contract.ts';
+
+type Card = { id?: unknown; waiting?: unknown; kind?: string; title?: string; since?: string; approval?: { at?: string } | null };
+type Snapshot = { schema: number; tickets: Card[] };
+type EventRow = { event_id: number; at: string; kind: string; ticket: string | null; detail: string | null };
+type QueueRow = { key: string; kind: string; ticket: string | null; grp: string; facts: string; first_at: string; state: string; attempts: number; done_at: string | null };
+type Live = { key: string; kind: string; ticket: string | null; title?: string; code?: string; minutes?: number; at: string };
+type TitleOf = (ref: string | null) => string | undefined;
+type Outcome = { adapter: Adapter; ok?: boolean; abandoned?: boolean; error?: { message?: unknown } | null };
+type Done = { sent: { key: string; message: NotifyMessage }[]; held: string[]; failed: string[]; dropped: string[] };
+
+const SCHEMA = `CREATE TABLE IF NOT EXISTS notify_state (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS notify_queue (
+  key TEXT PRIMARY KEY, kind TEXT NOT NULL, ticket TEXT, grp TEXT NOT NULL, facts TEXT NOT NULL,
+  first_at TEXT NOT NULL, state TEXT NOT NULL DEFAULT 'pending', attempts INTEGER NOT NULL DEFAULT 0, done_at TEXT
+);
+CREATE INDEX IF NOT EXISTS notify_queue_state ON notify_queue (state, grp);`;
+export const initNotify = (db: DatabaseSync) => db.exec(SCHEMA);
+const iso = (ms: number) => new Date(ms).toISOString();
+const DAY = 86400e3;
+// An occurrence older than this is no longer news: it is dropped unsent.
+export const EXPIRE_MS = DAY;
+// Tries per notification before it is given up.
+export const ATTEMPTS = 3;
+const RANK: Record<string, number> = { rollback: 0, health: 1, approval: 2, question: 3, blocked: 4 };
+const ROLLBACK = ['rollback_pushed', 'prod_revert'];
+const RELEASE_HEALTH = ['release_health_failing', 'rollback_health_still_failing', 'release_watch_failed', 'rollback_failed', 'rollback_migrations_blocked', 'rollback_ambiguous_base'];
+const BLOCKING = ['lane_limit_reached', 'lane_stuck'];
+const SAFE_ID = /^[A-Za-z0-9._-]{1,40}$/;
+const REASON = /^[a-z][a-z ]{0,40}(?: \(\d{3}\))?$/;
+// The ticket as the app names it (the local tracker's LOCAL- prefix dropped), or null.
+const shown = (ref: unknown): string | null => { const id = String(ref ?? '').replace(/^LOCAL-/, ''); return SAFE_ID.test(id) ? id : null; };
+
+function get(db: DatabaseSync, key: string) { return (db.prepare('SELECT value FROM notify_state WHERE key = ?').get(key) as { value: string } | undefined)?.value ?? null; }
+function put(db: DatabaseSync, key: string, value: unknown) { db.prepare('INSERT INTO notify_state(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(key, String(value)); }
+
+export function readSnapshot(dir = stateDir()): Snapshot | null {
+  try {
+    const snapshot = JSON.parse(readFileSync(join(dir, 'snapshot.json'), 'utf8'));
+    return snapshot?.schema === 1 && Array.isArray(snapshot.tickets) ? snapshot : null;
+  } catch { return null; }
+}
+
+// What the snapshot says waits for the human now. Keyed by the request or the
+// question, so a new one for the same ticket is news and the same one is not.
+function waitingCards(snapshot: Snapshot) {
+  const out: Live[] = [];
+  for (const card of snapshot?.tickets ?? []) {
+    const id = shown(card.id);
+    if (!id || !card.waiting) continue;
+    const at = card.approval?.at ?? card.since ?? '';
+    if (card.kind === 'ready') out.push({ key: `approval:${id}:${at}`, kind: 'approval', ticket: id, title: card.title, at });
+    else if (card.kind === 'question') out.push({ key: `question:${id}:${at}`, kind: 'question', ticket: id, title: card.title, at });
+  }
+  return out;
+}
+
+// The ledger events since the cursor that notify.
+function ledgerEvents(db: DatabaseSync, cursor: number, titleOf: TitleOf): Live[] {
+  const kinds = [...ROLLBACK, 'heartbeat_problem', ...RELEASE_HEALTH];
+  const rows = db.prepare(`SELECT event_id, at, kind, ticket, detail FROM events WHERE event_id > ? AND kind IN (${kinds.map(() => '?').join(',')}) ORDER BY event_id`).all(cursor, ...kinds) as EventRow[];
+  return rows.map((row) => {
+    const ticket = shown(row.ticket);
+    if (ROLLBACK.includes(row.kind)) return { key: `rollback:${row.event_id}`, kind: 'rollback', ticket, title: titleOf(row.ticket), at: row.at };
+    // Only the code of a heartbeat problem (before its first colon), and only a known one: what follows it (a name) is never said.
+    const code = row.kind === 'heartbeat_problem' ? String(row.detail ?? '').split(':')[0]! : row.kind;
+    return { key: `health:${row.event_id}`, kind: 'health', ticket: row.kind === 'heartbeat_problem' ? null : ticket, title: row.kind === 'heartbeat_problem' ? '' : titleOf(row.ticket),
+      code: HEALTH_CODES.includes(code) ? code : 'other', at: row.at };
+  });
+}
+
+// A ticket whose team could not open or that the rules cannot move, with no
+// run of it started since, for longer than the threshold. One per episode: the
+// first such event after its last run.
+function blockedTeams(db: DatabaseSync, settings: NotifySettings, now: number, titleOf: TitleOf) {
+  const window = Math.max(DAY, 2 * settings.blockedMinutes * 60000);
+  const rows = db.prepare(`SELECT ticket, MIN(e.at) at FROM events e WHERE e.kind IN (${BLOCKING.map(() => '?').join(',')}) AND e.ticket IS NOT NULL AND e.at >= ?
+    AND e.at > COALESCE((SELECT MAX(started_at) FROM runs r WHERE r.ticket = e.ticket), '') GROUP BY ticket`).all(...BLOCKING, iso(now - window)) as { ticket: string; at: string }[];
+  const out: Live[] = [];
+  for (const row of rows) {
+    const id = shown(row.ticket);
+    const since = Date.parse(row.at);
+    if (!id || !Number.isFinite(since) || now - since < settings.blockedMinutes * 60000) continue;
+    out.push({ key: `blocked:${id}:${row.at}`, kind: 'blocked', ticket: id, title: titleOf(row.ticket), minutes: Math.floor((now - since) / 60000), at: row.at });
+  }
+  return out;
+}
+
+// A rollback with no valid ticket has its own group (never the health problems of no ticket); ":" is in no identifier, so no ticket can take the name.
+const ownGroup = (o: Live) => o.ticket ?? (o.kind === 'rollback' ? 'rollback:none' : `health:${o.code ?? 'other'}`);
+const factsOf = (o: Live) => JSON.stringify({ title: o.title ?? '', code: o.code ?? null, minutes: o.minutes ?? null, at: o.at ?? null });
+
+// One dispatch. Returns what happened, for the tests and the wake's log.
+export async function dispatch({ db, settings, snapshot, adapters, now = Date.now(), language = settings.language, deadlineMs = settings.deadlineMs ?? 30000 }:
+  { db: DatabaseSync; settings: NotifySettings; snapshot: Snapshot | null; adapters: Adapter[]; now?: number; language?: string; deadlineMs?: number }): Promise<Done> {
+  // The deadline is on the real clock (now may be a test's fixed time).
+  const deadline = new AbortController();
+  const timer = setTimeout(() => deadline.abort(), deadlineMs);
+  timer.unref?.();
+  try { return await dispatchUntil({ db, settings, snapshot, adapters, now, language, signal: deadline.signal }); }
+  finally { clearTimeout(timer); }
+}
+
+// A ledger event that cannot be written (the database locked, full) is said on
+// the wake's log, by its kind only, and changes nothing: a notification that
+// was delivered stays sent and is not sent again.
+function recordEvent(db: DatabaseSync, event: { kind: string; ticket?: string | null; source: string; value?: number | null; detail: string }) {
+  try { addEvent(db, event); }
+  catch { console.error(`cleared: notifications: a ${event.kind} event could not be written to the ledger`); }
+}
+
+// One adapter's try: { ok } delivered, { error } failed, { abandoned } still on its way at the deadline.
+async function attempt(adapter: Adapter, message: NotifyMessage, signal: AbortSignal): Promise<Outcome> {
+  if (signal.aborted) return { adapter, abandoned: true };
+  let stop!: () => void;
+  const expired = new Promise<Outcome>((resolve) => { stop = () => resolve({ adapter, abandoned: true }); signal.addEventListener('abort', stop, { once: true }); });
+  const tried = Promise.resolve().then(() => adapter.send(message, { signal })).then(() => ({ adapter, ok: true }), (error) => (signal.aborted ? { adapter, abandoned: true } : { adapter, error }));
+  try { return await Promise.race([tried, expired]); }
+  finally { signal.removeEventListener('abort', stop); }
+}
+
+async function dispatchUntil({ db, settings, snapshot, adapters, now, language, signal }:
+  { db: DatabaseSync; settings: NotifySettings; snapshot: Snapshot | null; adapters: Adapter[]; now: number; language: string; signal: AbortSignal }) {
+  initNotify(db);
+  const done: Done = { sent: [], held: [], failed: [], dropped: [] };
+  const titles = new Map((snapshot?.tickets ?? []).map((t): [string | null, string | undefined] => [shown(t.id), t.title]));
+  const titleOf: TitleOf = (ref) => {
+    const id = shown(ref);
+    if (titles.has(id)) return titles.get(id);
+    try { return (db.prepare('SELECT title FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get(ref) as { title: string } | undefined)?.title ?? ''; } catch { return ''; }
+  };
+  const cursor = Number(get(db, 'cursor'));
+  const last = (db.prepare('SELECT COALESCE(MAX(event_id), 0) id FROM events').get() as { id: number }).id;
+  const live = [...(snapshot ? waitingCards(snapshot) : []), ...blockedTeams(db, settings, now, titleOf)];
+  const insert = db.prepare('INSERT OR IGNORE INTO notify_queue (key, kind, ticket, grp, facts, first_at, state) VALUES (?, ?, ?, ?, ?, ?, ?)');
+  // The first dispatch takes note of what exists and sends nothing: no backlog when notifications are turned on.
+  // Without a snapshot there is nothing to take note of yet: nothing is initialised, so the cards that exist when it appears are noted then, not sent later.
+  if (!Number.isSafeInteger(cursor) || get(db, 'cursor') === null) {
+    if (!snapshot) return done;
+    for (const o of live) insert.run(o.key, o.kind, o.ticket, ownGroup(o), factsOf(o), iso(now), 'seen');
+    put(db, 'cursor', last);
+    return done;
+  }
+  const fresh = [...ledgerEvents(db, cursor, titleOf), ...live];
+  for (const o of fresh) insert.run(o.key, o.kind, o.ticket, ownGroup(o), factsOf(o), iso(now), 'pending');
+  put(db, 'cursor', last);
+  // A live occurrence that left (answered, cleared, unblocked) is no longer worth a word; the minutes of one still blocked are brought up to date.
+  const liveKeys = new Set(live.map((o) => o.key));
+  for (const o of live.filter((x) => x.kind === 'blocked')) db.prepare("UPDATE notify_queue SET facts = ? WHERE key = ? AND state = 'pending'").run(factsOf(o), o.key);
+  const finish = db.prepare('UPDATE notify_queue SET state = ?, done_at = ? WHERE key = ?');
+  for (const row of db.prepare("SELECT key, kind FROM notify_queue WHERE state = 'pending'").all() as { key: string; kind: string }[]) {
+    const fromSnapshot = row.kind === 'approval' || row.kind === 'question';
+    if ((fromSnapshot && snapshot && !liveKeys.has(row.key)) || (row.kind === 'blocked' && !liveKeys.has(row.key))) { finish.run('gone', iso(now), row.key); done.dropped.push(row.key); }
+  }
+
+  const quiet = isQuiet(settings, now);
+  const ready = adapters.filter((a) => { try { return a.ready() === null; } catch { return false; } });
+  const pending = db.prepare("SELECT * FROM notify_queue WHERE state = 'pending' ORDER BY first_at, key").all() as QueueRow[];
+  const groups = new Map<string, QueueRow[]>();
+  for (const row of pending) {
+    if (!settings.events.includes(row.kind)) { finish.run('off', iso(now), row.key); done.dropped.push(row.key); continue; }
+    if (now - Date.parse(row.first_at) > EXPIRE_MS) { finish.run('expired', iso(now), row.key); done.dropped.push(row.key); continue; }
+    if (quiet && !URGENT.includes(row.kind)) { done.held.push(row.key); continue; }
+    // A rollback or a health problem waits only for another one of those: never behind a request or a question.
+    const urgent = URGENT.includes(row.kind);
+    const sentLast = (db.prepare(`SELECT MAX(done_at) at FROM notify_queue WHERE grp = ? AND state = 'sent'${urgent ? ` AND kind IN (${URGENT.map(() => '?').join(',')})` : ''}`).get(row.grp, ...(urgent ? URGENT : [])) as { at: string | null } | undefined)?.at;
+    if (sentLast && now - Date.parse(sentLast) < settings.coalesceMinutes * 60000) { done.held.push(row.key); continue; }
+    if (!groups.has(row.grp)) groups.set(row.grp, []);
+    groups.get(row.grp)!.push(row);
+  }
+  for (const rows of groups.values()) {
+    // One notification per ticket at a time: the most pressing, the newest of its kind; the others are folded into it.
+    rows.sort((a, b) => (RANK[a.kind] as number) - (RANK[b.kind] as number) || b.first_at.localeCompare(a.first_at) || b.key.localeCompare(a.key));
+    const [row, ...folded] = rows as [QueueRow, ...QueueRow[]];
+    // Past the deadline, nothing more is started: the group waits for the next wake as it is.
+    if (signal.aborted) { done.held.push(row.key); continue; }
+    const fold = () => { for (const other of folded) { finish.run('grouped', iso(now), other.key); done.dropped.push(other.key); } };
+    if (!ready.length) { fold(); finish.run('undelivered', iso(now), row.key); done.dropped.push(row.key); continue; }
+    const facts = JSON.parse(row.facts) as { title: string; code: string | null; minutes: number | null; at: string };
+    const message = render({ kind: row.kind, ticket: row.ticket, title: facts.title, code: facts.code, minutes: facts.minutes }, { language, linkBase: settings.linkBase });
+    const occurred = Date.parse(facts.at);
+    const outcomes = await Promise.all(ready.map((adapter) => attempt(adapter, message, signal)));
+    const delivered = outcomes.filter((o) => o.ok);
+    if (delivered.length) {
+      // Marked sent first: whatever happens to the ledger events below, it is not sent again.
+      finish.run('sent', iso(now), row.key);
+      fold();
+      done.sent.push({ key: row.key, message });
+    } else if (outcomes.some((o) => o.abandoned)) {
+      // Given up at the deadline: still pending, not a try, retried at the next wake.
+      done.held.push(row.key);
+    } else {
+      fold();
+      const attempts = row.attempts + 1;
+      db.prepare('UPDATE notify_queue SET attempts = ? WHERE key = ?').run(attempts, row.key);
+      if (attempts >= ATTEMPTS) finish.run('failed', iso(now), row.key);
+      done.failed.push(row.key);
+    }
+    for (const o of outcomes) {
+      // The time of this event is the time it was sent; value: seconds since what it tells happened.
+      if (o.ok) recordEvent(db, { kind: 'notification_sent', ticket: row.ticket, source: 'notify', value: Number.isFinite(occurred) ? Math.max(0, Math.round((now - occurred) / 1000)) : null,
+        detail: JSON.stringify({ event: row.kind, adapter: o.adapter.name }) });
+      else if ('error' in o) {
+        // The adapter's reason is a short code of its own; anything else (an address, a path, an answer body) is not kept.
+        const said = String(o.error?.message ?? '');
+        recordEvent(db, { kind: 'notification_failed', ticket: row.ticket, source: 'notify', detail: JSON.stringify({ event: row.kind, adapter: o.adapter.name, reason: REASON.test(said) ? said : 'failed' }) });
+      }
+    }
+  }
+  // The queue keeps two weeks.
+  db.prepare('DELETE FROM notify_queue WHERE state != ? AND first_at < ?').run('pending', iso(now - 14 * DAY));
+  return done;
+}
+
+// `test`: the fixed test message to every configured adapter, to check a setup
+// (run as the service account: nobody else can read the secrets). Says, per
+// adapter, sent, not ready and why, or failed with its code.
+export async function sendTest({ db, settings, adapters, now = Date.now() }: { db: DatabaseSync; settings: NotifySettings; adapters: Adapter[]; now?: number }) {
+  const lines: string[] = [];
+  const message = testMessage({ language: settings.language, linkBase: settings.linkBase });
+  for (const adapter of adapters) {
+    let reason: string | null;
+    try { reason = adapter.ready(); } catch { reason = 'unreadable'; }
+    if (reason) { lines.push(`${adapter.name}: not ready (${reason})`); continue; }
+    try {
+      await adapter.send(message);
+      addEvent(db, { kind: 'notification_sent', source: 'notify', at: iso(now), detail: JSON.stringify({ event: 'test', adapter: adapter.name }) });
+      lines.push(`${adapter.name}: sent`);
+    } catch (error) {
+      const said = String((error as Error | null)?.message ?? '');
+      lines.push(`${adapter.name}: failed (${REASON.test(said) ? said : 'failed'})`);
+    }
+  }
+  return lines;
+}
+
+async function main(args: string[]) {
+  if (args.length !== 1 || !['dispatch', 'test'].includes(args[0]!)) throw new Error('usage: notify.ts dispatch | test');
+  const conf = loadConfForCommand();
+  const settings = notifySettings(conf);
+  const db = openLedger(ledgerPath());
+  try {
+    const store = notifyStore(settings.secretsDir, { project: projectDir() });
+    const adapters = createAdapters(settings, { store });
+    if (args[0] === 'test') {
+      const lines = await sendTest({ db, settings, adapters });
+      console.log(lines.length ? lines.join('\n') : 'no adapter: [notify] adapters names none');
+      if (!lines.some((line) => line.endsWith(': sent'))) process.exitCode = 1;
+      return;
+    }
+    await dispatch({ db, settings, snapshot: readSnapshot(), adapters });
+  } finally { db.close(); }
+}
+
+if (runAsCommand(import.meta.url)) {
+  main(process.argv.slice(2)).catch((error) => {
+    // A setting's or an adapter's own words: no path, address or secret in them.
+    console.error(`cleared: notifications: ${error.message}`);
+    process.exitCode = 1;
+  });
+}
+

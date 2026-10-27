@@ -1,7 +1,7 @@
 // The flow's effects for real: what leaves the process. Each one is a
 // thin call to the workspace modules of lane 5 or to the lock's own client;
 // the flow's tests replace all of them (FlowEffects in engine.ts).
-import { execFile, spawn } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, posix, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,32 +11,30 @@ import { flatBriefing, levelContext, readLeveledBriefing, writeBriefing, type Me
 import { checkBranchName, git, projectCheckout, readTip, ticketBranch, ticketCheckout } from '../workspace/checkout.ts';
 import { variantFolder } from './variants.ts';
 import { judgeDiff } from './fast-lane.ts';
+import { checkBranch } from './env-setup.ts';
+import { Docker } from '../container/docker.ts';
+import { stateDirOf } from '../container/prepared.ts';
 import { captureHandover } from '../workspace/handover.ts';
 import { ensureProjectPage, readProjectPage, updateProjectPage } from '../workspace/project-page.ts';
 import { forgeEnvironments, publish } from '../workspace/publish.ts';
+import { forgeFor, forgeKindOf } from '../forge/index.ts';
 import type { ServiceConfig } from '../workspace/config.ts';
 import type { Ticket } from '../tickets/contract.ts';
-import { failedChecks, jobOf, logTail } from './ci-repair.ts';
 import { closePullRequest } from './pr-close.ts';
 import { captureProduction, captureProof, playwrightBrowser, proofTargets, type ProofTarget } from './proof-capture.ts';
 import { parseConf, projectSettings, workspaceOf, type FlowConfig } from './config.ts';
 import type { FlowEffects } from './engine.ts';
 
-// The repository's root, which holds release-request.mjs, the lock's client.
+// The repository's root, which holds release-request.ts, the lock's client.
 const CLEARED = fileURLToPath(new URL('../../../', import.meta.url));
 
-// What the release card says of a pull request's checks, from the buckets of
-// `gh pr checks --json bucket`: one failed or cancelled check fails them,
-// one still running (or none reported yet) keeps them pending.
-export function checksOf(checks: readonly { readonly bucket: string }[]): 'pending' | 'passed' | 'failed' {
-  if (checks.some((c) => c.bucket === 'fail' || c.bucket === 'cancel')) return 'failed';
-  if (checks.length === 0 || checks.some((c) => c.bucket === 'pending')) return 'pending';
-  return 'passed';
-}
+// What the release card says of a pull request's checks on GitHub, now the
+// GitHub adapter's (src/forge/github.ts).
+export { checksOf } from '../forge/github.ts';
 
 export type EffectsOptions = {
   readonly env?: NodeJS.ProcessEnv;
-  readonly releaseRequest?: string;       // the lock's client; release-request.mjs of the repository by default
+  readonly releaseRequest?: string;       // the lock's client; release-request.ts of the repository by default
   readonly requestTimeoutMs?: number;
   readonly mergeTimeoutMs?: number;
   // The page of a session's trial environment, through the service's
@@ -57,6 +55,9 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     ? { dir: service.dir, url: service.url, base: service.base, repo: service.repo }
     : { dir: config.projectDir, url: config.repoUrl, base: config.base, repo: config.repo };
   const forge = (service?: ServiceConfig) => forgeEnvironments(of(service).dir, env);
+  // The service's forge (`forge` in the workspace file, GitHub by default),
+  // in its checkout, with the forge's environment.
+  const forgeOf = async (service?: ServiceConfig) => forgeFor(forgeKindOf(service), { dir: of(service).dir, env: (await forge(service)).gh });
   const refresh = async (service?: ServiceConfig) => {
     const { dir, url, base } = of(service);
     const checkout = await projectCheckout({ url, dir, base, env: (await forge(service)).git });
@@ -66,9 +67,26 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     await pageOf(service, 'update').catch((error) => console.error(`cleared-v2: the project page could not be made (${error instanceof Error ? error.name : typeof error})`));
     return checkout;
   };
+  const settingsOf = async (service?: ServiceConfig) => {
+    // Fetched first: on a fresh service the project is not cloned yet, and
+    // a changed verdict phrase or host on the base is read as it is now.
+    await refresh(service);
+    const { dir, base } = of(service);
+    const baseRef = `refs/remotes/origin/${base}`;
+    const conf = await git(dir, ['show', `${baseRef}:.cleared/agents.conf`]);
+    let scripts: string[] = [];
+    try {
+      const pkg = JSON.parse(await git(dir, ['show', `${baseRef}:package.json`])) as { scripts?: Record<string, unknown> };
+      scripts = Object.keys(pkg.scripts ?? {});
+    } catch { /* no package.json at the base: no script to run */ }
+    return projectSettings(parseConf(conf), scripts);
+  };
   const pageOf = async (service: ServiceConfig | undefined, how: 'ensure' | 'update') => {
     const { dir, base } = of(service);
-    const source = { dir, base, name: sessionService(service).name, env };
+    // A folder service's page is its folder's; every page says where the
+    // service sits in the workspace (issue #394).
+    const { name, path, consumes, contract } = sessionService(service);
+    const source = { dir, base, name, env, path, consumes, contract };
     return how === 'ensure' ? ensureProjectPage(source) : updateProjectPage(source);
   };
 
@@ -147,7 +165,7 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
   // and the end of what it said on stderr.
   const lock = (args: readonly string[], input: string, limit: number, extra: NodeJS.ProcessEnv) =>
     new Promise<{ code: number | null; stderr: string; timedOut: boolean }>((resolve, reject) => {
-      const script = options.releaseRequest ?? join(CLEARED, 'release-request.mjs');
+      const script = options.releaseRequest ?? join(CLEARED, 'release-request.ts');
       const child = spawn(process.execPath, ['--no-warnings', script, ...args], {
         env: { ...env, CLEARED_REPO: config.projectDir, ...extra }, stdio: ['pipe', 'ignore', 'pipe'],
       });
@@ -164,20 +182,7 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
   return {
     // The service's settings as committed at its base branch, after a fetch.
     // Each service repository keeps its own .cleared/agents.conf (decision 18).
-    async settings(service) {
-      // Fetched first: on a fresh service the project is not cloned yet, and
-      // a changed verdict phrase or host on the base is read as it is now.
-      await refresh(service);
-      const { dir, base } = of(service);
-      const baseRef = `refs/remotes/origin/${base}`;
-      const conf = await git(dir, ['show', `${baseRef}:.cleared/agents.conf`]);
-      let scripts: string[] = [];
-      try {
-        const pkg = JSON.parse(await git(dir, ['show', `${baseRef}:package.json`])) as { scripts?: Record<string, unknown> };
-        scripts = Object.keys(pkg.scripts ?? {});
-      } catch { /* no package.json at the base: no script to run */ }
-      return projectSettings(parseConf(conf), scripts);
-    },
+    settings: settingsOf,
 
     async refreshProject(service) {
       await refresh(service);
@@ -280,6 +285,7 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       return publish({
         project: dir, workdir: input.workdir, base, branch: input.branch, repo, ticket: input.ticket,
         report: input.report, gitEnv: environments.git, ghEnv: environments.gh,
+        forge: forgeFor(forgeKindOf(input.service), { dir, env: environments.gh }),
         ...(input.receipt ? { receipt: input.receipt } : {}),
       });
     },
@@ -297,42 +303,22 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       return captureProduction({ browser: await playwrightBrowser(env), url, dir });
     },
 
-    // gh exits 8 while a check is pending, and prints the list all the same.
     async prChecks(pr, service) {
-      const { gh } = await forge(service);
-      const { dir, repo } = of(service);
-      const stdout = await new Promise<string>((resolve, reject) => {
-        execFile('gh', ['pr', 'checks', String(pr), '--repo', repo, '--json', 'bucket'], { cwd: dir, env: gh, timeout: 15_000, encoding: 'utf8' },
-          (error, out) => (error && (error as { code?: unknown }).code !== 8 ? reject(error) : resolve(out)));
-      });
-      return checksOf(JSON.parse(stdout) as { bucket: string }[]);
+      return (await forgeOf(service)).checks(of(service).repo, pr);
     },
 
     // The head and the failed checks of a pull request (issue #273), each
-    // GitHub Actions job's failed steps' log cut to its end; a log that
-    // cannot be read is left out, the check's name stays.
+    // failed check's log cut to its end when the forge gives one.
     async ciFailures({ pr, service }) {
-      const { gh } = await forge(service);
-      const { dir, repo } = of(service);
-      const read = (args: readonly string[]) => new Promise<string>((resolve, reject) => {
-        execFile('gh', [...args, '--repo', repo], { cwd: dir, env: gh, timeout: 30_000, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 }, (error, out) => (error ? reject(error) : resolve(out)));
-      });
-      const failures = failedChecks(JSON.parse(await read(['pr', 'view', String(pr), '--json', 'headRefOid,statusCheckRollup'])));
-      const checks = [];
-      for (const check of failures.checks.slice(0, 5)) {
-        const job = jobOf(check.url);
-        const log = job ? await read(['run', 'view', '--job', job, '--log-failed']).then((out) => logTail(out), () => null) : null;
-        checks.push({ ...check, log });
-      }
-      return { head: failures.head, checks: [...checks, ...failures.checks.slice(5)] };
+      return (await forgeOf(service)).failedChecks(of(service).repo, pr);
     },
 
     // A Close closes the ticket's pull request (issue #249, P114), through
-    // gh on the host as the repair reads one; never --delete-branch.
+    // the service's forge on the host as the repair reads one; never its branch.
     async closePullRequest({ pr, branches, reason, service }) {
       const { gh } = await forge(service);
       const { dir, repo, base } = of(service);
-      return closePullRequest({ pr, repo, dir, base, branches, reason, env: gh });
+      return closePullRequest({ pr, repo, dir, base, branches, reason, env: gh, forge: forgeFor(forgeKindOf(service), { dir, env: gh }) });
     },
 
     // What the published head changes against the base, read in the
@@ -364,6 +350,20 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       return judgeDiff({ sections, repo: dir, base: baseRef, commit, env });
     },
 
+    // The setup session's check (C4, flow/env-setup.ts): the session's
+    // branch fetched as a step's is, its image built as the service's
+    // prepared image would be once merged, and the check the base declares
+    // (its agents.conf and package.json, never the branch's) run in it.
+    async envCheck({ ticket, service, workdir }) {
+      const settings = await settingsOf(service);
+      const own = sessionService(service);
+      const { dir, ref } = await fetchBranch(ticket, own, workdir);
+      return checkBranch({
+        docker: new Docker(), stateDir: stateDirOf(env), source: { service: own.name, dir, base: own.base, path: own.path ?? null },
+        ref, declared: settings.testCommand ? { command: settings.testCommand, services: settings.services } : undefined,
+      });
+    },
+
     // What a step's branch changes against the service's base (decision 26,
     // lane 23), read as publish reads a branch (fetchBranch). Only what is
     // committed counts. With `snapshot`, the contract as committed is
@@ -384,6 +384,16 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
         writeFileSync(copy, await git(dir, ['cat-file', 'blob', blob]), { mode: 0o644 });
       }
       return { files, contract: { path, diff, blob, snapshot: copy } };
+    },
+
+    // The paths the author's branch commits against the service's base, for
+    // the capture rule (P226, flow/capture-need.ts): fetched as a step's
+    // branch is, into a ref of its own; a folder service's in its folder.
+    async changedPaths({ ticket, service, workdir }) {
+      const { dir, range } = await fetchBranch(ticket, service, workdir, `refs/cleared/proof/${service.name}/${ticketBranch(ticket)}`);
+      const files = (await git(dir, [...DIFF_ARGS, '--name-only', range, '--'])).split('\n').filter(Boolean);
+      const folder = service.kind === 'folder' && service.path ? `${service.path.replace(/\/+$/, '')}/` : '';
+      return folder ? files.filter((path) => path.startsWith(folder)) : files;
     },
 
     // What a service's ticket branch changes, for the reviewer of a ticket
@@ -409,10 +419,10 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       return { files, diff };
     },
 
-    // `release-request.mjs request_release <ticket> <pr> --ask`, the
+    // `release-request.ts request_release <ticket> <pr> --ask`, the
     // announcement on its stdin: the lock asks the human, at these heads.
     // Then the request time the lock recorded for these versions
-    // (<state>/validations/<ticket>.json, which ask-validation.sh writes).
+    // (<state>/validations/<ticket>.json, which ask-validation.ts writes).
     async requestRelease(input) {
       const limit = options.requestTimeoutMs ?? 60_000;
       const run = await lock(['request_release', input.ticket, String(input.pr), '--ask'], input.announcement, limit, {});
@@ -422,13 +432,13 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       return record && record.versions.some((v) => v.pr === input.pr) ? { requestedAt: record.at } : {};
     },
 
-    // `release-request.mjs request_release <ticket> <pr>`, without --ask:
-    // the broker runs merge-pr.sh, which merges once every check holds. The
-    // client's exit says what happened (release-request.mjs and
-    // serve/release-broker.mjs): 0 merged; 5 not now (merge-pr.sh's 3 or 5,
+    // `release-request.ts request_release <ticket> <pr>`, without --ask:
+    // the broker runs merge-pr.ts, which merges once every check holds. The
+    // client's exit says what happened (release-request.ts and
+    // serve/release-broker.ts): 0 merged; 5 not now (merge-pr.ts's 3 or 5,
     // or the broker busy with another release); 1 refused for good
-    // (merge-pr.sh's 6); anything else, the broker could not be asked.
-    // ORCH_FROM_QUEUE makes merge-pr.sh answer "not now" without writing
+    // (merge-pr.ts's 6); anything else, the broker could not be asked.
+    // ORCH_FROM_QUEUE makes merge-pr.ts answer "not now" without writing
     // v1's merge-queue file, which no v1 wake reads any more: the flow's
     // tick is the queue.
     async mergeRelease(input) {

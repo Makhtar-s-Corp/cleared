@@ -19,7 +19,10 @@
     "guard": "node scripts/guard.ts",
     "doctor": "node scripts/doctor.ts",
     "notify": "node src/cli/notify.ts",
-    "repair-services": "node src/cli/repair-services.ts"
+    "repair-services": "node src/cli/repair-services.ts",
+    "import-v1": "node src/cli/import-v1.ts",
+    "status": "node src/cli/status.ts",
+    "run": "node src/cli/run.ts"
   },
   "dependencies": {
     "@tanstack/react-query": "5.104.1",
@@ -42,6 +45,7 @@
     "@types/react-dom": "19.3.0",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
+    "axe-core": "4.14.0",
     "class-variance-authority": "0.7.1",
     "clsx": "2.1.1",
     "codemirror": "6.0.2",

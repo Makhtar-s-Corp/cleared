@@ -1,0 +1,95 @@
+#!/usr/bin/env node
+import { mkdirSync, readFileSync } from 'node:fs';
+import { createInterface } from 'node:readline/promises';
+import { openLedger } from './lib/ledger.ts';
+import { execFileSync, spawnSync } from 'node:child_process';
+import { join } from 'node:path';
+import { checkoutProblem, loadConfForCommand, stateDir } from './lib/conf.ts';
+import { createTracker } from './lib/tracker/contract.ts';
+import { checkoutReadEnv, gitRefusal } from './lib/git-checkout.ts';
+
+const [area, action, ...args] = process.argv.slice(2);
+// Every command below reads the committed project settings (here, or in the
+// process it starts). When they cannot be read, the reason is said first,
+// whatever the command: a path Cleared does not expand (~), a checkout that
+// is not there, or git refusing the service-owned checkout (lib/conf.ts).
+const demo = area === 'app' && [action, ...args].includes('--demo');
+// (status checks this itself, so that --json keeps its document: lib/heartbeat.ts)
+if (['app', 'rollback', 'ticket'].includes(area as string) && !demo && !process.env.CLEARED_CONF && !process.env.ORCH_CONF) {
+  const problem = checkoutProblem();
+  if (problem) { console.error(`cleared: ${problem}`); process.exit(2); }
+  loadConfForCommand(); // says why and exits 2 when git cannot read it
+}
+if (area === 'status') {
+  if (([action, ...args].filter(Boolean) as string[]).some((flag) => !['--json', '--reap'].includes(flag))) {
+    console.error('usage: cleared status [--json] [--reap]'); process.exit(64);
+  }
+  const result = spawnSync(process.execPath, [new URL('./lib/heartbeat.ts', import.meta.url).pathname,
+    'status', ...[action, ...args].filter(Boolean) as string[]], { stdio: 'inherit' });
+  process.exit(result.status ?? 1);
+}
+if (area === 'app') {
+  const result = spawnSync(process.execPath, [new URL('./app/main.ts', import.meta.url).pathname, ...[action, ...args].filter(Boolean) as string[]], { stdio: 'inherit' });
+  process.exit(result.status ?? 1);
+}
+if (area === 'rollback') {
+  const ticket = action;
+  const usage = 'usage: cleared rollback <ticket> [--yes] [--force-with-migrations]';
+  if (!ticket || ticket.startsWith('--')) { console.error(usage); process.exit(64); }
+  let yes = false, force = false;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--yes') yes = true;
+    else if (args[i] === '--force-with-migrations') force = true;
+    else { console.error(usage); process.exit(64); }
+  }
+  if (!yes) {
+    let db;
+    try {
+      db = openLedger(undefined, { readOnly: true });
+      const row = db.prepare('SELECT merge_sha,title FROM releases WHERE ticket = ? ORDER BY id DESC LIMIT 1').get(ticket) as { merge_sha: string; title: string } | undefined;
+      if (!row) throw new Error(`No Cleared release recorded for ${ticket}`);
+      const repo = process.env.CLEARED_REPO || process.env.ORCH_REPO || process.cwd();
+      let files;
+      // A read of the service-owned checkout: names only, no external diff, no textconv (lib/git-checkout.ts).
+      try { files = execFileSync('git', ['-C', repo, 'diff', '--name-only', '--no-ext-diff', '--no-textconv', `${row.merge_sha}^1`, row.merge_sha], { encoding: 'utf8', env: checkoutReadEnv(repo) }).trim(); }
+      catch (error) { throw new Error(gitRefusal(repo, error)); }
+      console.log(`Ticket: ${ticket} — ${row.title}\nMerge to revert: ${row.merge_sha}\nFiles:\n${files}`);
+      const prompt = createInterface({ input: process.stdin, output: process.stdout });
+      let answer;
+      try { answer = await prompt.question('Type "rollback" to confirm: '); }
+      finally { prompt.close(); }
+      if (answer.trim() !== 'rollback') { console.error('Rollback cancelled'); process.exit(1); }
+    } catch (error) { console.error(`cleared: ${(error as Error).message}`); process.exit(1); }
+    finally { db?.close(); }
+  }
+  const result = spawnSync(process.execPath, [new URL('./release-request.ts', import.meta.url).pathname,
+    'request_rollback', ticket, ...(force ? ['--force-with-migrations'] : [])], { stdio: 'inherit' });
+  process.exit(result.status ?? 1);
+}
+if (area !== 'ticket' || !['new', 'show', 'comment', 'move'].includes(action as string)) {
+  console.error('usage: cleared ticket new <title> [body file] | show <id> | comment <id> <body file> | move <id> <status> | rollback <ticket> [--yes]');
+  process.exit(64);
+}
+const conf = loadConfForCommand();
+if (conf.sections.tracker?.adapter !== 'local') {
+  console.error('cleared ticket commands require [tracker] adapter = local');
+  process.exit(2);
+}
+if (!process.env.CLEARED_STATE_DIR && !process.env.ORCH_STATE_DIR) {
+  console.error('cleared ticket commands require CLEARED_STATE_DIR set to the shared state directory used by the Cleared service');
+  process.exit(2);
+}
+const tracker = createTracker(conf);
+try {
+  let result;
+  if (action === 'new') result = tracker.createTicket({ title: args[0] as string, body: args[1] ? readFileSync(args[1], 'utf8') : '' });
+  else if (action === 'show') {
+    const ticket = tracker.getTicket(args[0] as string);
+    if (!ticket) throw new Error(`No such ticket: ${args[0]}`);
+    result = { ...ticket, comments: tracker.comments(args[0] as string), history: tracker.history(args[0] as string) };
+  }
+  else if (action === 'comment') result = tracker.comment(args[0] as string, readFileSync(args[1] as string, 'utf8'));
+  else result = tracker.moveTicket(args[0] as string, args[1] as string);
+  console.log(JSON.stringify(result, null, 2));
+} catch (error) { console.error(`cleared: ${(error as Error).message}`); process.exitCode = 1; }
+finally { tracker.close?.(); }

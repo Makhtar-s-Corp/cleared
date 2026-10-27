@@ -30,7 +30,7 @@ import { Empty } from '@/shell/Empty.tsx';
 import '@/screens/lead/lead.css';
 import { isLeadThread, LEAD_AGENT, LeadAgent, type LeadThread } from './agent.ts';
 import {
-  GAP_MS, SEND, TEXT_MAX, TICK_MS, choiceReply, choosePlan, clockOf, composerMode, draftFrom, gestureFailure, headerLine, memoryStats, mergeMessages, mergePlan, otherPlans,
+  GAP_MS, SEND, TEXT_MAX, TICK_MS, choiceReply, choosePlan, clockOf, composerMode, draftFrom, gestureFailure, headerLine, inboxNews, memoryStats, mergeMessages, mergePlan, otherPlans,
   placeholderKey, planFrom, planGesture, replyFor, sendReply, stopText, threadRows, trainHeadline, trainTone, waitsOn,
   type ComposerMode, type LeadDraft, type LeadView, type Reply, type StreamLike, type TrainLine,
 } from './model.ts';
@@ -271,11 +271,15 @@ function Live({ draft, planId }: { readonly draft: LeadDraft; readonly planId: s
     const el = threadRef.current;
     if (el) atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   };
+  // Again on a new line only, not when the agent's thread replaces the
+  // kept one at a visit: the scroll forces a layout.
+  const lines = thread?.messages.length;
+  const newest = thread?.messages.at(-1)?.seq;
   useLayoutEffect(() => {
     const el = threadRef.current;
     if (el && (atEnd.current || toEnd.current)) el.scrollTop = el.scrollHeight;
     toEnd.current = false;
-  }, [thread?.messages, thread?.lead.pendingQuestion?.requestId]);
+  }, [lines, newest, thread?.lead.pendingQuestion?.requestId]);
 
   const ready = thread !== undefined;
   useEffect(() => {
@@ -402,8 +406,8 @@ export default function Lead() {
       api: context.api,
       open: (url) => new EventSource(url) as unknown as StreamLike,
       later: (run, ms) => { setTimeout(run, ms); },
-      onFrame: (frame) => {
-        if (frame.kind === 'plan' || (frame.kind === 'state' && frame.state.pendingQuestion)) context.inboxChanged();
+      onFrame: (frame, before) => {
+        if (inboxNews(frame, before)) context.inboxChanged();
       },
     }),
   }), [context]);

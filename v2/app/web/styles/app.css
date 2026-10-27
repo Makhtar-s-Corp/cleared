@@ -125,6 +125,8 @@ button, input, textarea { font: inherit; color: inherit; }
 .muted { color: var(--text-muted); } .faint { color: var(--text-faint); } .small { font-size: var(--text-sm); }
 .id { font: var(--weight-regular) var(--text-sm)/1.4 var(--mono); color: var(--text-faint); white-space: nowrap; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* A live line that says nothing yet stays in the page, taking no room, so its message is read out when it comes. */
+:is(.choice-note, .plan-note):empty { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 @media (forced-colors: active) { :focus-visible { outline-color: Highlight; } }
 
 /* shell: the sidebar beside the main column, or a top bar and a bottom bar on a phone */
@@ -143,8 +145,8 @@ button, input, textarea { font: inherit; color: inherit; }
 .icon:hover { background: var(--tab-fill); color: var(--text); }
 .icon[data-state="open"] { background: var(--selected); color: var(--text); }
 .icon svg { flex: none; }
-.search { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); color: var(--text-muted); font-size: var(--text-md); cursor: pointer; }
-.search:hover { color: var(--text); }
+.search { display: flex; align-items: center; gap: var(--space-2); width: 100%; min-height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: transparent; color: var(--text-muted); font-size: var(--text-md); cursor: pointer; }
+.search:hover { background: var(--tab-fill); color: var(--text); }
 .search .search-text { flex: 1; text-align: left; }
 kbd { display: inline-flex; align-items: center; justify-content: center; min-width: 18px; height: 18px; padding: 0 var(--space-1); border-radius: 4px; background: var(--sunken); box-shadow: inset 0 0 0 1px var(--hairline); color: var(--text-muted); font: var(--weight-regular) var(--text-sm)/1 var(--sans); }
 .keys { display: inline-flex; align-items: center; gap: 2px; color: var(--text-faint); font-size: var(--text-sm); white-space: nowrap; }
@@ -153,7 +155,7 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .side-nav ul { display: flex; flex-direction: column; gap: 2px; }
 .nav-item { display: flex; align-items: center; gap: var(--space-2); min-height: 32px; padding: 0 var(--space-2); border-radius: var(--radius); color: var(--text-secondary); font-size: var(--text-md); white-space: nowrap; }
 .nav-item:hover { background: var(--tab-fill); color: var(--text); text-decoration: none; }
-.nav-item[aria-current="page"] { background: var(--selected); color: var(--text); font-weight: var(--weight-strong); }
+.nav-item[aria-current="page"], .side-session[aria-current="page"] { background: var(--surface); box-shadow: var(--e-outline); color: var(--text); }
 .nav-item svg { flex: none; color: var(--text-muted); }
 .nav-item[aria-current="page"] svg { color: var(--text); }
 .nav-label { flex: 1; overflow: hidden; text-overflow: ellipsis; }
@@ -164,13 +166,13 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .lead-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--dashed); }
 .lead-dot[data-lead="on"] { background: var(--success); }
 .lead-dot[data-lead="down"] { background: transparent; box-shadow: inset 0 0 0 1.5px var(--danger); }   /* a ring, not a colour alone */
-.side-sessions { flex: 1; min-height: 0; overflow-y: auto; margin: var(--space-2) calc(-1 * var(--space-2)) 0; padding: 0 var(--space-2); border-top: 1px solid var(--hairline); }
+.side-sessions { flex: 1; min-height: 0; overflow-y: auto; margin: var(--space-2) calc(-1 * var(--space-2)) 0; padding: 0 var(--space-2) var(--space-2); }
 .side-title { margin: var(--space-3) var(--space-2) var(--space-1); color: var(--text-faint); font-size: var(--text-sm); font-weight: var(--weight-strong); }
 .side-group + .side-group { margin-top: var(--space-2); }
-.side-group-title { display: flex; align-items: center; gap: var(--space-2); margin: var(--space-2) var(--space-2) 2px; color: var(--text-faint); font-size: var(--text-sm); font-weight: var(--weight-regular); }
-.side-session { display: flex; align-items: center; gap: var(--space-2); min-height: 32px; padding: 0 var(--space-2); border-radius: var(--radius); color: var(--text-secondary); font-size: var(--text-md); }
+.side-group-title { display: grid; grid-template-columns: 16px minmax(0, 1fr); align-items: center; column-gap: var(--space-2); min-height: 24px; margin: var(--space-2) 0 0; padding: 0 var(--space-2); color: var(--text-faint); font-size: var(--text-sm); font-weight: var(--weight-regular); }
+.side-group-title .state-dot { justify-self: center; }
+.side-session { display: flex; align-items: center; gap: var(--space-2); min-height: 30px; padding: 0 var(--space-2) 0 calc(var(--space-2) * 2 + 16px); border-radius: var(--radius); color: var(--text-secondary); font-size: var(--text-md); }
 .side-session:hover { background: var(--tab-fill); color: var(--text); text-decoration: none; }
-.side-session[aria-current="page"] { background: var(--selected); color: var(--text); }
 .side-session .title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .state-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; background: var(--stage-progress); }
 .state-dot[data-state="waiting"] { background: var(--awaiting); }
@@ -178,6 +180,26 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .state-dot[data-state="ended"] { background: var(--dashed); }
 .side-foot { display: flex; flex-direction: column; gap: var(--space-2); margin: 0 calc(-1 * var(--space-2)); padding: var(--space-2) var(--space-2) 0; border-top: 1px solid var(--hairline); }
 .side-foot-row { display: flex; align-items: center; gap: 2px; }
+/* The week's quota (the product owner's decision of 2026-10-25, 11:14, P227): a link to Consumption, its bar in the
+   Consumption screen's colours, the progress colour, or the danger text's for a quota reached before its reset. */
+.quota-gauge { display: flex; flex-direction: column; gap: var(--space-1); padding: var(--space-2); border-radius: var(--radius); color: var(--text-secondary); font-size: var(--text-sm); }
+.quota-gauge:hover { background: var(--tab-fill); text-decoration: none; }
+.quota-gauge[aria-current="page"] { background: var(--surface); box-shadow: var(--e-outline); }
+.quota-gauge-head { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-2); }
+.quota-gauge-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-muted); }
+.quota-gauge-percent { flex: none; color: var(--text); font-weight: var(--weight-strong); }
+.quota-gauge[data-verdict="hit"] .quota-gauge-percent { color: var(--danger-text); }
+.quota-gauge-bar { appearance: none; -webkit-appearance: none; display: block; width: 100%; height: 4px; border: 0; border-radius: 999px; background: var(--hairline); overflow: hidden; }
+.quota-gauge-bar::-webkit-progress-bar { background: var(--hairline); }
+.quota-gauge-bar::-webkit-progress-value { background: var(--stage-progress); border-radius: 999px; }
+.quota-gauge-bar::-moz-progress-bar { background: var(--stage-progress); border-radius: 999px; }
+.quota-gauge[data-verdict="hit"] .quota-gauge-bar::-webkit-progress-value { background: var(--danger-text); }
+.quota-gauge[data-verdict="hit"] .quota-gauge-bar::-moz-progress-bar { background: var(--danger-text); }
+.quota-gauge-reset { color: var(--text-faint); white-space: nowrap; }
+.quota-gauge-short, .quota-gauge-icon { display: none; }
+/* The account menu's link to Consumption, drawn as its buttons are. */
+.menu .menu-link { display: flex; align-items: center; color: var(--text); }
+.menu .menu-link:hover { text-decoration: none; }
 .lead-status { display: flex; align-items: center; gap: var(--space-2); padding: 0 var(--space-2); color: var(--text-muted); font-size: var(--text-sm); }
 .app[data-sidebar="rail"] .lead-status { display: none; }
 .side-foot .source-pill { display: none; }
@@ -187,7 +209,7 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .person { display: flex; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; min-height: 32px; padding: 0 var(--space-2) 0 var(--space-1); border: 0; border-radius: var(--radius); background: transparent; color: var(--text); font-size: var(--text-md); text-align: left; cursor: pointer; }
 .person:hover, .person[data-state="open"] { background: var(--tab-fill); }
 .person .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--ink); color: var(--on-ink); font-size: var(--text-sm); font-weight: var(--weight-strong); }
+.avatar { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--selected); color: var(--text); font-size: var(--text-sm); font-weight: var(--weight-strong); }
 /* The rail: the icons only, each with its name as a tooltip and for a screen reader. */
 .app[data-sidebar="rail"] .sidebar { padding: 0 var(--space-2) var(--space-2); align-items: center; }
 .app[data-sidebar="rail"] .side-head { padding: 0; justify-content: center; }
@@ -202,6 +224,8 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .app[data-sidebar="rail"] .side-foot { margin-top: auto; align-items: center; width: calc(100% + 2 * var(--space-2)); }
 .app[data-sidebar="rail"] .side-foot-row { flex-direction: column; }
 .app[data-sidebar="rail"] .person { flex: none; justify-content: center; padding: 0; width: 32px; }
+.app[data-sidebar="rail"] .quota-gauge { justify-content: center; width: 40px; min-height: 32px; padding: 0 var(--space-1); }
+.app[data-sidebar="rail"] :is(.quota-gauge-head, .quota-gauge-reset) { display: none; }
 .app[data-sidebar="open"] .side-foot { margin-top: auto; }
 /* Tooltips: the name and the chord at once, beside the icon (the native title waits a second): every
    item of the rail, and the icon-only buttons of the open sidebar. */
@@ -260,6 +284,33 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
   .dialog.sheet { width: min(860px, 100%); }
   .sheet-body { columns: 2; column-gap: var(--space-4); }
   .sheet-body section { break-inside: avoid; }
+}
+
+/* the API access panel (shell/Access.tsx, C18): one column at every width, the value and the command in Geist Mono, an id and a command line */
+.dialog.sheet.access { width: min(640px, 100%); }
+.access .sheet-body { columns: auto; display: flex; flex-direction: column; gap: var(--space-3); padding-top: var(--space-3); }
+.access .sheet-body section { padding-top: 0; }
+.access .sheet-body section.access-fresh { padding: var(--space-3); }
+.access-lead, .access-fresh p { font-size: var(--text-md); line-height: 1.45; text-wrap: pretty; }
+.access-note { color: var(--text-muted); font-size: var(--text-sm); }
+.access-failed { color: var(--danger-text); font-size: var(--text-md); }
+.access-fresh { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius); background: var(--surface-muted); }
+.access-fresh h3, .access-form label { color: var(--text); font-size: var(--text-md); font-weight: var(--weight-strong); }
+.access-value-row { display: flex; gap: var(--space-2); }
+.access-value-row input { flex: 1; min-height: 36px; padding: 0 var(--space-2); border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-outline); color: var(--text); font-size: var(--text-md); }
+#access-value { font-family: var(--mono); font-size: var(--text-sm); }
+.access-command { margin: 0; padding: 10px 12px; border-radius: var(--radius); background: var(--sunken); overflow-x: auto; font-family: var(--mono); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.access .sheet-body li.access-row { display: grid; grid-template-columns: 1fr auto; column-gap: var(--space-3); padding: var(--space-2) 0; }
+.access-row .access-name { font-weight: var(--weight-strong); }
+.access-row .access-dates { grid-column: 1; color: var(--text-muted); font-size: var(--text-sm); }
+.access-row button { grid-column: 2; grid-row: 1 / span 2; align-self: center; min-height: 32px; padding: 0 var(--space-3); }
+.access-form { display: flex; flex-direction: column; gap: var(--space-1); }
+.access-form .access-value-row button, .access-value-row #access-copy { min-height: 36px; padding: 0 var(--space-3); }
+.access-form .primary { border-radius: var(--radius); background: var(--ink); color: var(--on-ink); font-weight: var(--weight-strong); }
+.access-form .primary:hover { opacity: .88; }
+@media (max-width: 767px) {
+  .access-value-row { flex-direction: column; }
+  .access-value-row input, .access-value-row button, .access-row button { min-height: 44px; }
 }
 
 /* menus (the person's, the notifications'): a popover that hangs from its button and keeps 16 px from the edges */
@@ -339,24 +390,35 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
   .sidebar { position: sticky; top: 0; flex-direction: row; align-items: center; gap: var(--space-1); height: var(--top-bar); padding: 0 var(--space-2) 0 var(--space-3); border-right: 0; box-shadow: var(--e-header); overflow: visible; }
   .side-head { flex: 1; min-width: 0; min-height: 0; padding: 0; }
   .side-head .side-toggle, .side-sessions, .search-text, .search .keys, .person .name, .nav-item .keys, .nav-item:hover .keys, .nav-item:focus-visible .keys { display: none; }
+  /* The project's name is the bar's title (issue #380): the mark gives it its room, whole at 390 beside the gauge. */
   .side-brand { min-height: 44px; }
+  .side-brand .logo { display: none; }
   .search { justify-content: center; width: 44px; height: 44px; padding: 0; background: transparent; box-shadow: none; }
   .side-nav { position: fixed; left: 0; right: 0; bottom: 0; z-index: 20; padding: 0 var(--space-2) env(safe-area-inset-bottom); background: var(--sidebar); box-shadow: 0 -1px 0 var(--hairline); }
   .side-nav ul { flex-direction: row; gap: 0; }
   .side-nav li { flex: 1; }
   .nav-item { position: relative; flex-direction: column; justify-content: center; gap: 2px; min-height: var(--bottom-bar); padding: 0; font-size: var(--text-sm); }
-  .nav-item[aria-current="page"] { background: transparent; }
+  .nav-item[aria-current="page"] { background: transparent; box-shadow: none; }
   .nav-label { flex: none; }
   .nav-item .count { position: absolute; top: var(--space-1); left: calc(50% + 6px); min-width: 16px; height: 16px; padding: 0 var(--space-1); }
   .nav-item .lead-dot { position: absolute; top: var(--space-2); left: calc(50% + 10px); }
   .nav-item:hover .count, .nav-item:focus-visible .count, .nav-item:hover .lead-dot, .nav-item:focus-visible .lead-dot { display: inline-flex; }
   .nav-item .count[hidden] { display: none; }
-  .side-foot { flex-direction: row; align-items: center; margin: 0; padding: 0; width: auto; border-top: 0; }
+  .side-foot { flex-direction: row; align-items: center; gap: var(--space-1); margin: 0; padding: 0; width: auto; border-top: 0; }
   .side-foot-row { flex-direction: row; }
   .side-foot .source-pill { display: flex; }
   .lead-status { display: none; }
   .source-pill { padding: 2px var(--space-2); }
   .side-foot-row .theme { display: none; }
+  /* The gauge in the top bar (the owner's answer of 12:20): the percent over a thin bar, a 44 px target. */
+  .quota-gauge { flex: none; align-items: center; justify-content: center; gap: 3px; min-width: 44px; height: 44px; padding: 0 var(--space-1); }
+  .quota-gauge[aria-current="page"] { box-shadow: none; background: var(--tab-fill); }
+  .quota-gauge :is(.quota-gauge-head, .quota-gauge-reset) { display: none; }
+  .quota-gauge-short { display: block; color: var(--text); font-weight: var(--weight-strong); line-height: 1; white-space: nowrap; }
+  .quota-gauge[data-verdict="hit"] .quota-gauge-short { color: var(--danger-text); }
+  .quota-gauge-icon { display: block; color: var(--text-muted); }
+  .quota-gauge-bar { width: 32px; height: 3px; }
+  .menu .menu-link { min-height: 44px; }
   .source-pill .long { display: none; }
   .icon { width: 44px; height: 44px; }
   .person { flex: none; justify-content: center; width: 44px; height: 44px; padding: 0; }

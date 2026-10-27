@@ -401,3 +401,30 @@ test('releaseStopped with no session asks Docker nothing, and refuses what is no
   await assert.rejects(docker.releaseStopped([SESSION, '--all']), /not a session id/);
   assert.equal(fake.calls.length, 0);
 });
+
+// The test secrets (docs/v2/milestone-5-plan.md, decision 12): a private
+// variable is named on the command line, `--env NAME`, and its value is in
+// the client's own environment, where the CLI reads it; another account of
+// the machine reads a command line in the process list, never this.
+test('a private variable goes by name on the command line and by value in the client\'s environment', async () => {
+  const fake = new FakeDocker();
+  const docker = new Docker(fake.runner);
+  const value = ['sandbox', 'fake', 'value', '1'].join('-');
+  await docker.createContainer(spec(`cleared-v2-${SESSION}-session`, { env: { HOME: '/tmp' }, privateEnv: { PAYMENT_SANDBOX_KEY: value } }));
+  const call = fake.calls.find((c) => c.args[0] === 'create');
+  assert.ok(call);
+  assert.ok(call.args.includes('PAYMENT_SANDBOX_KEY') && call.args.includes('HOME=/tmp'));
+  assert.ok(!call.args.some((arg) => arg.includes(value)));
+  assert.deepEqual(call.options.env, { PAYMENT_SANDBOX_KEY: value });
+  await assert.rejects(docker.createContainer(spec(`cleared-v2-${SESSION}-other`, { env: { HOME: '/tmp' }, privateEnv: { HOME: value } })), /HOME/, 'one name, one place');
+  await assert.rejects(docker.createContainer(spec(`cleared-v2-${SESSION}-bad`, { privateEnv: { 'NOT A NAME': value } })), (error: Error) => !error.message.includes(value));
+});
+
+test('the command runner hands the client the environment it is given, over its own', async () => {
+  const value = ['sandbox', 'fake', 'value', '2'].join('-');
+  const run = commandRunner(process.execPath);
+  const result = await run(['-e', 'process.stdout.write(JSON.stringify([process.env.PAYMENT_SANDBOX_KEY ?? null, typeof process.env.PATH]))'], { env: { PAYMENT_SANDBOX_KEY: value } });
+  assert.deepEqual(JSON.parse(result.stdout), [value, 'string']);
+  const plain = await run(['-e', 'process.stdout.write(String(process.env.PAYMENT_SANDBOX_KEY ?? null))'], {});
+  assert.equal(plain.stdout, 'null');
+});

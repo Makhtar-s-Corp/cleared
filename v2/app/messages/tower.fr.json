@@ -73,6 +73,7 @@
   "landed_title": "Livré aujourd'hui",
   "landed_empty": "Rien de livré aujourd'hui pour l'instant.",
   "services_title": "Services",
+  "services_map_open": "Carte des services",
   "service_live_one": "{n} session en cours",
   "service_live_other": "{n} sessions en cours",
   "service_landing": "atterrit {ticket}",
@@ -178,5 +179,8 @@
   "template_ci_body": "## Le contrôle en échec\nSon nom et le lien vers l'exécution.\n\n## L'erreur\nLes lignes du journal qui la montrent.\n\n## Critères d'acceptation\n- Le contrôle passe.\n- Aucun test ignoré ni retiré pour y arriver.",
   "template_question": "Question",
   "template_question_title": "La question",
-  "template_question_body": "## La question\n\n## Où regarder\nservice:chemin:ligne, ou les fichiers concernés.\n\n## Attendu\nLa réponse écrite là où le prochain lecteur la cherchera (le README, une doc ou un commentaire près du code), en citant le code qu'elle lit."
+  "template_question_body": "## La question\n\n## Où regarder\nservice:chemin:ligne, ou les fichiers concernés.\n\n## Attendu\nLa réponse écrite là où le prochain lecteur la cherchera (le README, une doc ou un commentaire près du code), en citant le code qu'elle lit.",
+  "template_environment": "Environnement",
+  "template_environment_title": "Le service dont préparer l'environnement",
+  "template_environment_body": "## Le service\nSon nom, et ce que ses tests demandent qui manque à l'image de session de Cleared\u00a0: une bibliothèque système, un client de base de données, un autre langage.\n\n## Quoi écrire\n- `.devcontainer/devcontainer.json` avec `image`, ou `build.dockerfile` et un Dockerfile qui part de l'image de session de Cleared (cleared-v2-session)\u00a0: une session a besoin de Node 24, de Claude Code et du runner de Cleared.\n- Les dépendances s'installent avec `[session] install_command` dans `.cleared/agents.conf`, une commande simple.\n- Les features et les commandes de cycle de vie d'un devcontainer ne sont pas lues.\n\n## Critères d'acceptation\n- L'image de la branche se construit et le contrôle déclaré du service y passe. Cleared lance les deux avant la relecture.\n- Sans contrôle déclaré, l'image se construit, et le ticket le dit."
 }

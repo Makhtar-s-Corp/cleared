@@ -1,5 +1,5 @@
 // How the service is put together (docs/v2/milestone-1-plan.md, section 10).
-// Nine modules, one file each under src/modules/, each declaring its tables,
+// Twelve modules, one file each under src/modules/, each declaring its tables,
 // its routes and the registry slots it fills. main.ts assembles them; a lane
 // fills its own module and never edits main.ts or another module. Every
 // slot has an in-memory default, so a module that is still a stub leaves
@@ -17,7 +17,7 @@ export interface UserDirectory {
   list(): Promise<User[]>;
 }
 
-// A review's outcome, written where merge-pr.sh reads it (lane 8): a `runs`
+// A review's outcome, written where merge-pr.ts reads it (lane 8): a `runs`
 // row with role review and a report file ending with the [merge] verdict.
 export type ReviewRecord = {
   readonly ticket: TicketId;
@@ -28,6 +28,11 @@ export type ReviewRecord = {
   readonly round: number;
   readonly report: string;
   readonly at: string;
+  // What the flow knows of a pass (issue #445): the head it published, which
+  // the review read, and the project's [merge] verdict the review was judged
+  // by. Without them the recorder reads the lock's settings of the environment.
+  readonly commit?: string;
+  readonly verdictPhrase?: string;
 };
 
 export interface ReviewRecorder {
@@ -90,8 +95,9 @@ export type Module = {
 };
 
 // lead and notify: milestone 2 (docs/v2/milestone-2-plan.md, decision 14);
-// knowledge: the replanned milestone 2 (decision 27, lane 24).
-export const MODULE_NAMES = ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox', 'lead', 'notify', 'knowledge'] as const;
+// knowledge: the replanned milestone 2 (decision 27, lane 24); setup, run
+// and secrets: milestone 5 (docs/v2/milestone-5-plan.md, section 3.1).
+export const MODULE_NAMES = ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox', 'lead', 'notify', 'knowledge', 'setup', 'run', 'secrets'] as const;
 export type ModuleName = (typeof MODULE_NAMES)[number];
 
 export const emptyModule: Module = { tables: [], routes: [], provide: () => ({}) };

@@ -51,10 +51,12 @@ const levers = (page: any) => page.evaluate(async () => ((await (await fetch('/a
 const noOverflow = (page: any) => page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth);
 const shot = async (page: any, name: string) => { if (SHOTS) await page.screenshot({ path: join(SHOTS, `${name}.png`), fullPage: true }); };
 
-test('the screen opens from the sidebar and from G C without a reload, and draws the agents, the quotas and the dollars of the one that reported them', { skip }, async () => {
+// From the sidebar's quota gauge since the product owner's decision of 2026-10-25, 11:14 (P227): Consumption is no
+// longer one of the sidebar's screens.
+test('the screen opens from the sidebar\'s quota gauge and from G C without a reload, and draws the agents, the quotas and the dollars of the one that reported them', { skip }, async () => {
   await withBrowser({ language: 'en' }, async (page) => {
     await page.evaluate(() => { (window as any).__kept = 'same document'; });
-    await page.locator('.nav-item[data-nav="consumption"]').click();
+    await page.locator('#quota-gauge').click();
     await page.locator('.consumption-grid').waitFor();
     assert.equal(await page.evaluate(() => location.pathname), '/consumption');
     assert.equal(await page.evaluate(() => (window as any).__kept), 'same document', 'client routing: no document load');
@@ -129,7 +131,7 @@ test('in French the whole screen is French, with human dates and durations, and 
     assert.match(text, /Coût équivalent API/);
     assert.match(text, /Mesuré le mer\./);
     assert.doesNotMatch(text, /\d{4}-\d{2}-\d{2}T|\b\d{7,}\b/, 'no ISO time, no raw count of milliseconds or tokens');
-    assert.equal(await page.locator('.nav-item[data-nav="consumption"] .nav-label').innerText(), 'Consommation');
+    assert.match(await page.locator('#quota-gauge').getAttribute('aria-label'), /Ouvre Consommation\.$/);
     await shot(page, 'consumption-fr-desktop');
   });
 });

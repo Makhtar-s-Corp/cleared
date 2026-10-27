@@ -1,0 +1,12 @@
+{
+  "usage": "Usage: cleared <command> [arguments]",
+  "usage_commands": "Commands: {list}",
+  "unknown_command": "\"{name}\" is not a command of cleared.",
+  "entry_roles": "Roles of this image: service, app, broker, install or cleared.",
+  "state_missing": "The state folder {path} is not there. Run the install from the clone: docker compose -f v2/compose.yaml run --rm install",
+  "state_root": "The state folder {path} belongs to root, and the sessions would run as root. Run the install from the clone: docker compose -f v2/compose.yaml run --rm install",
+  "state_open": "Other accounts may write in the state folder {path}. Run chmod go-w {path}, then start Cleared again.",
+  "not_owner": "This container runs as uid {uid}, and the state folder {path} belongs to uid {owner}.",
+  "broker_waiting": "The release lock waits for a project: no checkout with .cleared/agents.conf is named yet, by CLEARED_V2_PROJECT_DIR or by the workspace the setup assistant writes. It starts by itself once the repository is connected.",
+  "broker_project": "The release lock starts for {path}."
+}

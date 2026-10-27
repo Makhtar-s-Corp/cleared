@@ -1,12 +1,11 @@
 // The notifications button of the Cockpit: this browser asks to be told when
 // something waits for the human. The page hands the browser's subscription to
-// the server (session and anti-forgery token, like every write) with the
-// passkey's answer to a challenge bound to that subscription: turning a
-// device's notifications on or off is the human's, like Clear to land. What is
-// sent, and when, is the service's decision, never the page's. On iPhone, web
-// notifications exist only for the app added to the Home Screen: the button
-// says so instead of offering what cannot work.
-import { passkey } from '/actions.js';
+// the server (session and anti-forgery token, like every write), confirming a
+// challenge bound to that subscription: turning a device's notifications on or
+// off is the human's, like Clear to land. What is sent, and when, is the
+// service's decision, never the page's. On iPhone, web notifications exist
+// only for the app added to the Home Screen: the button says so instead of
+// offering what cannot work.
 
 const key = (text) => Uint8Array.from(atob(text.replace(/-/g, '+').replace(/_/g, '/')), (c) => c.charCodeAt(0));
 
@@ -31,8 +30,6 @@ export async function initNotify({ t, $ }) {
     if (mine.ok) me = await mine.json();
     if (notify.ok) status = await notify.json();
   } catch { /* the button stays hidden */ }
-  // No passkey yet: the button says how to register one (notifications are confirmed with it).
-  if (me && status?.reason === 'no_passkey') { show(t('app_notify_enable'), { title: t('app_act_no_passkey') }); button.addEventListener('click', () => say(hint.hidden ? t('app_act_no_passkey') : '')); return; }
   // Not offered by this service (another adapter, no https address), or no session: nothing to show.
   if (!status?.available || !me) return;
   if (!supported) {
@@ -46,11 +43,10 @@ export async function initNotify({ t, $ }) {
     if (Notification.permission === 'denied') return show(t('app_notify_blocked'), { title: t('app_notify_blocked_hint'), disabled: true });
     return subscription ? show(t('app_notify_on'), { title: t('app_notify_off_hint'), pressed: true }) : show(t('app_notify_enable'), { pressed: false });
   }
-  // The server's challenge, answered by the passkey (fingerprint, face or the device's code), then the request itself.
+  // The server's challenge for this subscription, then the request that confirms it.
   const confirmed = async (path, body) => {
     const asked = await post('/api/notifications/challenge', body);
-    const assertion = await passkey(asked);
-    return post(path, { ...body, challengeId: asked.challengeId, assertion });
+    return post(path, { ...body, challengeId: asked.challengeId });
   };
   button.addEventListener('click', async () => {
     say('');
@@ -69,7 +65,7 @@ export async function initNotify({ t, $ }) {
       const made = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key(status.publicKey) });
       try { await confirmed('/api/notifications/subscribe', { op: 'subscribe', subscription: made.toJSON() }); }
       catch (error) { await made.unsubscribe(); throw error; }
-      // Shown by this device itself: permission and display work. The service's own test is `notify.mjs test`.
+      // Shown by this device itself: permission and display work. The service's own test is `notify.ts test`.
       await registration.showNotification(t('app_notify_ready_title'), { body: t('app_notify_ready_body'), tag: 'cleared-ready', icon: '/icons/icon-192.png' });
     } catch { say(t(turningOff ? 'app_notify_off_failed' : 'app_notify_failed')); }
     finally { await refresh(); }

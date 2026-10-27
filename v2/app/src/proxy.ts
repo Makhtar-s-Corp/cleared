@@ -9,10 +9,13 @@
 // the headers below from the browser: never its cookie, its anti-forgery
 // token or anything that would let the service mistake it for the browser.
 // Answers stream back as they come, so the session's event stream works
-// through it.
+// through it. The proof is read when a request needs it (issue #429): until
+// the service has made it the browser is told the service is starting, and
+// once the service refuses it the next request reads it again.
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
 import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER } from '../../src/api/types.ts';
 import type { User } from '../../src/modules/registry.ts';
+import { ProofError } from '../../src/modules/users.ts';
 
 export type Forward = {
   readonly method: string;
@@ -34,17 +37,33 @@ export function sendJson(response: ServerResponse, status: number, body: unknown
   response.end(text);
 }
 
-export function serviceSource(options: { readonly url: string; readonly proof: string }): DataSource {
+// The app's proof: a fixed one (the tests), or the app's reader of the file (src/modules/users.ts, proofReader).
+export type ProofSource = string | ((() => string) & { readonly forget?: () => void });
+
+// The proof, or undefined when the file does not hold a whole one yet.
+export function currentProof(proof: ProofSource): string | undefined {
+  if (typeof proof === 'string') return proof;
+  try { return proof(); } catch (error) {
+    if (error instanceof ProofError) return undefined;
+    throw error;
+  }
+}
+
+export function serviceSource(options: { readonly url: string; readonly proof: ProofSource }): DataSource {
   const base = new URL(options.url);
+  const { proof: source } = options;
   return {
     kind: 'service',
     forward(request, response, forward) {
-      const headers: Record<string, string> = { [SERVICE_PROOF_HEADER]: options.proof, [SERVICE_USER_HEADER]: forward.user.id };
+      const proof = currentProof(source);
+      if (proof === undefined) { sendJson(response, 503, { error: 'service_starting' }); return; }
+      const headers: Record<string, string> = { [SERVICE_PROOF_HEADER]: proof, [SERVICE_USER_HEADER]: forward.user.id };
       for (const name of REQUEST_HEADERS) {
         const value = request.headers[name];
         if (typeof value === 'string') headers[name] = value;
       }
       const upstream = httpRequest({ protocol: base.protocol, hostname: base.hostname, port: base.port, method: forward.method, path: forward.path, headers }, (answer) => {
+        if (answer.statusCode === 401 && typeof source !== 'string') source.forget?.();
         const out: Record<string, string> = {};
         for (const name of RESPONSE_HEADERS) {
           const value = answer.headers[name];

@@ -16,7 +16,8 @@
 // with one human side per process (terminal/human.ts), made with the
 // engine and the store this module receives. The idle watchdog (issue #290,
 // session/watchdog.ts) starts with the engine, on its own timer. The
-// captures of a pull request's proof receipt (P210) are flow/proof-routes.ts's.
+// captures of a pull request's proof receipt (P210) and the human's choice
+// of them on a ticket (P226, capture_choices) are flow/proof-routes.ts's.
 // A ticket launched from a chat (P212), POST /hooks/chat with chat_seen,
 // chat_launches and chat_replies, is flow/chat.ts's: a batch of one on the
 // batches' runner, whose replies follow the flow's events. The lanes' MCP
@@ -27,13 +28,16 @@ import type { Language } from '../../app/src/catalog.ts';
 import { LeverStore } from '../consumption/levers.ts';
 import { Docker } from '../container/docker.ts';
 import { BATCH_TABLES, BatchRunner, batchRoutes } from '../flow/batch.ts';
+import { CAPTURE_CHOICES_TABLE } from '../flow/capture-choice.ts';
 import { CHAT_TABLES, ChatConfigError, ChatLauncher, chatRoutes, loadChatConfig, type ChatConfig } from '../flow/chat.ts';
 import { editorRoutes } from '../flow/editor.ts';
 import { FAST_LANES_TABLE } from '../flow/fast-lane.ts';
+import { ENV_CHECKS_TABLE } from '../flow/env-setup.ts';
 import { filesRoutes } from '../flow/files.ts';
 import { planGateRoutes } from '../flow/plan-gate.ts';
 import { proofRoutes } from '../flow/proof-routes.ts';
 import { REPLAYS_TABLE, replayRoutes } from '../flow/replay.ts';
+import type { FlowEngine } from '../flow/engine.ts';
 import { runtime } from '../flow/runtime.ts';
 import { STEPS_TABLE, stepRoutes } from '../flow/steps.ts';
 import { takeoverRoutes } from '../flow/takeover.ts';
@@ -53,8 +57,10 @@ let store: Store | undefined;
 let human: HumanSide | undefined;
 let watchdog: IdleWatchdog | undefined;
 let batches: BatchRunner | undefined;
+let starts = 0;                                    // each start and stop; a listener of an older start does nothing
 // The batches' runner, on the engine and the store; the week stop is the plans' (CLEARED_V2_WEEK_STOP_PERCENT).
-function batchesOf(registry: Registry): BatchRunner | undefined {
+// The run module's tickets are batches of one on it too (modules/run.ts), so it is exported: one runner per process.
+export function batchesOf(registry: Registry): BatchRunner | undefined {
   if (batches || !store) return batches;
   const engine = runtime.engine(registry);
   if (!engine) return undefined;
@@ -133,7 +139,7 @@ function humanOf(registry: Registry): HumanSide | undefined {
 }
 
 const flow: Module = {
-  tables: [TRAIN_TABLE, STEPS_TABLE, VARIANTS_TABLE, REPLAYS_TABLE, ...BATCH_TABLES, ...CHAT_TABLES, FAST_LANES_TABLE],
+  tables: [TRAIN_TABLE, STEPS_TABLE, VARIANTS_TABLE, REPLAYS_TABLE, ...BATCH_TABLES, ...CHAT_TABLES, FAST_LANES_TABLE, CAPTURE_CHOICES_TABLE, ENV_CHECKS_TABLE],
   routes: [
     ...runtime.routes((path) => path.startsWith('/api/tickets')),
     ...planGateRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
@@ -166,25 +172,19 @@ const flow: Module = {
   // still sends. The lanes' MCP token is made then, for its install line,
   // with or without a project (issue #350), and the MCP route's language
   // and cleaner are read then, engine or not.
+  // An engine built later, once the assistant wrote the workspace (issue
+  // #420), starts them then, unless the module stopped meanwhile.
   start: (registry) => {
     mcpTokenOf();
     mcpSettings = readMcpSettings();
-    const engine = runtime.engine(registry);
-    if (!engine || !store) return;
-    batchesOf(registry);
-    chatOf(registry);
-    if (watchdog) return;
-    const docker = new Docker();
-    watchdog = new IdleWatchdog({
-      store, project: engine.config.project, idleMs: engine.config.idleMs,
-      owner: (session) => engine.idleStop(session),
-      release: (session) => docker.releaseStopped([session]),
-    });
-    watchdog.startTimer();
+    const started = ++starts;
+    runtime.whenEngine((engine) => { if (started === starts) startWith(registry, engine); });
+    runtime.engine(registry);
   },
   // Ends the watchdog's and the batches' timers and awaits the passes they run, and the chat's
   // replies, so that the store does not close under them; a second start builds new ones.
   stop: async () => {
+    starts += 1;
     const ending = watchdog;
     const runner = batches;
     const replies = chat;
@@ -196,5 +196,20 @@ const flow: Module = {
     await runner?.close();
   },
 };
+
+// What runs beside the engine: the batches' runner, the chat's replies, the idle watchdog.
+function startWith(registry: Registry, engine: FlowEngine): void {
+  if (!store) return;
+  batchesOf(registry);
+  chatOf(registry);
+  if (watchdog) return;
+  const docker = new Docker();
+  watchdog = new IdleWatchdog({
+    store, project: engine.config.project, idleMs: engine.config.idleMs,
+    owner: (session) => engine.idleStop(session),
+    release: (session) => docker.releaseStopped([session]),
+  });
+  watchdog.startTimer();
+}
 
 export default flow;

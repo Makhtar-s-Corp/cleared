@@ -128,7 +128,7 @@ test('a milestone 2 ledger is migrated: versions recorded, a backup with the sam
   assert.equal(backups(dir).length, 1);
 }));
 
-test('the v1 reader of the tracker tables (lib/tracker/adapters/local.mjs) still lists the tickets of a migrated ledger', withDir((dir) => {
+test('the v1 reader of the tracker tables (lib/tracker/adapters/local.ts) still lists the tickets of a migrated ledger', withDir((dir) => {
   const path = fixtureLedger(dir);
   start(path);
   const listed = JSON.parse(execFileSync(process.execPath, [new URL('./v1-list.ts', import.meta.url).pathname, path], { encoding: 'utf8' })) as { id: string; title: string; status: string; project: string }[];

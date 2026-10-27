@@ -35,10 +35,10 @@ const shape = (schema: JsonSchema): unknown => {
   return schema.type;
 };
 
-test('the lead has the thirteen host tools of section 3.2, in its order, each in the schema subset', () => {
+test('the lead has the thirteen host tools of section 3.2, then the service map\'s (milestone 4, section 12), in its order, each in the schema subset', () => {
   assert.deepEqual([...LEAD_TOOL_NAMES], [
     'state', 'ticket', 'session', 'search_memory', 'propose_plan', 'start_ticket', 'stop_session',
-    'message_session', 'answer_question', 'commit', 'fulfil', 'tell_owner', 'handover',
+    'message_session', 'answer_question', 'commit', 'fulfil', 'tell_owner', 'handover', 'service_impact',
   ]);
   assert.deepEqual(LEAD_TOOLS.map((tool) => tool.name), [...LEAD_TOOL_NAMES]);
   for (const tool of LEAD_TOOLS) {
@@ -73,6 +73,7 @@ test('each tool takes the input of section 3.2', () => {
     fulfil: object({ id: 'string', note: 'string' }, ['id', 'note']),
     tell_owner: object({ text: 'string' }, ['text']),
     handover: object({ summary: 'string' }, ['summary']),
+    service_impact: object({ services: ['string'] }, ['services']),
   });
 });
 
@@ -94,7 +95,7 @@ test('the lead\'s sentinel ticket is a word the ticket branch rule accepts', () 
 });
 
 test('an answer is cut at its cap, on a character boundary, with a line saying how much was cut', () => {
-  assert.deepEqual(ANSWER_CAPS, { state: 2048, ticket: 8192, session: 8192, search_memory: 8192 });
+  assert.deepEqual(ANSWER_CAPS, { state: 2048, ticket: 8192, session: 8192, search_memory: 8192, service_impact: 8192 });
   assert.equal(capAnswer('short', 8192), 'short');
   const long = 'é'.repeat(10_000);                               // 20 000 bytes
   const cut = capAnswer(long, 8192);

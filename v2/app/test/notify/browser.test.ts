@@ -36,7 +36,7 @@ test('a headless browser registers the worker, subscribes through the button, an
   await app.directory.add('alex', PASSWORD);
   const ecdh = createECDH('prime256v1');
   ecdh.generateKeys();
-  const keys = { p256dh: ecdh.getPublicKey().toString('base64url'), auth: Buffer.from('fedcba9876543210').toString('base64url') };
+  const keys = { p256dh: ecdh.getPublicKey().toString('base64url'), auth: Buffer.from('f3e1d5c7b9a0e2c4').toString('base64url') };
 
   const require = createRequire(join(PLAYWRIGHT as string, 'package.json'));
   const { chromium } = require('playwright-core') as { chromium: { launch(options: Record<string, unknown>): Promise<any> } };

@@ -174,8 +174,8 @@ async function errorOf(response: Response): Promise<string> {
 
 // The terminal's routes through the app (/api/service/...), each post with
 // the anti-forgery token; the stream is read by an EventSource at streamUrl.
-export function terminalApi(session: string, csrf: string, fetcher: Fetch = (url, init) => fetch(url, init)) {
-  const root = `/api/service/sessions/${encodeURIComponent(session)}/terminal`;
+// `root`: another terminal's routes, the setup assistant's (lane v2-j5-assistant).
+export function terminalApi(session: string, csrf: string, fetcher: Fetch = (url, init) => fetch(url, init), root = `/api/service/sessions/${encodeURIComponent(session)}/terminal`) {
   const post = (name: string, body: unknown) => fetcher(`${root}/${name}`, {
     method: 'POST', credentials: 'same-origin',
     headers: { accept: 'application/json', 'content-type': 'application/json', 'x-csrf-token': csrf },

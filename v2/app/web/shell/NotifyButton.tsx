@@ -2,7 +2,7 @@
 // shows): hidden until the page knows what it can offer, then a bell, bold
 // when this device is told.
 import { BellSimple } from '@phosphor-icons/react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.tsx';
 import type { Translate } from '@/lib/i18n.ts';
@@ -56,8 +56,10 @@ export function NotifyButton({ t, me }: { readonly t: Translate; readonly me: Me
     queueMicrotask(() => document.getElementById('notify-toggle')?.focus());
   }, [me, read, t]);
 
-  // The browser is read only once the service has answered: before that, nothing shows.
-  const view = read.status === null ? notifyView(null, UNKNOWN, false) : notifyView(read.status, readBrowser(), read.subscription !== null);
+  // The browser is read only once the service has answered: before that,
+  // nothing shows. Read again at each answer only: its permission is a call
+  // into the browser, and the sidebar draws again at every switch.
+  const view = useMemo(() => (read.status === null ? notifyView(null, UNKNOWN, false) : notifyView(read.status, readBrowser(), read.subscription !== null)), [read]);
   return (
     <div className={view.show && view.on ? 'notify on' : 'notify'} id="notify" hidden={!view.show}>
       <Popover>

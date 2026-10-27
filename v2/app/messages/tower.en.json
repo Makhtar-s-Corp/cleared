@@ -73,6 +73,7 @@
   "landed_title": "Landed today",
   "landed_empty": "Nothing landed yet today.",
   "services_title": "Services",
+  "services_map_open": "Service map",
   "service_live_one": "{n} live session",
   "service_live_other": "{n} live sessions",
   "service_landing": "landing {ticket}",
@@ -178,5 +179,8 @@
   "template_ci_body": "## The failing check\nIts name and the link to the run.\n\n## The error\nThe lines of the log that show it.\n\n## Acceptance criteria\n- The check passes.\n- No test skipped or removed to get there.",
   "template_question": "Question",
   "template_question_title": "The question",
-  "template_question_body": "## The question\n\n## Where to look\nservice:path:line, or the files concerned.\n\n## Expected\nThe answer written where the next reader will look for it (the README, a doc or a comment beside the code), citing the code it reads."
+  "template_question_body": "## The question\n\n## Where to look\nservice:path:line, or the files concerned.\n\n## Expected\nThe answer written where the next reader will look for it (the README, a doc or a comment beside the code), citing the code it reads.",
+  "template_environment": "Environment",
+  "template_environment_title": "The service whose environment to prepare",
+  "template_environment_body": "## The service\nIts name, and what its tests need that Cleared's session image lacks: a system library, a database client, another runtime.\n\n## What to write\n- `.devcontainer/devcontainer.json` with `image`, or `build.dockerfile` and a Dockerfile that starts from Cleared's session image (cleared-v2-session): a session needs Node 24, Claude Code and Cleared's runner.\n- The dependencies install with `[session] install_command` in `.cleared/agents.conf`, one simple command.\n- Devcontainer features and lifecycle commands are not read.\n\n## Acceptance criteria\n- The branch's image builds and the service's declared check passes in it. Cleared runs both before the review.\n- With no declared check, the image builds, and the ticket says so."
 }

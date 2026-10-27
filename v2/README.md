@@ -12,6 +12,49 @@ Node.js 24 or later. Node runs the service's and the app server's `.ts` files di
 
 The one exception is the app's front end (`app/web/`, React): Vite builds it into `app/dist/`, which the app serves (the owner's decision of 2026-10-22, in the [decisions log](../docs/v2/decisions-log.md)). `npm run app` and `npm test` build it first. The app reads the build's file names once, at its first page: restart it after a new `npm run build`.
 
+## Install with Docker Compose
+
+A person installing Cleared reads [docs/install.md](../docs/install.md): the same command, then the setup assistant step by step, reaching the machine over SSH, updating, stopping and removing everything. This section says how the install works.
+
+On Linux with Docker Engine and git, from a clone of this repository, as the account that will own Cleared (not root):
+
+```sh
+docker compose -f v2/compose.yaml run --rm install
+```
+
+The command needs nothing else on the machine: the install runs in Cleared's own image (`images/cleared/Dockerfile`, Node 24 with git, `gh`, the Docker CLI and Compose, v2 and the kept v1 lock), which Compose builds from the clone the first time. It ([`src/cli/install.ts`](src/cli/install.ts)), in this order:
+
+1. refuses a reserved port (80, 443, 8787, 8788, 8790), a port named twice, or a state folder that is not an absolute path, before it asks Docker anything;
+2. checks that Docker and Compose answer;
+3. when the project's service, app and broker already run, changes nothing and says the address;
+4. refuses a clone that belongs to root (the sessions run as the clone's owner), and any of the three ports something else holds (`lib/ports.ts`), before it writes anything;
+5. makes the state folder for the clone's owner (mode 700), or refuses one of another account or one others may write;
+6. builds the session and egress images when they are missing, starts the service, the app and the broker (`docker compose up -d`), waits for the app's first answer, and says the address, the time it took and the service's last log line that names `/setup` (the setup assistant's code).
+
+Run again, it changes nothing that runs. Its words are in `src/cli/messages/install.{en,fr}.json`, in `CLEARED_V2_APP_LANGUAGE`.
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `CLEARED_V2_STATE_DIR` | `/var/lib/cleared-v2` | The ledger, the keys, the sessions' checkouts. Mounted at its own path in every container, since the service gives its paths to the session containers it starts. |
+| `CLEARED_V2_PORT` | `8791` | The service, on `127.0.0.1`. |
+| `CLEARED_V2_APP_PORT` | `8792` | The app, on `127.0.0.1`. |
+| `CLEARED_V2_PREVIEW_PORT` | `8794` | The Browser tab's previews, on `127.0.0.1`. |
+| `CLEARED_V2_APP_LANGUAGE` | `fr` | `fr` or `en`, for the app and the command. |
+| `COMPOSE_PROJECT_NAME` | `cleared-v2` | A second install on one machine, with its own state folder and ports. |
+
+What [`compose.yaml`](compose.yaml) holds (`test/install/compose.test.ts`):
+
+- **Three containers** of the image, each a role of `images/cleared/entrypoint.ts`: `service` (the core, the only one with the Docker socket), `app` and `broker` (the release lock). Each runs as the owner of the state folder, never as root, with `HOME` in the state folder; no home of the machine is mounted. The broker waits until `CLEARED_V2_PROJECT_DIR` names a checkout with `.cleared/agents.conf`.
+- **Nothing published.** The three share the host's network and bind `127.0.0.1` only, as an install by hand does: the app finds the service on `127.0.0.1` and refuses any other address of its own. From another computer, forward the port over SSH: `ssh -L 8792:127.0.0.1:8792 <this machine>`.
+- **Every object labelled.** Each container and each image it builds carries `cleared.dev=v2`; the file declares no network and no named volume, so Compose makes nothing the label could miss. The session and egress images are build-only entries (profile `images`) under the tags the service runs.
+- **The socket gives the `service` container root's reach on the host**, as membership of the `docker` group does for an install by hand.
+
+To stop Cleared: `docker compose -f v2/compose.yaml down`. The state folder stays. To remove the images too, by label: `docker image ls --filter label=cleared.dev=v2`, then `docker image rm` of the ids. Nothing is published to a registry: Cleared's images are built on the machine from the clone, as the owner decided on 2026-10-25 (question 1 of [the milestone 5 plan](../docs/v2/milestone-5-plan.md)); `pull_policy: never` keeps Compose from pulling Cleared's own image. The images' base, `node:24`, comes from Docker Hub when the machine does not have it. Docker Desktop waits for question 4.
+
+The `cleared` command ([`src/cli/cleared.ts`](src/cli/cleared.ts)) runs `src/cli/<command>.ts` with its arguments: `cleared status`, `cleared user`, and each command a later lane adds as a file. From a clone it is `node v2/src/cli/cleared.ts <command>`. In the image it is the entrypoint's `cleared` role, which runs it as the state folder's owner (`docker compose exec` would run it as root); `docker compose -f v2/compose.yaml run --rm --no-deps service cleared status`, with the variables the install was given, is the intended form, not yet run.
+
+`cleared doctor` and `cleared run` are written up for the people who use them: each line of the doctor's ready section that is not green, and what to do, in [docs/troubleshooting.md](../docs/troubleshooting.md); the command `cleared run` and the routes `POST /api/run` and `GET /api/run/:id` in [docs/run.md](../docs/run.md).
+
 ## Commands
 
 Run from `v2/`:
@@ -23,10 +66,12 @@ Run from `v2/`:
 | `npm start` | Starts the service (`node src/main.ts`). |
 | `npm run app` | Starts the app (`node app/main.ts`), see [The app](#the-app). |
 | `npm run user -- add <name>` | Adds a person who signs in to the app (the `cleared-v2 user add <name>` command). |
+| `npm run status` | Says what the service is doing, from its ledger and its `/health`: its last beat, its sessions, what waits for you, the quota, the mirrors, the releases and one line per problem. Exit 1 with a problem, 2 when it cannot tell; `-- --json` gives one JSON object. See [The heartbeat and the status](#the-heartbeat-and-the-status). |
 | `npm test` | Builds the front end, runs the unit tests with `node --test` (`test/` and `app/test/`), then the components' tests with Vitest (`app/web/test/`, rendered to HTML under Node). |
 | `npx tsc --noEmit` | Type checks `src/`, `test/` and `scripts/`. `npm run typecheck` also checks the app's server with `tsc --noEmit -p app` and the front end with `tsc --noEmit -p app/web`; `npm test` runs both through `app/test/static.test.ts`. |
 | `node src/cli/ledger-mcp.ts` | Serves the ledger's session history to an agent as a read-only MCP server on stdio, see [The ledger's MCP server](#the-ledgers-mcp-server). Not through `npm run`, whose banner would reach the protocol's stdout. |
-| `npm run guard` | Runs the repository's private terms and secrets guard (`lib/guard/codex-guard.mjs`) on every v2 file and the v2 workflow. `-- --base origin/v2` also checks the lines changed since that ref, in the guard's `--strict` diff mode. |
+| `npm run import-v1 -- --from <v1 ledger.db>` | Says what a v1 ledger would bring to the configured workspace: its measured tickets as samples of the plans' estimates, and the decisions the owner approved there and that are unchanged in the checkout. Writes nothing; `--apply` imports, once however many times it runs. The v1 ledger is never written. See the [milestone 4 plan](../docs/v2/milestone-4-plan.md), section 3. |
+| `npm run guard` | Runs the repository's private terms and secrets guard (`lib/guard/codex-guard.ts`) on every v2 file and the v2 workflow. `-- --base origin/v2` also checks the lines added since that ref, in the guard's `--strict` diff mode: a removed line, and the unchanged line git repeats in a hunk header, are already in that ref and are not read. |
 
 ## Settings
 
@@ -156,6 +201,18 @@ A slash command `@cleared <task>` posted to `POST /hooks/chat` creates a ticket 
 - **The answers.** At once: the ticket's id, its title and the Tower's address. Then, posted to `response_url`: the author session's address when it starts, and the pull request's when the release waits for approval, each once, a restart included. The addresses are the app's (`CLEARED_V2_APP_ORIGIN`, else `http://127.0.0.1:8792`); the words are in `src/flow/messages/chat.en.json` and `.fr.json`, in the app's language.
 - **The limits.** The ticket is a batch of one: it starts within the Consumption screen's lanes and the week stop, and the answer says when it waits. The service listens on this machine only: how a chat platform reaches it is the owner's setup.
 
+## GitHub Issues and Linear
+
+With `CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE` or `CLEARED_V2_MIRROR_LINEAR_TOKEN_FILE` set, the service keeps its tickets on GitHub Issues or Linear too, and brings back what people change there, every minute (P230 to P232, `src/tickets/mirror.ts`). A person's change wins over an agent's; a tracker never approves a ticket, never starts a session, and never writes as the owner. A person hands an issue over to Cleared there with the label `cleared` or by assigning it to the mirror's account: its ticket becomes a one-item plan that waits in the Inbox for your approval, and the lead is told (C3, P244). Settings, what is mirrored, the conflict rule and the delegation: [docs/v2/mirrors.md](../docs/v2/mirrors.md). Linear is tested against a fake only. `npm run doctor -- mirror` checks the GitHub mirror with the service's settings: the token file readable (never printed), each repository reached with the rights to label and close its issues, the status labels a person picks on GitHub's page, and the mirror's last full pass; it writes nothing on GitHub.
+
+## The heartbeat and the status
+
+The service beats every minute (`CLEARED_V2_HEARTBEAT_SECONDS`), as v1's wake did (B2.1, P239, `src/heartbeat/`). With `CLEARED_V2_HEARTBEAT_PING_URL_FILE` set, each beat with no problem calls the address that file holds, so a push monitoring service of your choice alerts you when the beats stop; with `CLEARED_V2_HEARTBEAT_FAIL_URL_FILE` too, a beat with a problem calls that one instead, with the problems' codes only. Each file must be readable by the service's account alone, outside the project's checkout, and hold an HTTPS address (HTTP on loopback). A problem is a session unmoved for 2 hours (`CLEARED_V2_HEARTBEAT_SESSION_MINUTES`), a mirror without a full pass for 10 minutes (`CLEARED_V2_HEARTBEAT_TRACKER_MINUTES`), a refused address file, and, seen by `npm run status`, a beat older than three intervals or a service that does not answer. Each one is recorded once in the ledger's `events` (`heartbeat_problem`) while it lasts. The decisions and what v1 had that v2 does not: the [milestone 4 plan](../docs/v2/milestone-4-plan.md), section 8. Tested against a fake monitor only.
+
+## The service map
+
+The service reads each service's code at its base branch and draws what links them (M6, `src/map/`, the app's `/services`, reached from the tower's line of services, the palette or G M): the calls to another service's OpenAPI contract, the channels of an events contract another service names, the databases each one keeps and the tables another one reads. Each call says whether the workspace file declares it, the code shows it, or both; a call only the code shows is one the release train does not know. Picking a service shows what a change of it reaches, and the lead reads the same through its tool `service_impact` before it plans. The map is built again when a base commit moves, checked at the start, every 10 minutes (`CLEARED_V2_MAP_MINUTES`, 0 for never) and on Refresh. No setting's value is read, and only names that are identifiers are kept. What is read and the rules: the [milestone 4 plan](../docs/v2/milestone-4-plan.md), section 12.
+
 ## The harness pick
 
 `POST /api/tickets` with `harnesses`, 2 to 4 names, runs a variant of the ticket on each (P213, `src/flow/harness-pick.ts`). Once all have ended, the flow keeps by itself the variant that committed a change and whose own run of the declared test command passed, with the fewest tokens, else the shortest agent time; the others stop and their containers go. None green: the owner chooses in the inbox. The wins per ticket type are on the Consumption screen. Tested with fake adapters only.
@@ -171,6 +228,7 @@ A slash command `@cleared <task>` posted to `POST /hooks/chat` creates a ticket 
 Every pull request Cleared opens starts with a receipt (P210, `src/flow/receipt.ts`, its words in `src/flow/messages/receipt.en.json` and `.fr.json`, in the project's language):
 
 - **Captures.** `before.png` of what the base runs (the origin of the service's `health_url`), `after.png` of the ticket's trial environment, and `flow.webm`, about 20 seconds of the after page scrolled down and back up (`src/flow/proof-capture.ts`). Each page reaches its own address only. Linked through the app when `CLEARED_NOTIFY_LINK_BASE` is set (see [Settings](#settings)), else "kept by Cleared". A capture that was not taken says why: no browser, no `health_url`, no trial environment, or a failure. A ticket of variants takes none.
+- **Only when a screen changed** (P226, `src/flow/capture-need.ts`). Before a browser starts, the flow reads the paths the author's branch commits. Components, styles, catalogs, page routes, templates and the assets a page draws need captures; the backend alone, tests, CI and docs do not. The service's line ends with the reason: "No screen changed", the screens touched, or the human's choice. The ticket card's Auto, On and Off switch (`GET` and `POST /api/tickets/:id/captures`, kept in the ledger) wins over the rule. Use On when a page is drawn by a file the rule cannot tell from a backend file. A diff that cannot be read is captured.
 - **Tests.** Each review round's run of the declared `[session] test_command`: passed, failed, not run, or run in a pipe or a list, so its exit status is not known.
 - **Cost.** Tokens and time, as [the ticket's cost](#the-cost-of-a-ticket) counts them. Dollars only when every session reported a figure.
 
@@ -184,6 +242,16 @@ The receipt is built from structured fields only: no command output, no error te
 - **Time.** The agents' own time, each turn from its start to its end, and the ticket's time, from its first stored event to its last. Both are said as the app says a duration ("1 h 30", "1h 30m").
 - **Dollars.** Only the API-equivalent figure the harness reports (Claude Code's `total_cost_usd`), never an estimate and never euros. Codex and Cursor report none, so a ticket with one of their sessions has no dollar figure.
 - **Not counted.** The lead's turns: they serve several tickets at once, and the ledger gives no share of them to one.
+
+## The week's figures
+
+`GET /api/consumption/week?tz=<zone>` (C17, `src/consumption/week.ts`) reads the ledger and the ticket store, and writes nothing. The Consumption screen's "This week" panel shows it, over the screen's seven days in the person's zone.
+
+- **Merged.** The tickets Done now whose last move to Done in the week was the service's (the flow or the guarded merge). An issue closed on a tracker and a move by hand are not merges.
+- **Tokens and time.** Every turn finished in the week, the lead's and the questions' included, counted as the cost of a ticket is.
+- **Dollars.** Only as the harness reported them, each session's increase over the week. A week with a Codex or Cursor turn has no dollar figure, and the panel says so.
+- **Estimates.** Each merged ticket a plan estimated, its minutes against its own, never in dollars.
+- **Per service.** A session's service, else its ticket's; the lead and the questions on a row of the workspace's own, so the rows add up to the week.
 
 ## Ticket templates
 
@@ -211,7 +279,7 @@ A session reads the project's skills: the base branch's `.claude/skills` is moun
 
 ## The guard
 
-The guard checks every v2 file except the app's web fonts (`app/public/fonts/*.woff2`) and its three icons (`app/public/icons/icon-192.png`, `icon-512.png` and `apple-touch-icon.png`, by exact name), which are binary; it says how many it left out, and any other binary file is refused. The guard reads its private-term fingerprint lists from a project's committed `.cleared/agents.conf` (`[guard] salt`, `terms`, `allowed`), as v1 does. This repository commits no such list, so by default, and in CI, `npm run guard` checks secrets, private keys, IBANs, credentials in URLs, email addresses and phone numbers, and no private terms; it says so when it runs. This is a known gap: closing it in CI needs a fingerprint list the guard can read there, either a committed guard configuration with its lists or lists provided to the workflow. To check private terms too, point it at a project whose committed configuration names its lists: `CLEARED_REPO=<project checkout> [ORCH_GUARD_REF=<ref>] npm run guard`. The lines changed since `--base` leave out `package-lock.json`, which npm writes: the strict mode reads a dependency named `js-tokens` with a version range as an assigned secret. The tree check still reads the whole lock file. `app/dist/` is not checked: it is built, and git ignores it.
+The guard checks every v2 file except the app's web fonts (`app/public/fonts/*.woff2`) and its three icons (`app/public/icons/icon-192.png`, `icon-512.png` and `apple-touch-icon.png`, by exact name), which are binary; it says how many it left out, and any other binary file is refused. The guard reads its private-term fingerprint lists from a project's committed `.cleared/agents.conf` (`[guard] salt`, `terms`, `allowed`), as v1 does. This repository commits no such list, so by default, and in CI, `npm run guard` checks secrets, private keys, IBANs, credentials in URLs, email addresses and phone numbers, and no private terms; it says so when it runs. This is a known gap: closing it in CI needs a fingerprint list the guard can read there, either a committed guard configuration with its lists or lists provided to the workflow. To check private terms too, point it at a project whose committed configuration names its lists: `CLEARED_REPO=<project checkout> [ORCH_GUARD_REF=<ref>] npm run guard`. The lines added since `--base` leave out `package-lock.json`, which npm writes: the strict mode reads a dependency named `js-tokens` with a version range as an assigned secret. The tree check still reads the whole lock file. `app/dist/` is not checked: it is built, and git ignores it.
 
 ## CI
 

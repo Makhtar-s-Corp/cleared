@@ -98,7 +98,7 @@
 // back to the full circuit for good: its card says why, the lead is told,
 // and its later authors run on the full model, never a resumed Haiku.
 import { posix } from 'node:path';
-import { VARIANT_DIFF_MAX, VARIANTS_MAX, VARIANTS_MIN, type CiRepair, type InboxItem, type PermissionItem, type ProductionCheck, type QuestionItem, type QuestionTimeout, type FastLane, type ReleaseItem, type SessionDetail, type SessionPlan, type SessionSummary, type TakenOver, type TicketStep, type TicketVariant } from '../api/types.ts';
+import { VARIANT_DIFF_MAX, VARIANTS_MAX, VARIANTS_MIN, type CiRepair, type InboxItem, type PermissionItem, type CaptureChoice, type ProductionCheck, type QuestionItem, type QuestionTimeout, type FastLane, type ReleaseItem, type SessionDetail, type SessionPlan, type SessionSummary, type TakenOver, type TicketStep, type TicketVariant } from '../api/types.ts';
 import { isSessionId } from '../container/docker.ts';
 import type { SiblingSpec } from '../container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
@@ -137,12 +137,15 @@ import { GIVEN_BACK, GIVEN_BACK_REVIEW, TAKEN_OVER } from './takeover.ts';
 import { NO_ANSWER, answerMessage, channelOf, channelPrompt, lastSaid, verdictsOf, type ChannelMessage } from './channel.ts';
 import { testComment, testLine, testRunOf } from './review-tests.ts';
 import type { ProductionCapture, ProofCapture } from './proof-capture.ts';
+import { CaptureChoiceStore } from './capture-choice.ts';
+import { captureNeed, type CaptureChoiceName, type CaptureNeed } from './capture-need.ts';
 import { PRODUCTION_FILE, PROOF_FILES } from './proof-capture.ts';
 import { productionChecksOf, productionComment } from './production.ts';
 import type { ReceiptCapture, ReceiptData, ReceiptTest } from './receipt.ts';
 import { ticketCost } from '../consumption/ticket-cost.ts';
 import { CI_REPAIR_ATTEMPTS, onBase, repairComment, repairMessage, type CiFailures } from './ci-repair.ts';
 import { FastLaneStore, cardLane, fallbackComment, type FastVerdict } from './fast-lane.ts';
+import { ENV_CHECK_ROUNDS, EnvCheckStore, envCheckComment, envCheckGiveUp, envCheckRequest, isEnvironmentTicket, type EnvCheck } from './env-setup.ts';
 import type { PrClose } from './pr-close.ts';
 import { authorPrompt, contractSendBackMessage, fileDiff, handoverMessage, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
 import { humanEdits } from './human-edits.ts';
@@ -157,6 +160,7 @@ export type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts
 // What the lock answered a merge (effects.ts mergeRelease, release/lock.ts).
 export type { MergeOutcome } from '../release/lock.ts';
 export type { FastVerdict } from './fast-lane.ts';
+export type { EnvCheck } from './env-setup.ts';
 
 // What the flow does outside this process. `service` names the service of
 // a workspace of several the call is for; absent, the one-service
@@ -182,6 +186,11 @@ export type FlowEffects = {
   // author's session still runs. Never throws in the real one; a throw here
   // is journaled as failed. Absent: no capture is taken.
   captureProof?(input: { readonly ticket: TicketId; readonly session: SessionId; readonly service: ServiceConfig; readonly dir: string }): Promise<ProofCapture>;
+  // The paths the author's branch commits against the service's base, read
+  // as a step's branch is (stepChanges), a folder service's in its folder
+  // only: what the capture rule reads (P226, flow/capture-need.ts) before a
+  // browser starts. Absent: every author's work is captured, as before the rule.
+  changedPaths?(input: { readonly ticket: TicketId; readonly service: ServiceConfig; readonly workdir: string }): Promise<readonly string[]>;
   // The production page at `url`, the service's [release] production_url,
   // captured in `dir` once a release the human approved is deployed (by the
   // human or their CI) and its watch ended healthy (P218,
@@ -247,6 +256,11 @@ export type FlowEffects = {
   // `head`, against the base. Absent: no Quick ticket is judged, and no card
   // says a lane.
   fastLane?(input: { readonly ticket: TicketId; readonly service?: ServiceConfig; readonly workdir?: string; readonly head?: string }): Promise<FastVerdict>;
+  // The setup session's check (matrix C4, flow/env-setup.ts): the image of
+  // the session's branch in `workdir` built as the service's prepared image
+  // would be once merged, and the service's declared check run in it.
+  // Absent: no ticket of the environment template is checked.
+  envCheck?(input: { readonly ticket: TicketId; readonly service?: ServiceConfig; readonly workdir: string }): Promise<EnvCheck>;
 };
 
 export type StepChanges = {
@@ -418,6 +432,9 @@ export class FlowEngine {
   #replaying = new Set<TicketId>();                                 // tickets whose resume is under way
   #tips = new Map<SessionId, string>();                             // the last commit journaled as an author's checkpoint
   #fastLanes: FastLaneStore;                                        // the Quick tickets the rules kept fast or sent back (B2.2)
+  #captureChoices: CaptureChoiceStore;                              // the human's choice of the receipt's captures, by ticket (P226)
+  #envChecks: EnvCheckStore;                                        // the setup sessions' checks, by ticket (C4)
+  #envRuns = new Map<TicketId, string>();                           // when each ticket's run started: its checks' rounds count from there
 
   constructor(deps: FlowDeps) {
     this.registry = deps.registry;
@@ -437,6 +454,8 @@ export class FlowEngine {
     this.#variants = new VariantStore(deps.store.db, this.#now);
     this.#replays = new ReplayStore(deps.store.db, this.#now);
     this.#fastLanes = new FastLaneStore(deps.store.db);
+    this.#captureChoices = new CaptureChoiceStore(deps.store.db);
+    this.#envChecks = new EnvCheckStore(deps.store.db);
     this.#runner = new TrainRunner({
       db: deps.store.db, trains: this.#trains, tickets: this.registry.ticketStore, project: this.config.project, retryMs: this.config.mergeRetryMs,
       lock: (name) => this.#lockOf(this.#service(name)), now: this.#now, clean: this.#clean, emit: (event) => this.#emit(event),
@@ -677,7 +696,7 @@ export class FlowEngine {
   // ---- the landing ---------------------------------------------------------
 
   // The releases to follow: the last release item of each ticket in the go
-  // state, and of each ticket the lock already put in Done (merge-pr.sh does
+  // state, and of each ticket the lock already put in Done (merge-pr.ts does
   // at the merge, before the watch has said anything) if it was approved
   // within the horizon. Read from the tables at every tick, so that a new
   // engine goes on where the last one stopped; the `watch` step on the
@@ -770,7 +789,7 @@ export class FlowEngine {
       // A read that fails is retried like a move; a ticket that is gone has nothing to move.
       const status = (await tickets.get(c.ticket))?.status;
       if (landing.state === 'landed') {
-        // merge-pr.sh moves the card to Done when every shown pull request is merged; the flow does when it did not.
+        // merge-pr.ts moves the card to Done when every shown pull request is merged; the flow does when it did not.
         if (status === tickets.states.go) await tickets.move(c.ticket, tickets.states.done, SERVICE);
       } else if (landing.state === 'rolled_back') {
         if (status === tickets.states.go || status === tickets.states.done) await tickets.move(c.ticket, tickets.states.todo, SERVICE);
@@ -997,6 +1016,7 @@ export class FlowEngine {
     if (!adapter) throw new FlowError('unavailable', `no adapter for ${HARNESS} is registered`);
     this.#active.add(ticketId);
     this.#flows.set(ticketId, new Set());
+    this.#envRuns.set(ticketId, this.#at());
     this.#channels.delete(ticketId);
     if (origin) this.#origins.set(ticketId, origin);
     else this.#origins.delete(ticketId);
@@ -1477,9 +1497,12 @@ export class FlowEngine {
   // that lands are refused. The multi-service proof sets its earlier runs'
   // tickets aside, so that each run starts with nothing of theirs open
   // (scripts/proof-base.ts).
-  async setAside(id: TicketId, by: UserId): Promise<{ readonly sessions: number; readonly items: number }> {
-    const note = 'The owner set this ticket aside: its sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.';
-    return this.#takeOut(id, by, { message: 'The owner set the ticket aside: this session was stopped.', code: 'set_aside', reason: 'set_aside', note, refusal: 'it is not set aside' });
+  // The mirror of a tracker (tickets/mirror.ts, P232) gives its own words:
+  // a person moved the ticket there.
+  async setAside(id: TicketId, by: UserId, words?: { readonly note: string; readonly message: string }): Promise<{ readonly sessions: number; readonly items: number }> {
+    const note = words?.note ?? 'The owner set this ticket aside: its sessions were stopped and nothing of it waits in the inbox. Move it to Todo to start it again.';
+    const message = words?.message ?? 'The owner set the ticket aside: this session was stopped.';
+    return this.#takeOut(id, by, { message, code: 'set_aside', reason: 'set_aside', note, refusal: 'it is not set aside' });
   }
 
   // Close (POST /api/tickets/:id/close, issue #249): a ticket that should
@@ -2571,6 +2594,7 @@ export class FlowEngine {
     const ticket = await tickets.get(id);
     if (!ticket) return;
     await this.#judgeFast(ticket, { workdir: author.input.workdir });
+    if (!(await this.#environmentChecked(ticket, author))) return;
     await tickets.move(id, tickets.states.review, SERVICE);
     const open = this.#channels.get(id);
     if (open) {
@@ -2816,10 +2840,18 @@ export class FlowEngine {
   // The captures of `service`, taken while the author's session and its
   // trial environment still run, journaled on the session. A capture that
   // throws, or still runs at the cap, loses the captures, never the ticket.
+  // First the rule (P226): a change no person sees, or the human's Off on
+  // the ticket, takes none, and no browser starts; the journal says why.
   async #captureProof(live: Live, service: ServiceConfig): Promise<void> {
     const capture = this.#effects.captureProof;
     if (!capture) return;
     const { ticket: id, project } = live.input;
+    const need = await this.#captureNeed(live, service);
+    const reason = need ? { need } : {};
+    if (need && !need.take) {
+      this.#journal({ id: live.id, ticket: id, project }, { type: 'CUSTOM', name: 'cleared.proof_captured', value: { service: service.name, missing: [], ...reason } });
+      return;
+    }
     const failed: ProofCapture = { missing: (['before', 'after', 'video'] as const).map((part) => ({ part, reason: 'failed' as const })) };
     let timer: ReturnType<typeof setTimeout> | undefined;
     let got: ProofCapture;
@@ -2832,7 +2864,34 @@ export class FlowEngine {
     } finally {
       clearTimeout(timer);
     }
-    this.#journal({ id: live.id, ticket: id, project }, { type: 'CUSTOM', name: 'cleared.proof_captured', value: { service: service.name, ...got } });
+    this.#journal({ id: live.id, ticket: id, project }, { type: 'CUSTOM', name: 'cleared.proof_captured', value: { service: service.name, ...got, ...reason } });
+  }
+
+  // Whether the author's change needs captures: the paths its branch
+  // commits, and the human's choice on the ticket. Undefined without a
+  // reader of the diff; a read that fails is said by its code only.
+  async #captureNeed(live: Live, service: ServiceConfig): Promise<CaptureNeed | undefined> {
+    const read = this.#effects.changedPaths;
+    if (!read) return undefined;
+    const { ticket, workdir } = live.input;
+    const choice = this.#captureChoices.get(ticket).choice;
+    let paths: readonly string[] | undefined;
+    try { paths = await read({ ticket, service, workdir }); } catch { paths = undefined; }
+    return captureNeed(paths, choice);
+  }
+
+  // The human's choice of the receipt's captures on a ticket (GET and POST
+  // /api/tickets/:id/captures): undefined for a ticket the store does not
+  // know. It counts from the next author that ends its work.
+  async captureChoice(ticket: TicketId): Promise<CaptureChoice | undefined> {
+    if (!(await this.registry.ticketStore.get(ticket))) return undefined;
+    return this.#captureChoices.get(ticket);
+  }
+
+  async chooseCaptures(ticket: TicketId, choice: CaptureChoiceName, by: UserId): Promise<CaptureChoice> {
+    const known = await this.registry.ticketStore.get(ticket);
+    if (!known) throw new FlowError('not_found', `unknown ticket ${ticket}`);
+    return this.#captureChoices.set(ticket, known.project ?? this.config.project, choice, by, this.#at());
   }
 
   #proofDir(ticket: TicketId, service: string): string {
@@ -2979,7 +3038,10 @@ export class FlowEngine {
     ].join('\n');
     let requestedAt: string;
     try {
-      await this.registry.reviewRecorder.record({ ticket: id, pr: published.number, session: reviewer.id, model, verdict: 'pass', round, report, at: reviewedAt });
+      await this.registry.reviewRecorder.record({
+        ticket: id, pr: published.number, session: reviewer.id, model, verdict: 'pass', round, report, at: reviewedAt,
+        commit: published.head, verdictPhrase: reviewer.settings.verdict,
+      });
       const asked = await this.#effects.requestRelease({ ticket: id, pr: published.number, announcement });
       // The real lock moves the card itself when it asks; a store it did not move gets the move here.
       if ((await tickets.history(id)).at(-1)?.status !== tickets.states.validate) await tickets.move(id, tickets.states.validate, SERVICE);
@@ -3013,6 +3075,50 @@ export class FlowEngine {
     this.#step(session, 'STEP_FINISHED', 'release');
     this.#step(session, 'STEP_STARTED', 'approval');
     this.#emit({ type: 'release_requested', at: this.#at(), project, ticket: id, session: reviewer.id, item: item.id, pr: published.number, url: published.url });
+  }
+
+  // ---- the setup session (matrix C4, flow/env-setup.ts) ---------------------
+
+  // A ticket of the environment template, before its review: its branch's
+  // image built and the declared check run in it. True: the review may
+  // start. A failure goes back to the author, resumed, until the last
+  // round, which puts the ticket back in Todo, as a check that cannot run.
+  async #environmentChecked(ticket: Ticket, author: Live): Promise<boolean> {
+    const check = this.#effects.envCheck;
+    if (!check || !isEnvironmentTicket(ticket.labels)) return true;
+    const id = ticket.id;
+    const service = this.#several && author.input.service ? this.#service(author.input.service) : undefined;
+    // The run the check is for: a ticket set aside or closed while it ran,
+    // and maybe started again, is not this run's any more.
+    const run = this.#flows.get(id);
+    const ours = () => this.#active.has(id) && this.#flows.get(id) === run;
+    const since = this.#envRuns.get(id) ?? '';
+    let result: EnvCheck;
+    try {
+      result = await check({ ticket: id, ...(service ? { service } : {}), workdir: author.input.workdir });
+    } catch (error) {
+      if (ours()) await this.#putBack(id, `The environment check could not run: ${name(error)}`, 'env_check_failed');
+      return false;
+    }
+    const round = this.#envChecks.add(id, ticket.project ?? this.config.project, since, result, this.#at());
+    if (!ours()) return false;
+    await this.registry.ticketStore.comment(id, this.#clean(envCheckComment(result, round)), SERVICE)
+      .catch((error: unknown) => console.error(`cleared-v2: the environment check could not be said on ${id} (${error instanceof Error ? error.name : typeof error})`));
+    if (result.outcome === 'passed' || result.outcome === 'no_check') return true;
+    const failures = this.#envChecks.failures(id, since);
+    if (failures >= ENV_CHECK_ROUNDS) {
+      await this.#putBack(id, envCheckGiveUp(result, failures), 'env_check_failed');
+      return false;
+    }
+    const authorRow = this.#lastSession(id, 'author');
+    const adapter = this.registry.sessionAdapters[authorRow ? this.#harnessOf(authorRow.id) : HARNESS];
+    try {
+      if (!adapter) throw new FlowError('unavailable', 'the author\'s adapter is gone');
+      await this.#reopenWith(ticket, adapter, authorRow, this.#clean(envCheckRequest(result, failures, ENV_CHECK_ROUNDS)));
+    } catch (error) {
+      await this.#putBack(id, `The author could not be reopened after the environment check: ${name(error)}`, 'reopen_failed');
+    }
+    return false;
   }
 
   // ---- the fast lane (matrix B2.2, flow/fast-lane.ts) ------------------------

@@ -37,18 +37,24 @@ export function applyTheme(theme: Theme, save: boolean): void {
   catch { /* the choice lasts for this page only */ }
 }
 
-// The screens of the sidebar, in order, each with its chord (keys.ts).
+// Every screen, in order, each with its chord (keys.ts): the palette's Go to lists them all.
 export type NavItem = { readonly screen: ScreenName; readonly href: string; readonly label: string; readonly go: GoScreen; readonly chord: readonly string[] };
 
-export const NAV: readonly NavItem[] = [
+export const SCREENS: readonly NavItem[] = [
   { screen: 'tower', href: '/', label: 'nav_tower', go: 'tower', chord: ['G', 'T'] },
   { screen: 'inbox', href: '/inbox', label: 'nav_inbox', go: 'inbox', chord: ['G', 'I'] },
   { screen: 'session', href: '/sessions', label: 'nav_sessions', go: 'sessions', chord: ['G', 'S'] },
   { screen: 'lead', href: '/lead', label: 'nav_plans', go: 'lead', chord: ['G', 'P'] },
   { screen: 'consumption', href: '/consumption', label: 'nav_consumption', go: 'consumption', chord: ['G', 'C'] },
+  { screen: 'services', href: '/services', label: 'nav_services', go: 'services', chord: ['G', 'M'] },
 ];
 
-export const hrefOf = (to: GoScreen): string => NAV.find((item) => item.go === to)?.href ?? '/';
+// The sidebar's screens: the development's (the product owner's decision of 2026-10-25, 11:14, P227). Consumption
+// is reached by the quota gauge at the sidebar's foot, the palette, its chord and the account menu; the service map
+// (milestone 4, M6) by the tower's line of services, the palette and its chord.
+export const NAV: readonly NavItem[] = SCREENS.filter((item) => item.screen !== 'consumption' && item.screen !== 'services');
+
+export const hrefOf = (to: GoScreen): string => SCREENS.find((item) => item.go === to)?.href ?? '/';
 
 // The inbox's count as the badge draws it; nothing when nothing waits.
 export function inboxBadge(waiting: number | null): string | null {

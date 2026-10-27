@@ -46,7 +46,7 @@ test('after the write the broker is asked for the release, once per shown pull r
 
 test('a broker refusal is recorded and the signed move stays: the human did approve', async () => {
   const broker = new FakeBroker();
-  broker.answer = { ok: false, output: '', reason: 'merge-pr.sh: #7 is not put live: no check ran on it' };
+  broker.answer = { ok: false, output: '', reason: 'merge-pr.ts: #7 is not put live: no check ran on it' };
   const s = await service({ broker });
   const ticket = await s.waiting();
   const asked = s.ask([{ pr: 7, head: head('a') }]);
@@ -180,12 +180,12 @@ test('moved-by-owner refuses an approval signed for another request time or othe
   assert.deepEqual((await s.store.history(ticket.id)).at(-1)?.by.kind, 'other');
 });
 
-test('the lock sees the service as the agents\' application: tracker.sh identity answers app', async () => {
+test('the lock sees the service as the agents\' application: tracker.ts identity answers app', async () => {
   const s = await service();
   assert.equal(s.box.tracker('identity').stdout.trim(), 'app');
 });
 
-test('a tool of the agents cannot move the card to the go state through tracker.sh', async () => {
+test('a tool of the agents cannot move the card to the go state through tracker.ts', async () => {
   const s = await service();
   const ticket = await s.waiting();
   const result = s.box.tracker('move', ticket.id, 'Ready to Ship');

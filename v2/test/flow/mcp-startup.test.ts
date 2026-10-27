@@ -27,7 +27,7 @@ test('the language set between the import and the start is the one POST /mcp ans
   process.env.CLEARED_V2_APP_LANGUAGE = 'en';
 
   const store = openStore(':memory:');
-  const app = assemble({ sessions: emptyModule, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox: emptyModule, lead: emptyModule, notify: emptyModule, knowledge: emptyModule }, { store });
+  const app = assemble({ sessions: emptyModule, users: emptyModule, tickets: emptyModule, flow, approval: emptyModule, inbox: emptyModule, lead: emptyModule, notify: emptyModule, knowledge: emptyModule, setup: emptyModule, run: emptyModule, secrets: emptyModule }, { store });
   app.start?.();
   // Set back after the start: only a read at the start answers in English.
   process.env.CLEARED_V2_APP_LANGUAGE = 'fr';

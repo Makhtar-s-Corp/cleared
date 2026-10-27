@@ -29,7 +29,7 @@ function open(options: { signed?: boolean } = {}) {
 }
 
 test('the table statements are the local tracker\'s, one per statement, all IF NOT EXISTS', () => {
-  const source = readFileSync(new URL('../../../lib/tracker/adapters/local.mjs', import.meta.url), 'utf8');
+  const source = readFileSync(new URL('../../../lib/tracker/adapters/local.ts', import.meta.url), 'utf8');
   const schema = /const SCHEMA = `([\s\S]*?)`;/.exec(source)?.[1] ?? '';
   const norm = (text: string) => text.replace(/\s+/g, ' ').replace(/ ?, ?/g, ',').replace(/ ?\( ?/g, '(').replace(/ ?\) ?/g, ')').trim();
   const v1 = schema.split(';').map(norm).filter(Boolean);

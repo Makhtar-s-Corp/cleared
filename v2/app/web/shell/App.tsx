@@ -1,8 +1,9 @@
 // The shell in the browser: who is signed in, the sidebar (the screens, the
 // inbox count, the lead's dot, the live sessions, the theme, notifications,
 // signing out), the screen's bar, the command palette, the keyboard and its
-// sheet (lane 35, docs/v2/ui-overhaul-plan.md, 2.2 and U8), and the screen
-// of the address, with its catalog over the shell's.
+// sheet (lane 35, docs/v2/ui-overhaul-plan.md, 2.2 and U8), the API access
+// panel (shell/Access.tsx, C18), and the screen of the address, with its
+// catalog over the shell's.
 //
 // One document for the whole app (docs/v2/ui-overhaul-plan.md, section
 // 2.1, lane 34): the router (lib/router.tsx) names the screen from the
@@ -16,7 +17,7 @@
 // screen keeps its scroll, has its title, turns on its own sheets
 // (lib/sheets.ts) and fails alone (lib/boundary.tsx).
 import { RouterProvider, useRouterState, type AnyRouter } from '@tanstack/react-router';
-import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType } from 'react';
+import { Fragment, lazy, memo, Suspense, useCallback, useEffect, useInsertionEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ComponentType } from 'react';
 import type { LeadState, NextInboxItem, SessionSummary } from '../../../src/api/types.ts';
 import { json, serviceApi } from '@/lib/api.ts';
 import { ScreenBoundary } from '@/lib/boundary.tsx';
@@ -26,12 +27,13 @@ import { browserStore, rememberLanguage } from '@/lib/language.ts';
 import { Screen } from '@/lib/context.tsx';
 import { ChangeStream, type SourceLike } from '@/lib/events.ts';
 import { translator } from '@/lib/i18n.ts';
-import { CacheContext, useReader } from '@/lib/query.tsx';
+import { CacheContext, sameFields, useReader } from '@/lib/query.tsx';
 import { SCREEN_NAMES, createAppRouter, interceptLinks, loadScreen, loadedScreen } from '@/lib/router.tsx';
 import { KeptView } from '@/lib/stack.tsx';
 import { placeOf, pushStack, stackOrder, titleKey, type Place, type ScreenName } from '@/lib/routes.ts';
 import { ApiError, type Me, type ScreenContext } from '@/lib/screen.ts';
 import { showSheets } from '@/lib/sheets.ts';
+import { REFRESH_MS, browserZone, readConsumption } from '@/screens/consumption/model.ts';
 import { towerModel, type NeedCard } from '@/screens/tower/model.ts';
 import type { Ticket } from '../../../src/tickets/contract.ts';
 import { isMac } from './Kbd.tsx';
@@ -41,7 +43,9 @@ import {
   OPEN_FROM, RAIL_FROM, type SessionRow, type Theme,
 } from './model.ts';
 import { GESTURES, paletteItems, type PaletteItem } from './palette.ts';
+import { AccessPanel } from './Access.tsx';
 import { ShortcutSheet, pressTab, useShortcuts, walkRows } from './Shortcuts.tsx';
+import { weeklyQuota, type WeeklyQuota } from './quota.ts';
 import { Sidebar } from './Sidebar.tsx';
 
 export type ShellStart = {
@@ -210,7 +214,7 @@ function shownGesture(selector: string): HTMLElement | null {
   return null;
 }
 
-type Overlay = 'palette' | 'sheet' | null;
+type Overlay = 'palette' | 'sheet' | 'access' | null;
 
 // The palette is a chunk of its own (cmdk and what it brings), loaded once
 // the first screen has drawn, so the first draw does not wait for it.
@@ -275,6 +279,25 @@ function Shell({ shared }: { readonly shared: Shared }) {
     return shellReader.live(() => void recount());
   }, [shellReader, recount]);
 
+  // The week's quota for the sidebar's gauge (P227): read once the person is known, then each minute, as the
+  // Consumption screen reads it; a read that fails keeps what the gauge shows, and says nothing measured before it.
+  const zone = useMemo(() => browserZone(), []);
+  const [quota, setQuota] = useState<WeeklyQuota | null>(null);
+  useEffect(() => {
+    if (!raw) return;
+    let stopped = false;
+    const read = () => {
+      readConsumption(raw, zone).then((data) => {
+        if (stopped) return;
+        const next = weeklyQuota(data);
+        setQuota((held) => (held && sameFields(held, next) ? held : next));
+      }, () => { if (!stopped) setQuota((held) => held ?? { kind: 'none' }); });
+    };
+    read();
+    const timer = setInterval(read, REFRESH_MS);
+    return () => { stopped = true; clearInterval(timer); };
+  }, [raw, zone]);
+
   const signOut = useCallback(async () => {
     try { if (me) await json('/logout', { method: 'POST', headers: { 'x-csrf-token': me.csrf } }); }
     finally {
@@ -301,8 +324,11 @@ function Shell({ shared }: { readonly shared: Shared }) {
   const shownRow = place.session ? rows.find((row) => row.id === place.session) : undefined;
   const here = shownRow ? t('top_session', { ticket: shownRow.ticket, title: shownRow.title }) : t(titleKey(place.screen));
 
-  useScrollKept(place.path);
-  useLayoutEffect(() => {
+  // The screen's sheets on before any layout effect, the screen's own
+  // included (a child's run before the shell's): what they measure, and the
+  // layout the scroll below forces, is the next screen's as it will be
+  // painted, not laid out again in the same frame (lane j3-tab-perf).
+  useInsertionEffect(() => {
     showSheets(place.screen);
     document.body.dataset.screen = place.screen;
   }, [place.screen]);
@@ -314,16 +340,19 @@ function Shell({ shared }: { readonly shared: Shared }) {
   // screen reader: focus at the start of the new screen (the main region,
   // which draws no ring), and its name said. A move started in the
   // sidebar keeps the focus on the item pressed, as a native app's list
-  // of places does (lane 34's art director). Not on the first draw.
-  const [said, say] = useState('');
+  // of places does (lane 34's art director). Not on the first draw. The
+  // name is written into the live region, not drawn again by the shell.
+  const said = useRef<HTMLParagraphElement | null>(null);
   const moved = useRef(false);
   const fromSidebar = useRef(false);
   useLayoutEffect(() => {
     if (!moved.current) { moved.current = true; return; }
     if (!fromSidebar.current) document.getElementById('screen')?.focus({ preventScroll: true });
     fromSidebar.current = false;
-    say(document.title);
+    if (said.current) said.current.textContent = document.title;
   }, [place.path]);
+  // Last of the switch's changes to the page, since it forces a layout.
+  useScrollKept(place.path);
 
   const flipTheme = useCallback(() => {
     const next: Theme = currentTheme() === 'dark' ? 'light' : 'dark';
@@ -379,6 +408,11 @@ function Shell({ shared }: { readonly shared: Shared }) {
   // The sidebar draws again only when what it shows changes (Sidebar is memo).
   const groups = useMemo(() => sessionGroups(rows), [rows]);
   const onSignOut = useCallback(() => void signOut(), [signOut]);
+  // The menu that opens the API access panel closes first: the focus goes back to the person's button.
+  const openAccess = useCallback(() => {
+    back.current = document.getElementById('person');
+    setOverlay('access');
+  }, []);
   const onPick = useCallback((href: string) => { fromSidebar.current = href !== location.pathname; }, []);
 
   const lastRow = useRef<HTMLElement | null>(null);
@@ -412,15 +446,16 @@ function Shell({ shared }: { readonly shared: Shared }) {
       <div className="app" data-sidebar={mode} inert={overlay !== null}>
         <a className="skip" href="#screen">{t('skip_to_content')}</a>
         <Sidebar t={t} mode={mode} screen={place.screen} session={place.session} project={start.project} userName={start.userName} source={start.source} me={me}
-          waiting={waiting} lead={leadDot(lead)} groups={groups} theme={theme} onTheme={flipTheme} language={language} onLanguage={pickLanguage}
-          onSearch={openPalette} onToggle={toggleSidebar} onSignOut={onSignOut} onPick={onPick} />
+          waiting={waiting} lead={leadDot(lead)} groups={groups} quota={quota} zone={zone} theme={theme} onTheme={flipTheme} language={language} onLanguage={pickLanguage}
+          onSearch={openPalette} onToggle={toggleSidebar} onSignOut={onSignOut} onAccess={openAccess} onPick={onPick} />
         <div className="main">
-          <div className="top-bar" id="top-bar">
+          {/* The bar names the screen: the page's banner, so nothing on it lies outside a landmark. */}
+          <header className="top-bar" id="top-bar">
             <p className="top-title">{shownRow ? <><a className="crumb" href="/sessions">{t('title_session')}</a><span className="crumb" aria-hidden="true">/</span></> : null}<span className="here">{here}</span></p>
             {/* The sample data says so on every screen of a computer; a phone's top bar says it (Sidebar.tsx). */}
             {start.source === 'fixtures' ? <div className="top-actions"><p className="source-pill" id="source-pill">{t('source_fixtures')}</p></div> : null}
-          </div>
-          <p className="sr-only" role="status" aria-live="polite" id="screen-said">{said}</p>
+          </header>
+          <p className="sr-only" role="status" aria-live="polite" id="screen-said" ref={said} />
           <main id="screen" className="screen" tabIndex={-1}>
             {place.session ? null : <Fragment key={place.screen === 'ask' ? place.path : place.screen}>{host(place.screen, place.path)}</Fragment>}
             {drawn.current.map((id) => (
@@ -431,6 +466,7 @@ function Shell({ shared }: { readonly shared: Shared }) {
       </div>
       {overlay === 'palette' ? <Suspense fallback={null}><Palette t={towerT} items={items} dark={theme === 'dark'} onRun={runItem} onClose={() => setOverlay(null)} /></Suspense> : null}
       {overlay === 'sheet' ? <ShortcutSheet t={t} screen={place.screen} mac={mac} onClose={() => setOverlay(null)} /> : null}
+      {overlay === 'access' && raw ? <AccessPanel t={t} api={raw} onClose={() => setOverlay(null)} /> : null}
     </>
   );
 }

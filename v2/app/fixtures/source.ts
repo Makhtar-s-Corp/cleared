@@ -27,9 +27,12 @@
 // that holds the ticket's sessions; with `resolved`, the landed ticket
 // LOCAL-149 has its author's and its reviewer's sessions (fixtures/cost.ts),
 // and its production page's check (P218), read by the service's own reader.
+// The choice of the receipt's captures (P226) is kept by ticket, Auto until posted.
+// The week's figures (C17) are the service's own weekFigures over the
+// consumption fixture's ledger; with `week`, it holds a week of merged tickets.
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { KEEPALIVE_MS } from '../../src/api/events.ts';
-import { changeFrame, leadFrame, sseFrame, type Ask, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
+import { changeFrame, leadFrame, sseFrame, type Ask, type CaptureChoice, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
 import { ticketCost } from '../../src/consumption/ticket-cost.ts';
 import { productionChecksOf } from '../../src/flow/production.ts';
 import { BatchError, BatchRunner } from '../../src/flow/batch.ts';
@@ -45,6 +48,9 @@ import { askFixture, startedAsk } from './ask.ts';
 import { consumptionFixture } from './consumption.ts';
 import { RESOLVED_TICKET, resolvedStory } from './cost.ts';
 import { contractItem, knowledgeItem, requestItems } from './inbox.ts';
+import { serviceMapFixture } from './services.ts';
+import { variableRefusal } from '../../src/container/services.ts';
+import { TEST_VALUE_MIN, type TestValuesView } from '../../src/secrets/types.ts';
 import { RECIPES, schedulesFixture, ticketSteps, towerFixture } from './tower.ts';
 
 const BODY_LIMIT = 16 * 1024;
@@ -88,13 +94,14 @@ export type FixtureSource = DataSource & {
 
 const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 
-export async function fixtureSource(options: { readonly now?: () => Date; readonly project?: string; readonly resolved?: boolean } = {}): Promise<FixtureSource> {
+export async function fixtureSource(options: { readonly now?: () => Date; readonly project?: string; readonly resolved?: boolean; readonly week?: boolean } = {}): Promise<FixtureSource> {
   const now = options.now ?? (() => new Date());
   const fixture = await towerFixture(now(), options.project === undefined ? {} : { project: options.project });
   const lead = await leadFixture(now(), options.project === undefined ? {} : { project: options.project });
   const project = fixture.sessions[0]?.project ?? 'guestbook';
   const created = new MemoryTicketStore({ now: () => now().toISOString() });
   const takenOver = new Map<string, TakenOver>();
+  const captureChoices = new Map<string, CaptureChoice>();         // the receipt's captures forced from a ticket (P226)
   // LOCAL-152's reviewer resumes on its own story (envelopeReviewer, below).
   const human = fixtureHuman({ resumed: (id) => (id === envelopeReviewer?.id ? ENVELOPE_RESUMED : undefined) });
   const decided: (ContractItem | KnowledgeItem)[] = [contractItem(now()), knowledgeItem(now())];
@@ -114,7 +121,16 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
     return item.kind === 'release' && outcome ? { ...item, state: 'handled', outcome: { decision: 'close', ...outcome } } : item;
   };
   const asked = (item: NextInboxItem) => (item.kind === 'permission' || item.kind === 'question') && answered.has(`${item.sessionId}\n${item.requestId}`) ? { ...item, state: 'handled' as const } : item;
-  const consumption = consumptionFixture(project, now);
+  const consumption = consumptionFixture(project, now, { week: options.week === true });
+  let serviceMap = serviceMapFixture(now());
+  // The test secrets (C16): names, dates and who for the map's services, never a value; one set already.
+  const testValues = new Map<string, Map<string, { readonly setAt: string; readonly setBy: string }>>(serviceMap.services.map((service, index) => [
+    service.name, new Map(index === 0 ? [['PAYMENT_SANDBOX_KEY', { setAt: new Date(now().getTime() - 2 * 86_400_000).toISOString(), setBy: 'owner' }]] : []),
+  ]));
+  const testValuesView = (): TestValuesView => ({
+    workspace: true, key: 'ready',
+    services: [...testValues].map(([name, values]) => ({ name, inWorkspace: true, values: [...values].map(([value, saved]) => ({ service: name, name: value, ...saved, readable: true })) })),
+  });
   const batches = new BatchRunner({
     db: consumption.db, tickets: created, project, levers: consumption.levers, weekStopPercent: 85, now,
     flow: { launch: async (ticket, by) => { await created.move(ticket, created.states.progress, { kind: 'human', id: by }); }, subscribe: () => () => undefined },
@@ -203,11 +219,34 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
     // The consumption screen (O15): the service's own read and levers over a week of invented turns.
     if (collection === 'consumption') {
       if (method === 'GET' && parts.length === 1) return sendJson(response, 200, consumption.read(url.searchParams.get('tz') ?? undefined));
+      // The week's figures (C17): with `week`, a week of merged tickets on the same ledger.
+      if (method === 'GET' && id === 'week' && parts.length === 2) return sendJson(response, 200, await consumption.week(url.searchParams.get('tz') ?? undefined));
       if (method === 'POST' && id === 'levers' && parts.length === 2) {
         const body = await readJson(request);
         if (typeof body !== 'object' || body === null || Array.isArray(body)) return sendJson(response, 400, { error: 'the body is an object: { model?, maxLanes?, paused? }' });
         const done = consumption.write(body as Record<string, never>, user);
         return sendJson(response, done.status, done.body);
+      }
+    }
+    // The service map (M6): the example workspace's, read by the service's own code; a refresh builds it again.
+    if (collection === 'service-map') {
+      if (method === 'GET' && parts.length === 1) return sendJson(response, 200, serviceMap);
+      if (method === 'POST' && id === 'refresh' && parts.length === 2) return sendJson(response, 200, serviceMap = { ...serviceMap, readAt: now().toISOString() });
+    }
+    // The test secrets (C16): the service's refusals of a name and of a short value; a value is read and dropped.
+    if (collection === 'test-values') {
+      if (method === 'GET' && parts.length === 1) return sendJson(response, 200, testValuesView());
+      if (method === 'POST' && (parts.length === 1 || (id === 'remove' && parts.length === 2))) {
+        const body = (await readJson(request)) as { service?: unknown; name?: unknown; value?: unknown } | null;
+        const values = typeof body?.service === 'string' ? testValues.get(body.service) : undefined;
+        if (!values || typeof body?.name !== 'string') return sendJson(response, 400, { error: 'body' });
+        if (id === 'remove') return values.delete(body.name) ? sendJson(response, 200, { removed: true }) : sendJson(response, 404, { error: 'not_found' });
+        const refused = variableRefusal(body.name) ?? (typeof body.value !== 'string' ? 'body' : [...body.value].length < TEST_VALUE_MIN ? 'short' : undefined);
+        if (refused) return sendJson(response, 400, { error: refused });
+        const replaced = values.has(body.name);
+        const saved = { setAt: now().toISOString(), setBy: user };
+        values.set(body.name, saved);
+        return sendJson(response, 200, { value: { service: body.service, name: body.name, ...saved, readable: true }, replaced });
       }
     }
     // The batches (requirement C6): the service's checks, and a pass before each read.
@@ -358,6 +397,19 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
       if (method === 'GET' && sub === 'proof' && parts.length === 5 && parts[4] === 'production.png' && productionChecksOf(ledgerOf(decodeURIComponent(id ?? '')), decodeURIComponent(id ?? ''), [decodeURIComponent(parts[3] ?? '')]).some((c) => c.file)) {
         response.writeHead(200, { 'content-type': 'image/png', 'content-length': String(PIXEL.length), 'cache-control': 'no-store' });
         return void response.end(PIXEL);
+      }
+      // The human's choice of the receipt's captures (P226): Auto until one is posted.
+      if (sub === 'captures' && parts.length === 3) {
+        const ticket = decodeURIComponent(id ?? '');
+        if (!(await all()).some((t) => t.id === ticket)) return sendJson(response, 404, { error: 'no such ticket' });
+        if (method === 'GET') return sendJson(response, 200, captureChoices.get(ticket) ?? { choice: 'auto', by: null, at: null });
+        if (method === 'POST') {
+          const choice = ((await readJson(request)) as { choice?: unknown }).choice;
+          if (choice !== 'auto' && choice !== 'on' && choice !== 'off') return sendJson(response, 400, { error: 'choice is auto, on, off' });
+          const chosen: CaptureChoice = { choice, by: user, at: now().toISOString() };
+          captureChoices.set(ticket, chosen);
+          return sendJson(response, 200, chosen);
+        }
       }
       if (method === 'GET' && parts.length === 2) {
         const ticket = (await all()).find((t) => t.id === id);

@@ -26,6 +26,7 @@ import { Empty } from '@/shell/Empty.tsx';
 import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { ApiError } from '@/lib/screen.ts';
+import { SetupPending, setupPending } from '@/lib/setup-pending.tsx';
 import { sessionStatus, ticketState } from '@/lib/status.ts';
 import { QUESTION_MAX, askBody, askFailure, askHref, questionProblem, startAsk } from '@/screens/ask/model.ts';
 import {
@@ -323,9 +324,13 @@ export function TowerBody({ model, t, language = 'en', leadDraft = '', onLeadDra
           {model.needs.length === 0 ? null : <a className="more" href="/inbox">{t('open_inbox')}</a>}
         </div>
         {model.services.length === 0 ? null : (
-          <ul className="workspace-line" aria-label={t('services_title')}>
-            {model.services.map((row) => <li key={row.name} className="svc" data-service={row.name} data-state={serviceTone(row)}><span className="svc-name">{row.name}</span> <ServiceState row={row} t={t} /></li>)}
-          </ul>
+          <>
+            <ul className="workspace-line" aria-label={t('services_title')}>
+              {model.services.map((row) => <li key={row.name} className="svc" data-service={row.name} data-state={serviceTone(row)}><span className="svc-name">{row.name}</span> <ServiceState row={row} t={t} /></li>)}
+            </ul>
+            {/* The service map (milestone 4, M6): what links these services, reached from here, the palette and G M. */}
+            <a className="more services-open" id="services-open" href="/services">{t('services_map_open')}</a>
+          </>
         )}
         {/* Nothing waiting: the heading above says so; no empty list under it. */}
         {model.needs.length === 0 ? null : (
@@ -365,6 +370,9 @@ export function TowerBody({ model, t, language = 'en', leadDraft = '', onLeadDra
   );
 }
 
+// The failure that is no error: the setup is not finished (issue #431).
+const PENDING = 'setup_pending';
+
 export default function Tower() {
   const context = useScreen();
   const { t } = context;
@@ -400,7 +408,7 @@ export default function Tower() {
       setFailed(null);
     } catch (error) {
       if (!live()) return;
-      setFailed(t(error instanceof ApiError && error.status === 401 ? 'signed_out' : 'load_failed'));
+      setFailed(setupPending(error) ? PENDING : t(error instanceof ApiError && error.status === 401 ? 'signed_out' : 'load_failed'));
     }
   }, [context, t, setModel]);
 
@@ -538,7 +546,8 @@ export default function Tower() {
         <BatchForm t={t} text={batchText} note={batchNote} busy={batching} onText={setBatchText} onRun={(event) => void batch(event)} onClose={() => setBatchOpen(false)} />
       ) : null}
       <div id="tower-body" aria-busy={model === null && failed === null ? 'true' : undefined}>
-        {failed !== null ? <div className="empty error tower-failed"><p>{failed}</p><Button variant="chip" className="chip-button" id="tower-retry" onClick={() => void refresh()}>{t('boundary_retry')}</Button></div>
+        {failed === PENDING ? <SetupPending t={t} />
+          : failed !== null ? <div className="empty error tower-failed"><p>{failed}</p><Button variant="chip" className="chip-button" id="tower-retry" onClick={() => void refresh()}>{t('boundary_retry')}</Button></div>
           : model ? <TowerBody model={model} t={t} language={context.me.language} leadDraft={leadDraft} onLeadDraft={setLeadDraft} /> : null}
       </div>
     </div>

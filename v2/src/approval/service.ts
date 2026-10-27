@@ -2,13 +2,11 @@
 // tables, the approval writer with its grace, the review recorder. The modules
 // (src/modules/tickets.ts and approval.ts) call this with what the
 // environment says; the tests call it with what they choose.
-import { execFile } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { promisify } from 'node:util';
 import { SqliteUsers, proofPath, readOrCreateProof } from '../modules/users.ts';
 import type { UserDirectory } from '../modules/registry.ts';
-import { LocalTicketStore, TICKET_TABLES } from '../tickets/local-store.ts';
+import { LocalTicketStore, TICKET_TABLES, type ApprovalKeys } from '../tickets/local-store.ts';
 import type { TicketStates } from '../tickets/contract.ts';
 import { ledgerPath } from '../store/db.ts';
 import { SocketReleaseBroker, brokerSocketPath, type ReleaseBroker } from './broker.ts';
@@ -24,9 +22,10 @@ import { TrainStore, type Train } from '../release/store.ts';
 import type { Ticket } from '../tickets/contract.ts';
 import type { ServiceConfig, WorkspaceConfig } from '../workspace/config.ts';
 import { loadFlowConfig } from '../flow/config.ts';
+import { forgeFor } from '../forge/index.ts';
 
 // The tables the approval writer and the review recorder use besides the
-// tickets': the ledger's runs and events, as lib/ledger.mjs creates them.
+// tickets': the ledger's runs and events, as lib/ledger.ts creates them.
 export const APPROVAL_TABLES: string[] = [...RUNS_TABLES];
 export { TICKET_TABLES };
 
@@ -38,6 +37,7 @@ export type ApprovalOptions = {
   readonly ownerId?: string | undefined;
   readonly publicKey?: string | undefined;
   readonly signer?: ApprovalSigner | undefined;
+  readonly keys?: () => ApprovalKeys;                // the three above, read at each need (approvalEnvironment)
   readonly states?: TicketStates;
   readonly verdict?: string | undefined;
   readonly broker?: ReleaseBroker | null;
@@ -54,6 +54,7 @@ export function createApproval(options: ApprovalOptions) {
     stateDir: options.stateDir, users: options.users, now: () => now().toISOString(),
     ...(options.states ? { states: options.states } : {}), ...(options.ownerId ? { ownerId: options.ownerId } : {}),
     ...(options.publicKey ? { publicKey: options.publicKey } : {}), ...(options.signer ? { signer: options.signer } : {}),
+    ...(options.keys ? { keys: options.keys } : {}),
   });
   const approvalWriter = new LockApprovalWriter({
     store: ticketStore, db: options.db, users: options.users, proof: options.proof, ownerId: options.ownerId, now,
@@ -66,16 +67,14 @@ export function createApproval(options: ApprovalOptions) {
   return { ticketStore, approvalWriter, reviewRecorder };
 }
 
-const run = promisify(execFile);
-
-// The head of a pull request now, from the forge, in the project's checkout:
-// the fallback of the review recorder when the flow does not pass the commit.
-function ghHead(project: string | undefined) {
+// The head of a pull request now, from the forge, in the project's checkout
+// and on the repository it points at: the fallback of the review recorder
+// when the flow does not pass the commit.
+export function headOnForge(project: string | undefined) {
   return async (pr: number): Promise<string | undefined> => {
     if (!project) return undefined;
     try {
-      const { stdout } = await run('gh', ['pr', 'view', String(pr), '--json', 'headRefOid'], { cwd: project, timeout: 15_000, encoding: 'utf8' });
-      return (JSON.parse(stdout) as { headRefOid?: string }).headRefOid;
+      return await forgeFor('github', { dir: project, env: process.env }).headCommit(undefined, pr);
     } catch {
       return undefined;
     }
@@ -96,6 +95,11 @@ export type Environment = ReturnType<typeof createApproval> & {
 
 const environments = new WeakMap<DatabaseSync, Environment>();
 
+// The owner's rows are checked with the key the project's file names, else
+// with the public half of the one this service holds (issue #432): the
+// assistant makes it, and no step asks the person to commit it.
+const publicKeyOf = (conf: LockConf, signer: ApprovalSigner | undefined): string | undefined => conf.publicKey ?? signer?.publicKey;
+
 // One set of pieces per database, for the tickets module and the approval
 // module, which fill different slots of the registry from the same writer
 // and store. What the environment lacks leaves the pieces working without
@@ -104,7 +108,7 @@ const environments = new WeakMap<DatabaseSync, Environment>();
 export function approvalEnvironment(db: DatabaseSync, env: NodeJS.ProcessEnv = process.env): Environment {
   const known = environments.get(db);
   if (known) return known;
-  const conf = readLockConf(env);
+  let conf = readLockConf(env);
   const stateDir = stateDirectory(env);
   let signer: ApprovalSigner | undefined;
   const keyFile = conf.privateKeyFile || env.CLEARED_V2_APPROVAL_KEY || join(stateDir, 'approval.key');
@@ -125,11 +129,28 @@ export function approvalEnvironment(db: DatabaseSync, env: NodeJS.ProcessEnv = p
   }
   const socket = brokerSocketPath({ env, confSocket: conf.socketPath, stateDir });
   const users = new SqliteUsers(db);
+  // On a fresh install the service starts before the owner exists: the
+  // assistant makes the key and names the owner while it runs (P249's open
+  // point). Until both are there they are read again at each need, with no
+  // restart; then kept.
+  const current = (): { readonly conf: LockConf; readonly signer: ApprovalSigner | undefined } => {
+    if (!signer || !conf.ownerId) {
+      conf = readLockConf(env);
+      if (!signer) {
+        try { signer = ApprovalSigner.load(keyFile); } catch { /* said above, at start */ }
+      }
+    }
+    return { conf, signer };
+  };
+  const keys = (): ApprovalKeys => {
+    const now = current();
+    return { ownerId: now.conf.ownerId, publicKey: publicKeyOf(now.conf, now.signer), signer: now.signer };
+  };
   const parts = createApproval({
-    db, users, stateDir, proof, ownerId: conf.ownerId, publicKey: conf.publicKey, signer, states: conf.states, verdict: conf.verdict,
-    broker: new SocketReleaseBroker(socket, { stateDir }), resolveHead: ghHead(env.CLEARED_REPO || env.ORCH_REPO),
+    db, users, stateDir, proof, keys, states: conf.states, verdict: conf.verdict,
+    broker: new SocketReleaseBroker(socket, { stateDir }), resolveHead: headOnForge(env.CLEARED_REPO || env.ORCH_REPO),
   });
-  const built: Environment = { ...parts, conf, signer, stateDir, users, proof };
+  const built: Environment = { ...parts, get conf() { return current().conf; }, get signer() { return current().signer; }, stateDir, users, proof };
   environments.set(db, built);
   return built;
 }
@@ -175,14 +196,15 @@ export type ServiceLockOptions = {
 
 // The ticket store of one service's state folder: the same ledger and the
 // same signer, its validations record. Its recordApproval signs the
-// approver's move bound to that record, which that service's merge-pr.sh
+// approver's move bound to that record, which that service's merge-pr.ts
 // reads: the owner, or the user a human:<user> sensitivity names
 // (decision 24), whom that service's lock trusts as its owner_id.
 function serviceStore(db: DatabaseSync, environment: Environment, stateDir: string, now: () => Date, ownerId = environment.conf.ownerId): LocalTicketStore {
   const { conf, signer, users } = environment;
+  const publicKey = publicKeyOf(conf, signer);
   return new LocalTicketStore(db, {
     stateDir, users, now: () => now().toISOString(), states: conf.states,
-    ...(ownerId ? { ownerId } : {}), ...(conf.publicKey ? { publicKey: conf.publicKey } : {}), ...(signer ? { signer } : {}),
+    ...(ownerId ? { ownerId } : {}), ...(publicKey ? { publicKey } : {}), ...(signer ? { signer } : {}),
   });
 }
 
@@ -278,7 +300,7 @@ export async function checkApprover(
 // The gate of the one-service path, where the registry's approval writer
 // signs for the owner of the service's own lock: a human:<user> service
 // whose lock trusts another owner_id is refused as not set up, since its
-// merge-pr.sh would refuse the user's move.
+// merge-pr.ts would refuse the user's move.
 export type ApproverGate = (input: { readonly ticket: string; readonly by: string; readonly users: UserDirectory }) => Promise<void>;
 
 export function approverGate(read: () => { readonly workspace: WorkspaceConfig | undefined; readonly ownerId: string | undefined }): ApproverGate {

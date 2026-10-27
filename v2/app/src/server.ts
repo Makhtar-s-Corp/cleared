@@ -46,6 +46,16 @@
 // 'unsafe-inline', script-src still default-src 'self', and a file, a
 // catalog or an API answer carries the policy with no nonce.
 //
+// The setup assistant (docs/v2/milestone-5-plan.md, section 5, lane
+// v2-j5-assistant) is a page of its own at /setup and /setup/<step>, drawn
+// by its screen's chunk. When app/main.ts turns the gate on (options.setup)
+// and the ledger has no account, every page sends to /setup and the app
+// answers POST /setup/owner (setup.ts), where the setup code makes the
+// owner, with the sign-in form's origin checks and its throttle; once an
+// account exists, /setup is a signed-in page and its steps go through
+// /api/service/setup/*, the model step's terminal on the loopback address
+// only, as a session's.
+//
 // /api/notifications and its two writes are the app's own (notifications.ts):
 // a browser of the signed-in person asks to be told, with the same checks
 // as any write. The manifest, the service worker and the icons are served
@@ -60,9 +70,11 @@ import { sameProof } from '../../src/modules/users.ts';
 import { requestPath } from '../../src/server.ts';
 import type { UserId } from '../../src/session/contract.ts';
 import { translator, type Translate } from '../web/lib/i18n.ts';
+import { setupPlaceOf } from '../web/lib/routes.ts';
 import { isScreen, languageOf, loadCatalog, type Language, type Screen } from './catalog.ts';
 import { deviceName, notificationsFrom, NotifyError, type Notifications } from './notifications.ts';
 import { sendJson, type DataSource } from './proxy.ts';
+import { makeOwner, ownerShown, setupNeeded, type SetupOptions } from './setup.ts';
 import { clearedCookie, readCookie, sessionCookie, type CookieSession, type CookieSessions } from './session-cookie.ts';
 import type { LoginThrottle } from './users.ts';
 
@@ -77,6 +89,7 @@ export type AppOptions = {
   readonly distDir?: string;                         // default: app/dist, Vite's build
   readonly notifications?: Notifications;            // default: from the environment, read on first use
   readonly previewOrigin?: string | undefined;       // the preview listener's origin (preview.ts); none: no frame at all
+  readonly setup?: SetupOptions;                     // the first start's gate, app/main.ts's only (setup.ts)
 };
 
 export const DIST_DIR = new URL('../dist/', import.meta.url).pathname;
@@ -106,6 +119,7 @@ const PAGES: readonly { readonly path: RegExp; readonly screen: Exclude<Screen, 
   { path: /^\/sessions(?:\/[A-Za-z0-9_-]{1,64})?$/, screen: 'session' },
   { path: /^\/(?:lead|plans\/[A-Za-z0-9_-]{1,64})$/, screen: 'lead' },
   { path: /^\/consumption$/, screen: 'consumption' },                    // the consumption of the agents (O15)
+  { path: /^\/services$/, screen: 'services' },                          // the service map (M6)
   { path: /^\/ask\/[A-Za-z0-9_-]{1,64}$/, screen: 'ask' },                // a question to the code (lane 27)
 ];
 
@@ -120,8 +134,9 @@ export const styleNonce = (): string => randomBytes(16).toString('base64');
 
 // A preview of a session (/api/sessions/:id/preview/...), which the app's origin never forwards.
 const PREVIEW_PATH = /^sessions\/[^/]+\/preview(?:\/|$)/;
-// The web terminal of a session (/api/sessions/:id/terminal/...), forwarded on the loopback address only.
-const TERMINAL_PATH = /^sessions\/[^/]+\/terminal(?:\/|$)/;
+// The web terminal of a session (/api/sessions/:id/terminal/...) and the setup
+// assistant's (/api/setup/model/terminal/...), forwarded on the loopback address only.
+const TERMINAL_PATH = /^(?:sessions\/[^/]+|setup\/model)\/terminal(?:\/|$)/;
 const LOOPBACK_SOCKET = /^(?:127\.\d+\.\d+\.\d+|::1|::ffff:127\.\d+\.\d+\.\d+)$/;
 
 const escape = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -227,6 +242,20 @@ export function shellPage(t: Translate, language: Language, bundle: Bundle, nonc
 `;
 }
 
+// The setup assistant's page: its screen's chunk and sheets named at once,
+// the stage (first: no account yet, the code's form; signed: the owner's
+// steps) and the step of the address on the body.
+export function setupPage(t: Translate, language: Language, bundle: Bundle, nonce: string, options: { readonly stage: 'first' | 'signed'; readonly step: string | null }): string {
+  const own = bundle.screens.setup;
+  const extra = own ? `${own.styles.map((href) => `<link rel="stylesheet" href="${escape(href)}">`).join('\n')}\n<link rel="modulepreload" href="${escape(own.script)}">` : '';
+  return `${head(language, t('setup_title'), bundle, nonce).replace('</head>', `${extra}\n</head>`)}
+<body class="setup-page" data-screen="setup" data-stage="${options.stage}"${options.step ? ` data-step="${escape(options.step)}"` : ''}>
+<div id="root"></div>
+</body>
+</html>
+`;
+}
+
 function readBody(request: IncomingMessage, limit: number): Promise<string | undefined> {
   return new Promise((resolve) => {
     let size = 0;
@@ -248,6 +277,7 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
   // Each request's language (catalog.ts, languageOf), and the shell's words in it.
   const languageFor = (request: IncomingMessage): Language => languageOf(request.headers, options.language);
   const shellFor = (language: Language) => translator(loadCatalog('shell', language));
+  const setupFor = (language: Language) => translator({ ...loadCatalog('shell', language), ...loadCatalog('setup', language) });
   // Read at the first page, and again when the build's manifest changed: a
   // rebuild under a running server empties dist/ (emptyOutDir), and pages
   // naming the old hashed files would draw nothing until a restart (issue
@@ -402,11 +432,47 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     return true;
   }
 
+  // POST /setup/owner: the code's form, before anyone is signed in.
+  async function setupOwner(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const setup = options.setup;
+    if (!setup || !setupNeeded(setup)) return sendJson(response, 409, { error: 'owner_exists' });
+    if (!sameOrigin(request)) return sendJson(response, 403, { error: 'origin' });
+    const text = await readBody(request, 8192);
+    let body: unknown;
+    try { body = JSON.parse(text ?? ''); } catch { return sendJson(response, 400, { error: 'body' }); }
+    const made = await makeOwner(setup, body, options.throttle, request.socket.remoteAddress ?? 'unknown');
+    if (made.status !== 201) {
+      if (made.status === 429) response.setHeader('retry-after', String(made.wait ?? 60));
+      return sendJson(response, made.status, made.body);
+    }
+    const signed = options.sessions.create(made.user);
+    response.setHeader('set-cookie', sessionCookie(signed.id));
+    sendJson(response, 201, made.body);
+  }
+
   async function route(request: IncomingMessage, response: ServerResponse): Promise<void> {
     const method = request.method ?? 'GET';
     const path = requestPath(request.url ?? '/');
     if (path === undefined) return send(response, 400, 'bad request', 'text/plain; charset=utf-8');
     const read = method === 'GET' || method === 'HEAD';
+    const firstStart = setupNeeded(options.setup);
+
+    if (path === '/setup/owner') {
+      if (method !== 'POST') return send(response, 405, 'method not allowed', 'text/plain; charset=utf-8', { allow: 'POST' });
+      return setupOwner(request, response);
+    }
+    const setupPlace = setupPlaceOf(path);
+    if (setupPlace) {
+      if (!read) return send(response, 405, 'method not allowed', 'text/plain; charset=utf-8', { allow: 'GET, HEAD' });
+      const language = languageFor(request);
+      if (firstStart && options.setup) {
+        ownerShown(options.setup);
+        return sendPage(response, 200, (nonce) => setupPage(setupFor(language), language, built(), nonce, { stage: 'first', step: setupPlace.step }));
+      }
+      if (!(await session(request))) return redirect(response, '/login');
+      return sendPage(response, 200, (nonce) => setupPage(setupFor(language), language, built(), nonce, { stage: 'signed', step: setupPlace.step }));
+    }
+    if (firstStart && read && (path === '/login' || PAGES.some((p) => p.path.test(path)))) return redirect(response, '/setup');
 
     if (path === '/login') {
       if (method === 'POST') return signIn(request, response);

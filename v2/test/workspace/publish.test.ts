@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { testValuesOf } from '../../src/secrets/live.ts';
 import { PublishRefused, publish, type PublishInput } from '../../src/workspace/publish.ts';
 import { projectCheckout, ticketCheckout } from '../../src/workspace/checkout.ts';
 import { commit, gitIn, plantedKey, remote, tempDir, writeFiles } from './git.ts';
@@ -61,7 +63,7 @@ test('a clean branch is pushed from the host and its pull request opened through
   assert.equal(flag('--base'), 'main');
   assert.equal(flag('--head'), BRANCH);
   assert.equal(flag('--title'), 'Show the newest entry first');
-  assert.ok(!create.args.includes('--draft'), 'not a draft: merge-pr.sh refuses a draft');
+  assert.ok(!create.args.includes('--draft'), 'not a draft: merge-pr.ts refuses a draft');
   assert.ok(create.body?.includes('The list is sorted'), 'the report is in the body');
   assert.ok(!create.body?.includes('/home/someone'), 'no path of this machine in the body');
   assert.ok(create.body?.includes('- Show the newest entry first'), 'the commits are listed');
@@ -149,7 +151,7 @@ test('an open pull request for the branch is reused after the push', async () =>
 test('a report the guard flags is left out of the body, the pull request still opens', async () => {
   const { workdir, input, gh } = await setup();
   commit(workdir, { 'src/app.ts': 'export const order = "newest";\n' }, 'Newest first');
-  // lib/pr-body.mjs keeps an address, the guard refuses it.
+  // lib/pr-body.ts keeps an address, the guard refuses it.
   const address = ['someone', 'gmail.com'].join('@');
   await publish({ ...input, report: `## Done\nAsked ${address} for the copy.\n` });
   const body = gh.calls()[1]?.body ?? '';
@@ -186,7 +188,7 @@ test('a checkout whose git folder points elsewhere is refused', async () => {
   assert.deepEqual(gh.calls(), []);
 });
 
-test('without environments given, publish takes them from lib/forge.mjs: the ambient one when no app is configured', async () => {
+test('without environments given, publish takes them from lib/forge.ts: the ambient one when no app is configured', async () => {
   const { workdir, input, gh, remoteHead } = await setup();
   const head = commit(workdir, { 'src/app.ts': 'export const order = "newest";\n' }, 'Newest first');
   // Nothing of a v1 shell may point the child at a real configuration or ledger.
@@ -208,4 +210,35 @@ test('a refused branch leaves no ref of it in the project checkout', async () =>
   commit(workdir, { 'config/settings.ts': `export const apiKey = "${plantedKey}";\n` }, 'Add settings');
   await assert.rejects(publish(input), PublishRefused);
   assert.equal(gitIn(input.project, ['for-each-ref', 'refs/cleared/']), '');
+});
+
+// The test secrets (docs/v2/milestone-5-plan.md, decision 12, C16): a
+// session holds its service's test values. A commit or a commit message
+// that holds one is refused, nothing pushed; a report that names one
+// reaches the pull request's body without it.
+function testValue(n: number): string {
+  const value = ['sandbox', 'fake', 'value', String(n)].join('-');
+  testValuesOf(new DatabaseSync(':memory:'), { CLEARED_V2_STATE_DIR: tempDir('publish-secrets') }).set('guestbook', 'PAYMENT_SANDBOX_KEY', value, 'u1');
+  return value;
+}
+
+test('a commit or a commit message that holds a test secret\'s value is refused: nothing is pushed', async () => {
+  const value = testValue(7);
+  for (const [files, message] of [[{ 'src/app.ts': `export const key = "${value}";\n` }, 'Use the sandbox'], [{ 'src/app.ts': 'export const order = "newest";\n' }, `Test against ${value}`]] as const) {
+    const { workdir, input, gh, remoteHead } = await setup();
+    commit(workdir, files, message);
+    await assert.rejects(publish(input), (error: unknown) => error instanceof PublishRefused && error.code === 'guard' && /test secret/.test(error.message) && !error.message.includes(value));
+    assert.equal(remoteHead(), '', 'nothing pushed');
+    assert.deepEqual(gh.calls(), []);
+  }
+});
+
+test('a test secret\'s value is removed from the pull request\'s body', async () => {
+  const value = testValue(8);
+  const { workdir, input, gh } = await setup();
+  commit(workdir, { 'src/app.ts': 'export const order = "newest";\n' }, 'Newest first');
+  await publish({ ...input, report: `## Done\nRan the payment tests with ${value}.\n` });
+  const create = gh.calls()[1]!;
+  assert.ok(create.body?.includes('Ran the payment tests with [removed: secret].'), 'the report stays, without the value');
+  assert.ok(!create.body?.includes(value) && !create.args.some((arg) => arg.includes(value)));
 });

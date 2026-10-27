@@ -66,6 +66,7 @@ test('a whole ticket on the fake adapter: Todo, workspace, author with one permi
   assert.match(reviewer.input.prompt, /“no blocking issues”/);
 
   // A pass: the project is refreshed, then published; the review is recorded for the pull request; the lock is asked.
+  // The record carries the head published and the phrase the review was judged by (issue #445).
   await until(() => kinds(t).includes('release:waiting'), 'the release item');
   assert.deepEqual(t.calls, [
     'prepareWorkdir:author', 'captureHandover:author', 'prepareWorkdir:reviewer', 'refreshProject', `publish:${ticket.id}`, `requestRelease:${ticket.id}:7`,
@@ -73,6 +74,7 @@ test('a whole ticket on the fake adapter: Todo, workspace, author with one permi
   assert.equal(t.recorder.records.length, 1);
   assert.deepEqual({ ...t.recorder.records[0], at: undefined, report: undefined }, {
     ticket: ticket.id, pr: 7, session: reviewer.id, model: 'claude-sonnet-5-5', verdict: 'pass', round: 1, report: undefined, at: undefined,
+    commit: 'abc123', verdictPhrase: 'no blocking issues',
   });
   assert.match(t.recorder.records[0]!.report, /Verdict: “no blocking issues”/);
   assert.equal((await t.tickets.get(ticket.id))?.status, 'Needs Approval');
@@ -390,7 +392,7 @@ test('the release item carries the request time the lock recorded, else the time
   assert.equal(item?.requestedAt, '2026-10-21T10:00:05.000Z');
   assert.equal(slow.recorder.records[0]?.at, '2026-10-21T10:00:00.000Z', 'the review is stamped when it passed');
 
-  // A lock that moves the card itself, as ask-validation.sh does: no second move.
+  // A lock that moves the card itself, as ask-validation.ts does: no second move.
   let own: Setup | undefined;
   own = await setup({ scripts: { author: quickAuthor }, effects: { async requestRelease({ ticket }) { own!.clock.now += 7000; await own!.tickets.move(ticket, 'Needs Approval', { kind: 'agents', id: 'lock' }); own!.clock.now += 3000; return {}; } } });
   await own.engine.start(own.ticket.id, 'u1');
@@ -399,7 +401,7 @@ test('the release item carries the request time the lock recorded, else the time
   assert.equal(lockMoves.length, 1, 'the flow does not move a card the lock moved');
   assert.equal(own.inbox.list().find((i): i is ReleaseItem => i.kind === 'release')?.requestedAt, '2026-10-21T10:00:07.000Z');
 
-  // The real lock (ask-validation.sh) records its own time, in nanoseconds, a
+  // The real lock (ask-validation.ts) records its own time, in nanoseconds, a
   // little after its move: the approval route compares with that record, so
   // the item carries it.
   let real: Setup | undefined;

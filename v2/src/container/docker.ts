@@ -21,13 +21,22 @@ const LABEL_FILTER = `label=${LABEL}`;
 const [LABEL_KEY, LABEL_VALUE] = LABEL.split('=') as [string, string];
 
 export type DockerResult = { readonly code: number; readonly stdout: string; readonly stderr: string };
-export type RunOptions = { readonly input?: string; readonly timeoutMs?: number };
+// env: variables added to the client's own environment, for `--env NAME`
+// to read there (ContainerSpec.privateEnv), never put on its command line.
+export type RunOptions = { readonly input?: string; readonly timeoutMs?: number; readonly env?: Readonly<Record<string, string>> };
 export type DockerRunner = (args: readonly string[], options: RunOptions) => Promise<DockerResult>;
 // Starts a long-lived docker process whose standard streams the caller keeps.
 export type DockerSpawner = (args: readonly string[]) => ChildProcessWithoutNullStreams;
 
 export class DockerError extends Error {
   override name = 'DockerError';
+  // The last lines a failed command wrote, uncleaned: a build's first line
+  // only says which builder ran. Absent when the error is not a command's.
+  readonly tail?: string;
+  constructor(message: string, tail?: string) {
+    super(message);
+    if (tail !== undefined) this.tail = tail;
+  }
 }
 
 export class LabelRuleError extends Error {
@@ -40,7 +49,7 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 // builds print ids, JSON rows or a probe's short output.
 export const commandRunner = (command: string): DockerRunner => (args, options) =>
   new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], ...(options.env ? { env: { ...process.env, ...options.env } } : {}) });
     // Its own timer rather than spawn's `timeout`, which stayed armed after a
     // failed spawn and kept the process alive until it fired.
     const timer = setTimeout(() => child.kill('SIGKILL'), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -141,7 +150,10 @@ const NAME = /^[a-z0-9][a-z0-9_.-]{0,127}$/;
 const IMAGE = /^[a-z0-9][a-z0-9._/-]*(:[A-Za-z0-9_][A-Za-z0-9_.-]{0,127})?(@sha256:[a-f0-9]{64})?$/;
 const LIMIT = /^[0-9]+(\.[0-9]+)?[a-z]?$/;
 const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
+const LABEL_KEY_NAME = /^[a-z0-9][a-z0-9.-]{0,63}$/;
+const LABEL_VALUE_TEXT = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 const USER = /^[0-9]+:[0-9]+$|^[a-z_][a-z0-9_-]*$/;
+const ENTRYPOINT = /^[A-Za-z0-9_][A-Za-z0-9_./-]*$/;
 
 function check(ok: boolean, what: string, value: unknown): void {
   if (!ok) throw new DockerError(`invalid ${what}: ${JSON.stringify(value)}`);
@@ -166,6 +178,9 @@ export type ContainerSpec = {
   readonly role: string;
   readonly image: string;
   readonly networks: readonly NetworkAttachment[];
+  // One program, instead of the image's ENTRYPOINT: a check's container
+  // sleeps whatever the project's image starts (flow/env-setup.ts).
+  readonly entrypoint?: string;
   readonly command?: readonly string[];
   readonly user?: string;
   readonly readOnly?: boolean;
@@ -175,6 +190,11 @@ export type ContainerSpec = {
   readonly limits?: Limits;
   readonly mounts?: readonly Mount[];
   readonly env?: Readonly<Record<string, string>>;
+  // Variables whose values no other account of the machine may read (the
+  // test secrets, C16): named on the command line, `--env NAME`, their
+  // values in the client's environment, where the CLI reads them; a
+  // command line is public in the process list.
+  readonly privateEnv?: Readonly<Record<string, string>>;
   readonly workdir?: string;
   readonly interactive?: boolean;
 };
@@ -183,7 +203,8 @@ export type ContainerRow = { readonly id: string; readonly name: string; readonl
 export type NetworkRow = { readonly id: string; readonly name: string; readonly labels: Readonly<Record<string, string>> };
 export type VolumeRow = { readonly name: string; readonly labels: Readonly<Record<string, string>> };
 // workdir and volumes: the image's working folder and its VOLUME paths.
-export type ImageRow = { readonly id: string; readonly name: string; readonly labels: Readonly<Record<string, string>>; readonly workdir: string; readonly volumes: readonly string[] };
+// created: when it was built, as Docker writes it (RFC 3339).
+export type ImageRow = { readonly id: string; readonly name: string; readonly labels: Readonly<Record<string, string>>; readonly workdir: string; readonly volumes: readonly string[]; readonly created: string };
 
 // `docker ... --format '{{json .}}'` prints labels as "k=v,k=v".
 function parseLabels(text: unknown): Record<string, string> {
@@ -209,6 +230,7 @@ function labelled<T extends { readonly labels: Readonly<Record<string, string>> 
 }
 
 const firstLine = (text: string): string => text.trim().split('\n')[0] ?? '';
+const TAIL_LINES = 40;                       // the lines of a failed command's output a DockerError keeps
 
 // One word of a command line for sh, quoted: `script` takes its command as one string.
 const shellWord = (word: string): string => `'${word.replace(/'/g, `'\\''`)}'`;
@@ -232,7 +254,7 @@ export class Docker {
 
   private async must(args: readonly string[], owned?: ReadonlySet<string>, options?: RunOptions): Promise<string> {
     const result = await this.call(args, owned, options);
-    if (result.code !== 0) throw new DockerError(`docker ${verbOf(args)} failed (${result.code}): ${firstLine(result.stderr)}`);
+    if (result.code !== 0) throw new DockerError(`docker ${verbOf(args)} failed (${result.code}): ${firstLine(result.stderr)}`, result.stderr.trimEnd().split('\n').slice(-TAIL_LINES).join('\n'));
     return result.stdout;
   }
 
@@ -248,11 +270,12 @@ export class Docker {
   }
 
   // Builds an image from a context folder; the image carries the label,
-  // and the session's when it is built for one session. With `network:
-  // 'none'`, no step of the build reaches a network.
+  // and the session's when it is built for one session, and the `labels`
+  // given (a prepared image's service and hash). With `network: 'none'`, no
+  // step of the build reaches a network.
   async build(spec: {
     readonly context: string; readonly dockerfile?: string; readonly tag: string; readonly timeoutMs?: number;
-    readonly network?: 'none'; readonly session?: string;
+    readonly network?: 'none'; readonly session?: string; readonly labels?: Readonly<Record<string, string>>;
   }): Promise<void> {
     check(absolute(spec.context), 'build context', spec.context);
     check(spec.dockerfile === undefined || absolute(spec.dockerfile), 'Dockerfile', spec.dockerfile);
@@ -261,7 +284,12 @@ export class Docker {
     const file = spec.dockerfile === undefined ? [] : ['--file', spec.dockerfile];
     const session = spec.session === undefined ? [] : ['--label', `${SESSION_LABEL}=${spec.session}`];
     const network = spec.network === undefined ? [] : ['--network', spec.network];
-    await this.must(['build', '--label', LABEL, ...session, ...network, '--tag', spec.tag, ...file, '--', spec.context], undefined, { timeoutMs: spec.timeoutMs ?? 1_800_000 });
+    const labels = Object.entries(spec.labels ?? {}).flatMap(([key, value]) => {
+      check(LABEL_KEY_NAME.test(key) && key !== LABEL_KEY && key !== SESSION_LABEL, 'label', key);
+      check(LABEL_VALUE_TEXT.test(value), 'label value', value);
+      return ['--label', `${key}=${value}`];
+    });
+    await this.must(['build', '--label', LABEL, ...session, ...labels, ...network, '--tag', spec.tag, ...file, '--', spec.context], undefined, { timeoutMs: spec.timeoutMs ?? 1_800_000 });
   }
 
   async createNetwork(spec: { readonly name: string; readonly session: string; readonly internal: boolean }): Promise<string> {
@@ -321,13 +349,22 @@ export class Docker {
       check(ENV_KEY.test(key) && !value.includes('\0'), 'environment variable', key);
       args.push('--env', `${key}=${value}`);
     }
+    for (const [key, value] of Object.entries(spec.privateEnv ?? {})) {
+      check(ENV_KEY.test(key) && !value.includes('\0') && !Object.hasOwn(spec.env ?? {}, key), 'private environment variable', key);
+      args.push('--env', key);
+    }
     if (spec.workdir !== undefined) {
       check(absolute(spec.workdir), 'workdir', spec.workdir);
       args.push('--workdir', spec.workdir);
     }
     if (spec.interactive) args.push('--interactive');
+    if (spec.entrypoint !== undefined) {
+      check(ENTRYPOINT.test(spec.entrypoint), 'entrypoint', spec.entrypoint);
+      args.push('--entrypoint', spec.entrypoint);
+    }
     args.push('--', spec.image, ...(spec.command ?? []));
-    const out = await this.must(args);
+    const hidden = spec.privateEnv ?? {};
+    const out = await this.must(args, undefined, Object.keys(hidden).length > 0 ? { env: hidden } : undefined);
     return out.trim();
   }
 
@@ -356,11 +393,11 @@ export class Docker {
     const out = await this.must(['image', 'ls', '--no-trunc', ...filters, '--format', '{{json .}}']);
     const ids = [...new Set(jsonLines(out).map((row) => String(row.ID)))];
     if (ids.length === 0) return [];
-    type Inspected = { Id?: string; RepoTags?: string[] | null; Config?: { Labels?: Record<string, string> | null; WorkingDir?: string; Volumes?: Record<string, unknown> | null } };
+    type Inspected = { Id?: string; RepoTags?: string[] | null; Created?: string; Config?: { Labels?: Record<string, string> | null; WorkingDir?: string; Volumes?: Record<string, unknown> | null } };
     const inspected = JSON.parse(await this.must(['image', 'inspect', '--', ...ids], new Set(ids))) as Inspected[];
     const rows = inspected.map((image) => ({
       id: String(image.Id), name: image.RepoTags?.[0] ?? '<none>', labels: { ...(image.Config?.Labels ?? {}) },
-      workdir: image.Config?.WorkingDir ?? '', volumes: Object.keys(image.Config?.Volumes ?? {}),
+      workdir: image.Config?.WorkingDir ?? '', volumes: Object.keys(image.Config?.Volumes ?? {}), created: image.Created ?? '',
     }));
     return labelled(rows, 'image', (row) => row.name);
   }
@@ -368,6 +405,15 @@ export class Docker {
   async images(session: string): Promise<ImageRow[]> {
     const rows = await this.imageRows(this.filters(session));
     for (const row of rows) if (row.labels[SESSION_LABEL] !== session) throw new LabelRuleError(`docker listed image ${row.name} without ${SESSION_LABEL}=${session}: refused`);
+    return rows;
+  }
+
+  // The labelled images that also carry `key=value` (a prepared image's service).
+  async imagesLabelled(key: string, value: string): Promise<ImageRow[]> {
+    check(LABEL_KEY_NAME.test(key), 'label', key);
+    check(LABEL_VALUE_TEXT.test(value), 'label value', value);
+    const rows = await this.imageRows(['--filter', LABEL_FILTER, '--filter', `label=${key}=${value}`]);
+    for (const row of rows) if (row.labels[key] !== value) throw new LabelRuleError(`docker listed image ${row.name} without ${key}=${value}: refused`);
     return rows;
   }
 

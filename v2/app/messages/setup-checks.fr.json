@@ -1,0 +1,17 @@
+{
+  "checks_title": "Vérifier l'installation",
+  "checks_intro": "Chaque partie de l'installation vérifiée, en vert, ou en rouge avec ce qu'il faut faire.",
+  "checks_running": "Vérification de l'installation. Elle lit Docker, GitHub et le disque de cette machine, et ne change rien.",
+  "checks_again": "Vérifier de nouveau",
+  "checks_level_ok": "Réussi",
+  "checks_level_fail": "Échec",
+  "checks_level_notice": "À noter",
+  "checks_level_off": "Non vérifié",
+  "checks_todo": "À faire\u00a0:",
+  "checks_summary_ok": "{count} vérifications, aucune en échec, en {took}.",
+  "checks_summary_fail_one": "1 vérification en échec, sur {count}. Corrigez-la, puis vérifiez de nouveau.",
+  "checks_summary_fail_many": "{failed} vérifications en échec, sur {count}. Corrigez-les, puis vérifiez de nouveau.",
+  "checks_notices": "Les points à noter sont dits pour information\u202f; aucun n'empêche un premier ticket.",
+  "checks_command": "Les mêmes vérifications depuis un terminal, dans le clone\u00a0: docker compose -f v2/compose.yaml run --rm --no-deps service cleared doctor",
+  "checks_error_other": "Les vérifications n'ont pas pu se lancer. Réessayez dans un instant."
+}

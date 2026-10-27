@@ -203,3 +203,27 @@ test('a read of the inbox under way when a gesture moves an item is dropped: it 
   assert.equal((cache.peek<Item[]>('/inbox') ?? [])[0]?.state, 'handled', 'the old list did not land over the move');
   await written;
 });
+
+test('a read under way when a write is accepted does not stand for the read after it: a new request goes out, and its answer is the one kept (issue #376)', async () => {
+  const before = [{ id: 's1', lastSeq: 4 }];
+  const older = [{ id: 's1', lastSeq: 5 }];                      // asked before Take over, answered after it
+  const after = [{ id: 's1', lastSeq: 6, takenOver: { by: 'alex' } }];
+  let slow: ((value: unknown) => void) | undefined;
+  const asked: number[] = [];
+  const cache = new Cache(async () => {
+    asked.push(asked.length + 1);
+    if (asked.length === 1) return structuredClone(before);
+    if (asked.length === 2) return await new Promise((done) => { slow = done; });
+    return structuredClone(after);
+  });
+  t_caches.push(cache);
+  await cache.read('/sessions');
+  void cache.refetch(['sessions']).catch(() => {});             // an event's refetch, under way
+  await cache.write('/sessions/s1/takeover', null, async () => ({ accepted: true, by: 'alex' }));
+  await settle();
+  const requests = asked.length;
+  slow?.(structuredClone(older));
+  await settle();
+  assert.equal(requests, 3, 'the list asked again once the write was accepted');
+  assert.deepEqual(cache.peek('/sessions'), after, 'the list asked after the write is the one held');
+});

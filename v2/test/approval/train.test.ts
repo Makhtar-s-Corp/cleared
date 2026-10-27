@@ -4,7 +4,7 @@
 // record must still hold the head the card showed. The owner's move written
 // after the grace is bound to the first service's record, and the move the
 // train signs before the next service lands is bound to that service's: v1's
-// tracker.sh, run with each service's state folder on the shared ledger, is
+// tracker.ts, run with each service's state folder on the shared ledger, is
 // the oracle.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -34,7 +34,7 @@ async function world(options: { blocked?: boolean } = {}) {
   const workspace: WorkspaceConfig = { id: 'guestbook', name: 'Guestbook', file: '/etc/ws.conf', services: [svc('guestbook', second, ['filter-api']), svc('filter-api', s.box.state)] };
   s.db.exec(INBOX_TABLE);
   const ticket = await s.waiting();
-  // What each service's ask-validation.sh kept: the filter API's record in the first box, the guestbook's in the second.
+  // What each service's ask-validation.ts kept: the filter API's record in the first box, the guestbook's in the second.
   const record = (state: string, at: string, pulls: { pr: number; head: string }[]) => {
     mkdirSync(join(state, 'validations'), { recursive: true });
     writeFileSync(join(state, 'validations', `${ticket.id}.json`), JSON.stringify({ ticket: ticket.id, at, pulls }));
@@ -61,7 +61,7 @@ async function world(options: { blocked?: boolean } = {}) {
   const locks = serviceLocks(s.db, workspace, { env: s.box.env, environment, now: s.now });
   const approvals = new TrainApprovals({ db: s.db, workspace, locks, environment, env: s.box.env, timers: s.timers, now: s.now });
   // v1's oracle: did the owner move this ticket to go, bound to this state folder's record?
-  const movedByOwner = (state: string) => s.box.run('tracker.sh', ['moved-by-owner', ticket.id, 'Ready to Ship'], { ORCH_STATE_DIR: state, CLEARED_STATE_DIR: state, ORCH_LEDGER: join(s.box.state, 'ledger.db') }).status;
+  const movedByOwner = (state: string) => s.box.run('tracker.ts', ['moved-by-owner', ticket.id, 'Ready to Ship'], { ORCH_STATE_DIR: state, CLEARED_STATE_DIR: state, ORCH_LEDGER: join(s.box.state, 'ledger.db') }).status;
   return { s, ticket, item, trains, approvals, locks, workspace, second, stops, filterAt, guestbookAt, record, movedByOwner };
 }
 
@@ -134,17 +134,17 @@ test('one gesture: the owner\'s move after the grace is bound to the first servi
   assert.notEqual(w.movedByOwner(w.s.box.state), 0, 'nothing is written during the grace');
   await w.s.timers.fire();
   assert.equal((await w.s.store.get(w.ticket.id))?.status, 'Ready to Ship');
-  assert.equal(w.movedByOwner(w.s.box.state), 0, 'the filter API\'s merge-pr.sh reads the owner\'s move, bound to its record');
+  assert.equal(w.movedByOwner(w.s.box.state), 0, 'the filter API\'s merge-pr.ts reads the owner\'s move, bound to its record');
   assert.equal(w.movedByOwner(w.second), 8, 'the guestbook\'s does not: its record is another request');
 
-  // The filter API landed (merge-pr.sh closed the ticket on its own record); the train puts it back to validate and signs for the guestbook.
+  // The filter API landed (merge-pr.ts closed the ticket on its own record); the train puts it back to validate and signs for the guestbook.
   await w.s.store.move(w.ticket.id, 'Done', { kind: 'agents', id: 'cleared-v2' });
   await w.s.store.move(w.ticket.id, 'Needs Approval', { kind: 'agents', id: 'cleared-v2' });
   w.s.advance(1000);
   const guestbook = w.locks(w.workspace.services[0] as ServiceConfig);
   assert.equal(guestbook.check({ ticket: w.ticket.id, requestedAt: w.guestbookAt, head: { pr: 7, head: head('a') } }), undefined);
   await guestbook.sign({ ticket: w.ticket.id, by: 'u-owner', requestedAt: w.guestbookAt, heads: [{ pr: 7, head: head('a') }] });
-  assert.equal(w.movedByOwner(w.second), 0, 'the guestbook\'s merge-pr.sh reads the owner\'s move, bound to its record');
+  assert.equal(w.movedByOwner(w.second), 0, 'the guestbook\'s merge-pr.ts reads the owner\'s move, bound to its record');
   await assert.rejects(guestbook.sign({ ticket: w.ticket.id, by: 'u-guest', requestedAt: w.guestbookAt, heads: [{ pr: 7, head: head('a') }] }), /owner/, 'signed for the owner only');
 });
 

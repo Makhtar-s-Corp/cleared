@@ -132,8 +132,11 @@ export function ordered(items: readonly Item[]): { readonly waiting: Item[]; rea
 
 // What the service answered, without the kinds this screen does not know:
 // a later kind is left out rather than drawn as a row with no words.
+// The list itself when every item is known, so the same list read again
+// from the cache is the same value.
 export function known(values: readonly unknown[]): Item[] {
-  return values.filter((value): value is Item => typeof value === 'object' && value !== null && Object.hasOwn(RANK, (value as { kind?: unknown }).kind as string));
+  const ok = (value: unknown): value is Item => typeof value === 'object' && value !== null && Object.hasOwn(RANK, (value as { kind?: unknown }).kind as string);
+  return values.every(ok) ? values as Item[] : values.filter(ok);
 }
 
 // The item shown: the one the address names, else the first that waits.
@@ -395,6 +398,25 @@ export function chosenLine(item: VariantsItem, view: InboxView, t: Translate): s
 // What this page did, until the service's list says it.
 export function decidedLine(local: Extract<Local, { kind: 'decided' }>, item: ContractItem | KnowledgeItem, t: Translate): string {
   return t(`decided_${item.kind}_${local.decision}`, { time: clock(local.at) });
+}
+
+// What a gesture of this page left on an item, in words: on the detail's
+// line, and once on the inbox's live line. Undefined while the gesture is on
+// its way, asks a second step, or is in its grace.
+export function doneLine(item: Item, local: Local, t: Translate): string | undefined {
+  switch (local.kind) {
+    case 'settled': return t('settled');
+    case 'answered': return t(`answered_${local.decision}`);
+    case 'approved': return t('approved', { time: clock(local.at) });
+    case 'sent_back': return t('sent_back', { time: clock(local.at) });
+    case 'closed': return t('closed_done', { time: clock(local.at) });
+    case 'plan_approved': return t('approved_plan', { time: clock(local.at) });
+    case 'plan_go': return t('plan_go_done', { time: clock(local.at) });
+    case 'plan_changed': return t('plan_changed_done', { time: clock(local.at) });
+    case 'decided': return item.kind === 'contract' || item.kind === 'knowledge' ? decidedLine(local, item, t) : undefined;
+    case 'chosen': return t('variant_chosen_done', { n: local.position, time: clock(local.at) });
+    default: return undefined;
+  }
 }
 
 export type Gesture = 'approve' | 'undo' | 'send_back' | 'close' | 'answer' | 'approve_plan' | 'plan_go' | 'plan_change'

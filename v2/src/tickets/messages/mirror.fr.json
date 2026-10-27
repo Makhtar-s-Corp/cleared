@@ -1,0 +1,15 @@
+{
+  "refused_go": "« {state} » est l'accord du propriétaire, et il se donne dans Cleared seulement. {ticket} revient en « {back} ».",
+  "refused_approved": "{ticket} a reçu l'accord du propriétaire dans Cleared : jusqu'à sa mise en ligne, son état ne change que dans Cleared. Il revient en « {back} ».",
+  "refused_landing": "{ticket} est en cours de mise en ligne par Cleared : d'ici là, son état ne change que dans Cleared. Il revient en « {back} ».",
+  "refused_edit": "{ticket} a reçu l'accord du propriétaire dans Cleared : jusqu'à sa mise en ligne, son titre et sa description ne changent que dans Cleared. Ils reviennent à ceux de Cleared.",
+  "set_aside_note": "{who} a déplacé ce ticket sur {tracker}, en « {state} ». Ses sessions ont été arrêtées et plus rien de lui n'attend dans Réception. Remettez-le en Todo dans Cleared pour le relancer.",
+  "set_aside_message": "{who} a déplacé le ticket sur {tracker} : cette session a été arrêtée.",
+  "comment_in": "{who}, sur {tracker} :",
+  "comment_out_owner": "{who}, dans Cleared :",
+  "comment_out_user": "Un utilisateur de Cleared :",
+  "comment_out_service": "Cleared :",
+  "delegated": "{who} a confié ce ticket à Cleared : c'est {ticket}. Le plan {plan} attend l'accord du propriétaire dans Cleared, et rien ne commence avant.",
+  "delegated_in_plan": "{who} a confié ce ticket à Cleared, mais {ticket} est déjà dans le plan {plan} : aucun nouveau plan n'est fait.",
+  "delegated_in_state": "{who} a confié ce ticket à Cleared, mais {ticket} est déjà en « {state} » : aucun nouveau plan n'est fait."
+}

@@ -13,10 +13,16 @@
 // a link address is set, else said to be kept by Cleared. Its words are
 // its own catalog's (messages/receipt.<language>.json), over the shell's
 // for the units of a duration, in the project's language.
+//
+// Each service's line ends with why it has captures or none (P226, issue
+// #368, flow/capture-need.ts): no screen changed, the screens the change
+// touches, the human's choice on the ticket, or a diff that could not be
+// read. A capture journaled before the rule has no reason and reads as it did.
 import { readFileSync } from 'node:fs';
 import { loadCatalog, type Language } from '../../app/src/catalog.ts';
 import { translator, type Catalog, type Translate } from '../../app/web/lib/i18n.ts';
 import { lasted, quantity } from '../../app/web/lib/time.ts';
+import type { CaptureNeed } from './capture-need.ts';
 import type { CaptureMissing, ProofCapture } from './proof-capture.ts';
 
 export const RECEIPT_MESSAGES_DIR = new URL('./messages/', import.meta.url).pathname;
@@ -24,7 +30,7 @@ export const RECEIPT_START = '<!-- cleared:proof-receipt -->';
 export const RECEIPT_END = '<!-- /cleared:proof-receipt -->';
 
 export type ReceiptTest = { readonly round: number; readonly command: string; readonly outcome: 'passed' | 'failed' | 'unclear' | 'not_run' };
-export type ReceiptCapture = ProofCapture & { readonly service: string };
+export type ReceiptCapture = ProofCapture & { readonly service: string; readonly need?: CaptureNeed };
 
 export type ReceiptData = {
   readonly ticket: string;
@@ -70,6 +76,15 @@ function outcomeKey(outcome: ReceiptTest['outcome']): string {
 }
 const PART_KEYS: Record<CaptureMissing['part'], string> = { before: 'receipt_before', after: 'receipt_after', video: 'receipt_video_part' };
 
+// A list of screens kept to one line: the first SCREENS_SHOWN, then how many more.
+const SCREENS_SHOWN = 5;
+function needLine(need: CaptureNeed, t: Translate): string {
+  if (need.reason !== 'screens') return t(`receipt_need_${need.reason}`);
+  const shown = need.screens.slice(0, SCREENS_SHOWN).join(', ');
+  const more = need.screens.length - SCREENS_SHOWN;
+  return t('receipt_need_screens', { screens: more > 0 ? t('receipt_need_more', { screens: shown, n: more }) : shown });
+}
+
 function captureLine(capture: ReceiptCapture, data: ReceiptData, t: Translate): string {
   const taken: { label: string; file: string }[] = [];
   if (capture.before) taken.push({ label: t('receipt_before'), file: capture.before });
@@ -84,7 +99,10 @@ function captureLine(capture: ReceiptCapture, data: ReceiptData, t: Translate): 
   }
   for (const missing of capture.missing)
     parts.push(t('receipt_not_taken', { part: t(PART_KEYS[missing.part]), reason: t(`receipt_reason_${missing.reason}`) }));
-  return t('receipt_captures_of', { service: capture.service, parts: parts.join('; ') });
+  if (!capture.need) return t('receipt_captures_of', { service: capture.service, parts: parts.join('; ') });
+  const line = t('receipt_captures_of', { service: capture.service, parts: capture.need.take ? parts.join('; ') : t('receipt_captures_skipped') });
+  // The reason after a full stop, in both languages.
+  return `${line}. ${needLine(capture.need, t)}`;
 }
 
 export function renderReceipt(data: ReceiptData, language: Language): string {

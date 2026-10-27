@@ -12,13 +12,15 @@ import { MemoryTicketStore } from '../../src/tickets/contract.ts';
 // for those six. Milestone 2 adds lead and notify (decision 14): lane 5
 // filled lead and lane 6 filled notify (their own tests, test/lead/ and
 // test/notify/). The replanned milestone 2 adds knowledge (decision 27, lane
-// 24, its own tests in test/knowledge/).
-const stubs = { sessions: emptyModule, users: emptyModule, tickets: emptyModule, flow: emptyModule, approval: emptyModule, inbox: emptyModule, lead: emptyModule, notify: emptyModule, knowledge: emptyModule };
+// 24, its own tests in test/knowledge/). Milestone 5 adds setup, run and secrets
+// (milestone-5-plan.md, section 3.1): lane v2-j5-assistant filled setup (its
+// own tests, test/setup/); run and secrets are stubs until their lanes.
+const stubs = { sessions: emptyModule, users: emptyModule, tickets: emptyModule, flow: emptyModule, approval: emptyModule, inbox: emptyModule, lead: emptyModule, notify: emptyModule, knowledge: emptyModule, setup: emptyModule, run: emptyModule, secrets: emptyModule };
 const deps = { store: undefined as never };
 
 test('the module stubs are empty and assemble into the in-memory defaults', async () => {
-  assert.deepEqual([...MODULE_NAMES], ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox', 'lead', 'notify', 'knowledge']);
-  assert.equal(MODULE_NAMES.length, 9);
+  assert.deepEqual([...MODULE_NAMES], ['sessions', 'users', 'tickets', 'flow', 'approval', 'inbox', 'lead', 'notify', 'knowledge', 'setup', 'run', 'secrets']);
+  assert.equal(MODULE_NAMES.length, 12);
   // Lane 5 filled the lead module (its own test, test/lead/module.test.ts): it provides no slot.
   assert.deepEqual(lead.provide(deps), {});
   for (const [name, module] of Object.entries(stubs)) {

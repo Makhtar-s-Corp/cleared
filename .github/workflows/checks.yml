@@ -28,9 +28,17 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
-      - name: Syntax of every script
+      # The v1 core is TypeScript run by Node itself; the type check uses the
+      # TypeScript and Node types v2/ installs (no install script runs).
+      - name: Types
+        env:
+          SCARF_ANALYTICS: 'false'
+          DO_NOT_TRACK: '1'
         run: |
-          for script in *.sh lib/*.sh lib/terminal/*.sh lib/tracker/*.sh lib/tracker/adapters/*.sh adapters/*.sh serve/*.sh; do bash -n "$script"; done
-          for module in lib/*.mjs lib/guard/*.mjs lib/tracker/*.mjs lib/tracker/adapters/*.mjs serve/*.mjs app/*.mjs app/lib/*.mjs app/sources/*.mjs app/public/*.js cleared; do node --check "$module"; done
+          npm ci --prefix v2 --ignore-scripts
+          v2/node_modules/.bin/tsc -p .
+      - name: Syntax of the browser's scripts
+        run: |
+          for script in app/public/*.js; do node --check "$script"; done
       - name: Tests
-        run: node --no-warnings --test --test-timeout=120000 test/*.test.mjs
+        run: node --no-warnings --test --test-timeout=120000 test/*.test.ts

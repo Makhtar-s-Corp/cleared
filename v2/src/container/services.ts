@@ -87,6 +87,37 @@ export function parseServices(setting: string): ServiceSpec[] {
   return services;
 }
 
+// ------------------------------------------------------- test secrets
+//
+// A service's test secrets (docs/v2/milestone-5-plan.md, decision 12, C16)
+// are environment variables of its session's container and of its real
+// sibling. A name is an environment variable's, never one that Cleared, a
+// harness, a test service or the system reads to run the container: the
+// proxy, the home folder, the harness's login, Node's or the dynamic
+// loader's options, git's, the certificates trusted. The store refuses
+// such a name, and the runtime leaves it out again.
+const TEST_VARIABLE = /^[A-Z][A-Z0-9_]{0,63}$/;
+const RESERVED_VARIABLES: ReadonlySet<string> = new Set([
+  'HOME', 'PATH', 'USER', 'LOGNAME', 'SHELL', 'PWD', 'TMPDIR', 'TERM', 'LANG', 'TZ', 'HOSTNAME',
+  'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'FTP_PROXY',
+  'SSL_CERT_FILE', 'SSL_CERT_DIR', 'CURL_CA_BUNDLE', 'REQUESTS_CA_BUNDLE',
+  ...Object.values(KNOWN).flatMap((known) => [...Object.keys(known.env), ...Object.keys(known.sessionEnv('alias'))]),
+]);
+const RESERVED_PREFIXES: readonly string[] = ['CLEARED_', 'CLAUDE_', 'ANTHROPIC_', 'CODEX_', 'OPENAI_', 'CURSOR_', 'NODE_', 'NPM_CONFIG_', 'LD_', 'GIT_', 'SSH_', 'DOCKER_', 'EGRESS_', 'FAKE_'];
+
+// Why a name cannot be a test secret's: not a variable's name, or one the container needs as it is.
+export function variableRefusal(name: string): 'name' | 'reserved' | undefined {
+  if (!TEST_VARIABLE.test(name)) return 'name';
+  if (RESERVED_VARIABLES.has(name) || RESERVED_PREFIXES.some((prefix) => name.startsWith(prefix))) return 'reserved';
+  return undefined;
+}
+
+// The test secrets a container is given: those whose name passes, less any
+// name the container already sets, which stays the container's.
+export function testVariables(given: Readonly<Record<string, string>>, own: Readonly<Record<string, string>>): Record<string, string> {
+  return Object.fromEntries(Object.entries(given).filter(([name]) => variableRefusal(name) === undefined && !Object.hasOwn(own, name)));
+}
+
 // ------------------------------------------------------------- siblings
 //
 // The other services of the workspace, run beside a session on its

@@ -1,0 +1,163 @@
+# Cleared v2 under Docker Compose (docs/v2/milestone-5-plan.md, section 4).
+#
+# The one command, from a clone of this repository, on Linux with Docker
+# Engine:
+#
+#   docker compose -f v2/compose.yaml run --rm install
+#
+# The install (src/cli/install.ts) checks Docker, the three ports and the
+# state folder before it writes anything, builds the images, starts the
+# service, the app and the broker, and says the address and the setup line.
+# Run again, it changes nothing that runs and says the address.
+#
+# Rules this file keeps (test/install/compose.test.ts):
+#   - every container and every image it builds carries cleared.dev=v2; it
+#     makes no network and no named volume, so nothing escapes the label;
+#   - nothing is published: the service, the app and the broker share the
+#     host's network and bind 127.0.0.1 only, as a hand-made install does,
+#     since the app finds the service on 127.0.0.1 and refuses any other
+#     address of its own (app/src/config.ts);
+#   - the Docker socket reaches the service and the install alone (D10);
+#   - the state folder is mounted at its own path, since the service gives
+#     its path to the session containers it starts beside it;
+#   - each role runs as the owner of the state folder (the entrypoint drops
+#     root), never as root: the install gives the folder to the owner of
+#     the clone.
+#
+# Settings, read when the command runs: CLEARED_V2_STATE_DIR
+# (/var/lib/cleared-v2), CLEARED_V2_PORT (8791, the service),
+# CLEARED_V2_APP_PORT (8792, the app), CLEARED_V2_PREVIEW_PORT (8794, the
+# Browser tab's previews), CLEARED_V2_APP_LANGUAGE (fr), and
+# COMPOSE_PROJECT_NAME for a second install on one machine.
+name: cleared-v2
+
+services:
+  service:
+    image: "cleared-v2:local"
+    pull_policy: never
+    command:
+      - service
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    labels:
+      cleared.dev: v2
+      cleared.role: service
+    environment:
+      CLEARED_V2_HOST: 127.0.0.1
+      CLEARED_V2_PORT: "${CLEARED_V2_PORT:-8791}"
+      CLEARED_V2_STATE_DIR: "${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}"
+      CLEARED_STATE_DIR: "${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}"
+      CLEARED_V2_APP_LANGUAGE: "${CLEARED_V2_APP_LANGUAGE:-fr}"
+    volumes:
+      - "${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}:${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+  app:
+    image: "cleared-v2:local"
+    pull_policy: never
+    command:
+      - app
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    depends_on:
+      - service
+    labels:
+      cleared.dev: v2
+      cleared.role: app
+    environment:
+      CLEARED_V2_APP_HOST: 127.0.0.1
+      CLEARED_V2_APP_PORT: "${CLEARED_V2_APP_PORT:-8792}"
+      CLEARED_V2_PORT: "${CLEARED_V2_PORT:-8791}"
+      CLEARED_V2_PREVIEW_PORT: "${CLEARED_V2_PREVIEW_PORT:-8794}"
+      CLEARED_V2_STATE_DIR: "${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}"
+      CLEARED_STATE_DIR: "${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}"
+      CLEARED_V2_APP_LANGUAGE: "${CLEARED_V2_APP_LANGUAGE:-fr}"
+    volumes:
+      - "${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}:${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}"
+
+  # The release lock (serve/release-broker.ts), under the service's account:
+  # it accepts the service's requests by their uid, and reads the ledger and
+  # the review records in the state folder. It waits for a project: a
+  # checkout with .cleared/agents.conf that CLEARED_V2_PROJECT_DIR names, or
+  # the service of the workspace the setup assistant writes (issue #438),
+  # which it looks for every 5 s and starts on without a restart.
+  broker:
+    image: "cleared-v2:local"
+    pull_policy: never
+    command:
+      - broker
+    restart: unless-stopped
+    init: true
+    network_mode: host
+    labels:
+      cleared.dev: v2
+      cleared.role: broker
+    environment:
+      CLEARED_V2_PROJECT_DIR: "${CLEARED_V2_PROJECT_DIR:-}"
+      CLEARED_V2_STATE_DIR: "${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}"
+      CLEARED_STATE_DIR: "${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}"
+      CLEARED_V2_APP_LANGUAGE: "${CLEARED_V2_APP_LANGUAGE:-fr}"
+    volumes:
+      - "${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}:${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}"
+
+  # The one command. Runs as root only to give the state folder to the
+  # owner of the clone, which it reads and never writes.
+  install:
+    image: "cleared-v2:local"
+    build:
+      context: ..
+      dockerfile: v2/images/cleared/Dockerfile
+      labels:
+        cleared.dev: v2
+    profiles:
+      - install
+    command:
+      - install
+    network_mode: host
+    labels:
+      cleared.dev: v2
+      cleared.role: install
+    environment:
+      CLEARED_V2_COMPOSE_PROJECT: "${COMPOSE_PROJECT_NAME:-cleared-v2}"
+      CLEARED_V2_CLONE: /opt/cleared/clone
+      CLEARED_V2_PORT: "${CLEARED_V2_PORT:-8791}"
+      CLEARED_V2_APP_PORT: "${CLEARED_V2_APP_PORT:-8792}"
+      CLEARED_V2_PREVIEW_PORT: "${CLEARED_V2_PREVIEW_PORT:-8794}"
+      CLEARED_V2_STATE_DIR: "${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}"
+      CLEARED_V2_PROJECT_DIR: "${CLEARED_V2_PROJECT_DIR:-}"
+      CLEARED_V2_APP_LANGUAGE: "${CLEARED_V2_APP_LANGUAGE:-fr}"
+    volumes:
+      - "..:/opt/cleared/clone:ro"
+      - "${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}:${CLEARED_V2_STATE_DIR:-/var/lib/cleared-v2}"
+      - "/var/run/docker.sock:/var/run/docker.sock"
+
+  # Build-only: the images the service starts for each session, under the
+  # tags it names (src/container/session-runtime.ts). The install builds
+  # them when they are missing.
+  session:
+    image: "cleared-v2-session:2.1.306"
+    build:
+      context: images/session
+      labels:
+        cleared.dev: v2
+    profiles:
+      - images
+    network_mode: none
+    labels:
+      cleared.dev: v2
+      cleared.role: image
+
+  egress:
+    image: "cleared-v2-egress:1"
+    build:
+      context: images/egress
+      labels:
+        cleared.dev: v2
+    profiles:
+      - images
+    network_mode: none
+    labels:
+      cleared.dev: v2
+      cleared.role: image

@@ -10,6 +10,7 @@ import { InboxStore, INBOX_TABLE } from '../../src/inbox/store.ts';
 import { RUNS_TABLES } from '../../src/approval/review.ts';
 import { applyTables, openStore } from '../../src/store/db.ts';
 import { fakeSender } from './support.ts';
+import { defaultRegistry } from '../../src/modules/registry.ts';
 
 const until = async (check: () => boolean, ms = 5000) => {
   const end = Date.now() + ms;
@@ -56,4 +57,44 @@ test('with a project the dispatcher ticks from the start of the service, with no
     await dispatcher.close();
     store.close();
   }
+});
+
+// The heartbeat (docs/v2/milestone-4-plan.md, section 8): its tables are the
+// module's, and its beat starts with the service, a project set or not, and
+// stops with it.
+test('the module owns the heartbeat\'s tables', () => {
+  for (const table of ['v2_heartbeat_state', 'v2_heartbeat_incidents']) {
+    assert.ok(notify.tables.some((t) => t.startsWith(`CREATE TABLE IF NOT EXISTS ${table} (`)), table);
+  }
+});
+
+test('the beat starts with the service, without a project too, and stops with it', async () => {
+  const module = createNotifyModule({ env: {}, sender: () => fakeSender(), heartbeatMs: 10_000 });
+  const store = openStore(':memory:');
+  applyTables(store.db, [INBOX_TABLE, ...RUNS_TABLES, ...module.tables]);
+  module.provide({ store });
+  assert.equal(module.heartbeat(), undefined);
+  module.start?.(defaultRegistry());
+  try {
+    assert.ok(module.heartbeat());
+    await until(() => store.db.prepare("SELECT value FROM v2_heartbeat_state WHERE key = 'last_beat_at'").get() !== undefined);
+    assert.equal((store.db.prepare("SELECT value FROM v2_heartbeat_state WHERE key = 'monitor'").get() as { value: string }).value, 'off');
+  } finally {
+    await module.stop?.();
+    store.close();
+  }
+  assert.equal(module.heartbeat(), undefined);
+});
+
+test('a bad heartbeat setting is said in one line and the beat stays off', () => {
+  const lines: string[] = [];
+  const module = createNotifyModule({ env: { CLEARED_V2_HEARTBEAT_SECONDS: '2' }, sender: () => fakeSender(), log: (line) => lines.push(line) });
+  const store = openStore(':memory:');
+  applyTables(store.db, [INBOX_TABLE, ...RUNS_TABLES, ...module.tables]);
+  module.provide({ store });
+  module.start?.(defaultRegistry());
+  assert.equal(module.heartbeat(), undefined);
+  assert.equal(lines.length, 1);
+  assert.match(lines[0] ?? '', /^cleared-v2: the heartbeat is off: CLEARED_V2_HEARTBEAT_SECONDS /);
+  store.close();
 });

@@ -78,7 +78,7 @@ const PAIRS: readonly (readonly [string, readonly string[]])[] = [
   ['--placeholder', ['--canvas', '--surface', '--sunken', '--popover']],
   ['--link', ['--canvas', '--surface', '--sidebar', '--sunken', '--awaiting-surface', '--popover']],
   ['--awaiting-text', ['--canvas', '--surface', '--sidebar', '--awaiting-pill', '--awaiting-surface', '--selected']],   // --selected: the inbox's shown row (lane 37)
-  ['--danger-text', ['--canvas', '--surface', '--sunken']],
+  ['--danger-text', ['--canvas', '--surface', '--sunken', '--sidebar', '--tab-fill']],   // --sidebar, --tab-fill: the quota gauge's percent (P227)
   ['--on-ink', ['--ink']], ['--count-ink', ['--awaiting']],
 ];
 

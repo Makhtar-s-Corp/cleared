@@ -28,7 +28,6 @@
 import type { DatabaseSync } from 'node:sqlite';
 import type { HarnessWins, TicketType } from '../api/types.ts';
 import type { Harness } from '../session/contract.ts';
-import { TICKET_TEMPLATES } from '../tickets/templates.ts';
 import { FlowConfigError } from './config.ts';
 
 export const PICK_HARNESSES: readonly Harness[] = ['claude-code', 'codex', 'cursor'];
@@ -63,12 +62,13 @@ export function pickHarnessesOf(value: string | undefined): readonly PickHarness
 
 // The types of P214's templates, then other. A ticket's type is its
 // template's label, `type:<id>` (tickets/templates.ts); without one, its first
-// label that names a type, whatever the case; else other.
-export const TICKET_TYPES: readonly TicketType[] = [...TICKET_TEMPLATES, 'other'];
+// label that names a type, whatever the case; else other. The setup
+// session's template (C4) is other here: its wins say nothing of a harness.
+export const TICKET_TYPES: readonly TicketType[] = ['bug', 'review', 'ci', 'question', 'other'];
 
 export function ticketType(labels: readonly string[]): TicketType {
   const typed = labels.find((label) => label.startsWith('type:'))?.slice('type:'.length);
-  if (typed && (TICKET_TEMPLATES as readonly string[]).includes(typed)) return typed as TicketType;
+  if (typed && typed !== 'other' && (TICKET_TYPES as readonly string[]).includes(typed)) return typed as TicketType;
   for (const label of labels) {
     const word = label.trim().toLowerCase();
     if (word !== 'other' && (TICKET_TYPES as readonly string[]).includes(word)) return word as TicketType;

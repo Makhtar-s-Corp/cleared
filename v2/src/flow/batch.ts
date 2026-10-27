@@ -87,8 +87,8 @@ const errorName = (error: unknown) => (error instanceof Error ? error.name : typ
 const isText = (value: unknown): value is string => typeof value === 'string';
 
 // The tickets of a batch, checked whole before any of them exists. `min`:
-// 1 for the chat's command (flow/chat.ts), whose one ticket waits for the
-// same lanes and stop; the route keeps 2.
+// 1 for the chat's command (flow/chat.ts) and a run (run/runs.ts), whose one
+// ticket waits for the same lanes and stop; the route keeps 2.
 export function validateBatch(tickets: unknown, min = BATCH_MIN): BatchTicket[] {
   if (!Array.isArray(tickets)) throw new BatchError('invalid', 'tickets is a list of tickets');
   if (tickets.length < min || tickets.length > BATCH_MAX) throw new BatchError('invalid', `a batch holds ${min} to ${BATCH_MAX} tickets, not ${tickets.length}`);
@@ -172,7 +172,8 @@ export class BatchRunner {
   // ---- the person's gestures -----------------------------------------------------
 
   // Creates the batch's tickets in order, then starts what the lanes and the stop allow.
-  async create(input: { readonly tickets: unknown }, by: UserId, options: { readonly min?: number } = {}): Promise<Batch> {
+  // `services`: the services each ticket names, for a run (run/runs.ts), which checked them.
+  async create(input: { readonly tickets: unknown }, by: UserId, options: { readonly min?: number; readonly services?: readonly string[] } = {}): Promise<Batch> {
     const tickets = validateBatch(input.tickets, options.min);
     const seq = Number((this.#db.prepare('SELECT MAX(seq) AS n FROM batches').get() as Row).n ?? 0) + 1;
     const id = `batch-${seq}`;
@@ -183,7 +184,7 @@ export class BatchRunner {
       const position = index + 1;
       try {
         const created = await this.#deps.tickets.create(
-          { title: ticket.title, ...(ticket.body ? { body: ticket.body } : {}), labels: [...(ticket.labels ?? []), `batch:${id}`], project: this.#deps.project },
+          { title: ticket.title, ...(ticket.body ? { body: ticket.body } : {}), labels: [...(ticket.labels ?? []), `batch:${id}`], project: this.#deps.project, ...(options.services ? { services: options.services } : {}) },
           { kind: 'human', id: by },
         );
         insert.run(id, position, created.id, ticket.title, at);

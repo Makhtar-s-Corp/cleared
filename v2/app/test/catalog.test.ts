@@ -2,22 +2,24 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { LANGUAGES, MESSAGES_DIR, SCREENS, loadCatalog } from '../src/catalog.ts';
+import { CATALOGS, LANGUAGES, MESSAGES_DIR, SCREENS, loadCatalog } from '../src/catalog.ts';
 import { format, hasMark, translator } from '../web/lib/i18n.ts';
 
 const files = readdirSync(MESSAGES_DIR).filter((name) => name.endsWith('.json')).sort();
 const read = (name: string) => JSON.parse(readFileSync(join(MESSAGES_DIR, name), 'utf8')) as Record<string, unknown>;
 const placeholders = (text: string) => [...text.matchAll(/\{([a-z_]+)\}/g)].map((m) => m[1]).sort();
 
-test('every message file is <screen>.<language>.json, for the known screens and languages', () => {
+// A catalog is a screen's, or one of the setup assistant's: setup and
+// setup-<step> (milestone-5-plan.md, decision 9, lane v2-j5-assistant).
+test('every message file is <catalog>.<language>.json, for the known catalogs and languages', () => {
   assert.ok(files.length > 0);
   for (const name of files) {
-    const match = /^([a-z]+)\.([a-z]{2})\.json$/.exec(name);
+    const match = /^([a-z]+(?:-[a-z]+)*)\.([a-z]{2})\.json$/.exec(name);
     assert.ok(match, name);
-    assert.ok(SCREENS.includes(match[1] as never), `${name}: unknown screen`);
+    assert.ok(CATALOGS.includes(match[1] as never), `${name}: unknown catalog`);
     assert.ok(LANGUAGES.includes(match[2] as never), `${name}: unknown language`);
   }
-  for (const screen of SCREENS) for (const language of LANGUAGES) assert.ok(files.includes(`${screen}.${language}.json`), `${screen}.${language}.json is missing`);
+  for (const catalog of CATALOGS) for (const language of LANGUAGES) assert.ok(files.includes(`${catalog}.${language}.json`), `${catalog}.${language}.json is missing`);
 });
 
 test('the French file of every screen has every key of the English one, with the same placeholders, and no other key', () => {
