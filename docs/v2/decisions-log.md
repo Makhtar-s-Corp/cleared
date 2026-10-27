@@ -7297,5 +7297,5 @@ The lane's tests were committed alone (`7db961f3`). On it: `test/setup/first-tic
 
 **Resources.** No Docker object, no real GitHub, GitLab, Slack, Cursor or Codex account, no Claude Code login read. Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issues and the pull request. Ports: only the tests' own ephemeral loopback ones. No tunnel, no secret.
 
-- Pull request: against `v2`.
+- Pull request: 440, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-first-ticket`.
