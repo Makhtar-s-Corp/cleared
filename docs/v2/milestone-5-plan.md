@@ -325,7 +325,7 @@ A real GitLab account and project: the owner's trial, as Linear's was (question 
 
 ## 12. Test secrets in the app (`v2-j5-secrets`)
 
-Matrix: C16. Wave 4. Effort M.
+Matrix: C16, and P257, the lane's own line, added when it delivered. Wave 4. Effort M.
 
 ### 12.1 Context
 
@@ -350,9 +350,11 @@ Production secrets; a vault or a cloud secret manager; secrets per ticket.
 
 None.
 
+Matrix line P257, pull request 441 (issue #434). What the author found and chose, as the decisions log of 2026-10-27 says. The values go to an author's and a reviewer's session and to each real sibling, never to postgres, a fake, a reader or the lead. They pass through the docker client's environment (`--env NAME`), since a command line can be read by any account of the machine: that is an addition to `src/container/docker.ts`, and each of the three adapters names its session's service and role to the runtime. Pull request bodies did not go through the cleaner, and the guard does not know the values: `src/workspace/publish.ts` now refuses a branch whose commits hold one and removes any from the body. No Docker object was made: the fake `docker` of the tests records each command line and the environment it was given.
+
 ## 13. The setup session (`v2-j5-env-setup`)
 
-Matrix: C4, M10 (setup sessions), and P256, the lane's own line, added when it delivered. Wave 4. Effort M.
+Matrix: C4, M10 (setup sessions), and P258, the lane's own line, added when it delivered. Wave 4. Effort M.
 
 ### 13.1 Context
 
@@ -379,7 +381,7 @@ The real run needs a Claude Code login for the author session: the service's own
 
 ### 13.6 Delivered
 
-Matrix line P256, pull request 439 (issue #435). What the author found and chose, as the decisions log of 2026-10-27 says. The check runs the service's declared test services beside it, as a session does: the guestbook's tests need its Postgres, which the first real run found. It gives the check's container `sleep` as its program, since a project's image may name an ENTRYPOINT, which the first real run found too. The real run checked a broken branch and a working one, written by the author of the lane in place of a session, both from Cleared's own image: this server has no session image (as section 10.6 says), so no real author session wrote the `.devcontainer`, and C4 and P256 stay `partial` until the rehearsal runs one. A check the service's stop interrupts leaves its objects: issue #436. Files beyond section 13.4: the engine's hook (`engine.ts`, one call before the review), the real effect (`effects.ts`), the merge's listener (`runtime.ts`), the put-back reason (`events.ts`), the table (`modules/flow.ts`), the builder made to read a commit (`prepared.ts`, `checkout.ts`), the Docker wrapper's ENTRYPOINT and a failed command's last lines (`docker.ts`), the harness pick's ticket types (`harness-pick.ts`), the template's words in the tower's catalogs; none is another wave 4 lane's.
+Matrix line P258, pull request 439 (issue #435). What the author found and chose, as the decisions log of 2026-10-27 says. The check runs the service's declared test services beside it, as a session does: the guestbook's tests need its Postgres, which the first real run found. It gives the check's container `sleep` as its program, since a project's image may name an ENTRYPOINT, which the first real run found too. The real run checked a broken branch and a working one, written by the author of the lane in place of a session, both from Cleared's own image: this server has no session image (as section 10.6 says), so no real author session wrote the `.devcontainer`, and C4 and P256 stay `partial` until the rehearsal runs one. A check the service's stop interrupts leaves its objects: issue #436. Files beyond section 13.4: the engine's hook (`engine.ts`, one call before the review), the real effect (`effects.ts`), the merge's listener (`runtime.ts`), the put-back reason (`events.ts`), the table (`modules/flow.ts`), the builder made to read a commit (`prepared.ts`, `checkout.ts`), the Docker wrapper's ENTRYPOINT and a failed command's last lines (`docker.ts`), the harness pick's ticket types (`harness-pick.ts`), the template's words in the tower's catalogs; none is another wave 4 lane's.
 
 ## 14. The first ticket (`v2-j5-first-ticket`)
 
@@ -406,6 +408,10 @@ Choosing a ticket for the person beyond the template; skipping the review or the
 ### 14.5 Real accounts and machines
 
 None: the real first ticket is the proof's.
+
+### 14.6 Delivered
+
+Matrix line P256, issue #433. What the author found and chose, as the decisions log of 2026-10-27 says. The first ticket is made in Todo by the step itself, in one click, so "proposed" is the step's page, not a ticket in a backlog. Live is the ticket's move to Done, which the engine makes once the release watch ends healthy or unwatched. The two open points left to this lane are closed for the flow's engine and the approval: the workspace and the key the assistant writes are used with no restart (#420, kept open for the lead's knowledge, the mirrors and the workspace record). The Compose broker still gets no project from the assistant (#438), so the real step 10 waits for it.
 
 ## 15. The README and the documentation (`v2-j5-docs`)
 

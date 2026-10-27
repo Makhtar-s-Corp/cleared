@@ -75,3 +75,28 @@ export type ForgeView = { readonly credential: CredentialView; readonly rights: 
 export type ForgeChecked = { readonly forge: 'github' | 'gitlab'; readonly credential: CredentialView; readonly repositories: number; readonly more: boolean; readonly sample: readonly string[] };
 
 export type ModelView = { readonly credential: CredentialView; readonly terminal: boolean };
+
+// The first ticket (section 14): where it stands, from its state in the
+// ticket store. todo: in Todo, the flow starting it; working: the author;
+// review: the reviewer; approval: waiting for the owner in the inbox;
+// merging: approved, the lock merges and the release watch runs; live: Done;
+// stopped: another state (set aside, closed).
+export const FIRST_TICKET_STAGES = ['todo', 'working', 'review', 'approval', 'merging', 'live'] as const;
+export type FirstTicketStage = (typeof FIRST_TICKET_STAGES)[number] | 'stopped';
+
+export type FirstTicket = {
+  readonly id: string;
+  readonly title: string;
+  readonly service: string | null;
+  readonly stage: FirstTicketStage;
+  readonly createdAt: string;
+  readonly rolledBack: boolean;                      // the release watch put it back in Todo after it was approved
+};
+
+// GET /api/setup/first-ticket?language= and POST { service, language }.
+export type FirstTicketView = {
+  readonly ready: boolean;                           // false: no workspace yet (the workspace step), no ticket can run
+  readonly services: readonly string[];
+  readonly proposal: { readonly title: string; readonly body: string };
+  readonly ticket: FirstTicket | null;
+};

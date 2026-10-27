@@ -13,7 +13,7 @@
 // docs/v2/milestone-5-plan.md, decision 5).
 import '../src/setup/load.ts';
 import { createServer } from 'node:http';
-import users, { ProofError, SqliteUsers, proofPath, readOrCreateProof } from '../src/modules/users.ts';
+import users, { ProofError, SqliteUsers, proofPath, proofReader } from '../src/modules/users.ts';
 import { formatAddress } from '../src/server.ts';
 import { SETUP_TABLES } from '../src/setup/tables.ts';
 import { LedgerPathError, StoreError, applyTables, ledgerPath, openStore } from '../src/store/db.ts';
@@ -30,7 +30,7 @@ function orExit<T>(make: () => T): T {
   try {
     return make();
   } catch (error) {
-    if (!(error instanceof AppConfigError || error instanceof PreviewConfigError || error instanceof LedgerPathError || error instanceof StoreError || error instanceof ProofError || error instanceof BuildMissing)) throw error;
+    if (!(error instanceof AppConfigError || error instanceof PreviewConfigError || error instanceof LedgerPathError || error instanceof StoreError || error instanceof BuildMissing)) throw error;
     console.error(`cleared-v2-app: ${error.message}`);
     process.exit(64);
   }
@@ -42,7 +42,13 @@ orExit(() => readBundle());
 const ledger = orExit(() => ledgerPath());
 const store = orExit(() => openStore(ledger));
 applyTables(store.db, [...users.tables, ...SESSION_TABLES, ...SETUP_TABLES]);
-const proof = orExit(() => readOrCreateProof(proofPath(ledger)));
+// Read when a request needs it (issue #429): at a first start the service
+// may not have made it yet, and the app does not stop for that.
+const proof = proofReader(proofPath(ledger));
+try { proof(); } catch (error) {
+  if (!(error instanceof ProofError)) throw error;
+  console.error(`cleared-v2-app: ${error.message}; read again at the next request`);
+}
 const source = config.source === 'fixtures'
   ? await fixtureSource(config.project ? { project: config.project } : {})
   : serviceSource({ url: config.serviceUrl, proof });

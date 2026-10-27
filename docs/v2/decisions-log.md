@@ -7242,7 +7242,178 @@ The two agreement cases came later, from a second read of the lock's path: with 
 - Pull request: 428, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-gitlab`.
 
-## 2026-10-27: the setup session: a ticket of the Environment template, its branch built and checked before the review, its image built after the merge, proposed by the assistant (the author's choices, lane `v2-j5-env-setup`, C4, M10, P256, issue #435)
+## 2026-10-27: the assistant's first ticket, followed to live, the setup's summary, and four fixes from the end-to-end test of 26 October (the author's choices, lane `v2-j5-first-ticket`, B6.5, B6.5p, P256, issue #433; issues #429 to #432)
+
+**The need.** Section 14 of [milestone-5-plan.md](milestone-5-plan.md) (matrix B6.5, B6.5p steps 9 and 10): the assistant's last step, a first ticket that changes one visible line of the project, proposed with its service, moved to Todo in one click and followed to live; and the summary of each step's time, the person's and the machine's, with the total. Two open points were left to this lane: the workspace the assistant writes (#420) and the approval key it makes (P249) were used only from the service's next start. With it, four bugs found by the end-to-end test of 26 October, one commit each: #429, #430, #431 and #432. French and English, accessible, fakes only, nothing on a real server. As earlier lanes noted, the brief's section 6 (`PROMPT.md`) and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of section 3.1 of the milestone 5 plan.
+
+**The branch.** The brief asked for `v2/j5-first-ticket`. Git refuses that name while a local branch `v2` exists, so the lane runs on `v2-j5-first-ticket`, as the other milestone 5 lanes did.
+
+**Decision: the four fixes.**
+1. **#429, the app's proof.** The service made it with an exclusive create, then wrote it: an app starting a second later read an empty file, logged "not 64 hex characters" and kept no proof until a restart. The proof is now written in a file of its own, then linked to its name (a link fails if the name exists, so two processes starting at once agree, as `setup/approval-key.ts` already does for the key). The issue asked for a rename; a rename replaces a proof another process already read, which would give a 401 for good. The app reads the proof when a request needs it (`proofReader`): until it is whole, the browser gets 503 `service_starting` and the service is not asked; a 401 from the service makes the next request read it again. `app/main.ts` no longer stops on a proof that is not ready. The lanes' MCP token, made by the same function, gains the same.
+2. **#430, `cleared doctor` and Docker.** The entrypoint's `cleared` role dropped root with the owner's group only. It now keeps the socket's group, as the service does. Only the service's container mounts the socket, so the app's and the broker's never find one (D10 holds).
+3. **#431, before the forge.** The service answers 503 until a workspace exists. The Tower and the Inbox now say "Cleared runs no ticket yet: the setup is not finished" and link to `/setup`, not an error; a refusal keeps the service's `{ error }`, so the app's own `service_starting` still reads as a service that is starting; the Inbox clears its failure once a later read succeeds. **The language:** the app follows the person's choice, then the browser's languages, then `CLEARED_V2_APP_LANGUAGE` (the owner's request of 2026-10-23, 08:40), which is why a headless browser in en-US got English on an install in French while the commands spoke French. That order stays. What was missing is a way to choose before the owner's account and its menu exist: the setup page now has the menu's language choice, which writes the same cookie.
+4. **#432, the public key.** Step 1 said to add `human_public_key` to the project's `.cleared/agents.conf` and commit it, before any repository was linked (step 4), against section 1's rule that no step needs a hand-edited file. The service now checks the owner's signed rows with the public half of the key it holds when the project's file names none; a key the file names still wins. The step says there is nothing to add to the repository, and keeps the line in a closed fold "for a release lock set up by hand". Putting the line in the first ticket's own pull request was not taken: a key arriving in the pull request being approved must never check that approval.
+
+**Decision: the lane.**
+5. **The ticket's text** is in the step's file (`src/setup/steps/first-ticket.ts`), in English and in French, in the person's language as a team's content is: one line at the end of `README.md` at the root of the service's repository ("This project takes its changes through Cleared: an author, a reviewer, and the owner's approval."), a README made if there is none, nothing else changed. No `type:` label: the tracker's types are bug, review, ci and question.
+6. **Proposed, then one click.** A ticket is created in Todo and the flow starts it, so "proposed" is the step's page: the ticket as it will be written and the repository it targets (a list when the workspace has several). The click makes the ticket as the owner and starts it, as the Tower's form does. One first ticket: its row is taken before the ticket is made, so two clicks make one (`exists`); before a workspace exists the step says so and links to the workspace step (`no_workspace`); a store that cannot sign yet answers `unsigned`.
+7. **Followed to live.** The page reads the step every 5 seconds until the ticket is live or left the flow. Its stages come from the ticket store's state: Todo, the author, the review, the owner's approval (with the inbox's link: the approval is the inbox's, as for any ticket), the merge and the release watch, live. Live is Done, which the engine sets once the watch ends healthy or unwatched (question 2 of the plan, default (a)); a roll-back that put it back in Todo is said.
+8. **The step's times.** The step is done at the moment the ticket went Done, read from its history, not when a page looked (`SetupRecords.done` takes that moment, never before the step was shown). The machine's time is Todo to the first approval asked (the sessions) plus the approval to Done (the lock and the watch); the rest, reading the proposal and approving, is the person's.
+9. **The summary** (`src/setup/summary.ts`): each step's time, the person's and the machine's, the totals, the steps skipped, whether all are done and whether the whole held in the hour. `setupView` takes its totals from it. It is drawn as a table with a caption, by the step once live and by the assistant's last page; durations as `lasted` says them ("12 min", "40 s"), no milliseconds.
+10. **No restart for the workspace (#420).** The runtime reads the flow's settings again at each request while it has none, and builds the engine at the first request that finds them; a workspace that is named but wrong is said once. It tells whoever waits (`whenEngine`): the flow module then starts the idle watchdog (B3.11), the batches and the chat's replies, which it started only with an engine present at start. A listener from a start that a stop ended does nothing.
+11. **No restart for the approval key (P249's open point).** The approval's key and owner are read at each need until both exist, then kept: the ticket store and the writer take them from a function, and the multi-service paths read the environment's `conf` and `signer` through getters.
+12. **For the tests**, the setup module takes its steps as an option (the registry's by default), so the browser test gives the first-ticket step an engine on the flow's fake harness.
+
+**Questions for the owner** (defaults applied):
+1. **The release lock's key (#432).** The v1 lock (`merge-pr.ts`, run by the broker) still reads `human_public_key` from the project's `.cleared/agents.conf` only. (a) The lock reads the key the service holds when the file names none, as the service now does: the trust moves from a reviewed line of the repository to the state folder, which the service's account alone can write and which already holds the private half. (b) The workspace step opens a configuration pull request adding the line, which the owner merges on the forge. (c) Unchanged: a lock set up by hand reads the line the step keeps folded. Default applied: (c), since (a) changes what the lock trusts. Recommended: (a), as the private half beside it already lets that account sign.
+2. **The app's language (#431).** (a) The person's choice, then the browser, then the install's setting, as the owner asked on 2026-10-23 (applied), with the choice now on the setup page. (b) The install's setting before the browser when the install named one. Default: (a).
+
+**Open.**
+- **#420** stays open for what still reads the workspace at start only: the lead's knowledge, the GitHub and Linear mirrors, and the workspace record of the tickets module.
+- **#437** (opened here, read in the code, not run): the Tower creates a ticket with the app's project name, which a Compose install leaves empty, so the service refuses it after the assistant. The first ticket goes through the step, not that route.
+- **#438** (opened here, read in the code, not run): the Compose broker idles until `CLEARED_V2_PROJECT_DIR` names a checkout, and the assistant gives it none, so the real step 10 waits for a lock that does not run.
+- The watchdog's start with an engine built later is proven through `whenEngine` (`test/flow/runtime-later.test.ts`), not through the flow module itself, which uses the process's runtime.
+
+**Not done here.** No real first ticket: the plan keeps it for the proof (B6.5p); the step is proven on the flow's fake harness, to the approval, and its live through the ticket store's move to Done. No Compose run: #429 and #430 are proven by their tests, not on a Docker install.
+
+**Tests first.** Each fix's commit holds its test and its code; each test was run on the code before it:
+- #429: `test/modules/users.test.ts`, with the old `readOrCreateProof`, "nothing at the path while the proof is written" failed (a reader at the moment of the write found an empty file), deterministically: the test reads the path from inside `writeSync`, no race. The reader's case failed on a stand-in that read the file each time.
+- #430: `test/install/entrypoint.test.ts` failed: the cleared role got `[1000]`. The case that said "the socket's group for the service only" changed with the code.
+- #431: `app/web/test/setup-pending.test.tsx` could not load what it tests (no `setup-pending.tsx`, no `LanguageChoice`).
+- #432: `test/approval/environment.test.ts`, the owner's row read as `other`; `app/web/test/setup/setup.test.tsx`, the owner step's case, which said "to commit to the project", changed with the code.
+
+The lane's tests were committed alone (`7db961f3`). On it: `test/setup/first-ticket.test.ts` could not load (no `summary.ts`, no step), `test/flow/runtime-later.test.ts` failed both cases (no `whenEngine`), the key case of `test/approval/environment.test.ts` failed (`canSign` stayed false), and the 5 cases of `app/web/test/setup/first-ticket.test.tsx` failed (the stub drew none of it). Changed with the code: `test/flow/runtime-later.test.ts` gave its store the inbox's table and its fake release a result; `app/test/shell/tokens.test.ts` found a `font-weight: normal` in the new sheet; the i18n audit names "Todo" (the board's state) and "Total" as written alike in French; the three setup browser tests wait for the key's line in its fold, and the assistant's walk meets the filled first-ticket step.
+
+**Files outside the lane's list**, each for the four fixes or the two open points: `src/modules/users.ts`, `app/main.ts`, `app/src/proxy.ts`, `app/src/preview.ts` (#429); `images/cleared/entrypoint.ts` (#430); `app/web/lib/api.ts`, `app/web/lib/screen.ts`, `app/web/lib/setup-pending.tsx`, `app/web/screens/tower/Tower.tsx`, `app/web/screens/inbox/Inbox.tsx`, `app/messages/shell.{en,fr}.json`, `app/web/screens/setup/Setup.tsx` and `setup.css` (#431, and the summary on the last page); `src/approval/service.ts`, `src/setup/approval-key.ts`, `app/web/screens/setup/steps/Owner.tsx`, `app/messages/setup-owner.{en,fr}.json` (#432); `src/flow/runtime.ts`, `src/modules/flow.ts` (#420); `src/tickets/local-store.ts`, `src/approval/writer.ts` (the key read at each need); `src/setup/records.ts`, `src/setup/types.ts`, `src/modules/setup.ts` (the step's moment, its shapes, the totals, the steps option).
+
+**Captures** (`docs/v2/first-ticket/`): the proposal and live, at 1440, 1280, 768 and 390 px, light and dark, in English, and at 1440 in French. Taken by `app/test/setup/first-ticket-browser.test.ts` with `CLEARED_V2_CAPTURES`; the times read 0 s there, the flow's clock being the test's.
+
+**Checks**, on this branch at `origin/v2` `eb81a2ed`:
+- `npm run typecheck` passes.
+- `npm test`: 2781 Node tests, 2658 pass, 123 skipped, 0 fail; 400 Vitest tests pass.
+- The six setup browser tests (`setup`, `checks`, `forge-gitlab`, `workspace`, `environment`, `first-ticket`) pass in both languages, axe finding nothing, with `CLEARED_V2_PLAYWRIGHT` and `CLEARED_V2_CHROME` naming this server's headless Chrome (the installed playwright-core asks a build this server does not hold).
+- `npm test` with `CLEARED_V2_PLAYWRIGHT` set (every browser test): 2781 Node tests, 2776 pass, 2 skipped, 3 fail, none of them this lane's. Run alone, each the same on this branch and on a clean checkout of `origin/v2` at `eb81a2ed`: `app/test/notify/browser.test.ts` fails on both (the button is never offered in this server's headless Chrome, as P249's and P255's entries say); the real-Chromium case of `test/flow/proof-capture.test.ts` fails on both (its after page and video say `failed`); `app/test/foundation/budget-browser.test.ts` passes on both, its p95 over 100 ms (134.7 ms) only under the whole run's load.
+- `npm run guard -- --base origin/v2`: nothing refused. The guard does not read `docs/v2/`, and ran without the private-term list, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
+
+**Resources.** No Docker object, no real GitHub, GitLab, Slack, Cursor or Codex account, no Claude Code login read. Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issues and the pull request. Ports: only the tests' own ephemeral loopback ones. No tunnel, no secret.
+
+- Pull request: 440, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-first-ticket`.
+
+## 2026-10-27: test secrets in the app, sealed at rest, given to an author's and a reviewer's session only, and cleaned from what Cleared writes (the author's choices, lane `v2-j5-secrets`, C16, P257, issue #434)
+
+**The need.** Issue #434, section 12 of [milestone-5-plan.md](milestone-5-plan.md) (matrix C16, decision 12). A project whose tests need a key, a sandbox account or a mail test server, has no place for it but its own files. This lane adds:
+- a service's test secrets, set, replaced and removed in the app by a signed-in person, each change in the ledger with its name, who and when, never its value;
+- the values encrypted at rest under `<state>/secrets.key`, so a ledger copied without the key reads nothing;
+- the values given to the sessions' tests, and removed from everything Cleared writes;
+- a Test secrets panel on the Services screen and the assistant's secrets step, which show names and dates, never a value.
+
+French and English, accessible, fake values only, made at run time. As earlier lanes noted, the brief's section 6 (`PROMPT.md`) and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of section 3.1 of the milestone 5 plan.
+
+**The branch.** The brief asked for `v2/j5-secrets`. Git refuses that name while a local branch `v2` exists, so the lane runs on `v2-j5-secrets`, as the other milestone 5 lanes did.
+
+**Decision.**
+1. **The store** (`src/secrets/store.ts`), two tables of the secrets module:
+   - `test_secrets`: one row a service and a name, the value sealed, who set it and when;
+   - `test_secret_changes`: each set, replace and remove, with the name, who and when.
+
+   The values the key opens are read once at start and kept in memory. The cleaner reads that list at each text it cleans, so it never reads the ledger or decrypts on that path. One store a ledger (`src/secrets/live.ts`): the Services screen, the assistant's step, the cleaner and the session runtime all see a value the moment it is set.
+2. **The key** (`src/secrets/key.ts`). `<state>/secrets.key`, 32 random bytes, mode 600, made at the first value (`O_EXCL`, never through a link), never before: reading needs none.
+   - A link, a file of another account, one the group or others can read, or one of another size is refused. Nothing is sealed or opened with it, the service's log says why, and the screens say the key file is refused.
+   - AES-256-GCM, a fresh 12-byte nonce at each write, the service and the name as associated data: a sealed value moved to another row does not open.
+   - A ledger copied without its key lists its names as unreadable, gives no session a value, and a value set again there is sealed under the new key.
+3. **What a name and a value may be.**
+   - A name is an environment variable's: a capital, then capitals, digits and `_`, 64 characters at most.
+   - A name is never one the container needs as it is: the proxies, `HOME`, `PATH`, the certificates, `DATABASE_URL` (what postgres gives), and every name under `CLEARED_`, `CLAUDE_`, `ANTHROPIC_`, `CODEX_`, `OPENAI_`, `CURSOR_`, `NODE_`, `NPM_CONFIG_`, `LD_`, `GIT_`, `SSH_`, `DOCKER_`, `EGRESS_` and `FAKE_`. The rule is in `src/container/services.ts`, beside the test services' own variables, and the runtime applies it again.
+   - A value is one line, 8 to 4096 characters, with no control character and no space at either end (a paste mistake). The cleaner does not look for a value under 8 characters, which would remove ordinary words, so such a value is refused rather than kept and missed.
+   - 50 values a service at most.
+4. **Who gets the values.**
+   - An author's and a reviewer's session container gets its own service's values.
+   - Each real sibling gets its own service's: it runs the project's code for the tests.
+   - Nothing else does: a fake (it answers from a contract), the egress, postgres (its environment is fixed, as milestone 1 decided), a reader, the lead, and a session that names no service.
+   - Each of the three adapters (Claude Code, Codex, Cursor) now names its session's service and role to the runtime.
+   - A name the container already sets stays the container's: the values are added under the runtime's own variables, never over them.
+5. **Never on a command line.** `docker create --env NAME=value` puts the value in the process list, where any account of the machine reads it. The runtime gives the values as `privateEnv`: `--env NAME` on the command line, the value in the docker client's own environment, where the CLI reads it. `src/container/docker.ts` carries it, and its runner hands the client that environment over its own.
+6. **The cleaner's list.**
+   - `secretValues(env)` (`src/session/clean.ts`) now adds every value the service held since it started, a replaced or removed one too. A session started before the change still holds the old value.
+   - Every call site that reads `secretValues` at each text is reached without being edited: the session's events, the flow's comments and notes, the lead, the reader, the knowledge module, the human terminal.
+   - One did not: the lanes' MCP server's redactor (`src/mcp/redact.ts`) read the list once, when the flow module was made, before the secrets module had its store. It reads it at each text now, and `test/mcp/redact.test.ts` fails without that change.
+7. **Pull requests.** The body was never cleaned by `cleanText`, and the guard does not know the values. `src/workspace/publish.ts`:
+   - refuses a branch whose commits or commit messages hold a value, as the guard refuses one: nothing is pushed, and the refusal names no value;
+   - sends the body without any value the session's report names.
+
+   The title comes from the commit messages, already checked, so it needs nothing of its own.
+8. **The routes.**
+   - `GET`, `POST` and `POST …/remove` under `/api/test-values`, for the Services screen: the app's proof, then a person the service knows, never the flow's own identities.
+   - The same under `/api/setup/secrets` for the owner, through the setup module's guard, with `POST /api/setup/secrets/done`, which needs one value saved.
+   - A refusal is a code the screens say in words. No answer, error or log line carries a value, and the tests read every answer for one.
+9. **The screens.**
+   - One panel (`app/web/screens/services/TestValues.tsx`), on the Services screen under the map (shown also when the map cannot be read) and in the assistant's step, so both say the same.
+   - Each service with its values by name, "Set on 25 October by alex", an unreadable one said with what to do, a service gone from the workspace listed apart so its values can be removed.
+   - The form: the service when there are several, the name, and the value in a password field, emptied once saved.
+   - The words say test values only, since the session's agent can read them, and that a change reaches the next session that starts.
+   - The step's catalog keys are `test_values_*`, as the assistant lane chose: the guard reads a key with "secret" in it as an assigned secret. The Services catalog repeats the shared keys, and a test keeps both copies equal.
+   - The panel's service groups carry `data-test-values-service`, not `data-service`, which the map's buttons already use.
+
+**Questions for the owner** (defaults applied):
+1. A reader's session gets no value (applied): it reads code and runs no test. Or give it its service's values too.
+2. Postgres and the other declared test services get none (applied): the plan says "the test services", but their environment is fixed and they run no project code; the real siblings do, and they get them. Or give them to every declared service too.
+3. Any signed-in person may set, replace and remove a value on the Services screen (applied), as section 12 says; only the owner in the assistant. Or the owner alone on both.
+
+**Open.**
+- **A restart forgets old values.** The cleaner's list is the values the service held since it started. A value replaced before a restart is no longer removed, if a session container started before that restart still holds it. A hash of each old value would keep it, but a hash of a short value can be guessed; nothing is kept on disk but the sealed current values.
+- **Docker shows them.** `docker inspect` of a session container shows its environment to an account in the `docker` group, which already has root's reach on the host (the README says so).
+
+**Not done here.**
+- No Docker object was made: the tests' fake `docker` records each command line and the environment it was given. Docker's `--env NAME` form, which reads the value from the client's environment, is the CLI's documented one.
+- No real secret anywhere, no real account. Out of scope, as section 12.3 says: production secrets, a vault or a cloud secret manager, secrets per ticket.
+
+**Tests first.** `88f47cf9` committed the tests alone. On it:
+- the store's, the routes', the cleaner's, the runtime's and the publish tests could not load `src/secrets/`;
+- the services tests could not import `testVariables`;
+- the two new docker cases failed: no `privateEnv`, and the runner did not pass its environment on;
+- the step's screen test failed on its stub (no value listed, no Done), and the panel's test could not load `TestValues.tsx`.
+
+The publish case that refuses a branch holding a value came after, from a second read of `publish.ts`: the guard reads the commits, but not for these values.
+
+**Files outside the lane's list**, each for the values' path, nothing else changed:
+- `src/container/docker.ts` (decision 5);
+- `src/session/adapters/claude-code.ts`, `codex.ts` and `cursor.ts`: the service and the role, one line each (decision 4);
+- `src/workspace/publish.ts` (decision 7);
+- `src/mcp/redact.ts` (decision 6);
+- tests: `test/container/docker.test.ts`, `test/workspace/publish.test.ts`, `test/mcp/redact.test.ts`, and three that took the secrets step for a stub or "Service" for an untranslated word: `app/test/setup/setup-browser.test.ts`, `app/web/test/setup/setup.test.tsx`, `app/web/test/i18n-audit.test.tsx`. Lane `v2-j5-first-ticket` edited the first two as well; they were joined at the merge of 440;
+- `app/web/screens/services/Services.tsx`, `services.css` and `app/messages/services.{en,fr}.json`: the panel mounted and its words;
+- `app/fixtures/source.ts`: the panel's routes on the fixtures, names and dates only, a value read and dropped.
+
+**Captures.** `docs/v2/test-secrets/`:
+- the step at 1440, 1280, 768 and 390 px, light and dark, in English, and at 1440 in French, by `app/test/setup/secrets-browser.test.ts`;
+- the panel at the same widths, light and dark, in English, and in French, dark, by `app/test/services/test-values-browser.test.ts`.
+
+Both run with `CLEARED_V2_CAPTURES`.
+
+**Checks.** Run on this branch at `origin/v2` `eb81a2ed`.
+- `npm run typecheck` passes.
+- `npm test`, with `CLEARED_V2_PLAYWRIGHT` set and the browser tests on this server's Google Chrome (`CLEARED_V2_CHROME`: the Chromium build that `playwright-core` names is not installed here, and every browser test failed at its launch without it): 2805 Node tests, 2801 pass, 2 skipped, 2 fail. Neither is this lane's:
+  - `test/flow/proof-capture.test.ts`, the real browser's capture: its after page and its video fail. It fails the same way on a clean checkout of `origin/v2` at `eb81a2ed`, run here on the same Chrome.
+  - `app/test/foundation/budget-browser.test.ts`, the screen-switch budget: 106.9 ms at p95 under the whole suite's load, over its 100. Alone it passes on both trees (22.4 to 25.8 ms here, 23.6 to 29.4 ms on `origin/v2`). With the test's own load, `CLEARED_V2_BUDGET_SLOWDOWN=4`, it fails on both (139.6 and 144.3 ms here, 108.5 and 140.7 ms on `origin/v2`). The Services screen is not one of its five.
+- 399 Vitest tests pass.
+- The first full run found three tests that still took the secrets step for a stub (the assistant's walk in the browser, the stub test of `setup.test.tsx`) or found "Service" written alike in French and English (`i18n-audit.test.tsx`). The walk now expects the step's no-workspace line, the stub test renders the stub itself, and the two keys are on the audit's list of shared words.
+- The panel's browser test leaves the shell's search and account buttons out of axe's label-in-name rule, as `app/test/a11y-browser.test.ts` does and says why; the rest of the page is checked whole.
+- `npm run guard -- --base origin/v2`: nothing refused. A first run refused four lines of a test, a message id of ten digits read as a phone number; the id is letters now.
+- The guard does not read `docs/v2/`, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
+
+**Resources.**
+- No Docker object, no real account, no Claude Code login read.
+- No Slack, Cursor or Codex account used.
+- Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issue and the pull request, nothing else.
+- Ports: only the tests' own ephemeral loopback ones. No tunnel, no secret.
+
+**The merge of 440** (lane `v2-j5-first-ticket`, issue #433, at `origin/v2` `012f5481`). 440 took the id P256, so this lane's line is P257: the matrix, section 12 of the plan and this entry say so. Two tests both lanes edited were joined: the assistant's browser walk now meets every later step filled, each saying it has no workspace yet, and the i18n audit's list of shared words holds both lanes' additions.
+
+- Pull request: 441, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-secrets`.
+
+## 2026-10-27: the setup session: a ticket of the Environment template, its branch built and checked before the review, its image built after the merge, proposed by the assistant (the author's choices, lane `v2-j5-env-setup`, C4, M10, P258, issue #435)
 
 **The need.** Issue #435, section 13 of [milestone-5-plan.md](milestone-5-plan.md) (matrix C4, and M10's setup sessions; decision 14). A repository with no `.devcontainer` runs on Cleared's session image, where its tests may not run. The lane adds:
 - a ticket template "Prepare the environment", whose author writes the `.devcontainer`;
@@ -7282,7 +7453,7 @@ French and English, with fakes for Docker and the harness, and one real run on t
 The first tries found two defects, fixed here with a test each: the check's container exited at once on an image whose ENTRYPOINT is a program (it now has `sleep` as its own), and the guestbook's tests failed on the database the check did not give them (it now runs the declared test services).
 
 **Not done here.**
-- **No real author session.** This server has no session image (as section 10.6 found), and the author's login would be the service's own token. C4 and P256 stay `partial` until the rehearsal (section 16) runs one setup session to its merge.
+- **No real author session.** This server has no session image (as section 10.6 found), and the author's login would be the service's own token. C4 and P258 stay `partial` until the rehearsal (section 16) runs one setup session to its merge.
 - **The browser test does not press Start**: the assistant's browser harness runs no flow. The route is proven by the service's tests, the screen's start by its markup in both languages.
 - **#436.** A check the service's stop interrupts leaves its labelled objects, under a session id no ledger row knows; `doctor docker` reports them.
 - **A ticket in steps or with variants is not checked.** The check sits on the path of a ticket of one service and one author, which is what the assistant starts; a setup ticket a person splits into steps or runs as variants goes to its review as before.
@@ -7299,6 +7470,8 @@ The first tries found two defects, fixed here with a test each: the check's cont
 - The browser tests `environment-browser`, `workspace-browser`, `tower-templates-browser`, `setup-browser` and `checks-browser` pass in both languages, axe finding nothing.
 - `npm run guard -- --base origin/v2`: nothing refused. A first run refused two catalog lines, keys named `environment_check_passed`, which the guard reads as an assigned secret (as P246 found for "pass"); the key is `environment_check_green`.
 - The race and the rounds per run, found at a second read: the set-aside case fails with the guard removed from the engine, and passes with it.
+
+**The merge of 440 and 441** (lanes `v2-j5-first-ticket`, issue #433, and `v2-j5-secrets`, issue #434, at `origin/v2` `08484fea`). They took the ids P256 and P257, so this lane's line is P258: the matrix, section 13 of the plan and this entry say so. Both sides of the matrix and of this log are kept, theirs first, as they merged first.
 
 - Pull request: 439, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-env-setup`.

@@ -12,7 +12,7 @@ import { Progress } from '../../screens/setup/Setup.tsx';
 import { OwnerFirst, OwnerStep } from '../../screens/setup/steps/Owner.tsx';
 import { ForgeStep } from '../../screens/setup/steps/Forge.tsx';
 import { ModelStep } from '../../screens/setup/steps/Model.tsx';
-import { SecretsStep } from '../../screens/setup/steps/Secrets.tsx';
+import { StepStub } from '../../screens/setup/step.tsx';
 import { html, visibleText } from '../render.tsx';
 
 const en = setupTranslator('en');
@@ -70,12 +70,16 @@ test('the first step: the setup code, the owner\'s name and password, each with 
   });
 });
 
-test('the owner step once done: the public key and the line it goes in, to commit to the project', () => {
+// Issue #432: no step asks for a hand-edited file. Cleared keeps the public
+// half and checks the approvals with it; the line stays at hand, folded,
+// for a release lock set up by hand.
+test('the owner step once done: nothing to add to a repository, the public half folded for a lock set up by hand', () => {
   each((t, language) => {
     const markup = html(<OwnerStep t={t} step={VIEW.steps[0] as StepView} api={api} onDone={noop} initial={{ name: 'alex', publicKey: 'TUNvd0JRWURLMlZ3QXlFQQ', setting: 'human_public_key' }} />);
     noMark(markup, `owner ${language}`);
-    assert.match(markup, /human_public_key = TUNvd0JRWURLMlZ3QXlFQQ/);
-    assert.match(markup, /\.cleared\/agents\.conf/);
+    assert.match(markup, /<details[^>]*>[\s\S]*human_public_key = TUNvd0JRWURLMlZ3QXlFQQ[\s\S]*<\/details>/);
+    const shown = visibleText(markup.replace(/<details[\s\S]*<\/details>/, '')).join(' ');
+    assert.doesNotMatch(shown, /agents\.conf|commit/i, 'nothing outside the fold asks for a file or a commit');
   });
 });
 
@@ -108,10 +112,11 @@ test('the model step: the command to run, a terminal to run it in, and the field
   });
 });
 
+// The stub itself, not a step's screen: each step's lane fills its own (the secrets step's, lane v2-j5-secrets, has its tests).
 test('a step a later lane fills says so, and offers Skip', () => {
   each((t, language) => {
-    const markup = html(<SecretsStep t={t} step={step('secrets')} api={api} onDone={noop} />);
-    noMark(markup, `secrets ${language}`);
-    assert.match(markup, /data-step-stub="secrets"/);
+    const markup = html(<StepStub t={t} id="first-ticket" />);
+    noMark(markup, `stub ${language}`);
+    assert.match(markup, /data-step-stub="first-ticket"/);
   });
 });

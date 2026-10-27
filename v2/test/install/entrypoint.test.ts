@@ -40,11 +40,16 @@ test('the state folder\'s owner, refused when missing, root\'s, or writable by o
   assert.throws(() => stateOwner(good, () => ({ uid: 0, gid: 0, mode: 0o40700, directory: true })), { name: 'EntryError', message: 'state_root' });
 });
 
-test('the groups: the owner\'s, and the Docker socket\'s for the service only', () => {
-  assert.deepEqual(groupsOf('service', { uid: 1000, gid: 1000 }, 990), [1000, 990]);
-  assert.deepEqual(groupsOf('service', { uid: 1000, gid: 1000 }, 1000), [1000]);
-  assert.deepEqual(groupsOf('service', { uid: 1000, gid: 1000 }, undefined), [1000]);
-  for (const role of ['app', 'broker', 'cleared'] as const) assert.deepEqual(groupsOf(role, { uid: 1000, gid: 1000 }, 990), [1000], role);
+// Issue #430: `cleared doctor` runs as the cleared role in the service's
+// container (`docker compose run service cleared doctor`) and asks Docker,
+// so it drops root as the service does, the socket's group kept.
+test('the groups: the owner\'s, and the Docker socket\'s for the service and the cleared command only', () => {
+  for (const role of ['service', 'cleared'] as const) {
+    assert.deepEqual(groupsOf(role, { uid: 1000, gid: 1000 }, 990), [1000, 990], role);
+    assert.deepEqual(groupsOf(role, { uid: 1000, gid: 1000 }, 1000), [1000], role);
+    assert.deepEqual(groupsOf(role, { uid: 1000, gid: 1000 }, undefined), [1000], role);
+  }
+  for (const role of ['app', 'broker'] as const) assert.deepEqual(groupsOf(role, { uid: 1000, gid: 1000 }, 990), [1000], role);
 });
 
 test('the broker\'s project: CLEARED_V2_PROJECT_DIR with its .cleared/agents.conf, else none yet', () => {

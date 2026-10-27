@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { SqliteUsers, proofPath, readOrCreateProof } from '../modules/users.ts';
 import type { UserDirectory } from '../modules/registry.ts';
-import { LocalTicketStore, TICKET_TABLES } from '../tickets/local-store.ts';
+import { LocalTicketStore, TICKET_TABLES, type ApprovalKeys } from '../tickets/local-store.ts';
 import type { TicketStates } from '../tickets/contract.ts';
 import { ledgerPath } from '../store/db.ts';
 import { SocketReleaseBroker, brokerSocketPath, type ReleaseBroker } from './broker.ts';
@@ -37,6 +37,7 @@ export type ApprovalOptions = {
   readonly ownerId?: string | undefined;
   readonly publicKey?: string | undefined;
   readonly signer?: ApprovalSigner | undefined;
+  readonly keys?: () => ApprovalKeys;                // the three above, read at each need (approvalEnvironment)
   readonly states?: TicketStates;
   readonly verdict?: string | undefined;
   readonly broker?: ReleaseBroker | null;
@@ -53,6 +54,7 @@ export function createApproval(options: ApprovalOptions) {
     stateDir: options.stateDir, users: options.users, now: () => now().toISOString(),
     ...(options.states ? { states: options.states } : {}), ...(options.ownerId ? { ownerId: options.ownerId } : {}),
     ...(options.publicKey ? { publicKey: options.publicKey } : {}), ...(options.signer ? { signer: options.signer } : {}),
+    ...(options.keys ? { keys: options.keys } : {}),
   });
   const approvalWriter = new LockApprovalWriter({
     store: ticketStore, db: options.db, users: options.users, proof: options.proof, ownerId: options.ownerId, now,
@@ -93,6 +95,11 @@ export type Environment = ReturnType<typeof createApproval> & {
 
 const environments = new WeakMap<DatabaseSync, Environment>();
 
+// The owner's rows are checked with the key the project's file names, else
+// with the public half of the one this service holds (issue #432): the
+// assistant makes it, and no step asks the person to commit it.
+const publicKeyOf = (conf: LockConf, signer: ApprovalSigner | undefined): string | undefined => conf.publicKey ?? signer?.publicKey;
+
 // One set of pieces per database, for the tickets module and the approval
 // module, which fill different slots of the registry from the same writer
 // and store. What the environment lacks leaves the pieces working without
@@ -101,7 +108,7 @@ const environments = new WeakMap<DatabaseSync, Environment>();
 export function approvalEnvironment(db: DatabaseSync, env: NodeJS.ProcessEnv = process.env): Environment {
   const known = environments.get(db);
   if (known) return known;
-  const conf = readLockConf(env);
+  let conf = readLockConf(env);
   const stateDir = stateDirectory(env);
   let signer: ApprovalSigner | undefined;
   const keyFile = conf.privateKeyFile || env.CLEARED_V2_APPROVAL_KEY || join(stateDir, 'approval.key');
@@ -122,11 +129,28 @@ export function approvalEnvironment(db: DatabaseSync, env: NodeJS.ProcessEnv = p
   }
   const socket = brokerSocketPath({ env, confSocket: conf.socketPath, stateDir });
   const users = new SqliteUsers(db);
+  // On a fresh install the service starts before the owner exists: the
+  // assistant makes the key and names the owner while it runs (P249's open
+  // point). Until both are there they are read again at each need, with no
+  // restart; then kept.
+  const current = (): { readonly conf: LockConf; readonly signer: ApprovalSigner | undefined } => {
+    if (!signer || !conf.ownerId) {
+      conf = readLockConf(env);
+      if (!signer) {
+        try { signer = ApprovalSigner.load(keyFile); } catch { /* said above, at start */ }
+      }
+    }
+    return { conf, signer };
+  };
+  const keys = (): ApprovalKeys => {
+    const now = current();
+    return { ownerId: now.conf.ownerId, publicKey: publicKeyOf(now.conf, now.signer), signer: now.signer };
+  };
   const parts = createApproval({
-    db, users, stateDir, proof, ownerId: conf.ownerId, publicKey: conf.publicKey, signer, states: conf.states, verdict: conf.verdict,
+    db, users, stateDir, proof, keys, states: conf.states, verdict: conf.verdict,
     broker: new SocketReleaseBroker(socket, { stateDir }), resolveHead: headOnForge(env.CLEARED_REPO || env.ORCH_REPO),
   });
-  const built: Environment = { ...parts, conf, signer, stateDir, users, proof };
+  const built: Environment = { ...parts, get conf() { return current().conf; }, get signer() { return current().signer; }, stateDir, users, proof };
   environments.set(db, built);
   return built;
 }
@@ -177,9 +201,10 @@ export type ServiceLockOptions = {
 // (decision 24), whom that service's lock trusts as its owner_id.
 function serviceStore(db: DatabaseSync, environment: Environment, stateDir: string, now: () => Date, ownerId = environment.conf.ownerId): LocalTicketStore {
   const { conf, signer, users } = environment;
+  const publicKey = publicKeyOf(conf, signer);
   return new LocalTicketStore(db, {
     stateDir, users, now: () => now().toISOString(), states: conf.states,
-    ...(ownerId ? { ownerId } : {}), ...(conf.publicKey ? { publicKey: conf.publicKey } : {}), ...(signer ? { signer } : {}),
+    ...(ownerId ? { ownerId } : {}), ...(publicKey ? { publicKey } : {}), ...(signer ? { signer } : {}),
   });
 }
 

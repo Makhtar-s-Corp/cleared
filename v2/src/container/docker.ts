@@ -21,7 +21,9 @@ const LABEL_FILTER = `label=${LABEL}`;
 const [LABEL_KEY, LABEL_VALUE] = LABEL.split('=') as [string, string];
 
 export type DockerResult = { readonly code: number; readonly stdout: string; readonly stderr: string };
-export type RunOptions = { readonly input?: string; readonly timeoutMs?: number };
+// env: variables added to the client's own environment, for `--env NAME`
+// to read there (ContainerSpec.privateEnv), never put on its command line.
+export type RunOptions = { readonly input?: string; readonly timeoutMs?: number; readonly env?: Readonly<Record<string, string>> };
 export type DockerRunner = (args: readonly string[], options: RunOptions) => Promise<DockerResult>;
 // Starts a long-lived docker process whose standard streams the caller keeps.
 export type DockerSpawner = (args: readonly string[]) => ChildProcessWithoutNullStreams;
@@ -47,7 +49,7 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 // builds print ids, JSON rows or a probe's short output.
 export const commandRunner = (command: string): DockerRunner => (args, options) =>
   new Promise((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'], ...(options.env ? { env: { ...process.env, ...options.env } } : {}) });
     // Its own timer rather than spawn's `timeout`, which stayed armed after a
     // failed spawn and kept the process alive until it fired.
     const timer = setTimeout(() => child.kill('SIGKILL'), options.timeoutMs ?? DEFAULT_TIMEOUT_MS);
@@ -188,6 +190,11 @@ export type ContainerSpec = {
   readonly limits?: Limits;
   readonly mounts?: readonly Mount[];
   readonly env?: Readonly<Record<string, string>>;
+  // Variables whose values no other account of the machine may read (the
+  // test secrets, C16): named on the command line, `--env NAME`, their
+  // values in the client's environment, where the CLI reads them; a
+  // command line is public in the process list.
+  readonly privateEnv?: Readonly<Record<string, string>>;
   readonly workdir?: string;
   readonly interactive?: boolean;
 };
@@ -342,6 +349,10 @@ export class Docker {
       check(ENV_KEY.test(key) && !value.includes('\0'), 'environment variable', key);
       args.push('--env', `${key}=${value}`);
     }
+    for (const [key, value] of Object.entries(spec.privateEnv ?? {})) {
+      check(ENV_KEY.test(key) && !value.includes('\0') && !Object.hasOwn(spec.env ?? {}, key), 'private environment variable', key);
+      args.push('--env', key);
+    }
     if (spec.workdir !== undefined) {
       check(absolute(spec.workdir), 'workdir', spec.workdir);
       args.push('--workdir', spec.workdir);
@@ -352,7 +363,8 @@ export class Docker {
       args.push('--entrypoint', spec.entrypoint);
     }
     args.push('--', spec.image, ...(spec.command ?? []));
-    const out = await this.must(args);
+    const hidden = spec.privateEnv ?? {};
+    const out = await this.must(args, undefined, Object.keys(hidden).length > 0 ? { env: hidden } : undefined);
     return out.trim();
   }
 

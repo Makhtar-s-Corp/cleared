@@ -94,7 +94,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await page.fill('#setup-name', 'alex');
     await page.fill('#setup-password', PASSWORD);
     await page.click('[data-act="setup_owner"]');
-    await page.locator('[data-public-key]').waitFor();
+    await page.locator('[data-public-key]').waitFor({ state: 'attached' });   // folded for a lock set up by hand (issue #432)
     await page.click('[data-act="setup_next"]');
     await page.locator('#setup-forge-value').waitFor();
     await page.fill('#setup-forge-value', GOOD);

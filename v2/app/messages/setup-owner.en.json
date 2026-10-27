@@ -20,8 +20,10 @@
   "owner_done_title": "Your account is ready",
   "owner_done_body": "You are signed in as {name}. Cleared made its approval signature on this machine, where it stays.",
   "owner_signing_title": "So the release lock trusts your approvals",
-  "owner_signing_body": "Add this line to the [tracker] section of your project's .cleared/agents.conf and commit it. It is public: it lets the lock check that an approval came from this app.",
-  "owner_signing_existed": "A signature was already on this machine: this line is its public half.",
+  "owner_signing_body": "Cleared checks each approval against this signature's public half, which it keeps on this machine. You have nothing to add to your repository.",
+  "owner_signing_more": "For a release lock set up by hand",
+  "owner_signing_by_hand": "A release lock set up by hand reads the public half from the [tracker] section of the project's .cleared/agents.conf, as this line.",
+  "owner_signing_existed": "A signature was already on this machine: Cleared kept it.",
   "owner_signing_missing": "Cleared could not make its approval signature: the app's log says why. Run npm run setup in v2/ to make it.",
   "owner_copy": "Copy the line",
   "owner_copied": "Copied"

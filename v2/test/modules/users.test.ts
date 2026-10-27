@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { chmodSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { syncBuiltinESMExports, createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after } from 'node:test';
 import { DatabaseSync } from 'node:sqlite';
 import users, {
   PASSWORD_DEFAULTS, PASSWORD_LENGTH, PROOF_FILE, ProofError, SqliteUsers, UserError,
-  hashPassword, proofPath, readOrCreateProof, sameProof, verifyPassword, type PasswordParams,
+  hashPassword, proofPath, proofReader, readOrCreateProof, sameProof, verifyPassword, type PasswordParams,
 } from '../../src/modules/users.ts';
 import { applyTables, openStore } from '../../src/store/db.ts';
 
@@ -96,6 +97,45 @@ test('the proof file sits beside the ledger, is made once with mode 0600, and a 
   writeFileSync(path, 'short\n');
   assert.throws(() => readOrCreateProof(path), ProofError);
   assert.equal(readFileSync(path, 'utf8'), 'short\n', 'a refused proof is left as it is');
+});
+
+// Issue #429: at a first start the service and the app make or read the
+// proof at once. The file appears whole or not at all, so no reader ever
+// sees it empty or half written, and every process gets the same proof.
+test('the proof appears whole or not at all: while it is written, its path holds nothing a reader could take', () => {
+  const folder = mkdtempSync(join(dir, 'race-'));
+  const path = join(folder, PROOF_FILE);
+  const fs = createRequire(import.meta.url)('node:fs') as typeof import('node:fs');
+  const write = fs.writeSync;
+  const seen: (string | null)[] = [];
+  // A reader that looks at the path at the moment the proof is written: what another process would read then.
+  fs.writeSync = ((...args: Parameters<typeof write>) => {
+    try { seen.push(readFileSync(path, 'utf8')); } catch { seen.push(null); }
+    return write(...args);
+  }) as typeof write;
+  syncBuiltinESMExports();
+  let proof: string;
+  try { proof = readOrCreateProof(path); }
+  finally { fs.writeSync = write; syncBuiltinESMExports(); }
+  assert.deepEqual(seen, [null], 'nothing at the path while the proof is written');
+  assert.match(proof, /^[0-9a-f]{64}$/);
+  assert.equal(readOrCreateProof(path), proof, 'a second process gets the same proof');
+  assert.equal(statSync(path).mode & 0o777, 0o600);
+  assert.deepEqual(readdirSync(folder), [PROOF_FILE], 'nothing but the proof is left in the folder');
+});
+
+test('the app\'s reader of the proof waits for a whole one, keeps it, and reads it again when told the service refused it', () => {
+  const folder = mkdtempSync(join(dir, 'reader-'));
+  const path = join(folder, PROOF_FILE);
+  writeFileSync(path, '', { mode: 0o600 });
+  const proof = proofReader(path);
+  assert.throws(() => proof(), ProofError, 'an empty file is not a proof yet');
+  writeFileSync(path, `${'a'.repeat(64)}\n`);
+  assert.equal(proof(), 'a'.repeat(64), 'read again at the next call, with no restart');
+  writeFileSync(path, `${'b'.repeat(64)}\n`);
+  assert.equal(proof(), 'a'.repeat(64), 'a whole proof is kept');
+  proof.forget();
+  assert.equal(proof(), 'b'.repeat(64), 'forgotten, it is read again');
 });
 
 test('two proofs compare in constant time and only an exact match passes', () => {

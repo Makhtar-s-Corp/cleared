@@ -9,6 +9,11 @@
 
 .setup-head { margin-bottom: var(--space-4); }
 .setup-brand { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+/* The language choice (issue #431), drawn as the account menu's. */
+.setup-language { margin-left: auto; display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: var(--surface-muted); font-size: var(--text-sm); }
+.setup-language button { min-height: 28px; padding: 0 var(--space-2); border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
+.setup-language button[aria-pressed="true"] { background: var(--surface); box-shadow: var(--e-outline); color: var(--text); font-weight: var(--weight-strong); }
+@media (max-width: 767px) { .setup-language button { min-height: 44px; } }
 .setup-brand .name { font-weight: var(--weight-strong); font-size: var(--text-md); letter-spacing: -.01em; }
 .setup-head h1 { margin: 0; font-size: var(--text-lg); font-weight: var(--weight-strong); letter-spacing: -.035em; line-height: 1.25; }
 .setup-lead { margin: 4px 0 0; color: var(--text-muted); font-size: var(--text-md); text-wrap: pretty; }
@@ -62,6 +67,9 @@
 .setup-tag { margin-left: 8px; padding: 1px 6px; border-radius: 999px; box-shadow: var(--e-outline); color: var(--text-secondary); font-size: var(--text-sm); white-space: nowrap; }
 
 .setup-code { margin: 0 0 var(--space-2); padding: 10px 12px; border-radius: var(--radius); background: var(--sunken); overflow-x: auto; font-family: var(--mono); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+.setup-more { margin-top: var(--space-2); }
+.setup-more summary { cursor: pointer; color: var(--text-secondary); }
+.setup-more[open] summary { margin-bottom: var(--space-2); }
 .setup-terminal { margin: var(--space-2) 0; }
 /* The web terminal's frame, as the session screen draws it (session.css), which this page does not load. */
 .setup-terminal .term { display: flex; flex-direction: column; gap: 8px; }

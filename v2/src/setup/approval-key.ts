@@ -2,8 +2,9 @@
 // assistant's owner step make it: written once, mode 0600, never over a key
 // that exists and never printed. Written beside the final name and linked
 // into place, which fails if a file is there, so a crash leaves no half key.
-// The public key goes in the project's .cleared/agents.conf as
-// [tracker] human_public_key; it is not a secret.
+// The service checks the owner's approvals with its public half, unless the
+// project's .cleared/agents.conf names one as [tracker] human_public_key
+// (approval/service.ts, issue #432); it is not a secret.
 import { closeSync, constants, linkSync, mkdirSync, openSync, rmSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ApprovalSigner, generateKeyPair } from '../approval/signer.ts';
