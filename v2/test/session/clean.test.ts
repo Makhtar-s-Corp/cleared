@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { COMMAND_OUTPUT_LIMIT, GUARD_PATTERNS, cleanText, createCleaner, secretValues, type Cleaner } from '../../src/session/clean.ts';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { testValuesOf } from '../../src/secrets/live.ts';
+import { COMMAND_OUTPUT_LIMIT, GUARD_PATTERNS, cleanText, createCleaner, secretValues, withoutTestValues, type Cleaner } from '../../src/session/clean.ts';
 import { readToolOutput, toolArgs, toolResult, type AgUiEvent, type ToolOutput } from '../../src/session/events.ts';
 
 // Secret-shaped values are assembled at run time: written whole, they would
@@ -263,4 +267,54 @@ test('identifiers pass whole, even when their digits read as a phone number: the
   // Something that is not an id's shape is still cleaned.
   const [odd] = cleaner.clean({ type: 'TOOL_CALL_START', toolCallId: `call ${apiKey}`, toolCallName: 'Bash' } as AgUiEvent);
   assert.ok(!(odd as { toolCallId: string }).toolCallId.includes(apiKey));
+});
+
+// ------------------------------------------------------- the test secrets (C16)
+//
+// docs/v2/milestone-5-plan.md, decision 12: a test secret's value is given to
+// a session, so the cleaner removes it as it removes the environment's
+// secrets, from every event, comment and pull request body. The list is the
+// secrets module's store (src/secrets/live.ts), read from memory at each text.
+// Fake values only, made at run time.
+
+const testValue = (n: number): string => ['sandbox', 'fake', 'value', String(n)].join('-');
+
+function testValues() {
+  const state = mkdtempSync(join(tmpdir(), 'cleared-clean-secrets-'));
+  test.after(() => rmSync(state, { recursive: true, force: true }));
+  return testValuesOf(new DatabaseSync(':memory:'), { CLEARED_V2_STATE_DIR: state });
+}
+
+test('a test secret\'s value is removed from an event, a comment and a pull request body', () => {
+  const store = testValues();
+  store.set('api', 'PAYMENT_SANDBOX_KEY', testValue(1), 'u1');
+  assert.ok(secretValues({}).includes(testValue(1)), 'in the cleaner\'s list with the environment\'s');
+
+  const cleaner = createCleaner({ secrets: secretValues({}) });
+  const events = [
+    ...cleaner.clean({ type: 'TEXT_MESSAGE_START', messageId: 'msg_0123456789', role: 'assistant' } as AgUiEvent),
+    ...cleaner.clean({ type: 'TEXT_MESSAGE_CONTENT', messageId: 'msg_0123456789', delta: `The key is ${testValue(1).slice(0, 7)}` } as AgUiEvent),
+    ...cleaner.clean({ type: 'TEXT_MESSAGE_CONTENT', messageId: 'msg_0123456789', delta: `${testValue(1).slice(7)}, from the sandbox.` } as AgUiEvent),
+    ...cleaner.clean({ type: 'TEXT_MESSAGE_END', messageId: 'msg_0123456789' } as AgUiEvent),
+  ];
+  const text = JSON.stringify(events);
+  assert.ok(!text.includes(testValue(1)), 'not in the event, even split across deltas');
+  assert.match(text, /\[removed: secret\]/);
+
+  const comment = cleanText(`The tests passed with ${testValue(1)} as the sandbox's key.`, { secrets: secretValues({}) });
+  assert.equal(comment, 'The tests passed with [removed: secret] as the sandbox\'s key.');
+
+  const body = withoutTestValues(`## Done\nRan the payment tests against ${testValue(1)}.\n\nCommits:\n- Use ${testValue(1)} in the fixture\n`);
+  assert.ok(!body.includes(testValue(1)));
+  assert.equal(body.split('[removed: secret]').length, 3, 'every occurrence');
+  assert.equal(withoutTestValues('No value here, and an address a@b.example stays.'), 'No value here, and an address a@b.example stays.', 'only the test values: the body keeps everything else as it was');
+});
+
+test('a replaced or removed test value is still removed: a session started before the change holds it', () => {
+  const store = testValues();
+  store.set('api', 'PAYMENT_SANDBOX_KEY', testValue(2), 'u1');
+  store.set('api', 'PAYMENT_SANDBOX_KEY', testValue(3), 'u1');
+  store.remove('api', 'PAYMENT_SANDBOX_KEY', 'u1');
+  const out = cleanText(`old ${testValue(2)} new ${testValue(3)}`, { secrets: secretValues({}) });
+  assert.equal(out, 'old [removed: secret] new [removed: secret]');
 });

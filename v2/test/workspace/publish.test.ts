@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
+import { testValuesOf } from '../../src/secrets/live.ts';
 import { PublishRefused, publish, type PublishInput } from '../../src/workspace/publish.ts';
 import { projectCheckout, ticketCheckout } from '../../src/workspace/checkout.ts';
 import { commit, gitIn, plantedKey, remote, tempDir, writeFiles } from './git.ts';
@@ -208,4 +210,21 @@ test('a refused branch leaves no ref of it in the project checkout', async () =>
   commit(workdir, { 'config/settings.ts': `export const apiKey = "${plantedKey}";\n` }, 'Add settings');
   await assert.rejects(publish(input), PublishRefused);
   assert.equal(gitIn(input.project, ['for-each-ref', 'refs/cleared/']), '');
+});
+
+// The test secrets (docs/v2/milestone-5-plan.md, decision 12, C16): a
+// session holds its service's test values, so a commit subject or a report
+// that names one reaches the forge without it, in the title and the body.
+test('a test secret\'s value is removed from the pull request\'s title and body', async () => {
+  const value = ['sandbox', 'fake', 'value', '7'].join('-');
+  const state = tempDir('publish-secrets');
+  testValuesOf(new DatabaseSync(':memory:'), { CLEARED_V2_STATE_DIR: state }).set('guestbook', 'PAYMENT_SANDBOX_KEY', value, 'u1');
+  const { workdir, input, gh } = await setup();
+  commit(workdir, { 'src/app.ts': 'export const order = "newest";\n' }, `Test against ${value}`);
+  await publish({ ...input, report: `## Done\nRan the payment tests with ${value}.\n` });
+  const create = gh.calls()[1]!;
+  const title = create.args[create.args.indexOf('--title') + 1] ?? '';
+  assert.equal(title, 'Test against [removed: secret]');
+  assert.ok(create.body?.includes('Ran the payment tests with [removed: secret].'), 'the report stays, without the value');
+  assert.ok(!create.body?.includes(value) && !create.args.some((arg) => arg.includes(value)));
 });
