@@ -9,7 +9,7 @@ import { STEPS } from '../../src/setup/steps.ts';
 import type { StepView } from '../../src/setup/types.ts';
 import { RESERVED_PORTS } from '../../scripts/proof-rehearsal.ts';
 import {
-  PROOF_STEPS, choosePorts, cleanupPlan, fakeGitHub, firstTicketScript, ghApiAnswer, overrideFile, proofRows, renderReport, scratchName, spoken,
+  PROOF_STEPS, choosePorts, cleanupPlan, keepName, fakeGitHub, firstTicketScript, ghApiAnswer, overrideFile, proofRows, renderReport, scratchName, spoken,
   type DockerObject, type ProofRun,
 } from '../../scripts/proof-j5.ts';
 
@@ -55,10 +55,12 @@ const BEFORE: DockerObject[] = [
   { kind: 'image', id: 'gbi', name: 'cleared-guestbook:d711d6bd7f02', labels: { 'cleared.dev': 'v2' } },
 ];
 
+const KEEP = 'cleared-v2-proof-keep:0a1b2c3d';
+
 test('the cleanup removes what the rehearsal made, by the label, and nothing that was there before', () => {
   const after: DockerObject[] = [
     ...BEFORE.filter((o) => o.id !== 'old'),
-    { kind: 'image', id: 'old', name: '', labels: compose('cleared-v2-e2e', 'install') },                // the tag moved to the rehearsal's build
+    { kind: 'image', id: 'old', name: KEEP, labels: compose('cleared-v2-e2e', 'install') },                // kept by its second name while the build took the tag
     { kind: 'container', id: 's1', name: `${PROJECT}-service-1`, labels: compose(PROJECT, 'service') },
     { kind: 'container', id: 'a1', name: `${PROJECT}-app-1`, labels: compose(PROJECT, 'app') },
     { kind: 'container', id: 'b1', name: `${PROJECT}-broker-1`, labels: compose(PROJECT, 'broker') },
@@ -72,31 +74,36 @@ test('the cleanup removes what the rehearsal made, by the label, and nothing tha
     { kind: 'container', id: 'e2e3', name: 'cleared-v2-e2e-broker-2', labels: compose('cleared-v2-e2e', 'broker') },
     { kind: 'container', id: 'x', name: 'unrelated', labels: {} },
   ];
-  const plan = cleanupPlan({ before: BEFORE, after, project: PROJECT, previousImage: 'old', image: 'cleared-v2:local' });
+  const plan = cleanupPlan({ before: BEFORE, after, project: PROJECT, kept: KEEP, image: 'cleared-v2:local' });
   assert.deepEqual(plan.remove.map((o) => o.id).sort(), ['a1', 'b1', 'egr', 'net', 'new', 'prep', 's1', 'ses']);
   for (const kept of ['e2e1', 'e2e2', 'e2e3', 'gb1', 'gb2', 'fa1', 'old', 'gbi', 'x']) assert.ok(!plan.remove.some((o) => o.id === kept), kept);
-  // The shared tag goes back to the image it named before the rehearsal.
-  assert.deepEqual(plan.commands[0], ['tag', 'old', 'cleared-v2:local']);
-  const kinds = plan.commands.slice(1).map((c) => c.slice(0, 2).join(' '));
-  assert.deepEqual(kinds, ['rm --force', 'network rm', 'image rm']);
-  assert.deepEqual(plan.commands[1]?.slice(2).sort(), ['a1', 'b1', 's1']);
-  assert.deepEqual(plan.commands[3]?.slice(2).sort(), ['egr', 'new', 'prep', 'ses']);
+  const kinds = plan.commands.map((c) => c.slice(0, 2).join(' '));
+  assert.deepEqual(kinds, ['rm --force', 'network rm', 'image rm', `tag ${KEEP}`, 'image rm']);
+  assert.deepEqual(plan.commands[0]?.slice(2).sort(), ['a1', 'b1', 's1']);
+  assert.deepEqual(plan.commands[2]?.slice(2).sort(), ['egr', 'new', 'prep', 'ses']);
+  // The shared tag goes back to the image it named before, once the build's is gone, and the second name goes.
+  assert.deepEqual(plan.commands[3], ['tag', KEEP, 'cleared-v2:local']);
+  assert.deepEqual(plan.commands[4], ['image', 'rm', KEEP]);
   for (const command of plan.commands) for (const word of command) assert.doesNotMatch(word, /^(prune|system|-a|--all|--filter)$/);
 });
 
 test('the cleanup never removes an object without the label, even one of the scratch project', () => {
   const after: DockerObject[] = [...BEFORE, { kind: 'container', id: 'odd', name: `${PROJECT}-odd`, labels: { 'com.docker.compose.project': PROJECT } }];
-  const plan = cleanupPlan({ before: BEFORE, after, project: PROJECT, previousImage: 'old', image: 'cleared-v2:local' });
+  const plan = cleanupPlan({ before: BEFORE, after, project: PROJECT, kept: null, image: 'cleared-v2:local' });
   assert.deepEqual(plan.remove, []);
   assert.deepEqual(plan.commands, []);
 });
 
-test('no tag to restore when the image was not there before, or the build left it where it was', () => {
+test('no tag to give back when the image was not there before; the second name goes even when the build changed nothing', () => {
   const made: DockerObject = { kind: 'image', id: 'new', name: 'cleared-v2:local', labels: compose(PROJECT, 'install') };
-  const fresh = cleanupPlan({ before: [], after: [made], project: PROJECT, previousImage: null, image: 'cleared-v2:local' });
+  const fresh = cleanupPlan({ before: [], after: [made], project: PROJECT, kept: null, image: 'cleared-v2:local' });
   assert.deepEqual(fresh.commands, [['image', 'rm', 'new']]);
-  const cached = cleanupPlan({ before: BEFORE, after: BEFORE, project: PROJECT, previousImage: 'old', image: 'cleared-v2:local' });
-  assert.deepEqual(cached.commands, []);
+  const cached = cleanupPlan({ before: BEFORE, after: BEFORE, project: PROJECT, kept: KEEP, image: 'cleared-v2:local' });
+  assert.deepEqual(cached.commands, [['tag', KEEP, 'cleared-v2:local'], ['image', 'rm', KEEP]]);
+});
+
+test('the image\'s second name, labelled with the scratch project\'s suffix', () => {
+  assert.equal(keepName(PROJECT), KEEP);
 });
 
 test('the override gives the service its fakes and nothing else: no port, no other service, its folder at its own path', () => {
@@ -139,13 +146,18 @@ test('the gh stand-in answers the forge contract\'s reads in the shape gh api gi
   assert.equal(ghApiAnswer(['pr', 'list'], REPOS), undefined, 'the pull requests are the milestone 2 stand-in\'s');
 });
 
-test('the fake harness: an author that adds the first ticket\'s line at the end of the README, a reviewer that passes it', () => {
+test('the fake harness: an author that proposes its plan, then adds the first ticket\'s line at the end of the README at its Go; a reviewer that passes it', () => {
   const readme = '# Guestbook\n\nThe last line.\n';
   const script = parseRehearsalScript(JSON.stringify(firstTicketScript(readme, 'The line the ticket asks for.')));
   const rule = script.authorRules?.[0];
   assert.ok(rule);
   assert.deepEqual(rule.files, [{ path: 'README.md', replace: ['The last line.', 'The last line.\n\nThe line the ticket asks for.'] }]);
   assert.ok(JSON.stringify(script.reviewer).includes('no blocking issues'));
+  const plan = rule.steps.findIndex((s) => 'hostCall' in s && s.hostCall.name === 'propose_session_plan');
+  const go = rule.steps.findIndex((s) => 'awaitMessage' in s);
+  assert.ok(plan >= 0 && go > plan, 'the plan, then the wait for its Go');
+  assert.equal((rule.steps[plan] as { hostCall: { input: { confidence: string } } }).hostCall.input.confidence, 'high');
+  assert.doesNotMatch(JSON.stringify(script), /"total_cost_usd":\d/, 'no cost: no money from a fake');
 });
 
 const view = (id: StepView['id'], state: StepView['state'], personMs: number, machineMs: number): StepView =>
@@ -166,6 +178,9 @@ test('each step\'s time: the command\'s from the rehearsal\'s clock, the assista
   assert.equal(rows[8]?.personMs, null, 'the first ticket\'s record is one for 9 and 10, given on 9');
   assert.equal(rows[8]?.note, 'Todo to approved: 1 min 45 s, of which the approval waited 15 s');
   assert.equal(rows[9]?.note, 'approved to live: 1 min 00 s');
+  const planned = proofRows(VIEW, { commandMs: 1, buildMs: null, moments: { ...MOMENTS, planAsked: '2026-10-27T10:00:10.000Z', go: '2026-10-27T10:00:40.000Z' } });
+  assert.equal(planned[8]?.note, 'Todo to approved: 1 min 45 s, of which the session plan waited its Go 30 s and the approval waited 15 s');
+  assert.equal(planned[0]?.note, '', 'no build, no note');
   const missing = proofRows(VIEW.filter((v) => v.id !== 'checks'), { commandMs: 1, buildMs: null, moments: {} });
   assert.equal(missing[7]?.status, 'not seen');
   assert.equal(missing[9]?.status, 'not seen');
