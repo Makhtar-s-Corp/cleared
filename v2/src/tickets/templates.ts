@@ -1,9 +1,12 @@
 // Ready-made tickets (P214, issue #330): Bug, Review, CI and Question, picked
-// in the tower's bar. The app's catalogs hold each one's words in French and
-// in English; the service holds the ids and the label a template's ticket
-// carries, `type:<id>`, so what kind of ticket it is can be counted from the
+// in the tower's bar, and Environment, the setup session (C4, decision 14 of
+// milestone 5, flow/env-setup.ts), which the assistant's environment step
+// proposes too: its ticket's branch is built and checked before its review.
+// The app's catalogs hold each one's words in French and in English; the
+// service holds the ids and the label a template's ticket carries,
+// `type:<id>`, so what kind of ticket it is can be counted from the
 // tracker's labels. A ticket names one known kind at most.
-export const TICKET_TEMPLATES = ['bug', 'review', 'ci', 'question'] as const;
+export const TICKET_TEMPLATES = ['bug', 'review', 'ci', 'question', 'environment'] as const;
 export type TicketTemplate = (typeof TICKET_TEMPLATES)[number];
 
 const TYPE_PREFIX = 'type:';

@@ -7241,3 +7241,55 @@ The two agreement cases came later, from a second read of the lock's path: with 
 
 - Pull request: 428, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-gitlab`.
+
+## 2026-10-27: the setup session: a ticket of the Environment template, its branch built and checked before the review, its image built after the merge, proposed by the assistant (the author's choices, lane `v2-j5-env-setup`, C4, M10, P256, issue #435)
+
+**The need.** Issue #435, section 13 of [milestone-5-plan.md](milestone-5-plan.md) (matrix C4, and M10's setup sessions; decision 14). A repository with no `.devcontainer` runs on Cleared's session image, where its tests may not run. The lane adds:
+- a ticket template "Prepare the environment", whose author writes the `.devcontainer`;
+- before the reviewer, the branch's image built with section 10's builder and the declared check run in it, a failure sent back to the author with its output cleaned and cut;
+- the prepared image built again after the merge;
+- the proposal, by the assistant's environment step and its workspace step, for a service with no `.devcontainer` or whose check fails in its image.
+
+French and English, with fakes for Docker and the harness, and one real run on this server. As earlier lanes noted, the brief's section 6 (`PROMPT.md`) and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of section 3.1 of the milestone 5 plan.
+
+**The branch.** The brief asked for `v2/j5-env-setup`. Git refuses that name while a local branch `v2` exists, so the lane runs on `v2-j5-env-setup`, as the other milestone 5 lanes did.
+
+**Decision.**
+1. **The template is a sixth kind of ticket, `environment`** (`type:environment`), in the tower's bar beside Bug, Review, CI and Question, and in `cleared run --template`. Its body says what Cleared reads of a `.devcontainer` (`image`, or `build.dockerfile`), that a Dockerfile starts from Cleared's session image, that the dependencies install with `[session] install_command`, and that features and lifecycle commands are not read. The harness pick counts it as `other`: its wins say nothing of a harness, and `api/types.ts` is not a milestone 5 lane's to edit.
+2. **When the check runs.** In `#authorDone`, after the fast lane's reading and before the ticket moves to review: after the first author turn, and after each turn that answers a reviewer, so no reviewer ever reads a branch whose image does not build. A ticket of another template makes no Docker call.
+3. **What is built.** The image the branch would give the service once merged: the builder reads the branch's commit (fetched into the service's checkout as a step's branch is) instead of the base, for the `.devcontainer`, its Dockerfile, the lock files and the install command, since the session writes them. The check itself, `[session] test_command` (else `npm test`), and the test services are read from the base, as the fast lane reads its settings: the branch cannot change what judges it.
+   - `readInputs` takes `at`, `exportBase` takes `commit`, and the build's middle is `buildPrepared`, which `PreparedImages` calls as before.
+   - The check's images are tagged `cleared-v2-check-<service>:<hash>` and labelled with a session id of the check's own, never `cleared.service` or `cleared.prepared`: the prepared images' cleanup cannot count one, and the check removes them with its container and network, whatever happens.
+4. **How the check runs.** In a container of that image, the branch's tree mounted at `/workspace` from under the state folder (which a Compose install mounts at the host's path), no capability, the session's limits, `sleep` as its program. Its declared test services (`[session] services`) run first on an internal network of the check's, the isolated gateway as a session's, and are waited for until ready (60 seconds); the check is on that network only, with their variables. With no service, it has no network at all.
+5. **The branch's Dockerfile builds with Docker's default network**, as a prepared image's does. Installing a system package is what a setup session's Dockerfile is for, and with `--network none` it could not. It is unreviewed code on the host's builder, with no secret, no mount and the label; question 1 asks the owner.
+6. **What goes back.** The result is a comment on the ticket, in English as every comment the flow writes, cleaned by the service's cleaner, its output the last 15 lines, each cut at 300 characters, a code fence in it defused. Durations read "34 s", "2 min 10 s", "1 h 05". A failed build keeps the build's last lines: a `DockerError` now carries the last 40 lines of what the command wrote, since BuildKit's first line only says which builder ran. A failure resumes the same author with the result and what to change; the third failure puts the ticket back in Todo (`env_check_failed`, question 2), and so does a check that cannot run (Docker down, a test service never ready). The rounds are rows of `env_checks`, kept across a restart.
+7. **No check declared**: the image building is the whole check, and the comment says so (section 13.3).
+8. **After the merge.** `preparedAfterMerge` builds again the image of a service that has one. `environmentAfterMerge` builds the first one of a service that has none, which a setup session of a newly connected service needs.
+9. **The environment step.** After a Build, each ready image runs its service's declared check, as above but on the base's tree, unless it already passed on that image; the result is `<state>/prepared/<service>.check.json` (mode 600). Each service then says its check, and a setup session is proposed for a service with no `.devcontainer`, whose image did not build, or whose check failed. Start makes the ticket, in the person's language from the tower's catalog, and starts it as the owner, as the tower's Create does. One open session per service: a second Start answers the open ticket.
+   - The running flow reads the workspace at its start (issue #420): a service connected since is refused with `restart`, and no running flow with `no_flow`; the screen says to restart Cleared and offers no Start.
+   - The summary no longer says "every image is ready" in green when a check failed in one.
+10. **The workspace step** says which connected services have no `.devcontainer`, with a link to the environment step. It reads the base of each checkout; nothing else changes there.
+
+**Questions for the owner** (defaults applied):
+1. The branch's Dockerfile builds with Docker's default network, before any review (applied), so a setup session can install a system package. Or build it with no network, which keeps unreviewed code off the network and makes most setup sessions impossible.
+2. Three failed checks put the ticket back in Todo (applied). Or more rounds, each an author session's tokens and time.
+
+**The real run** (this server, 2026-10-27, Docker 29.8.1, every object labelled `cleared.dev=v2`, no port opened). A copy of the guestbook without its `.devcontainer` as a bare repository and the service's checkout; two branches written by the author of the lane in place of a session, each fetched as the flow fetches one, then `checkBranch` with the real Docker. The base declares `npm test` and `postgres:16`.
+- `LOCAL-1`, a Dockerfile installing a package that does not exist: `build_failed` in 2 s, the comment holding Docker's own last lines, down to `E: Unable to locate package cleared-no-such-package`.
+- `LOCAL-2`, a Dockerfile and `install_command = npm ci`: `passed`, "the branch's image built in 4 s from the Dockerfile its .devcontainer names, and `npm test` passed in it in 4 s" (15 s in all, the Postgres start included; the dependencies' layer was cached by the earlier tries).
+- Before and after, the same labelled containers, images and networks: nothing the check made was left.
+
+The first tries found two defects, fixed here with a test each: the check's container exited at once on an image whose ENTRYPOINT is a program (it now has `sleep` as its own), and the guestbook's tests failed on the database the check did not give them (it now runs the declared test services).
+
+**Not done here.**
+- **No real author session.** This server has no session image (as section 10.6 found), and the author's login would be the service's own token. C4 and P256 stay `partial` until the rehearsal (section 16) runs one setup session to its merge.
+- **The browser test does not press Start**: the assistant's browser harness runs no flow. The route is proven by the service's tests, the screen's start by its markup in both languages.
+- **A ticket in steps or with variants is not checked.** The check sits on the path of a ticket of one service and one author, which is what the assistant starts; a setup ticket a person splits into steps or runs as variants goes to its review as before.
+
+**Tests first.** `b784a362` committed the tests alone. Run on that commit, in a scratch copy:
+- `test/flow/env-setup.test.ts` and `test/setup/environment.test.ts` cannot load `src/flow/env-setup.ts`;
+- the templates case fails (four templates), the connect case finds no `devcontainer` field, and seven of the screens' cases fail (no check line, no proposal, no Environment template);
+- the harness pick's new case passes there too: it guards that the new template stays `other`.
+
+- Pull request: @@PR@@, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-env-setup`.

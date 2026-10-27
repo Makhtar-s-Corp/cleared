@@ -145,6 +145,7 @@ import type { ReceiptCapture, ReceiptData, ReceiptTest } from './receipt.ts';
 import { ticketCost } from '../consumption/ticket-cost.ts';
 import { CI_REPAIR_ATTEMPTS, onBase, repairComment, repairMessage, type CiFailures } from './ci-repair.ts';
 import { FastLaneStore, cardLane, fallbackComment, type FastVerdict } from './fast-lane.ts';
+import { ENV_CHECK_ROUNDS, EnvCheckStore, envCheckComment, envCheckGiveUp, envCheckRequest, isEnvironmentTicket, type EnvCheck } from './env-setup.ts';
 import type { PrClose } from './pr-close.ts';
 import { authorPrompt, contractSendBackMessage, fileDiff, handoverMessage, lastReport, parseVerdict, reviewPrompt, reviewRequestMessage, stepPrompt, withoutFile, type ReviewContract, type ReviewService } from './prompts.ts';
 import { humanEdits } from './human-edits.ts';
@@ -159,6 +160,7 @@ export type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts
 // What the lock answered a merge (effects.ts mergeRelease, release/lock.ts).
 export type { MergeOutcome } from '../release/lock.ts';
 export type { FastVerdict } from './fast-lane.ts';
+export type { EnvCheck } from './env-setup.ts';
 
 // What the flow does outside this process. `service` names the service of
 // a workspace of several the call is for; absent, the one-service
@@ -254,6 +256,11 @@ export type FlowEffects = {
   // `head`, against the base. Absent: no Quick ticket is judged, and no card
   // says a lane.
   fastLane?(input: { readonly ticket: TicketId; readonly service?: ServiceConfig; readonly workdir?: string; readonly head?: string }): Promise<FastVerdict>;
+  // The setup session's check (matrix C4, flow/env-setup.ts): the image of
+  // the session's branch in `workdir` built as the service's prepared image
+  // would be once merged, and the service's declared check run in it.
+  // Absent: no ticket of the environment template is checked.
+  envCheck?(input: { readonly ticket: TicketId; readonly service?: ServiceConfig; readonly workdir: string }): Promise<EnvCheck>;
 };
 
 export type StepChanges = {
@@ -426,6 +433,7 @@ export class FlowEngine {
   #tips = new Map<SessionId, string>();                             // the last commit journaled as an author's checkpoint
   #fastLanes: FastLaneStore;                                        // the Quick tickets the rules kept fast or sent back (B2.2)
   #captureChoices: CaptureChoiceStore;                              // the human's choice of the receipt's captures, by ticket (P226)
+  #envChecks: EnvCheckStore;                                        // the setup sessions' checks, by ticket (C4)
 
   constructor(deps: FlowDeps) {
     this.registry = deps.registry;
@@ -446,6 +454,7 @@ export class FlowEngine {
     this.#replays = new ReplayStore(deps.store.db, this.#now);
     this.#fastLanes = new FastLaneStore(deps.store.db);
     this.#captureChoices = new CaptureChoiceStore(deps.store.db);
+    this.#envChecks = new EnvCheckStore(deps.store.db);
     this.#runner = new TrainRunner({
       db: deps.store.db, trains: this.#trains, tickets: this.registry.ticketStore, project: this.config.project, retryMs: this.config.mergeRetryMs,
       lock: (name) => this.#lockOf(this.#service(name)), now: this.#now, clean: this.#clean, emit: (event) => this.#emit(event),
@@ -2583,6 +2592,7 @@ export class FlowEngine {
     const ticket = await tickets.get(id);
     if (!ticket) return;
     await this.#judgeFast(ticket, { workdir: author.input.workdir });
+    if (!(await this.#environmentChecked(ticket, author))) return;
     await tickets.move(id, tickets.states.review, SERVICE);
     const open = this.#channels.get(id);
     if (open) {
@@ -3060,6 +3070,44 @@ export class FlowEngine {
     this.#step(session, 'STEP_FINISHED', 'release');
     this.#step(session, 'STEP_STARTED', 'approval');
     this.#emit({ type: 'release_requested', at: this.#at(), project, ticket: id, session: reviewer.id, item: item.id, pr: published.number, url: published.url });
+  }
+
+  // ---- the setup session (matrix C4, flow/env-setup.ts) ---------------------
+
+  // A ticket of the environment template, before its review: its branch's
+  // image built and the declared check run in it. True: the review may
+  // start. A failure goes back to the author, resumed, until the last
+  // round, which puts the ticket back in Todo, as a check that cannot run.
+  async #environmentChecked(ticket: Ticket, author: Live): Promise<boolean> {
+    const check = this.#effects.envCheck;
+    if (!check || !isEnvironmentTicket(ticket.labels)) return true;
+    const id = ticket.id;
+    const service = this.#several && author.input.service ? this.#service(author.input.service) : undefined;
+    let result: EnvCheck;
+    try {
+      result = await check({ ticket: id, ...(service ? { service } : {}), workdir: author.input.workdir });
+    } catch (error) {
+      await this.#putBack(id, `The environment check could not run: ${name(error)}`, 'env_check_failed');
+      return false;
+    }
+    const round = this.#envChecks.add(id, ticket.project ?? this.config.project, result, this.#at());
+    await this.registry.ticketStore.comment(id, this.#clean(envCheckComment(result, round)), SERVICE)
+      .catch((error: unknown) => console.error(`cleared-v2: the environment check could not be said on ${id} (${error instanceof Error ? error.name : typeof error})`));
+    if (result.outcome === 'passed' || result.outcome === 'no_check') return true;
+    const failures = this.#envChecks.failures(id);
+    if (failures >= ENV_CHECK_ROUNDS) {
+      await this.#putBack(id, envCheckGiveUp(result, failures), 'env_check_failed');
+      return false;
+    }
+    const authorRow = this.#lastSession(id, 'author');
+    const adapter = this.registry.sessionAdapters[authorRow ? this.#harnessOf(authorRow.id) : HARNESS];
+    try {
+      if (!adapter) throw new FlowError('unavailable', 'the author\'s adapter is gone');
+      await this.#reopenWith(ticket, adapter, authorRow, this.#clean(envCheckRequest(result, failures, ENV_CHECK_ROUNDS)));
+    } catch (error) {
+      await this.#putBack(id, `The author could not be reopened after the environment check: ${name(error)}`, 'reopen_failed');
+    }
+    return false;
   }
 
   // ---- the fast lane (matrix B2.2, flow/fast-lane.ts) ------------------------

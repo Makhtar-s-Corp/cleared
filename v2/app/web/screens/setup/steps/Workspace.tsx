@@ -4,9 +4,11 @@
 // the services, a monorepo's two layouts, each contract file it found and
 // each call between the services, with the places that suggested it. A
 // proposed line is the person's to tick: only what is ticked is written.
+// A connected service with no .devcontainer is said, with the environment
+// step, which proposes it a setup session (section 13, C4).
 // The Services screen's Connect opens this step too.
 import { useEffect, useState, type FormEvent } from 'react';
-import type { ConfirmBody, ProposeBody, ProposedLink, ProposedService, WorkspaceProposal, WorkspaceView, WorkspaceWritten } from '../../../../../src/workspace/types.ts';
+import type { ConfirmBody, ConnectedService, ProposeBody, ProposedLink, ProposedService, WorkspaceProposal, WorkspaceView, WorkspaceWritten } from '../../../../../src/workspace/types.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import type { Translate } from '@/lib/i18n.ts';
@@ -25,6 +27,18 @@ const toggled = (set: ReadonlySet<string>, value: string, on: boolean): Set<stri
   if (on) next.add(value); else next.delete(value);
   return next;
 };
+
+// The connected services whose base holds no .devcontainer, and where their setup session is proposed.
+export function NoDevcontainer({ t, services }: { readonly t: Translate; readonly services: readonly ConnectedService[] }) {
+  const names = services.filter((service) => service.devcontainer === false).map((service) => service.name);
+  if (names.length === 0) return null;
+  return (
+    <p className="setup-note" data-workspace-no-devcontainer>
+      {t(names.length === 1 ? 'workspace_no_devcontainer_one' : 'workspace_no_devcontainer_many', { services: names.join(', ') })}{' '}
+      <a className="setup-link" href="/setup/environment">{t('workspace_to_environment')}</a>
+    </p>
+  );
+}
 
 function serviceLine(t: Translate, service: ProposedService): string {
   return service.path === null ? t('workspace_service_repository', { repo: service.repo }) : t('workspace_service_folder', { repo: service.repo, path: service.path });
@@ -122,11 +136,13 @@ export function WorkspaceStep({ t, api, onDone, initial }: StepProps<Initial>) {
             {t('workspace_written', { services: written.services.map((s) => s.name).join(', '), links: written.links, contracts: written.contracts })}
           </p>
         ) : null}
+        {written ? <NoDevcontainer t={t} services={written.services} /> : null}
         {view.connected && !again && !proposal ? (
           <div className="setup-saved" data-workspace-connected>
             <p>{view.connected.at
               ? t('workspace_connected', { services: view.connected.services.map((s) => s.name).join(', '), date: dayOf(view.connected.at, t) })
               : t('workspace_connected_undated', { services: view.connected.services.map((s) => s.name).join(', ') })}</p>
+            {written ? null : <NoDevcontainer t={t} services={view.connected.services} />}
             <Button className="btn" data-act="setup_workspace_again" onClick={() => { setAgain(true); setWritten(undefined); }}>{t('workspace_again')}</Button>
           </div>
         ) : null}

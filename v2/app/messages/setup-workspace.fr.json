@@ -53,5 +53,8 @@
   "workspace_error_checkout_other": "Un dossier de cette machine contient déjà un autre dépôt là où celui-ci irait. Le journal le nomme.",
   "workspace_error_unreachable": "GitHub n'a pas répondu. Réessayez dans un instant.",
   "workspace_error_clone_failed": "Un dépôt n'a pas pu être cloné ou lu. Le journal de Cleared dit pourquoi.",
-  "workspace_error_other": "L'étape n'a pas pu continuer. Réessayez dans un instant."
+  "workspace_error_other": "L'étape n'a pas pu continuer. Réessayez dans un instant.",
+  "workspace_no_devcontainer_one": "{services} n'a pas de .devcontainer, ses sessions tournent donc sur l'image de session de Cleared. Si ses tests demandent plus, l'étape suivante propose une session de mise en place qui en écrit un.",
+  "workspace_no_devcontainer_many": "{services} n'ont pas de .devcontainer, leurs sessions tournent donc sur l'image de session de Cleared. Si leurs tests demandent plus, l'étape suivante propose une session de mise en place pour chacun.",
+  "workspace_to_environment": "Préparer l'environnement"
 }

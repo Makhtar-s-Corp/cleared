@@ -278,12 +278,16 @@ export type BaseExport = {
 // (decisions 20 and 27). Landed code only: never the checkout's working
 // tree, never a ticket checkout. With `only`, that folder of the repository
 // alone, its content at the top; undefined when the base has no such folder.
-export async function exportBase(input: { readonly project: string; readonly base: string; readonly root: string; readonly only?: string }): Promise<BaseExport | undefined> {
+// With `commit`, that commit of the checkout instead of the base's: a
+// ticket's branch fetched into it, as the setup session's check reads it
+// (flow/env-setup.ts).
+export async function exportBase(input: { readonly project: string; readonly base: string; readonly root: string; readonly only?: string; readonly commit?: string }): Promise<BaseExport | undefined> {
   checkPath(input.project, 'project checkout');
   checkPath(input.root, 'export folder');
   await checkBranchName(input.base, 'base branch');
   if (input.only !== undefined) checkFolder(input.only);
-  const commit = (await git(input.project, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${input.base}^{commit}`])).trim();
+  if (input.commit !== undefined && !/^[0-9a-f]{40,64}$/.test(input.commit)) throw new CheckoutError('the commit to export is not a commit id');
+  const commit = input.commit ?? (await git(input.project, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${input.base}^{commit}`])).trim();
   if (input.only !== undefined && !(await git(input.project, ['ls-tree', '-d', commit, '--', input.only])).trim()) return undefined;
   const dir = join(input.root, commit);
   if (existsSync(dir)) return { dir, commit };

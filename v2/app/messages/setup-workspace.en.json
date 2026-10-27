@@ -53,5 +53,8 @@
   "workspace_error_checkout_other": "A folder of this machine already holds another repository where this one would go. Its log names it.",
   "workspace_error_unreachable": "GitHub did not answer. Try again in a moment.",
   "workspace_error_clone_failed": "A repository could not be cloned or read. Cleared's log says why.",
-  "workspace_error_other": "The step could not go on. Try again in a moment."
+  "workspace_error_other": "The step could not go on. Try again in a moment.",
+  "workspace_no_devcontainer_one": "{services} has no .devcontainer, so its sessions run on Cleared's session image. If its tests need more, the next step proposes a setup session that writes one.",
+  "workspace_no_devcontainer_many": "{services} have no .devcontainer, so their sessions run on Cleared's session image. If their tests need more, the next step proposes a setup session for each.",
+  "workspace_to_environment": "Prepare the environment"
 }

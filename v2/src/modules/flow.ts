@@ -32,6 +32,7 @@ import { CAPTURE_CHOICES_TABLE } from '../flow/capture-choice.ts';
 import { CHAT_TABLES, ChatConfigError, ChatLauncher, chatRoutes, loadChatConfig, type ChatConfig } from '../flow/chat.ts';
 import { editorRoutes } from '../flow/editor.ts';
 import { FAST_LANES_TABLE } from '../flow/fast-lane.ts';
+import { ENV_CHECKS_TABLE } from '../flow/env-setup.ts';
 import { filesRoutes } from '../flow/files.ts';
 import { planGateRoutes } from '../flow/plan-gate.ts';
 import { proofRoutes } from '../flow/proof-routes.ts';
@@ -136,7 +137,7 @@ function humanOf(registry: Registry): HumanSide | undefined {
 }
 
 const flow: Module = {
-  tables: [TRAIN_TABLE, STEPS_TABLE, VARIANTS_TABLE, REPLAYS_TABLE, ...BATCH_TABLES, ...CHAT_TABLES, FAST_LANES_TABLE, CAPTURE_CHOICES_TABLE],
+  tables: [TRAIN_TABLE, STEPS_TABLE, VARIANTS_TABLE, REPLAYS_TABLE, ...BATCH_TABLES, ...CHAT_TABLES, FAST_LANES_TABLE, CAPTURE_CHOICES_TABLE, ENV_CHECKS_TABLE],
   routes: [
     ...runtime.routes((path) => path.startsWith('/api/tickets')),
     ...planGateRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),

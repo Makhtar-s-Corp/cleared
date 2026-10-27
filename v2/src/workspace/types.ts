@@ -9,7 +9,10 @@ export type RepositoryChoice = { readonly repo: string; readonly private: boolea
 // Why the list is empty: no forge credential yet, or the forge did not answer.
 export type ListProblem = 'no_forge' | 'unreachable';
 
-export type ConnectedService = { readonly name: string; readonly repo: string; readonly path: string | null };
+// `devcontainer`: whether its base holds a .devcontainer file, read by the
+// assistant's workspace step (C4: one without is proposed a setup session at
+// the environment step); null when its base is not fetched, absent when not read.
+export type ConnectedService = { readonly name: string; readonly repo: string; readonly path: string | null; readonly devcontainer?: boolean | null };
 
 export type WorkspaceView = {
   readonly repositories: readonly RepositoryChoice[];
