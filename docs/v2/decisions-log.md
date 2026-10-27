@@ -7292,5 +7292,13 @@ The first tries found two defects, fixed here with a test each: the check's cont
 - the templates case fails (four templates), the connect case finds no `devcontainer` field, and seven of the screens' cases fail (no check line, no proposal, no Environment template);
 - the harness pick's new case passes there too: it guards that the new template stays `other`.
 
-- Pull request: @@PR@@, against `v2`.
+**Verification.**
+- `npm run typecheck` in `v2/`: clean.
+- `npm test` in `v2/`: 2784 node tests, 2662 pass, 0 fail, 122 skipped; 396 vitest tests pass.
+- The root suite (`node --test test/*.test.ts`): 413 tests, 411 pass, 2 skipped.
+- The browser tests `environment-browser`, `workspace-browser`, `tower-templates-browser`, `setup-browser` and `checks-browser` pass in both languages, axe finding nothing.
+- `npm run guard -- --base origin/v2`: nothing refused. A first run refused two catalog lines, keys named `environment_check_passed`, which the guard reads as an assigned secret (as P246 found for "pass"); the key is `environment_check_green`.
+- The race and the rounds per run, found at a second read: the set-aside case fails with the guard removed from the engine, and passes with it.
+
+- Pull request: 439, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-env-setup`.
