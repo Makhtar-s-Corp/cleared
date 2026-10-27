@@ -62,7 +62,7 @@ docker compose -f v2/compose.yaml run --rm install
 
 ### When the command stops
 
-Each refusal before Cleared starts ends with "Nothing was written." Run the command again once the cause is fixed.
+A refusal ends with "Nothing was written.": the command stopped before writing or starting anything. Run it again once the cause is fixed. The last line of the table is different: Cleared was started and did not answer in time.
 
 | The command says | What to do |
 | --- | --- |

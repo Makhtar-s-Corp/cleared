@@ -441,6 +441,10 @@ A website; translating the documentation pages (the app is translated, the pages
 
 None.
 
+### 15.6 Delivered
+
+Matrix line P259, pull request PRNUM (issue #442). What the author found and chose, as the decisions log of 2026-10-27 says. `docs/troubleshooting.md` quotes the ready section's catalog line by line, and the test reads that catalog, so a new line of the doctor needs its words in the page. The owner step had no capture: one was taken on the assistant's fakes (`docs/v2/setup-assistant/owner-1440-light.png`), a file beyond section 15.4. Updating, and the Compose forms of `cleared doctor` and `cleared run`, are derived from the code and said not yet run. A Compose install's open gaps (#420, #421, #436, #437, #438) are listed in the troubleshooting page, #438 also where the first ticket meets it.
+
 ## 16. The proof (`v2-j5-proof`)
 
 Matrix: B6.5p. Wave 5. Effort M.
