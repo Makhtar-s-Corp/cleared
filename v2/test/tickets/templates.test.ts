@@ -39,9 +39,9 @@ async function post(body: unknown): Promise<{ status: number; json: unknown }> {
   return { status: response.status, json: text ? JSON.parse(text) : undefined };
 }
 
-test('four templates, Bug, Review, CI and Question, each a type label', () => {
-  assert.deepEqual(TICKET_TEMPLATES, ['bug', 'review', 'ci', 'question']);
-  assert.deepEqual(TICKET_TEMPLATES.map(typeLabel), ['type:bug', 'type:review', 'type:ci', 'type:question']);
+test('five templates, Bug, Review, CI, Question and Environment (the setup session, C4), each a type label', () => {
+  assert.deepEqual(TICKET_TEMPLATES, ['bug', 'review', 'ci', 'question', 'environment']);
+  assert.deepEqual(TICKET_TEMPLATES.map(typeLabel), ['type:bug', 'type:review', 'type:ci', 'type:question', 'type:environment']);
 });
 
 test('a ticket names one known kind at most; the other labels are not read', () => {

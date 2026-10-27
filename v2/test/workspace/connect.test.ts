@@ -305,14 +305,15 @@ test('the step: the list, the proposal, then the file from the ticks, the step d
     assert.equal(existsSync(join(dir, WORKSPACE_FILE)), false);
     const confirmed = await call('/api/setup/workspace', { repositories: ['example-org/guestbook', 'example-org/filter-api'], services: ['guestbook', 'filter-api'], links: ['guestbook>filter-api'], contracts: ['filter-api'] });
     assert.equal(confirmed.status, 200);
-    assert.deepEqual(confirmed.json, { services: [{ name: 'guestbook', repo: 'example-org/guestbook', path: null }, { name: 'filter-api', repo: 'example-org/filter-api', path: null }], links: 1, contracts: 1 });
+    // Each says whether its base holds a .devcontainer (C4): both examples do.
+    assert.deepEqual(confirmed.json, { services: [{ name: 'guestbook', repo: 'example-org/guestbook', path: null, devcontainer: true }, { name: 'filter-api', repo: 'example-org/filter-api', path: null, devcontainer: true }], links: 1, contracts: 1 });
     assert.ok(!confirmed.text.includes(dir), 'no path of this machine in the answer');
     const setup = await call('/api/setup');
     const step = setup.json.steps.find((s: { id: string }) => s.id === 'workspace');
     assert.equal(step.state, 'done');
     assert.equal(step.filled, true);
     const again = await call('/api/setup/workspace');
-    assert.deepEqual(again.json.connected.services.map((s: { name: string }) => s.name), ['guestbook', 'filter-api']);
+    assert.deepEqual(again.json.connected.services.map((s: { name: string; devcontainer: boolean }) => [s.name, s.devcontainer]), [['guestbook', true], ['filter-api', true]]);
     assert.equal(again.json.source, 'assistant');
   });
 });

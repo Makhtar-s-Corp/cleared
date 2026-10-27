@@ -21,7 +21,26 @@ export type EnvironmentService = {
   readonly buildMs: number | null;
   readonly startedAt: string | null;                            // of the build running
   readonly error: string | null;                                // the failed build's first line
+  // The service's declared check, as its base declares it; null: none.
+  readonly checkCommand: string | null;
+  // The check run in the ready image by the last Build (flow/env-setup.ts
+  // checkPrepared); null when none ran on this image.
+  readonly check: EnvironmentCheck | null;
+  // Why a setup session is proposed (C4), or null: no .devcontainer, the
+  // image did not build, or the check failed in it.
+  readonly proposal: 'no_devcontainer' | 'build_failed' | 'check_failed' | null;
+  readonly setupTicket: string | null;                          // the open setup session's ticket, when there is one
 };
 
+export type EnvironmentCheck = { readonly command: string; readonly passed: boolean; readonly at: string; readonly ms: number; readonly tail: string };
+
 // GET /api/setup/environment, and POST /api/setup/environment/build (202).
-export type EnvironmentView = { readonly workspace: boolean; readonly services: readonly EnvironmentService[] };
+// `sessions`: whether a setup session can start from here, the flow running
+// with this workspace; `no_flow` when it does not run, `restart` when it
+// runs on a workspace read before this one was connected (issue #420).
+export type EnvironmentView = { readonly workspace: boolean; readonly services: readonly EnvironmentService[]; readonly sessions: 'ready' | 'no_flow' | 'restart' };
+
+// POST /api/setup/environment/session: a setup session for `service`, its
+// ticket's title and description in the person's language (the template's).
+export type SetupSessionBody = { readonly service: string; readonly title: string; readonly body: string };
+export type SetupSessionAnswer = { readonly ticket: string; readonly created: boolean };

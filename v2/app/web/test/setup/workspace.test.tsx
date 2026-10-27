@@ -111,6 +111,26 @@ test('a monorepo: its folders as services or the repository as one, a choice of 
   });
 });
 
+test('a connected service with no .devcontainer is said, with the step that proposes it a setup session; one with one, or unread, is not', () => {
+  each((t, language) => {
+    const services = [
+      { name: 'guestbook', repo: 'example-org/guestbook', path: null, devcontainer: false },
+      { name: 'filter-api', repo: 'example-org/filter-api', path: null, devcontainer: true },
+      { name: 'jobs', repo: 'example-org/jobs', path: null, devcontainer: null },
+    ];
+    const one = html(<WorkspaceStep t={t} step={{ ...step, state: 'done' }} api={api} onDone={noop} initial={{ view: { ...VIEW, connected: { services, at: '2026-10-25T20:00:00.000Z' }, source: 'assistant' } }} />);
+    noMark(one, `no devcontainer ${language}`);
+    assert.match(one, /data-workspace-no-devcontainer/);
+    const text = visibleText(one).join(' ');
+    assert.ok(text.includes(t('workspace_no_devcontainer_one', { services: 'guestbook' })), `${language}: only the service without one`);
+    assert.match(one, /<a class="setup-link" href="\/setup\/environment">/);
+    const many = html(<WorkspaceStep t={t} step={{ ...step, state: 'done' }} api={api} onDone={noop} initial={{ view: { ...VIEW, connected: { services: services.map((s) => ({ ...s, devcontainer: false })), at: null }, source: 'assistant' } }} />);
+    assert.ok(visibleText(many).join(' ').includes(t('workspace_no_devcontainer_many', { services: 'guestbook, filter-api, jobs' })));
+    const none = html(<WorkspaceStep t={t} step={{ ...step, state: 'done' }} api={api} onDone={noop} initial={{ view: { ...VIEW, connected: { services: services.slice(1), at: null }, source: 'assistant' } }} />);
+    assert.doesNotMatch(none, /data-workspace-no-devcontainer/);
+  });
+});
+
 test('an earlier connect and the environment\'s file are said, the environment\'s with no way to replace it', () => {
   each((t, language) => {
     const done = html(<WorkspaceStep t={t} step={{ ...step, state: 'done' }} api={api} onDone={noop} initial={{ view: { ...VIEW, connected: { services: [{ name: 'guestbook', repo: 'example-org/guestbook', path: null }, { name: 'filter-api', repo: 'example-org/filter-api', path: null }], at: '2026-10-25T20:00:00.000Z' }, source: 'assistant' } }} />);

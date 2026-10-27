@@ -113,9 +113,9 @@ export const stateDirOf = (env: NodeJS.ProcessEnv): string =>
 
 // --------------------------------------------------------------- inputs
 
-async function baseCommitOf(source: PreparedSource): Promise<string | undefined> {
+async function baseCommitOf(source: PreparedSource, at = `refs/remotes/origin/${source.base}`): Promise<string | undefined> {
   try {
-    const commit = (await git(source.dir, ['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${source.base}^{commit}`])).trim();
+    const commit = (await git(source.dir, ['rev-parse', '--verify', '--quiet', `${at}^{commit}`])).trim();
     return /^[0-9a-f]{40,64}$/.test(commit) ? commit : undefined;
   } catch (error) {
     if (error instanceof CheckoutError) return undefined;
@@ -140,13 +140,15 @@ const text = async (dir: string, object: string): Promise<string> => git(dir, ['
 const fromImage = (named: string, baseImage: string): string => (/^cleared-v2-session(?::[A-Za-z0-9_.-]+)?$/.test(named) ? baseImage : named);
 
 // What the base branch holds for the service's image, and its hash; undefined
-// when the checkout has no base fetched. A devcontainer file or an install
-// command that cannot be used is a PreparedError, said to the person.
-export async function readInputs(source: PreparedSource, options: { readonly baseImage?: string } = {}): Promise<PreparedInputs | undefined> {
+// when the checkout has no base fetched. `at`: another ref of the checkout
+// instead of the base, a ticket's branch as the setup session's check reads
+// it (flow/env-setup.ts). A devcontainer file or an install command that
+// cannot be used is a PreparedError, said to the person.
+export async function readInputs(source: PreparedSource, options: { readonly baseImage?: string; readonly at?: string } = {}): Promise<PreparedInputs | undefined> {
   const baseImage = options.baseImage ?? SESSION_IMAGE;
   if (!SERVICE.test(source.service)) throw new PreparedError(`not a service name: ${JSON.stringify(source.service)}`);
   if (source.path !== null && (source.path === '' || source.path.split('/').some((part) => part === '' || part === '.' || part === '..'))) throw new PreparedError(`not a folder of the repository: ${JSON.stringify(source.path)}`);
-  const commit = await baseCommitOf(source);
+  const commit = await baseCommitOf(source, options.at);
   if (!commit) return undefined;
   const at = (file: string) => (source.path === null ? file : `${source.path}/${file}`);
   const named = [...LOCK_FILES, ...MANIFEST_FILES].map(at);
@@ -225,6 +227,35 @@ export function preparedDockerfile(input: { readonly from: string; readonly file
   ].join('\n');
 }
 
+// The image of `inputs` under `tag`, from `tree`, the files of their
+// commit: the devcontainer's Dockerfile built first when it names one, then
+// Cleared's Dockerfile of a prepared image. `work`: a scratch folder for the
+// build context. `session`: the images carry its label too, so that the
+// setup session's check removes them with its container.
+export async function buildPrepared(input: {
+  readonly docker: Docker; readonly source: PreparedSource; readonly inputs: PreparedInputs; readonly tree: string; readonly work: string;
+  readonly tag: string; readonly labels: Readonly<Record<string, string>>; readonly baseImage: string; readonly session?: string;
+}): Promise<void> {
+  const { docker, source, inputs, tree, work, tag, labels } = input;
+  const session = input.session === undefined ? {} : { session: input.session };
+  let from = inputs.from;
+  if (from === null) {
+    const choice = readDevcontainer(join(tree, inputs.devcontainerRoot), input.baseImage);
+    if (choice.kind !== 'dockerfile') throw new PreparedError('the devcontainer file names no Dockerfile');
+    from = `${tag}-devcontainer`;
+    await docker.build({ context: choice.context, dockerfile: choice.dockerfile, tag: from, labels, ...session });
+  }
+  const root = source.path === null ? tree : join(tree, source.path);
+  const context = join(work, 'context');
+  mkdirSync(context);
+  for (const file of inputs.files) {
+    if (!lstatSync(join(root, file), { throwIfNoEntry: false })?.isFile()) throw new PreparedError(`${file} is not a plain file`);
+    copyFileSync(join(root, file), join(context, file));
+  }
+  writeFileSync(join(context, 'Dockerfile'), preparedDockerfile({ from, files: inputs.files, install: inputs.install }));
+  await docker.build({ context, dockerfile: join(context, 'Dockerfile'), tag, labels, ...session });
+}
+
 // --------------------------------------------------------------- records
 
 const recordFile = (stateDir: string, service: string): string => join(stateDir, 'prepared', `${service}.json`);
@@ -271,6 +302,11 @@ export class PreparedImages {
 
   get baseImage(): string {
     return this.#baseImage;
+  }
+
+  // The Docker it builds with: the environment step runs the declared check in what it built.
+  get docker(): Docker {
+    return this.#docker;
   }
 
   readInputs(source: PreparedSource): Promise<PreparedInputs | undefined> {
@@ -326,22 +362,7 @@ export class PreparedImages {
       if (!exported) throw new PreparedError(`the base branch ${source.base} of ${source.service} could not be exported`);
       // The base moved since it was read: the files are the new one's, so is the hash.
       if (exported.commit !== inputs.commit) throw new PreparedError('the base branch moved during the build: build again');
-      let from = inputs.from;
-      if (from === null) {
-        const choice = readDevcontainer(join(exported.dir, inputs.devcontainerRoot), this.#baseImage);
-        if (choice.kind !== 'dockerfile') throw new PreparedError('the devcontainer file names no Dockerfile');
-        from = `${tag}-devcontainer`;
-        await this.#docker.build({ context: choice.context, dockerfile: choice.dockerfile, tag: from, labels });
-      }
-      const root = source.path === null ? exported.dir : join(exported.dir, source.path);
-      const context = join(work, 'context');
-      mkdirSync(context);
-      for (const file of inputs.files) {
-        if (!lstatSync(join(root, file), { throwIfNoEntry: false })?.isFile()) throw new PreparedError(`${file} is not a plain file`);
-        copyFileSync(join(root, file), join(context, file));
-      }
-      writeFileSync(join(context, 'Dockerfile'), preparedDockerfile({ from, files: inputs.files, install: inputs.install }));
-      await this.#docker.build({ context, dockerfile: join(context, 'Dockerfile'), tag, labels });
+      await buildPrepared({ docker: this.#docker, source, inputs, tree: exported.dir, work, tag, labels, baseImage: this.#baseImage });
       const ready: PreparedRecord = {
         ...kept, state: 'ready', hash: inputs.hash, tag, builtAt: this.#now().toISOString(), buildMs: Date.now() - clock, error: null,
       };

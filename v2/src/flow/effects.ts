@@ -11,6 +11,9 @@ import { flatBriefing, levelContext, readLeveledBriefing, writeBriefing, type Me
 import { checkBranchName, git, projectCheckout, readTip, ticketBranch, ticketCheckout } from '../workspace/checkout.ts';
 import { variantFolder } from './variants.ts';
 import { judgeDiff } from './fast-lane.ts';
+import { checkBranch } from './env-setup.ts';
+import { Docker } from '../container/docker.ts';
+import { stateDirOf } from '../container/prepared.ts';
 import { captureHandover } from '../workspace/handover.ts';
 import { ensureProjectPage, readProjectPage, updateProjectPage } from '../workspace/project-page.ts';
 import { forgeEnvironments, publish } from '../workspace/publish.ts';
@@ -63,6 +66,20 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     // forge itself is in it too; a page that cannot be made never stops the fetch.
     await pageOf(service, 'update').catch((error) => console.error(`cleared-v2: the project page could not be made (${error instanceof Error ? error.name : typeof error})`));
     return checkout;
+  };
+  const settingsOf = async (service?: ServiceConfig) => {
+    // Fetched first: on a fresh service the project is not cloned yet, and
+    // a changed verdict phrase or host on the base is read as it is now.
+    await refresh(service);
+    const { dir, base } = of(service);
+    const baseRef = `refs/remotes/origin/${base}`;
+    const conf = await git(dir, ['show', `${baseRef}:.cleared/agents.conf`]);
+    let scripts: string[] = [];
+    try {
+      const pkg = JSON.parse(await git(dir, ['show', `${baseRef}:package.json`])) as { scripts?: Record<string, unknown> };
+      scripts = Object.keys(pkg.scripts ?? {});
+    } catch { /* no package.json at the base: no script to run */ }
+    return projectSettings(parseConf(conf), scripts);
   };
   const pageOf = async (service: ServiceConfig | undefined, how: 'ensure' | 'update') => {
     const { dir, base } = of(service);
@@ -165,20 +182,7 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
   return {
     // The service's settings as committed at its base branch, after a fetch.
     // Each service repository keeps its own .cleared/agents.conf (decision 18).
-    async settings(service) {
-      // Fetched first: on a fresh service the project is not cloned yet, and
-      // a changed verdict phrase or host on the base is read as it is now.
-      await refresh(service);
-      const { dir, base } = of(service);
-      const baseRef = `refs/remotes/origin/${base}`;
-      const conf = await git(dir, ['show', `${baseRef}:.cleared/agents.conf`]);
-      let scripts: string[] = [];
-      try {
-        const pkg = JSON.parse(await git(dir, ['show', `${baseRef}:package.json`])) as { scripts?: Record<string, unknown> };
-        scripts = Object.keys(pkg.scripts ?? {});
-      } catch { /* no package.json at the base: no script to run */ }
-      return projectSettings(parseConf(conf), scripts);
-    },
+    settings: settingsOf,
 
     async refreshProject(service) {
       await refresh(service);
@@ -344,6 +348,20 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
       else if (head && /^[0-9a-f]{40}$/.test(head)) commit = head;
       else throw new Error('no branch and no commit to judge');
       return judgeDiff({ sections, repo: dir, base: baseRef, commit, env });
+    },
+
+    // The setup session's check (C4, flow/env-setup.ts): the session's
+    // branch fetched as a step's is, its image built as the service's
+    // prepared image would be once merged, and the check the base declares
+    // (its agents.conf and package.json, never the branch's) run in it.
+    async envCheck({ ticket, service, workdir }) {
+      const settings = await settingsOf(service);
+      const own = sessionService(service);
+      const { dir, ref } = await fetchBranch(ticket, own, workdir);
+      return checkBranch({
+        docker: new Docker(), stateDir: stateDirOf(env), source: { service: own.name, dir, base: own.base, path: own.path ?? null },
+        ref, declared: settings.testCommand ? { command: settings.testCommand, services: settings.services } : undefined,
+      });
     },
 
     // What a step's branch changes against the service's base (decision 26,

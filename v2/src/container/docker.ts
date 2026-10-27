@@ -30,6 +30,13 @@ export type DockerSpawner = (args: readonly string[]) => ChildProcessWithoutNull
 
 export class DockerError extends Error {
   override name = 'DockerError';
+  // The last lines a failed command wrote, uncleaned: a build's first line
+  // only says which builder ran. Absent when the error is not a command's.
+  readonly tail?: string;
+  constructor(message: string, tail?: string) {
+    super(message);
+    if (tail !== undefined) this.tail = tail;
+  }
 }
 
 export class LabelRuleError extends Error {
@@ -146,6 +153,7 @@ const ENV_KEY = /^[A-Za-z_][A-Za-z0-9_]*$/;
 const LABEL_KEY_NAME = /^[a-z0-9][a-z0-9.-]{0,63}$/;
 const LABEL_VALUE_TEXT = /^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$/;
 const USER = /^[0-9]+:[0-9]+$|^[a-z_][a-z0-9_-]*$/;
+const ENTRYPOINT = /^[A-Za-z0-9_][A-Za-z0-9_./-]*$/;
 
 function check(ok: boolean, what: string, value: unknown): void {
   if (!ok) throw new DockerError(`invalid ${what}: ${JSON.stringify(value)}`);
@@ -170,6 +178,9 @@ export type ContainerSpec = {
   readonly role: string;
   readonly image: string;
   readonly networks: readonly NetworkAttachment[];
+  // One program, instead of the image's ENTRYPOINT: a check's container
+  // sleeps whatever the project's image starts (flow/env-setup.ts).
+  readonly entrypoint?: string;
   readonly command?: readonly string[];
   readonly user?: string;
   readonly readOnly?: boolean;
@@ -219,6 +230,7 @@ function labelled<T extends { readonly labels: Readonly<Record<string, string>> 
 }
 
 const firstLine = (text: string): string => text.trim().split('\n')[0] ?? '';
+const TAIL_LINES = 40;                       // the lines of a failed command's output a DockerError keeps
 
 // One word of a command line for sh, quoted: `script` takes its command as one string.
 const shellWord = (word: string): string => `'${word.replace(/'/g, `'\\''`)}'`;
@@ -242,7 +254,7 @@ export class Docker {
 
   private async must(args: readonly string[], owned?: ReadonlySet<string>, options?: RunOptions): Promise<string> {
     const result = await this.call(args, owned, options);
-    if (result.code !== 0) throw new DockerError(`docker ${verbOf(args)} failed (${result.code}): ${firstLine(result.stderr)}`);
+    if (result.code !== 0) throw new DockerError(`docker ${verbOf(args)} failed (${result.code}): ${firstLine(result.stderr)}`, result.stderr.trimEnd().split('\n').slice(-TAIL_LINES).join('\n'));
     return result.stdout;
   }
 
@@ -346,6 +358,10 @@ export class Docker {
       args.push('--workdir', spec.workdir);
     }
     if (spec.interactive) args.push('--interactive');
+    if (spec.entrypoint !== undefined) {
+      check(ENTRYPOINT.test(spec.entrypoint), 'entrypoint', spec.entrypoint);
+      args.push('--entrypoint', spec.entrypoint);
+    }
     args.push('--', spec.image, ...(spec.command ?? []));
     const hidden = spec.privateEnv ?? {};
     const out = await this.must(args, undefined, Object.keys(hidden).length > 0 ? { env: hidden } : undefined);

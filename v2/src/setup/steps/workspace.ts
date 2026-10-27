@@ -2,7 +2,9 @@
 // decision 15): the repositories the forge credential reaches, one or
 // several picked, cloned, the links between them proposed, and the
 // workspace file written from what the person ticked (workspace/connect.ts).
-// The Services screen's Connect opens it too. The repositories are listed
+// The Services screen's Connect opens it too. Each connected service says
+// whether its base holds a .devcontainer: one without is proposed a setup
+// session at the environment step (section 13, C4). The repositories are listed
 // through the forge contract's GitHub adapter (gh, with the GH_TOKEN the
 // forge step set); a list that cannot be had says why, never gh's words.
 //
@@ -14,6 +16,7 @@
 //   502: unreachable (the forge), clone_failed; 503: no state folder
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { hasDevcontainer } from '../../flow/env-setup.ts';
 import type { ForgeRepository } from '../../forge/contract.ts';
 import { forgeFor } from '../../forge/index.ts';
 import { confirm, ConnectError, listChoices, pick, propose, WORKSPACE_FILE } from '../../workspace/connect.ts';
@@ -44,23 +47,28 @@ async function listed(deps: StepDeps): Promise<{ readonly repositories: ForgeRep
   }
 }
 
-// What the assistant wrote, when the settings name its file.
-function connectedOf(deps: StepDeps): WorkspaceView['connected'] {
+// What the assistant wrote, when the settings name its file, each service
+// with whether its base holds a .devcontainer.
+async function connectedOf(deps: StepDeps): Promise<WorkspaceView['connected']> {
   const at = paths(deps);
   const file = join(at.state, WORKSPACE_FILE);
   if (readSettings(at.settings).env.CLEARED_V2_WORKSPACE !== file || !existsSync(file)) return null;
   let sections: Record<string, Record<string, string>>;
   try { sections = parseConf(readFileSync(file, 'utf8')); } catch { return null; }
-  const services = Object.entries(sections).flatMap(([section, keys]): ConnectedService[] => {
+  const services: ConnectedService[] = [];
+  for (const [section, keys] of Object.entries(sections)) {
     const name = /^service\s+(\S+)$/.exec(section)?.[1];
-    return name ? [{ name, repo: keys.repository ?? '', path: keys.path ?? null }] : [];
-  });
+    if (!name) continue;
+    const path = keys.path ?? null;
+    const devcontainer = keys.dir && keys.base ? await hasDevcontainer({ dir: keys.dir, base: keys.base, path }) : null;
+    services.push({ name, repo: keys.repository ?? '', path, devcontainer });
+  }
   return { services, at: deps.records.get('workspace')?.doneAt ?? null };
 }
 
 async function view(deps: StepDeps): Promise<WorkspaceView> {
   if (deps.fromEnvironment.has('CLEARED_V2_WORKSPACE')) return { repositories: [], archived: 0, problem: null, connected: null, source: 'environment' };
-  const connected = connectedOf(deps);
+  const connected = await connectedOf(deps);
   const source = connected ? 'assistant' : null;
   try {
     const { repositories, archived } = await listed(deps);
@@ -125,7 +133,8 @@ const workspace: SetupStep = {
             });
             deps.records.machine('workspace', Date.now() - started);
             deps.records.done('workspace');
-            return done satisfies WorkspaceWritten;
+            const read = new Map(((await connectedOf(deps))?.services ?? []).map((service) => [service.name, service.devcontainer]));
+            return { ...done, services: done.services.map((service) => ({ ...service, devcontainer: read.get(service.name) ?? null })) } satisfies WorkspaceWritten;
           });
           answer(context, 200, written);
         }),

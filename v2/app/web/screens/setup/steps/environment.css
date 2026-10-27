@@ -19,3 +19,9 @@
 @media (max-width: 640px) {
   .setup-env-item { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* The declared check's output, and the setup session's proposal (lane v2-j5-env-setup, C4). */
+.setup-step .setup-env-output { margin: 6px 0 0; padding: 8px 10px; max-width: 72ch; max-height: 16em; overflow: auto; background: var(--sunken); border-radius: var(--radius); font-family: var(--mono); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
+.setup-step .setup-env-session { margin: 8px 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; }
+.setup-step .setup-env-session > .setup-env-text { margin: 0; flex: 1 1 32ch; }
+.setup-step p.setup-env-session { display: block; color: var(--text-secondary); font-size: var(--text-sm); max-width: 72ch; }
