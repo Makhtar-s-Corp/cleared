@@ -18,7 +18,7 @@
   "first_ticket_stage_live": "En production",
   "first_ticket_now_todo": "En Todo. Cleared le démarre.",
   "first_ticket_now_working": "L'auteur fait le changement.",
-  "first_ticket_now_plan": "L'auteur a proposé son plan. Il attend votre Go dans la réception : lisez-le là, puis donnez le Go.",
+  "first_ticket_now_plan": "L'auteur a proposé son plan. Il attend votre Go dans la réception : lisez-le là, puis donnez le Go.",
   "first_ticket_now_review": "Un relecteur, un autre modèle, lit le changement.",
   "first_ticket_now_approval": "La revue est passée. La mise en production attend votre approbation dans la réception.",
   "first_ticket_now_merging": "Approuvé. Le verrou de mise en production le fusionne, puis la surveillance vérifie le projet.",
