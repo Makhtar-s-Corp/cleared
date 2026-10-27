@@ -7274,16 +7274,17 @@ French and English, with fakes for Docker and the harness, and one real run on t
 1. The branch's Dockerfile builds with Docker's default network, before any review (applied), so a setup session can install a system package. Or build it with no network, which keeps unreviewed code off the network and makes most setup sessions impossible.
 2. Three failed checks put the ticket back in Todo (applied). Or more rounds, each an author session's tokens and time.
 
-**The real run** (this server, 2026-10-27, Docker 29.8.1, every object labelled `cleared.dev=v2`, no port opened). A copy of the guestbook without its `.devcontainer` as a bare repository and the service's checkout; two branches written by the author of the lane in place of a session, each fetched as the flow fetches one, then `checkBranch` with the real Docker. The base declares `npm test` and `postgres:16`.
-- `LOCAL-1`, a Dockerfile installing a package that does not exist: `build_failed` in 2 s, the comment holding Docker's own last lines, down to `E: Unable to locate package cleared-no-such-package`.
-- `LOCAL-2`, a Dockerfile and `install_command = npm ci`: `passed`, "the branch's image built in 4 s from the Dockerfile its .devcontainer names, and `npm test` passed in it in 4 s" (15 s in all, the Postgres start included; the dependencies' layer was cached by the earlier tries).
-- Before and after, the same labelled containers, images and networks: nothing the check made was left.
+**The real run** (this server, 2026-10-27 from 11:42:48 to 11:42:58, Docker 29.8.1, every object labelled `cleared.dev=v2`). A copy of the guestbook without its `.devcontainer` as a bare repository and the service's checkout, in a scratch folder; two branches written by the author of the lane in place of a session, each fetched as the flow fetches one, then `checkBranch` with the real Docker through Cleared's wrapper. The base declares `npm test` and `postgres:16`. Both Dockerfiles start `FROM cleared-v2:local`, Cleared's own image (Node 24, root) built by the compose lane's run, since this server has no session image: the template's `cleared-v2-session`, whose user is `node`, was not exercised, nor a non-root user writing `/workspace`.
+- `LOCAL-1`, a Dockerfile installing a package that does not exist: `build_failed` in 1 s, the comment holding Docker's own last lines, down to `E: Unable to locate package cleared-no-such-package`.
+- `LOCAL-2`, a Dockerfile and `install_command = npm ci`: `passed`, "the branch's image built in 1 s from the Dockerfile its .devcontainer names, and `npm test` passed in it in 3 s" (9 s in all, the Postgres start included; the dependencies' layer was cached by the earlier tries of the day).
+- Before and after, the same labelled containers, images and networks: nothing the check made was left. `ss -ltn` before and after: the same listeners, but for one loopback port that another process of the machine held between the two readings and had closed seconds later; the run's own process had ended, and nothing it starts publishes a port.
 
 The first tries found two defects, fixed here with a test each: the check's container exited at once on an image whose ENTRYPOINT is a program (it now has `sleep` as its own), and the guestbook's tests failed on the database the check did not give them (it now runs the declared test services).
 
 **Not done here.**
 - **No real author session.** This server has no session image (as section 10.6 found), and the author's login would be the service's own token. C4 and P256 stay `partial` until the rehearsal (section 16) runs one setup session to its merge.
 - **The browser test does not press Start**: the assistant's browser harness runs no flow. The route is proven by the service's tests, the screen's start by its markup in both languages.
+- **#436.** A check the service's stop interrupts leaves its labelled objects, under a session id no ledger row knows; `doctor docker` reports them.
 - **A ticket in steps or with variants is not checked.** The check sits on the path of a ticket of one service and one author, which is what the assistant starts; a setup ticket a person splits into steps or runs as variants goes to its review as before.
 
 **Tests first.** `b784a362` committed the tests alone. Run on that commit, in a scratch copy:

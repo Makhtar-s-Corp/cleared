@@ -193,13 +193,17 @@ test('once an image is ready its declared check runs in it, on the base\'s tree 
 test('a check that fails in its image proposes a setup session and runs again at the next Build; a failed build proposes one too', async () => {
   const fake = new FakeDocker();
   let code = 1;
-  fake.execAnswer = () => ({ code, stdout: 'not ok 1 - sqlite3: command not found\n', stderr: '' });
-  await serve(workspace({ api: project({ '.devcontainer/devcontainer.json': '{ "image": "cleared-v2-session:latest" }\n' }, null, 'api') }), fake, async (call) => {
+  const env = workspace({ api: project({ '.devcontainer/devcontainer.json': '{ "image": "cleared-v2-session:latest" }\n' }, null, 'api') });
+  const secret = ['made', 'at', 'run', 'time', String(process.pid)].join('-');
+  env.CLEARED_V2_EXAMPLE_TOKEN = secret;
+  fake.execAnswer = () => ({ code, stdout: `not ok 1 - sqlite3: command not found\nconnecting with ${secret} from ${env.CLEARED_V2_STATE_DIR}/x\n`, stderr: '' });
+  await serve(env, fake, async (call) => {
     await call('POST', '/api/setup/environment/build');
     let view = await settled(call);
     assert.equal(view.services[0]?.state, 'ready');
     assert.equal(view.services[0]?.check?.passed, false);
     assert.match(view.services[0]?.check?.tail ?? '', /sqlite3: command not found/);
+    assert.doesNotMatch(JSON.stringify(view), new RegExp(`${secret}|${env.CLEARED_V2_STATE_DIR}`), 'cleaned before it is kept and shown');
     assert.equal(view.services[0]?.proposal, 'check_failed');
     code = 0;
     await call('POST', '/api/setup/environment/build');

@@ -22,6 +22,7 @@
 //
 // Reading the view asks Docker nothing: the builds' records, the checks'
 // and the services' base branches say it.
+import { homedir } from 'node:os';
 import { Docker } from '../../container/docker.ts';
 import { PreparedError, PreparedImages, readRecord, stateDirOf, type PreparedInputs, type PreparedSource } from '../../container/prepared.ts';
 import type { EnvironmentService, EnvironmentView, SetupSessionAnswer } from '../../container/types.ts';
@@ -29,6 +30,7 @@ import { FlowConfigError, loadFlowConfig, workspaceOf } from '../../flow/config.
 import { ENVIRONMENT_LABEL, checkPrepared, declaredCheck, readPreparedCheck } from '../../flow/env-setup.ts';
 import { runtime } from '../../flow/runtime.ts';
 import type { Registry } from '../../modules/registry.ts';
+import { cleanText, secretValues } from '../../session/clean.ts';
 import type { UserId } from '../../session/contract.ts';
 import type { Ticket, TicketId, TicketStore } from '../../tickets/contract.ts';
 import { answer, guarded, HttpError, readBody } from '../http.ts';
@@ -150,7 +152,10 @@ export function environmentStep(
         const declared = await declaredCheck(source);
         const last = readPreparedCheck(images.stateDir, source.service);
         if (!declared || (last?.passed && last.hash === ready.hash && last.command === declared.command.join(' '))) return;
-        await checkPrepared({ docker: images.docker, stateDir: images.stateDir, source, image: ready.tag, hash: ready.hash, declared, now: deps.now });
+        // Cleaned as the flow's texts are: the record reaches the browser.
+        const servicePaths = [images.stateDir, deps.env.HOME ?? homedir()].filter((path) => path && path !== '/');
+        const clean = (text: string) => cleanText(text, { secrets: secretValues(deps.env), servicePaths });
+        await checkPrepared({ docker: images.docker, stateDir: images.stateDir, source, image: ready.tag, hash: ready.hash, declared, clean, now: deps.now });
       };
 
       const build = async (list: readonly PreparedSource[]): Promise<void> => {

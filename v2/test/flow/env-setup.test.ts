@@ -219,16 +219,22 @@ test('the words: durations a person reads, the comment and the request to the au
   assert.equal(ENVIRONMENT_LABEL, 'type:environment');
 });
 
-test('the checks\' rows: each round kept, the failures counted per ticket', () => {
+test('the checks\' rows: each round kept, the rounds and the failures counted per ticket and per run', () => {
   const checks = new EnvCheckStore(openStore(':memory:').db);
   const failed: EnvCheck = { outcome: 'failed', command: 'npm test', tail: 'x', buildMs: 1, checkMs: 1, devcontainer: 'none' };
-  assert.equal(checks.failures('LOCAL-1'), 0);
-  assert.equal(checks.add('LOCAL-1', 'guestbook', failed, '2026-10-27T10:00:00.000Z'), 1);
-  assert.equal(checks.add('LOCAL-1', 'guestbook', { ...failed, outcome: 'build_failed' }, '2026-10-27T10:05:00.000Z'), 2);
-  assert.equal(checks.add('LOCAL-1', 'guestbook', { ...failed, outcome: 'passed' }, '2026-10-27T10:10:00.000Z'), 3);
-  assert.equal(checks.add('LOCAL-2', 'guestbook', failed, '2026-10-27T10:10:00.000Z'), 1);
-  assert.equal(checks.failures('LOCAL-1'), 2);
-  assert.deepEqual(checks.list('LOCAL-1').map((row) => row.outcome), ['failed', 'build_failed', 'passed']);
+  const first = '2026-10-27T09:59:00.000Z';
+  assert.equal(checks.failures('LOCAL-1', first), 0);
+  assert.equal(checks.add('LOCAL-1', 'guestbook', first, failed, '2026-10-27T10:00:00.000Z'), 1);
+  assert.equal(checks.add('LOCAL-1', 'guestbook', first, { ...failed, outcome: 'build_failed' }, '2026-10-27T10:05:00.000Z'), 2);
+  assert.equal(checks.add('LOCAL-1', 'guestbook', first, { ...failed, outcome: 'passed' }, '2026-10-27T10:10:00.000Z'), 3);
+  assert.equal(checks.add('LOCAL-2', 'guestbook', first, failed, '2026-10-27T10:10:00.000Z'), 1);
+  assert.equal(checks.failures('LOCAL-1', first), 2);
+  // Started again: its own rounds, its own failures.
+  const again = '2026-10-27T11:00:00.000Z';
+  assert.equal(checks.failures('LOCAL-1', again), 0);
+  assert.equal(checks.add('LOCAL-1', 'guestbook', again, failed, '2026-10-27T11:01:00.000Z'), 1);
+  assert.equal(checks.failures('LOCAL-1', again), 1);
+  assert.deepEqual(checks.list('LOCAL-1').map((row) => `${row.round}:${row.outcome}`), ['1:failed', '2:build_failed', '3:passed', '1:failed']);
 });
 
 test('the assistant reads, at the base only, whether a service has a .devcontainer and which check it declares', async () => {
@@ -371,6 +377,48 @@ test('a check still red after the last round puts the ticket back in Todo, with 
   assert.ok(!roles(u).includes('reviewer'));
   await t.engine.close();
   await u.engine.close();
+});
+
+test('a ticket put back after its last round, started again, has its rounds again', async () => {
+  const checked = checker([...Array.from({ length: ENV_CHECK_ROUNDS }, () => FAIL), FAIL, PASS]);
+  const t = await setup({ scripts: { author: quickAuthor, reopen: reopenScript }, effects: { envCheck: checked.effect } });
+  const ticket = await environmentTicket(t);
+  await t.engine.start(ticket.id, 'u1');
+  await until(() => putBack(t).length > 0, 'the ticket put back', 5000);
+  await t.engine.settled();
+  t.clock.now += 60_000;
+  await t.engine.start(ticket.id, 'u1');
+  await until(() => t.inbox.list().some((i) => i.kind === 'release'), 'the release item', 5000);
+  await t.engine.settled();
+  assert.equal(putBack(t).length, 1, 'its first failure of the new run goes back to its author');
+  assert.equal(checked.calls.length, ENV_CHECK_ROUNDS + 2);
+  const said = await comments(t, ticket.id);
+  assert.ok(said.some((c) => c.startsWith('Environment check, round 2') && c.includes('passed')), 'counted from the new start');
+  await t.engine.close();
+});
+
+test('a ticket set aside or closed while its check runs: the result is dropped, no reviewer and no author start', async () => {
+  for (const [how, result] of [['set aside', PASS], ['closed', FAIL]] as const) {
+    let release!: (check: EnvCheck) => void;
+    let called = false;
+    const t = await setup({
+      scripts: { author: quickAuthor, reopen: reopenScript },
+      effects: { envCheck: () => { called = true; return new Promise<EnvCheck>((resolve) => { release = resolve; }); } },
+    });
+    const ticket = await environmentTicket(t);
+    await t.engine.start(ticket.id, 'u1');
+    await until(() => called, 'the check', 5000);
+    if (how === 'set aside') await t.engine.setAside(ticket.id, 'u1');
+    else await t.engine.closeTicket(ticket.id, 'not needed after all', 'u1');
+    const before = (await comments(t, ticket.id)).length;
+    release(result);
+    await t.engine.settled();
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.deepEqual(roles(t), ['author'], `${how}: no reviewer, and the author is not resumed`);
+    assert.equal((await comments(t, ticket.id)).length, before, `${how}: nothing said of a run that ended`);
+    assert.equal(t.engine.isActive(ticket.id), false);
+    await t.engine.close();
+  }
 });
 
 // ---------------------------------------------------------- after the merge

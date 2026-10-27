@@ -11,6 +11,8 @@
 //     call of POST /check at src/filter.ts line 38, none of them ticked;
 //   - nothing is written before the person ticks; once the link and the
 //     contract are ticked, the workspace file holds them and the step is done;
+//   - the guestbook, here without its .devcontainer, is said, with the
+//     environment step that proposes it a setup session (C4);
 //   - each page has no policy violation, no page error, no missing key, and
 //     axe finds no violation of WCAG 2.2 AA;
 //   - with CLEARED_V2_CAPTURES=<folder>, the proposal is captured at 1440,
@@ -82,7 +84,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
   const gh = fakeGh({
     repositories: [
       { repo: 'example-org/filter-api', url: remote(files(`${EXAMPLES}filter-api`)), base: 'main', private: false, archived: false },
-      { repo: 'example-org/guestbook', url: remote(files(`${EXAMPLES}guestbook`)), base: 'main', private: true, archived: false },
+      { repo: 'example-org/guestbook', url: remote(Object.fromEntries(Object.entries(files(`${EXAMPLES}guestbook`)).filter(([path]) => !path.startsWith('.devcontainer/')))), base: 'main', private: true, archived: false },
       { repo: 'example-org/both', url: remote({ ...files(`${EXAMPLES}guestbook`, 'guestbook/'), ...files(`${EXAMPLES}filter-api`, 'filter-api/') }), base: 'main', private: false, archived: false },
     ],
     pulls: [],
@@ -165,6 +167,19 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     assert.match(written, /^contract = openapi:contract\/openapi\.yaml$/m);
     assert.equal(readSettings(join(service.dir, 'settings.conf')).env.CLEARED_V2_WORKSPACE, join(service.dir, WORKSPACE_FILE));
     await page.locator('.setup-progress li[data-step="workspace"][data-state="done"]').waitFor();
+    // The guestbook has no .devcontainer here: said, with the step that proposes it a setup session.
+    const missing = await page.locator('[data-workspace-no-devcontainer]').innerText();
+    assert.match(missing, /guestbook/);
+    assert.doesNotMatch(missing, /filter-api/);
+    assert.equal(await page.locator('[data-workspace-no-devcontainer] a[href="/setup/environment"]').count(), 1);
+    await checked(page, 'no .devcontainer said');
+    if (CAPTURES) {
+      for (const [width, theme] of (language === 'en' ? [[1440, 'light'], [390, 'dark']] : [[1440, 'light']]) as [number, string][]) {
+        await page.evaluate((value: string) => { document.documentElement.dataset.theme = value; }, theme);
+        await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+        await page.screenshot({ path: join(CAPTURES, `workspace-written-${width}-${theme}${language === 'fr' ? '-fr' : ''}.png`), fullPage: true });
+      }
+    }
     assert.deepEqual(errors, [], 'no page error');
   } finally {
     await browser.close();

@@ -434,6 +434,7 @@ export class FlowEngine {
   #fastLanes: FastLaneStore;                                        // the Quick tickets the rules kept fast or sent back (B2.2)
   #captureChoices: CaptureChoiceStore;                              // the human's choice of the receipt's captures, by ticket (P226)
   #envChecks: EnvCheckStore;                                        // the setup sessions' checks, by ticket (C4)
+  #envRuns = new Map<TicketId, string>();                           // when each ticket's run started: its checks' rounds count from there
 
   constructor(deps: FlowDeps) {
     this.registry = deps.registry;
@@ -1015,6 +1016,7 @@ export class FlowEngine {
     if (!adapter) throw new FlowError('unavailable', `no adapter for ${HARNESS} is registered`);
     this.#active.add(ticketId);
     this.#flows.set(ticketId, new Set());
+    this.#envRuns.set(ticketId, this.#at());
     this.#channels.delete(ticketId);
     if (origin) this.#origins.set(ticketId, origin);
     else this.#origins.delete(ticketId);
@@ -3083,18 +3085,24 @@ export class FlowEngine {
     if (!check || !isEnvironmentTicket(ticket.labels)) return true;
     const id = ticket.id;
     const service = this.#several && author.input.service ? this.#service(author.input.service) : undefined;
+    // The run the check is for: a ticket set aside or closed while it ran,
+    // and maybe started again, is not this run's any more.
+    const run = this.#flows.get(id);
+    const ours = () => this.#active.has(id) && this.#flows.get(id) === run;
+    const since = this.#envRuns.get(id) ?? '';
     let result: EnvCheck;
     try {
       result = await check({ ticket: id, ...(service ? { service } : {}), workdir: author.input.workdir });
     } catch (error) {
-      await this.#putBack(id, `The environment check could not run: ${name(error)}`, 'env_check_failed');
+      if (ours()) await this.#putBack(id, `The environment check could not run: ${name(error)}`, 'env_check_failed');
       return false;
     }
-    const round = this.#envChecks.add(id, ticket.project ?? this.config.project, result, this.#at());
+    const round = this.#envChecks.add(id, ticket.project ?? this.config.project, since, result, this.#at());
+    if (!ours()) return false;
     await this.registry.ticketStore.comment(id, this.#clean(envCheckComment(result, round)), SERVICE)
       .catch((error: unknown) => console.error(`cleared-v2: the environment check could not be said on ${id} (${error instanceof Error ? error.name : typeof error})`));
     if (result.outcome === 'passed' || result.outcome === 'no_check') return true;
-    const failures = this.#envChecks.failures(id);
+    const failures = this.#envChecks.failures(id, since);
     if (failures >= ENV_CHECK_ROUNDS) {
       await this.#putBack(id, envCheckGiveUp(result, failures), 'env_check_failed');
       return false;

@@ -235,12 +235,14 @@ function writePreparedCheck(stateDir: string, service: string, check: PreparedCh
 }
 
 // The declared check run in the service's ready prepared image, on its
-// base's tree, as a session of it would run it; recorded for the step.
+// base's tree, as a session of it would run it; recorded for the step, its
+// output passed through `clean` first (the service's cleaner): the record
+// is read by the browser.
 // Undefined when the service declares none. The image is the prepared
 // one, never removed here: only the check's container is.
 export async function checkPrepared(input: {
   readonly docker: Docker; readonly stateDir: string; readonly source: PreparedSource; readonly image: string; readonly hash: string;
-  readonly declared: DeclaredCheck | undefined; readonly now?: () => Date; readonly timeoutMs?: number;
+  readonly declared: DeclaredCheck | undefined; readonly clean: (text: string) => string; readonly now?: () => Date; readonly timeoutMs?: number;
 }): Promise<PreparedCheck | undefined> {
   const { docker, source, declared } = input;
   if (!declared || declared.command.length === 0) return undefined;
@@ -252,7 +254,7 @@ export async function checkPrepared(input: {
     if (!exported) throw new PreparedError(`the base branch ${source.base} of ${source.service} could not be exported`);
     const workdir = source.path === null ? WORKSPACE : posix.join(WORKSPACE, source.path);
     const ran = await checkImage({ docker, session, image: input.image, tree: exported.dir, workdir, command: declared.command, services: declared.services, ...(input.timeoutMs === undefined ? {} : { timeoutMs: input.timeoutMs }) });
-    const check: PreparedCheck = { hash: input.hash, command: declared.command.join(' '), passed: ran.passed, at: (input.now ?? (() => new Date()))().toISOString(), ms: ran.ms, tail: ran.tail };
+    const check: PreparedCheck = { hash: input.hash, command: declared.command.join(' '), passed: ran.passed, at: (input.now ?? (() => new Date()))().toISOString(), ms: ran.ms, tail: input.clean(ran.tail) };
     writePreparedCheck(input.stateDir, source.service, check);
     return check;
   } finally {
@@ -311,14 +313,16 @@ export function envCheckGiveUp(check: EnvCheck, rounds: number): string {
 
 // ------------------------------------------------------------------ rows
 
+// `run`: when the ticket's run started (a start, after a put back, is a new
+// one); its checks' rounds and failures count within it.
 export const ENV_CHECKS_TABLE = `CREATE TABLE IF NOT EXISTS env_checks (
-  ticket TEXT NOT NULL, round INTEGER NOT NULL, project TEXT NOT NULL, outcome TEXT NOT NULL, command TEXT,
-  build_ms INTEGER NOT NULL, check_ms INTEGER, at TEXT NOT NULL, PRIMARY KEY (ticket, round)
+  ticket TEXT NOT NULL, run TEXT NOT NULL, round INTEGER NOT NULL, project TEXT NOT NULL, outcome TEXT NOT NULL, command TEXT,
+  build_ms INTEGER NOT NULL, check_ms INTEGER, at TEXT NOT NULL, PRIMARY KEY (ticket, run, round)
 )`;
 
-export type EnvCheckRow = { readonly round: number; readonly outcome: EnvCheck['outcome']; readonly command: string | null; readonly buildMs: number; readonly checkMs: number | null; readonly at: string };
+export type EnvCheckRow = { readonly run: string; readonly round: number; readonly outcome: EnvCheck['outcome']; readonly command: string | null; readonly buildMs: number; readonly checkMs: number | null; readonly at: string };
 
-// Each check of a ticket, kept across a restart: its round, and how many failed.
+// Each check of a ticket, kept: its run, its round in it, and how many of the run's failed.
 export class EnvCheckStore {
   readonly #db: DatabaseSync;
   constructor(db: DatabaseSync) {
@@ -326,22 +330,22 @@ export class EnvCheckStore {
     db.exec(ENV_CHECKS_TABLE);
   }
 
-  // The round this check was.
-  add(ticket: string, project: string, check: EnvCheck, at: string): number {
-    const row = this.#db.prepare('SELECT COALESCE(MAX(round), 0) + 1 AS round FROM env_checks WHERE ticket = ?').get(ticket) as { round: number };
-    this.#db.prepare('INSERT INTO env_checks (ticket, round, project, outcome, command, build_ms, check_ms, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)')
-      .run(ticket, row.round, project, check.outcome, check.command, Math.round(check.buildMs), check.checkMs === null ? null : Math.round(check.checkMs), at);
+  // The round this check was, in its run.
+  add(ticket: string, project: string, run: string, check: EnvCheck, at: string): number {
+    const row = this.#db.prepare('SELECT COALESCE(MAX(round), 0) + 1 AS round FROM env_checks WHERE ticket = ? AND run = ?').get(ticket, run) as { round: number };
+    this.#db.prepare('INSERT INTO env_checks (ticket, run, round, project, outcome, command, build_ms, check_ms, at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)')
+      .run(ticket, run, row.round, project, check.outcome, check.command, Math.round(check.buildMs), check.checkMs === null ? null : Math.round(check.checkMs), at);
     return row.round;
   }
 
-  failures(ticket: string): number {
-    return (this.#db.prepare("SELECT COUNT(*) AS n FROM env_checks WHERE ticket = ? AND outcome IN ('failed', 'build_failed')").get(ticket) as { n: number }).n;
+  failures(ticket: string, run: string): number {
+    return (this.#db.prepare("SELECT COUNT(*) AS n FROM env_checks WHERE ticket = ? AND run = ? AND outcome IN ('failed', 'build_failed')").get(ticket, run) as { n: number }).n;
   }
 
   list(ticket: string): EnvCheckRow[] {
-    return (this.#db.prepare('SELECT round, outcome, command, build_ms, check_ms, at FROM env_checks WHERE ticket = ? ORDER BY round').all(ticket) as
-      { round: number; outcome: EnvCheck['outcome']; command: string | null; build_ms: number; check_ms: number | null; at: string }[])
-      .map((row) => ({ round: row.round, outcome: row.outcome, command: row.command, buildMs: row.build_ms, checkMs: row.check_ms, at: row.at }));
+    return (this.#db.prepare('SELECT run, round, outcome, command, build_ms, check_ms, at FROM env_checks WHERE ticket = ? ORDER BY at, round').all(ticket) as
+      { run: string; round: number; outcome: EnvCheck['outcome']; command: string | null; build_ms: number; check_ms: number | null; at: string }[])
+      .map((row) => ({ run: row.run, round: row.round, outcome: row.outcome, command: row.command, buildMs: row.build_ms, checkMs: row.check_ms, at: row.at }));
   }
 }
 
