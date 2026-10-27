@@ -43,3 +43,36 @@ test('a public key the project\'s file names still wins over the one the service
   const { kind, close } = await owned(`[tracker]\nhuman_public_key = ${other}\n`);
   try { assert.equal(kind, 'other', 'signed with the service\'s key, checked with the file\'s: not the owner\'s'); } finally { close(); }
 });
+
+// P249's open point, with issue #420: on a fresh install the service starts
+// before the owner exists. The assistant then makes the key and names the
+// owner while it runs, and the approval reads them at its next need, with
+// no restart; once both are there they are kept.
+test('a key made and an owner named after the service started are used at the next approval, with no restart', async () => {
+  const state = mkdtempSync(join(tmpdir(), 'cleared-approval-later-'));
+  const db = new DatabaseSync(join(state, 'ledger.db'));
+  try {
+    applyTables(db, [USERS_TABLE, ...TICKET_TABLES, ...APPROVAL_TABLES]);
+    const file = join(state, 'agents.conf');
+    writeFileSync(file, '[tracker]\n');
+    const key = join(state, 'approval.key');
+    const env: NodeJS.ProcessEnv = { CLEARED_STATE_DIR: state, CLEARED_V2_STATE_DIR: state, CLEARED_CONF: file, CLEARED_V2_APPROVAL_KEY: key };
+    const error = console.error;
+    console.error = () => undefined;
+    let environment;
+    try { environment = approvalEnvironment(db, env); } finally { console.error = error; }
+    const { ticketStore } = environment;
+    assert.equal(ticketStore.canSign, false, 'no key, no owner yet');
+    const user = await new SqliteUsers(db, { params: FAST }).add('alex', 'a long passphrase for the owner');
+    makeApprovalKey(key);
+    env.CLEARED_V2_OWNER_ID = 'alex';                       // what refreshSettings sets from the file the app wrote
+    assert.equal(ticketStore.canSign, true, 'read again at the next need');
+    const ticket = await ticketStore.create({ title: 'The heading says hello', project: 'guestbook' }, { kind: 'human', id: user.id });
+    assert.equal((await ticketStore.history(ticket.id))[0]?.by.kind, 'human', 'signed with the new key, checked with its public half');
+    delete env.CLEARED_V2_OWNER_ID;
+    assert.equal(ticketStore.canSign, true, 'kept once complete');
+  } finally {
+    db.close();
+    rmSync(state, { recursive: true, force: true });
+  }
+});
