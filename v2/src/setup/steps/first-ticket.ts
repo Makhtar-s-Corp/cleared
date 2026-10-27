@@ -2,8 +2,9 @@
 // 14, proof steps 9 and 10): a first ticket that changes one visible line
 // of the project, its text kept here rather than in the Tower's templates,
 // proposed with the service it targets; moved to Todo in one click, where
-// the flow starts it as any ticket (author, review, the owner's approval in
-// the inbox, the lock, the release watch); then followed to live. The step
+// the flow starts it as any ticket (author, its session plan's Go and the
+// owner's approval in the inbox, review, the lock, the release watch); then
+// followed to live. The step
 // is done when the ticket is Done, at that moment: the machine's time is
 // the sessions' (Todo to the approval asked) and the merge's (approved to
 // Done), the rest is the person's.
@@ -71,6 +72,11 @@ function stageOf(status: string, states: TicketStore['states']): FirstTicketStag
   }
 }
 
+// The author's session plan that waits for its Go in the inbox, if one does
+// (issue #446): the owner's gesture, as the approval is.
+const waitingPlan = (engine: FlowEngine, ticket: string): string | undefined =>
+  engine.inbox.items().find((item) => item.kind === 'session_plan' && item.state === 'waiting' && item.ticket === ticket)?.id;
+
 const ms = (from: string | undefined, to: string | undefined): number =>
   from && to ? Math.max(0, Date.parse(to) - Date.parse(from)) : 0;
 
@@ -102,12 +108,14 @@ export function firstTicketStep(options: { readonly engine: (registry: Registry)
     const ticket: Ticket | undefined = await tickets?.get(kept.ticket).catch(() => undefined);
     if (!tickets || !ticket) return { id: kept.ticket, title: '', service: kept.service, stage: 'stopped', createdAt: kept.created_at, rolledBack: false };
     const history = await tickets.history(ticket.id);
-    const stage = stageOf(ticket.status, tickets.states);
+    let stage = stageOf(ticket.status, tickets.states);
+    const plan = stage === 'working' && engine ? waitingPlan(engine, ticket.id) : undefined;
+    if (plan) stage = 'plan';
     if (stage === 'live' && !deps.records.get('first-ticket')?.doneAt) {
       deps.records.machine('first-ticket', machineOf(history, tickets.states));
       deps.records.done('first-ticket', history.filter((change) => change.status === tickets.states.done).at(-1)?.at ?? deps.now().toISOString());
     }
-    return { id: ticket.id, title: ticket.title, service: kept.service, stage, createdAt: kept.created_at, rolledBack: rolledBack(history, tickets.states) };
+    return { id: ticket.id, title: ticket.title, service: kept.service, stage, createdAt: kept.created_at, rolledBack: rolledBack(history, tickets.states), ...(plan ? { plan } : {}) };
   }
 
   async function viewOf(deps: StepDeps, context: RouteContext, language: Language): Promise<FirstTicketView> {

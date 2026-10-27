@@ -17,10 +17,12 @@ import { HttpError } from '../../src/setup/http.ts';
 import { SETUP_STEPS_TABLE, SetupRecords } from '../../src/setup/records.ts';
 import type { StepDeps } from '../../src/setup/step.ts';
 import FIRST_TICKET, { FIRST_TICKET_TABLE, firstTicketStep } from '../../src/setup/steps/first-ticket.ts';
+import type { SessionPlanItem } from '../../src/api/types.ts';
+import type { FakeStep } from '../../src/session/adapters/fake.ts';
 import { HOUR_MS, summaryOf, totalOf } from '../../src/setup/summary.ts';
 import type { FirstTicketView, StepView } from '../../src/setup/types.ts';
 import { STEP_IDS } from '../../src/setup/types.ts';
-import { REPORT_PASS, quickAuthor, reviewerScript, setup, until, type Setup } from '../flow/support.ts';
+import { REPORT_PASS, fakeEffects, finished, quickAuthor, reviewerScript, setup, started, text, until, type Setup } from '../flow/support.ts';
 
 type Call = (path: string, options?: { readonly method?: string; readonly body?: unknown; readonly user?: string }) => Promise<{ status: number; text: string; json: any }>;
 
@@ -156,6 +158,35 @@ test('the step follows the ticket: working, review, then the approval waiting in
     (await call('?language=en'));
     assert.equal(records.get('first-ticket')?.machineMs, record?.machineMs, 'counted once');
   }, t.clock);
+});
+
+// Issue #446: the author's first turn proposes a session plan, and the
+// flow holds it until a Go (decision 22 of milestone 2). The step says the
+// plan waits for the person's Go and links to its item in the inbox.
+const planned: readonly FakeStep[] = [
+  started, ...text('p1', 'I read the project. Here is my plan.'),
+  { hostCall: { toolCallId: 'plan-1', name: 'propose_session_plan', input: { steps: ['Add the line'], files: ['README.md'], confidence: 'medium', reason: 'One line.' } } },
+  finished(0.1), { awaitMessage: true }, started, ...text('a1', 'Done.'), finished(0.3),
+];
+
+test('the plan waits for the owner\'s Go: the step says so with its item in the inbox, then follows the author once the Go is given', async () => {
+  const settings = await fakeEffects([]).settings();
+  const t = await setup({ scripts: { author: planned, reviewers: [reviewerScript(REPORT_PASS)] }, config: { authorTools: true }, effects: { settings: async () => settings } });
+  await serve(() => t.engine, async (call) => {
+    const made = (await call('', { method: 'POST', body: { service: 'guestbook', language: 'en' } })).json as FirstTicketView;
+    const waitingPlan = () => t.inbox.items().find((item): item is SessionPlanItem => item.kind === 'session_plan' && item.state === 'waiting' && item.ticket === made.ticket?.id);
+    await until(() => waitingPlan() !== undefined, 'the session plan in the inbox', 5000);
+    await t.engine.settled();
+    const item = waitingPlan() as SessionPlanItem;
+    const held = (await call('?language=en')).json as FirstTicketView;
+    assert.equal(held.ticket?.stage, 'plan');
+    assert.equal(held.ticket?.plan, item.id, 'the item the inbox opens');
+    await t.engine.planGo(item.sessionId, 'u1');
+    await t.engine.settled();
+    const going = (await call('?language=en')).json as FirstTicketView;
+    assert.notEqual(going.ticket?.stage, 'plan');
+    assert.equal(going.ticket?.plan ?? null, null);
+  });
 });
 
 test('a first ticket rolled back by the release watch is back in Todo, said so, and not live', async () => {

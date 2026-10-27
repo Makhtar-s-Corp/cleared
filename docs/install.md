@@ -125,7 +125,7 @@ The checks of `cleared doctor`: Docker, the images, the state folder, the disk, 
 
 ### 8. First ticket
 
-A small first ticket, proposed for one of your repositories: one line added at the end of its README. One click moves it to Todo. The step follows it through its author, its review, your approval in the Inbox, the merge and the release watch, to live, then shows the time of each step and the total.
+A small first ticket, proposed for one of your repositories: one line added at the end of its README. One click moves it to Todo. The step follows it through its author, whose plan waits for your Go in the Inbox (the step links to it), its review, your approval in the Inbox, the merge and the release watch, to live, then shows the time of each step and the total.
 
 ![The first ticket, proposed](v2/first-ticket/first-ticket-proposal-1440-light.png)
 

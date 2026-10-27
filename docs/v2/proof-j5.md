@@ -40,7 +40,6 @@ What the code or the rehearsal shows will stop a real run, each to be closed bef
 - **The lock under Compose** (issue #438): the Compose broker idles until `CLEARED_V2_PROJECT_DIR` names a checkout, and the assistant gives it none. Step 10 waits for a lock that does not run. The rehearsal replaces the lock with a stand-in, so it does not prove step 10 under Compose.
 - **The lock's key** (question 1 of lane `v2-j5-first-ticket`, default (c) applied): v1's lock reads `human_public_key` from the project's `.cleared/agents.conf` only. Under that default the newcomer must add the line by hand, which fails pass 2. Options (a) or (b) of that question close it.
 - **The release request on an install by the assistant** (issue #445): the approval of a single service reads the project's verdict phrase and the pull request's head through `CLEARED_CONF` and `CLEARED_REPO` only, which such an install does not set. The first ticket goes back to Todo after its review, so step 9 cannot pass. Found by the rehearsal, which gives the service both as a stand-in.
-- **The session plan's Go** (issue #446): the first ticket's author proposes a session plan that waits for its Go in the inbox, and the first-ticket step does not say so. A newcomer who follows the step alone waits 10 minutes of the hour for the delay's Go. Found by the rehearsal, which gives the Go from the inbox.
 - **`claude setup-token` in the web terminal** (section 5.6 of the plan): not yet run with a real subscription. The rehearsal pastes a made-up value.
 
 ## After the run
