@@ -10,13 +10,14 @@ Both use a person's API token. Make one in the app: your menu, API access, then 
 
 A token creates, starts and reads tickets as its person. It never approves a release, never answers a session's question or permission, and never reaches the setup or the settings: only the two run routes below accept it.
 
-Keep it in a file only you can read, and name the file in `CLEARED_V2_API_TOKEN_FILE`:
+Keep it in a file only you can read:
 
 ```sh
 umask 077
 printf '%s\n' 'clr_...' > ~/.cleared-token     # paste the value in place of clr_...
-export CLEARED_V2_API_TOKEN_FILE=~/.cleared-token
 ```
+
+Then set `CLEARED_V2_API_TOKEN_FILE` to that file's path (`~/.cleared-token` here) in the shell or the script that runs the command.
 
 `cleared run` refuses a file other accounts can read. The variable `CLEARED_V2_API_TOKEN` can hold the value instead, for a script whose environment is already private. The command never takes the token as an argument, which `ps` and the shell's history would show, and never prints it.
 
