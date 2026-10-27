@@ -403,6 +403,10 @@ Choosing a ticket for the person beyond the template; skipping the review or the
 
 None: the real first ticket is the proof's.
 
+### 14.6 Delivered
+
+Matrix line P256, issue #433. What the author found and chose, as the decisions log of 2026-10-27 says. The first ticket is made in Todo by the step itself, in one click, so "proposed" is the step's page, not a ticket in a backlog. Live is the ticket's move to Done, which the engine makes once the release watch ends healthy or unwatched. The two open points left to this lane are closed for the flow's engine and the approval: the workspace and the key the assistant writes are used with no restart (#420, kept open for the lead's knowledge, the mirrors and the workspace record). The Compose broker still gets no project from the assistant (#438), so the real step 10 waits for it.
+
 ## 15. The README and the documentation (`v2-j5-docs`)
 
 Matrix: B6.5 (README and documentation). Wave 5. Effort M.
