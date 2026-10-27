@@ -59,4 +59,6 @@ On this server, under a scratch Compose project (`cleared-v2-proof-<8 hex>`) and
 
 Before its build, when the machine already holds an image under the tag `cleared-v2:local` (another install's), the rehearsal gives that image a second labelled name, `cleared-v2-proof-keep:<8 hex>`, and puts the tag back on it at the end: under Docker's containerd image store, an image whose only tag moves to another is gone as an image, even while containers run on it.
 
+The service it starts prunes the prepared images of a service by their repository name (`cleared-v2-prep-<service>`, P254): on a machine where another install holds prepared images for a service named `guestbook`, the rehearsal's could remove them. None was there on this server.
+
 Its pure parts are tested by `v2/test/scripts/proof-j5.test.ts`: the ten steps, the ports, the fakes, the times, the report, and the cleanup's filter.
