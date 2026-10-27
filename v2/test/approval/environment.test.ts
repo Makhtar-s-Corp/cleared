@@ -5,7 +5,7 @@
 // none; a key the file names still wins.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -75,4 +75,45 @@ test('a key made and an owner named after the service started are used at the ne
     db.close();
     rmSync(state, { recursive: true, force: true });
   }
+});
+
+// Issue #445: an install by the setup assistant names neither CLEARED_CONF
+// nor CLEARED_REPO, only the workspace. The flow then gives the recorder the
+// head it published and the phrase it judged the review by, which the
+// service's checkout's agents.conf holds; a file the environment names
+// still wins, as the v1 lock reads that one.
+const COMMIT = 'a'.repeat(40);
+const review = { ticket: 'LOCAL-1', pr: 7, session: 's-review', model: 'claude-sonnet-5-5', verdict: 'pass' as const, round: 1, report: 'Read it.', at: '2026-10-27T09:00:00.000Z' };
+
+function recorded(env: (state: string) => NodeJS.ProcessEnv) {
+  const state = mkdtempSync(join(tmpdir(), 'cleared-approval-review-'));
+  const db = new DatabaseSync(join(state, 'ledger.db'));
+  applyTables(db, [USERS_TABLE, ...TICKET_TABLES, ...APPROVAL_TABLES]);
+  const { reviewRecorder } = approvalEnvironment(db, { CLEARED_STATE_DIR: state, CLEARED_V2_STATE_DIR: state, CLEARED_V2_APPROVAL_KEY: join(state, 'approval.key'), ...env(state) });
+  const report = () => readFileSync(join(state, 'reports', readdirSync(join(state, 'reports'))[0] as string), 'utf8');
+  return { reviewRecorder, report, close: () => { db.close(); rmSync(state, { recursive: true, force: true }); } };
+}
+
+test('with no CLEARED_CONF nor CLEARED_REPO, a review is recorded with the head and the phrase the flow gives', async () => {
+  const error = console.error;
+  console.error = () => undefined;
+  const { reviewRecorder, report, close } = recorded(() => ({}));
+  try {
+    await reviewRecorder.record({ ...review, commit: COMMIT, verdictPhrase: 'no blocking issues' });
+    assert.match(report(), new RegExp(`commit: ${COMMIT}`));
+    assert.match(report(), /^Verdict: no blocking issues$/m);
+  } finally { close(); console.error = error; }
+});
+
+test('the verdict phrase of the file the environment names wins over the one the flow gives', async () => {
+  const error = console.error;
+  console.error = () => undefined;
+  const { reviewRecorder, report, close } = recorded((state) => {
+    writeFileSync(join(state, 'agents.conf'), '[merge]\nverdict = ready to merge\n');
+    return { CLEARED_CONF: join(state, 'agents.conf') };
+  });
+  try {
+    await reviewRecorder.record({ ...review, commit: COMMIT, verdictPhrase: 'no blocking issues' });
+    assert.match(report(), /^Verdict: ready to merge$/m);
+  } finally { close(); console.error = error; }
 });
