@@ -122,8 +122,12 @@ export function approvalEnvironment(db: DatabaseSync, env: NodeJS.ProcessEnv = p
   }
   const socket = brokerSocketPath({ env, confSocket: conf.socketPath, stateDir });
   const users = new SqliteUsers(db);
+  // The owner's rows are checked with the key the project's file names,
+  // else with the public half of the one this service holds (issue #432):
+  // the assistant makes it, and no step asks the person to commit it.
+  const publicKey = conf.publicKey ?? signer?.publicKey;
   const parts = createApproval({
-    db, users, stateDir, proof, ownerId: conf.ownerId, publicKey: conf.publicKey, signer, states: conf.states, verdict: conf.verdict,
+    db, users, stateDir, proof, ownerId: conf.ownerId, publicKey, signer, states: conf.states, verdict: conf.verdict,
     broker: new SocketReleaseBroker(socket, { stateDir }), resolveHead: headOnForge(env.CLEARED_REPO || env.ORCH_REPO),
   });
   const built: Environment = { ...parts, conf, signer, stateDir, users, proof };

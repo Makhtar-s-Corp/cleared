@@ -63,6 +63,9 @@
 .setup-tag { margin-left: 8px; padding: 1px 6px; border-radius: 999px; box-shadow: var(--e-outline); color: var(--text-secondary); font-size: var(--text-sm); white-space: nowrap; }
 
 .setup-code { margin: 0 0 var(--space-2); padding: 10px 12px; border-radius: var(--radius); background: var(--sunken); overflow-x: auto; font-family: var(--mono); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+.setup-more { margin-top: var(--space-2); }
+.setup-more summary { cursor: pointer; color: var(--text-secondary); }
+.setup-more[open] summary { margin-bottom: var(--space-2); }
 .setup-terminal { margin: var(--space-2) 0; }
 /* The web terminal's frame, as the session screen draws it (session.css), which this page does not load. */
 .setup-terminal .term { display: flex; flex-direction: column; gap: 8px; }

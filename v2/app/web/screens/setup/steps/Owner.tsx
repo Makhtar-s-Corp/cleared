@@ -27,8 +27,13 @@ export function OwnerMadePanel({ t, made }: { readonly t: Translate; readonly ma
         <>
           <p>{t('owner_signing_body')}</p>
           {made.existed ? <p className="setup-note">{t('owner_signing_existed')}</p> : null}
-          <pre className="setup-code" data-public-key><code>{line}</code></pre>
-          <Button className="btn" data-act="setup_copy" onClick={copy}>{copied ? t('owner_copied') : t('owner_copy')}</Button>
+          {/* Issue #432: nothing to commit. The line stays at hand for a release lock set up by hand. */}
+          <details className="setup-more">
+            <summary>{t('owner_signing_more')}</summary>
+            <p>{t('owner_signing_by_hand')}</p>
+            <pre className="setup-code" data-public-key><code>{line}</code></pre>
+            <Button className="btn" data-act="setup_copy" onClick={copy}>{copied ? t('owner_copied') : t('owner_copy')}</Button>
+          </details>
         </>
       ) : <p className="setup-error" role="alert">{t('owner_signing_missing')}</p>}
     </div>
