@@ -112,7 +112,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await page.fill('#setup-name', 'alex');
     await page.fill('#setup-password', PASSWORD);
     await page.click('[data-act="setup_owner"]');
-    await page.locator('[data-public-key]').waitFor();
+    await page.locator('[data-public-key]').waitFor({ state: 'attached' });   // folded for a lock set up by hand (issue #432)
     await checked(page, 'owner done');
     await page.click('[data-act="setup_next"]');
 
@@ -152,11 +152,13 @@ async function run(language: 'en' | 'fr'): Promise<void> {
 
     for (const id of ['workspace', 'environment', 'secrets', 'checks', 'first-ticket']) {
       await page.waitForURL(`${app.base}/setup/${id}`);
-      // The workspace, environment and checks steps are filled (lanes v2-j5-connect, v2-j5-images and v2-j5-doctor, each with its own tests); the others are stubs.
+      // The workspace, environment, checks and first-ticket steps are filled (lanes v2-j5-connect, v2-j5-images, v2-j5-doctor and
+      // v2-j5-first-ticket, each with its own tests); the others are stubs.
       const marker = id === 'workspace' ? '[data-workspace-step] [name="repository"]' : id === 'checks' ? '[data-check="docker"]'
-        : id === 'environment' ? '[data-environment-none]' : `[data-step-stub="${id}"]`;
+        : id === 'environment' ? '[data-environment-none]' : id === 'first-ticket' ? '[data-first-ticket="waiting"]' : `[data-step-stub="${id}"]`;
       await page.locator(marker).first().waitFor();
       if (id === 'environment') await checked(page, 'the environment with no workspace');
+      if (id === 'first-ticket') await checked(page, 'the first ticket with no workspace');
       if (id === 'secrets') await checked(page, 'a stub');
       await page.click('[data-act="setup_skip"]');
     }
