@@ -325,7 +325,7 @@ A real GitLab account and project: the owner's trial, as Linear's was (question 
 
 ## 12. Test secrets in the app (`v2-j5-secrets`)
 
-Matrix: C16. Wave 4. Effort M.
+Matrix: C16, and P257, the lane's own line, added when it delivered. Wave 4. Effort M.
 
 ### 12.1 Context
 
@@ -349,6 +349,8 @@ Production secrets; a vault or a cloud secret manager; secrets per ticket.
 ### 12.5 Real accounts and machines
 
 None.
+
+Matrix line P257, pull request 441 (issue #434). What the author found and chose, as the decisions log of 2026-10-27 says. The values go to an author's and a reviewer's session and to each real sibling, never to postgres, a fake, a reader or the lead. They pass through the docker client's environment (`--env NAME`), since a command line can be read by any account of the machine: that is an addition to `src/container/docker.ts`, and each of the three adapters names its session's service and role to the runtime. Pull request bodies did not go through the cleaner, and the guard does not know the values: `src/workspace/publish.ts` now refuses a branch whose commits hold one and removes any from the body. No Docker object was made: the fake `docker` of the tests records each command line and the environment it was given.
 
 ## 13. The setup session (`v2-j5-env-setup`)
 

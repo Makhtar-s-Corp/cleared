@@ -94,6 +94,8 @@ export function dockerLauncher(docker: Docker, runtime: CodexRuntime): CodexLaun
         allowHosts: [...input.policy.allowedHosts, ...CODEX_HOSTS], hostAddresses: runtime.hostAddresses, services: input.services ?? runtime.services ?? [],
         ...(input.siblings === undefined ? {} : { siblings: input.siblings }), ...(input.skills === undefined ? {} : { skills: input.skills }),
         user: runtime.user, command: ['sleep', 'infinity'],
+        // Its service's test secrets, for an author or a reviewer (C16).
+        ...(input.service === undefined ? {} : { service: input.service }), role: input.role,
         ...(runtime.image === undefined ? {} : { image: runtime.image }),
         ...(runtime.limits === undefined ? {} : { limits: runtime.limits }),
       });

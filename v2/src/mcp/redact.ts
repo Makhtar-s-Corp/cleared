@@ -97,16 +97,15 @@ function named(entries: readonly (readonly [string, unknown])[]): Record<string,
 }
 
 export function createRedactor(options: RedactorOptions): Redactor {
-  const clean: CleanOptions = {
-    secrets: secretValues(options.env),
-    servicePaths: [...new Set([...options.paths, options.env.CLEARED_V2_STATE_DIR, options.env.HOME].filter((p): p is string => !!p && p !== '/'))],
-  };
+  const servicePaths = [...new Set([...options.paths, options.env.CLEARED_V2_STATE_DIR, options.env.HOME].filter((p): p is string => !!p && p !== '/'))];
+  // The secret values at each text: the test secrets (C16) are set while the service runs.
+  const clean = (): CleanOptions => ({ secrets: secretValues(options.env), servicePaths });
   const tokens = (text: string): string => {
     let out = text;
     for (const [category, pattern] of TOKEN_PATTERNS) out = out.replace(pattern, removed(category));
     return out.replace(ASSIGNMENT, (match, name: string) => (SECRET_NAME.test(name.replace(INNOCENT_WORDS, '_')) ? `${name}=${removed('environment value')}` : match)).replace(QUERY, `$1${removed('address parameter')}`);
   };
-  const full = (text: string): string => tokens(cleanText(text, clean));
+  const full = (text: string): string => tokens(cleanText(text, clean()));
   // The guard's patterns read the digits of a UUID as a phone number, so an
   // id passes whole when it has the generated shape; a token of that shape
   // (ghp_...) is still a token.

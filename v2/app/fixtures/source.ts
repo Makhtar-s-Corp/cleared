@@ -49,6 +49,8 @@ import { consumptionFixture } from './consumption.ts';
 import { RESOLVED_TICKET, resolvedStory } from './cost.ts';
 import { contractItem, knowledgeItem, requestItems } from './inbox.ts';
 import { serviceMapFixture } from './services.ts';
+import { variableRefusal } from '../../src/container/services.ts';
+import { TEST_VALUE_MIN, type TestValuesView } from '../../src/secrets/types.ts';
 import { RECIPES, schedulesFixture, ticketSteps, towerFixture } from './tower.ts';
 
 const BODY_LIMIT = 16 * 1024;
@@ -121,6 +123,14 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   const asked = (item: NextInboxItem) => (item.kind === 'permission' || item.kind === 'question') && answered.has(`${item.sessionId}\n${item.requestId}`) ? { ...item, state: 'handled' as const } : item;
   const consumption = consumptionFixture(project, now, { week: options.week === true });
   let serviceMap = serviceMapFixture(now());
+  // The test secrets (C16): names, dates and who for the map's services, never a value; one set already.
+  const testValues = new Map<string, Map<string, { readonly setAt: string; readonly setBy: string }>>(serviceMap.services.map((service, index) => [
+    service.name, new Map(index === 0 ? [['PAYMENT_SANDBOX_KEY', { setAt: new Date(now().getTime() - 2 * 86_400_000).toISOString(), setBy: 'owner' }]] : []),
+  ]));
+  const testValuesView = (): TestValuesView => ({
+    workspace: true, key: 'ready',
+    services: [...testValues].map(([name, values]) => ({ name, inWorkspace: true, values: [...values].map(([value, saved]) => ({ service: name, name: value, ...saved, readable: true })) })),
+  });
   const batches = new BatchRunner({
     db: consumption.db, tickets: created, project, levers: consumption.levers, weekStopPercent: 85, now,
     flow: { launch: async (ticket, by) => { await created.move(ticket, created.states.progress, { kind: 'human', id: by }); }, subscribe: () => () => undefined },
@@ -222,6 +232,22 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
     if (collection === 'service-map') {
       if (method === 'GET' && parts.length === 1) return sendJson(response, 200, serviceMap);
       if (method === 'POST' && id === 'refresh' && parts.length === 2) return sendJson(response, 200, serviceMap = { ...serviceMap, readAt: now().toISOString() });
+    }
+    // The test secrets (C16): the service's refusals of a name and of a short value; a value is read and dropped.
+    if (collection === 'test-values') {
+      if (method === 'GET' && parts.length === 1) return sendJson(response, 200, testValuesView());
+      if (method === 'POST' && (parts.length === 1 || (id === 'remove' && parts.length === 2))) {
+        const body = (await readJson(request)) as { service?: unknown; name?: unknown; value?: unknown } | null;
+        const values = typeof body?.service === 'string' ? testValues.get(body.service) : undefined;
+        if (!values || typeof body?.name !== 'string') return sendJson(response, 400, { error: 'body' });
+        if (id === 'remove') return values.delete(body.name) ? sendJson(response, 200, { removed: true }) : sendJson(response, 404, { error: 'not_found' });
+        const refused = variableRefusal(body.name) ?? (typeof body.value !== 'string' ? 'body' : [...body.value].length < TEST_VALUE_MIN ? 'short' : undefined);
+        if (refused) return sendJson(response, 400, { error: refused });
+        const replaced = values.has(body.name);
+        const saved = { setAt: now().toISOString(), setBy: user };
+        values.set(body.name, saved);
+        return sendJson(response, 200, { value: { service: body.service, name: body.name, ...saved, readable: true }, replaced });
+      }
     }
     // The batches (requirement C6): the service's checks, and a pass before each read.
     if (collection === 'batches') {

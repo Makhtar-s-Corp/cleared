@@ -2,6 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
+import { DatabaseSync } from 'node:sqlite';
+import { testValuesOf } from '../../src/secrets/live.ts';
 import { join } from 'node:path';
 import { Docker, LABEL } from '../../src/container/docker.ts';
 import { parseServices } from '../../src/container/services.ts';
@@ -14,6 +16,8 @@ import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createClaudeCodeAdapter } from '../../src/session/adapters/claude-code.ts';
+import { dockerLauncher as codexLauncher } from '../../src/session/adapters/codex.ts';
+import { dockerLauncher as cursorLauncher } from '../../src/session/adapters/cursor.ts';
 import { createCleaner } from '../../src/session/clean.ts';
 import type { StartInput } from '../../src/session/contract.ts';
 import { DEFAULT_SAFE_COMMANDS } from '../../src/session/policy.ts';
@@ -724,4 +728,106 @@ test('the Claude Code adapter tells the ticket it waits for its service\'s image
   assert.deepEqual(waited.map((row) => row.event.value), [{ service: 'api', state: 'waiting' }]);
   const image = (byName(fake.containers, sessionNames(SESSION).container).args ?? []).find((arg) => arg.startsWith('cleared-v2-prep-api:'));
   assert.ok(image && image !== first.tag, 'the new image, built while the ticket waited');
+});
+
+// ------------------------------------------------------- the test secrets (C16)
+//
+// docs/v2/milestone-5-plan.md, decision 12: a service's test secrets are
+// given to its author's and its reviewer's session container, and to each
+// real sibling, its own service's; never to a fake, the egress, postgres,
+// a reader or the lead. A value goes through the docker client's own
+// environment, `--env NAME` on its command line, so no other account of
+// the machine reads it in the process list. Fake values only.
+
+const secretValue = (n: number): string => ['sandbox', 'fake', 'value', String(n)].join('-');
+
+function withTestValues(): void {
+  const state = scratch();
+  const store = testValuesOf(new DatabaseSync(':memory:'), { CLEARED_V2_STATE_DIR: state });
+  store.set('guestbook', 'PAYMENT_SANDBOX_KEY', secretValue(1), 'u1');
+  store.set('filter-api', 'FILTER_TEST_KEY', secretValue(2), 'u1');
+  store.set('mail', 'MAIL_TEST_PASSWORD', secretValue(3), 'u1');
+}
+
+// The create call of a container, by its name: its arguments and the environment the client was run with.
+function created(fake: FakeDocker, name: string): { readonly args: readonly string[]; readonly env: Readonly<Record<string, string>> } {
+  const call = fake.calls.find((c) => c.args[0] === 'create' && hasPair(c.args, '--name', name));
+  assert.ok(call, `no create of ${name}`);
+  return { args: call.args, env: call.options.env ?? {} };
+}
+
+test('an author\'s session gets its service\'s test secrets by name on the command line, the values through the client\'s environment', async () => {
+  withTestValues();
+  const files = workspaceFiles();
+  const fake = new FakeDocker();
+  await startSession(new Docker(fake.runner), runtimeSpec({ service: 'guestbook', role: 'author', siblings: [files.guestbook, files.filter] }));
+  const names = sessionNames(SESSION);
+  const session = created(fake, names.container);
+  assert.ok(hasPair(session.args, '--env', 'PAYMENT_SANDBOX_KEY'), 'the name alone');
+  assert.equal(session.env.PAYMENT_SANDBOX_KEY, secretValue(1));
+  assert.ok(!session.args.some((arg) => arg.includes(secretValue(1))), 'never the value on the command line');
+  assert.ok(!session.args.includes('MAIL_TEST_PASSWORD') && !session.args.includes('FILTER_TEST_KEY'), 'another service\'s are not its');
+
+  const sibling = created(fake, names.sibling('guestbook'));
+  assert.ok(hasPair(sibling.args, '--env', 'PAYMENT_SANDBOX_KEY'), 'a real sibling gets its own service\'s');
+  assert.equal(sibling.env.PAYMENT_SANDBOX_KEY, secretValue(1));
+  const fakeSibling = created(fake, names.sibling('filter-api'));
+  assert.ok(!fakeSibling.args.includes('FILTER_TEST_KEY') && fakeSibling.env.FILTER_TEST_KEY === undefined, 'a fake answers from its contract and gets none');
+  for (const name of [names.service('postgres'), names.egress]) {
+    const other = created(fake, name);
+    assert.deepEqual(other.env, {}, name);
+  }
+  for (const call of fake.calls) for (const value of [1, 2, 3].map(secretValue)) assert.ok(!call.args.some((arg) => arg.includes(value)), 'no command line carries a value');
+});
+
+test('a reviewer gets them too; a reader, the lead or a session with no service gets none', async () => {
+  withTestValues();
+  for (const [role, given] of [['reviewer', true], ['reader', false], ['lead', false], [undefined, false]] as const) {
+    const fake = new FakeDocker();
+    await startSession(new Docker(fake.runner), runtimeSpec({ ...(role === undefined ? {} : { service: 'guestbook', role }) }));
+    const session = created(fake, sessionNames(SESSION).container);
+    assert.equal(session.env.PAYMENT_SANDBOX_KEY === secretValue(1), given, String(role));
+    assert.equal(hasPair(session.args, '--env', 'PAYMENT_SANDBOX_KEY'), given, String(role));
+  }
+});
+
+test('what Cleared sets in the container wins over a test secret of the same name', async () => {
+  const state = scratch();
+  const store = testValuesOf(new DatabaseSync(':memory:'), { CLEARED_V2_STATE_DIR: state });
+  store.set('guestbook', 'PAYMENT_SANDBOX_KEY', secretValue(4), 'u1');
+  // The caller's variable of the same name is the container's.
+  const fake = new FakeDocker();
+  await startSession(new Docker(fake.runner), runtimeSpec({ service: 'guestbook', role: 'author', env: { PAYMENT_SANDBOX_KEY: 'given by the caller' } }));
+  const session = created(fake, sessionNames(SESSION).container);
+  assert.ok(hasPair(session.args, '--env', 'PAYMENT_SANDBOX_KEY=given by the caller'));
+  assert.equal(session.env.PAYMENT_SANDBOX_KEY, undefined);
+  assert.ok(hasPair(session.args, '--env', `HTTPS_PROXY=http://egress:3128`));
+});
+
+test('each adapter names its session\'s service and role to the runtime', async () => {
+  withTestValues();
+  const dir = scratch();
+  const input: StartInput = {
+    project: 'guestbook', ticket: 'LOCAL-1', role: 'author', harness: 'claude-code', model: 'claude-haiku-5-5', workdir: join(dir, 'work'),
+    briefing: { projectPage: '', decisions: [], glossary: [], lessons: [], lastHandover: null },
+    policy: { role: 'author', base: 'main', workdir: '/workspace', scripts: [], credentialFile: '/run/cleared/claude.token', safeCommands: DEFAULT_SAFE_COMMANDS, allowedHosts: [], forbiddenHosts: [], ticketFiles: [], learned: [] },
+    prompt: 'x', service: 'guestbook',
+  };
+  const runtime = { stateDir: join(dir, 'state'), loginFile: join(dir, 'harness.key'), hostAddresses: [], user: '1000:1000', stopTimeoutMs: 10, image: SESSION_IMAGE };
+  const runner = () => {
+    const process = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough(), pid: 1, exitCode: null, kill: () => true });
+    return process as unknown as ChildProcessWithoutNullStreams;
+  };
+  const claude = new FakeDocker();
+  await createClaudeCodeAdapter({ log: { append: () => 0, after: () => [] } as never, cleaner: () => createCleaner({}), docker: new Docker(claude.runner, runner), newId: () => SESSION, runtime }).start(input);
+  const codex = new FakeDocker();
+  await codexLauncher(new Docker(codex.runner), runtime).start(SESSION, input);
+  const cursor = new FakeDocker();
+  await cursorLauncher(new Docker(cursor.runner), runtime).start(SESSION, input);
+  for (const [name, fake] of [['claude-code', claude], ['codex', codex], ['cursor', cursor]] as const) {
+    assert.equal(created(fake, sessionNames(SESSION).container).env.PAYMENT_SANDBOX_KEY, secretValue(1), name);
+  }
+  const reader = new FakeDocker();
+  await codexLauncher(new Docker(reader.runner), runtime).start(SESSION, { ...input, role: 'reader' });
+  assert.equal(created(reader, sessionNames(SESSION).container).env.PAYMENT_SANDBOX_KEY, undefined, 'a reader\'s gets none');
 });

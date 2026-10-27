@@ -4,15 +4,19 @@
 // which is what a screen reader and a narrow screen read; the services as
 // buttons, and the impact of the one picked, as the service computed it.
 // model.ts holds the rules and the words; this file draws them, reads the
-// map again on the change stream, and refreshes it on demand.
+// map again on the change stream, and refreshes it on demand. Under the map,
+// the services' test secrets (TestValues.tsx, C16), shown even when the
+// map cannot be read.
 import { ArrowsClockwise } from '@phosphor-icons/react';
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ServiceMap } from '../../../../src/api/types.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { useScreen } from '@/lib/context.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { useLive } from '@/lib/query.tsx';
 import { FIT_WIDTH, builtLine, impactLines, layout, linkRows, mapFailure, problemLines, readMap, refreshMap, serviceDetail, type Drawing } from './model.ts';
+import { TestValuesEditor } from './TestValues.tsx';
+import { testValuesClient } from './test-values.ts';
 import './services.css';
 
 function Diagram({ drawing, picked, t }: { readonly drawing: Drawing; readonly picked: string | null; readonly t: Translate }) {
@@ -155,6 +159,7 @@ export default function ServicesPage() {
   const [picked, setPicked] = useState<string | null>(null);
   const [note, setNote] = useState('');
   const [busy, setBusy] = useState(false);
+  const client = useMemo(() => testValuesClient(context.me.csrf), [context.me.csrf]);
 
   const load = useCallback(async () => {
     try {
@@ -180,6 +185,12 @@ export default function ServicesPage() {
     }
   };
 
-  if (!map) return failed !== null ? <ServicesFailed t={t} message={failed} /> : <div className="services" aria-busy="true" />;
-  return <ServicesView map={map} t={t} now={context.now()} picked={picked} busy={busy} note={note} onPick={(service) => setPicked((before) => (before === service ? null : service))} onRefresh={() => void refresh()} />;
+  const values = <div className="services services-values"><TestValuesEditor t={t} client={client} path="/test-values" idPrefix="services" /></div>;
+  if (!map) return failed !== null ? <><ServicesFailed t={t} message={failed} />{values}</> : <div className="services" aria-busy="true" />;
+  return (
+    <>
+      <ServicesView map={map} t={t} now={context.now()} picked={picked} busy={busy} note={note} onPick={(service) => setPicked((before) => (before === service ? null : service))} onRefresh={() => void refresh()} />
+      {values}
+    </>
+  );
 }

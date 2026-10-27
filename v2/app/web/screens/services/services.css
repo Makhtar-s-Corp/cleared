@@ -78,3 +78,6 @@
   .services-actions { flex-wrap: wrap; }
   #services-refresh, .services-connect { min-height: 44px; }
 }
+
+/* The test secrets under the map (lane v2-j5-secrets): the screen's width, less its top padding. */
+.services.services-values { padding-top: 0; }

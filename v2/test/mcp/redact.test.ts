@@ -1,6 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { TEXT_LIMIT, createRedactor, cutStrings } from '../../src/mcp/redact.ts';
+import { testValuesOf } from '../../src/secrets/live.ts';
 import { ENV, ENV_NAME, SECRETS } from './support.ts';
 
 const redactor = createRedactor({ env: ENV, paths: ['/srv/state/shop'] });
@@ -87,4 +92,13 @@ test('changes says whether cleaning would change a text: a search term shaped li
   assert.equal(redactor.changes(SECRETS.github), true);
   assert.equal(redactor.changes(SECRETS.anthropic.slice(0, 30)), true);
   assert.equal(redactor.changes('basket total'), false);
+});
+
+// The test secrets (C16): set while the service runs, after the redactor is
+// made, and removed from the lanes' answers all the same.
+test('a test secret set after the redactor is made is removed from what it answers', () => {
+  const made = createRedactor({ env: ENV, paths: [] });
+  const value = ['sandbox', 'fake', 'value', 'mcp'].join('-');
+  testValuesOf(new DatabaseSync(':memory:'), { CLEARED_V2_STATE_DIR: mkdtempSync(join(tmpdir(), 'cleared-redact-')) }).set('guestbook', 'PAYMENT_SANDBOX_KEY', value, 'u1');
+  assert.equal(made.text(`ran with ${value}`), 'ran with [removed: secret]');
 });

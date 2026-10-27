@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { ServiceError, dependencyChange, parseServices, planSiblings, ticketLayerDockerfile, type SiblingSource } from '../../src/container/services.ts';
+import { ServiceError, dependencyChange, parseServices, planSiblings, testVariables, ticketLayerDockerfile, variableRefusal, type SiblingSource } from '../../src/container/services.ts';
 
 test('postgres:16 becomes a service named postgres with its data on tmpfs and a DATABASE_URL for the session', () => {
   const [postgres, ...rest] = parseServices('postgres:16');
@@ -154,4 +154,26 @@ test('a fake of a contract in another format carries the format, and its port is
     { name: 'filter-api', port: 8080, contract: '/state/filter-api/contract/openapi.yaml' },
   ], 'OpenAPI, the default, carries no format');
   assert.deepEqual(asked, ['protobuf:/state/royalties/api/royalties.proto', 'jsonschema:/state/catalogue/schema/isrc.json', 'openapi:/state/filter-api/contract/openapi.yaml']);
+});
+
+// ------------------------------------------------------- the test secrets (C16)
+
+test('a test secret is named as an environment variable, never one Cleared, a harness or a test service sets', () => {
+  for (const name of ['PAYMENT_SANDBOX_KEY', 'MAIL_TEST_PASSWORD', 'S3_TEST_BUCKET', 'A']) assert.equal(variableRefusal(name), undefined, name);
+  for (const name of ['', 'lower', '9LIVES', 'WITH-DASH', 'WITH SPACE', `A${'B'.repeat(64)}`]) assert.equal(variableRefusal(name), 'name', name);
+  const reserved = [
+    'HOME', 'PATH', 'USER', 'SHELL', 'TMPDIR', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY', 'ALL_PROXY', 'NODE_OPTIONS', 'NODE_EXTRA_CA_CERTS', 'NODE_TLS_REJECT_UNAUTHORIZED',
+    'SSL_CERT_FILE', 'SSL_CERT_DIR', 'LD_PRELOAD', 'LD_LIBRARY_PATH', 'GIT_DIR', 'GIT_SSH_COMMAND', 'CLAUDE_CONFIG_DIR', 'CLAUDE_CODE_OAUTH_TOKEN', 'ANTHROPIC_API_KEY',
+    'CLEARED_V2_STATE_DIR', 'CODEX_HOME', 'OPENAI_API_KEY', 'CURSOR_API_KEY', 'EGRESS_PORT', 'FAKE_PORT',
+    // What a known test service gives the session: postgres's DATABASE_URL.
+    ...Object.keys(parseServices('postgres:16')[0]?.sessionEnv ?? {}),
+  ];
+  for (const name of reserved) assert.equal(variableRefusal(name), 'reserved', name);
+});
+
+test('the variables given: the test secrets that pass, under what the container already sets', () => {
+  const value = (n: number) => ['sandbox', 'fake', 'value', String(n)].join('-');
+  assert.deepEqual(testVariables({ PAYMENT_SANDBOX_KEY: value(1), HOME: value(2), lower: value(3), DATABASE_URL: value(4) }, { HOME: '/tmp', DATABASE_URL: 'postgres://postgres@postgres:5432/postgres' }), { PAYMENT_SANDBOX_KEY: value(1) });
+  assert.deepEqual(testVariables({ MAIL_TEST_PASSWORD: value(5) }, { MAIL_TEST_PASSWORD: 'the container\'s own' }), {}, 'a name the container sets is the container\'s');
+  assert.deepEqual(testVariables({}, { HOME: '/tmp' }), {});
 });
