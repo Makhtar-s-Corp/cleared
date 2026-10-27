@@ -7350,5 +7350,5 @@ Both run with `CLEARED_V2_CAPTURES`.
 - Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issue and the pull request, nothing else.
 - Ports: only the tests' own ephemeral loopback ones. No tunnel, no secret.
 
-- Pull request: against `v2`.
+- Pull request: 441, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-secrets`.
