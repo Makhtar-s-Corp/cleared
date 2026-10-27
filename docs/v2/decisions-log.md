@@ -7475,3 +7475,34 @@ The first tries found two defects, fixed here with a test each: the check's cont
 
 - Pull request: 439, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-env-setup`.
+
+## 2026-10-27: the README for v2, and a newcomer's pages: install, troubleshooting, `cleared run` and its API (the author's choices, lane `v2-j5-docs`, B6.5, P259, issue #442)
+
+**The need.** Section 15 of [milestone-5-plan.md](milestone-5-plan.md) (matrix B6.5): the root `README.md` still described v1 (systemd, Tailscale, Orca terminals) and sent the reader to `v2/README.md` to start anything. The lane writes the README and the pages a newcomer follows: `docs/install.md`, `docs/troubleshooting.md` and `docs/run.md`, with `v2/README.md` pointing to them, proven by `test/docs.test.ts`. English pages, no em dash, nothing on a real server. As earlier lanes noted, `PROMPT.md` and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of section 3.1 of the milestone 5 plan.
+
+**Decisions.**
+1. **Quoted from the code, never paraphrased.** `docs/troubleshooting.md` quotes each line of the ready section that is not green as `src/doctor/messages/ready.en.json` writes it, placeholders included, under the check that prints it (the twelve ids of `READY_CHECKS`; the `workspace_*` lines are the `checkout` check's), with what to do as the doctor says it and a line of why where it helps. The test reads the catalog, so a line added to the doctor without a word in the page fails it. Notices are there too: a person asks about them as much as about failures. The install's refusals are quoted in `docs/install.md` the same way, from `src/cli/messages/install.en.json`.
+2. **The assistant's steps** are the registry's (`src/setup/steps.ts`), in its order, under the names the assistant shows (`app/messages/setup.en.json`), each with a capture from the assistant's own browser tests. The owner step had none: one was taken (`docs/v2/setup-assistant/owner-1440-light.png`, 1440 px, light, English) with a scratch script on the same fakes as `app/test/setup/setup-browser.test.ts` (a scratch ledger, a fake container, this server's headless Chrome), the code on it a scratch service's. The Claude Code step shows the French capture, the only one there is, and says so.
+3. **Updating** is `docker compose -f v2/compose.yaml down`, `git pull`, then the install with `--build`. Read from `src/cli/install.ts`: run while Cleared runs, the install changes nothing, and `run --rm install` alone does not build an image that exists. The page says this path is derived and not yet run; the plan keeps upgrading in place out of scope (section 4.3).
+4. **Removing everything** lists the four kinds the Docker wrapper labels (`create`, `build`, `network create`, `volume create` in `src/container/docker.ts`), each by `--filter label=cleared.dev=v2`, after `down`, and says what the label cannot tell apart: a second install on the machine goes too. The state folder is removed last, by hand, said irreversible, with what it holds.
+5. **SSH from elsewhere** forwards the app's port and the previews' (8794): `app/src/preview.ts` serves the Browser tab's previews from their own loopback origin, which the browser loads directly.
+6. **What a Compose install cannot do yet is said where the newcomer meets it**: the first ticket's step and the troubleshooting page name #438 (no project for the release lock), with #420, #421, #436 and #437 listed once, in troubleshooting. The README's status says the proof (B6.5p) has not been run.
+7. **The Compose forms** of `cleared doctor` and `cleared run` (`docker compose -f v2/compose.yaml run --rm --no-deps service cleared ...`) are the ones the Checks step and `v2/README.md` name. `cleared run`'s form needs its token file under the state folder, the only folder of the machine that container sees; the page says it is not yet run.
+8. **The templates `cleared run` takes** are listed from `TICKET_TEMPLATES`, which the command checks: `bug`, `review`, `ci`, `question` and `environment`. Its usage line in `src/cli/messages/run.{en,fr}.json` still lists four, since the Environment template (P258) came after; not this lane's file.
+9. **The v1 pages** of `docs/` (concepts, configuration, security, the app, trackers, notifications, heartbeat, memory, roadmap) are named in the README as written for v1 and kept; rewriting them is not section 15's.
+10. **The wording test over the new catalogs.** `test/wording.test.ts` already walks every catalog of `app/` and `src/`, the milestone 5 ones included, and passes unchanged. `test/docs.test.ts` applies its prose rules (no em dash, no dash used as a pause, no emoji, no filler) to the four pages outside their code, where a shell line may hold a `!` or a `--`.
+
+**Files beyond section 15.4**: `docs/v2/setup-assistant/owner-1440-light.png` (decision 2), section 15.6 of the plan (`test/milestone-5-plan.test.ts` asks every milestone 5 line of the matrix to be named there), the matrix and this log.
+
+**Tests first.** `9062aee8` committed `test/docs.test.ts` alone. On it, 8 of the 12 cases failed: the pages did not exist, the README had no section "What it needs", and `v2/README.md` linked none of them. The 4 cases that were there passed.
+
+**Checks**, on this branch at `origin/v2` `ceb1589f`:
+- `npm run typecheck` passes.
+- `npm test`: 2851 Node tests, 2716 pass, 135 skipped, 0 fail; 413 Vitest tests pass. A first run failed one case, `test/milestone-5-plan.test.ts` (P259 not named in the plan), fixed by section 15.6.
+- `test/docs.test.ts`: 12 of 12 pass; `test/wording.test.ts`: 2 of 2.
+- `npm run guard -- --base origin/v2`: nothing refused. A first run refused a line of `docs/run.md`, an `export` of `CLEARED_V2_API_TOKEN_FILE` read as an assigned secret; the page names the variable in prose. The guard reads `v2/` and the v2 workflow only, not `docs/` or the root README, and runs without the private-term list; the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
+
+**Resources.** No Docker object, no real GitHub, GitLab, Slack, Cursor or Codex account, no Claude Code login read, no doctor run. Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issue and the pull request. Ports: the capture's scratch service and app, and the tests', on ephemeral loopback ports. No tunnel, no secret.
+
+- Pull request: 444, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-docs`.

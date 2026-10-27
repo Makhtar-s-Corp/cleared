@@ -14,6 +14,8 @@ The one exception is the app's front end (`app/web/`, React): Vite builds it int
 
 ## Install with Docker Compose
 
+A person installing Cleared reads [docs/install.md](../docs/install.md): the same command, then the setup assistant step by step, reaching the machine over SSH, updating, stopping and removing everything. This section says how the install works.
+
 On Linux with Docker Engine and git, from a clone of this repository, as the account that will own Cleared (not root):
 
 ```sh
@@ -50,6 +52,8 @@ What [`compose.yaml`](compose.yaml) holds (`test/install/compose.test.ts`):
 To stop Cleared: `docker compose -f v2/compose.yaml down`. The state folder stays. To remove the images too, by label: `docker image ls --filter label=cleared.dev=v2`, then `docker image rm` of the ids. Nothing is published to a registry: Cleared's images are built on the machine from the clone, as the owner decided on 2026-10-25 (question 1 of [the milestone 5 plan](../docs/v2/milestone-5-plan.md)); `pull_policy: never` keeps Compose from pulling Cleared's own image. The images' base, `node:24`, comes from Docker Hub when the machine does not have it. Docker Desktop waits for question 4.
 
 The `cleared` command ([`src/cli/cleared.ts`](src/cli/cleared.ts)) runs `src/cli/<command>.ts` with its arguments: `cleared status`, `cleared user`, and each command a later lane adds as a file. From a clone it is `node v2/src/cli/cleared.ts <command>`. In the image it is the entrypoint's `cleared` role, which runs it as the state folder's owner (`docker compose exec` would run it as root); `docker compose -f v2/compose.yaml run --rm --no-deps service cleared status`, with the variables the install was given, is the intended form, not yet run.
+
+`cleared doctor` and `cleared run` are written up for the people who use them: each line of the doctor's ready section that is not green, and what to do, in [docs/troubleshooting.md](../docs/troubleshooting.md); the command `cleared run` and the routes `POST /api/run` and `GET /api/run/:id` in [docs/run.md](../docs/run.md).
 
 ## Commands
 
