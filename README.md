@@ -2,62 +2,81 @@
 
 **Your agents do the work. Nothing ships until it's cleared.**
 
-Cleared is for developers who want coding agents to work on tickets while keeping review and shipping decisions visible. Scripts take a ticket through a coding team, checks, an independent review, human approval, and a guarded merge; Git worktrees isolate the work, and a SQLite ledger records actions, costs, and decisions.
-
-A local release broker checks tracker approval and the reviewed PR before merging; agent harnesses only request release over its Unix socket. Optional release health checks can watch the application after Cleared merges a PR. Repeated failures can trigger a revert of that exact merge, and a verified human owner can request the same revert with `cleared rollback TICKET`. Cleared pushes the revert to the base branch so the project's own deployment platform can redeploy it. See [Release configuration](docs/configuration.md#release) for the required health probe, branch permissions and migration limits.
-
-`cleared status` shows the last wake, service reachability and stalled work without starting a model. An optional push heartbeat lets an external service alert you when Cleared stops waking or gets stuck. See [Heartbeat and status](docs/heartbeat.md).
-
-To let an agent search the v2 session history read only, with secrets removed, give it this line: `claude mcp add cleared-ledger -e CLEARED_STATE_DIR=<folder of ledger.db> -- node <cleared checkout>/v2/src/cli/ledger-mcp.ts` (see [the ledger's MCP server](v2/README.md#the-ledgers-mcp-server)).
-
-When something waits for the human (a release to agree to, a team's question) or goes wrong (a rollback, a health problem, a team blocked), the wake tells him on his phone: through the app installed on the Home Screen (Web Push, no outside account), or ntfy, Telegram or e-mail. See [Notifications](docs/notifications.md).
+Cleared takes your tickets through coding agents and keeps the decisions with you. A ticket moved to Todo gets its own session: an author writes the change in a container of its own, with no route out but a filtered proxy; a reviewer of another model reads it; the change and its proof wait in your Inbox. Nothing is merged until you approve that exact version. Then a release lock merges it and, when the project declares one, watches its health and can roll it back. A ledger keeps every session, cost and decision.
 
 ```mermaid
 flowchart LR
-  A[Ticket moves to Todo] --> B[Open team and worktree]
-  B --> C[Code and checks]
+  A[Ticket moved to Todo] --> B[Author session in its own container]
+  B --> C[Checks]
   C --> D[Review by another model]
-  D --> E[Request approval for this PR version]
-  E --> F[Human moves ticket to approval state]
-  F --> G[Guarded merge and deployment]
+  D --> E[Your approval in the Inbox]
+  E --> F[Release lock merges]
+  F --> G[Health watch]
   C -->|Fix needed| B
   D -->|Fix needed| B
 ```
 
-This diagram shows the normal path for an application change. The configured tooling exception is described below.
+## How it works
 
-## Principles
+- **One machine, under Docker Compose.** Three containers (the service, the web app and the release lock) and one container per session. Every Docker object Cleared makes carries the label `cleared.dev=v2`, and Cleared acts only on what it lists by that label.
+- **Your subscriptions.** Sessions run Claude Code on your Claude subscription. Cleared does not resell model calls.
+- **Your forge.** GitHub or GitLab: Cleared pushes a branch per ticket and opens a pull request; your CI runs as usual.
+- **Scripts decide the flow, not a model.** A model writes and reviews; when to review, when to ask you and when to merge are code.
+- **Nothing ships without you.** The release lock checks your signed approval of the reviewed head before it merges.
+- **On this machine only.** The app listens on `127.0.0.1`; from another computer you forward its port over SSH.
 
-- Scripts coordinate the workflow; a model does not decide when to merge.
-- Application changes require a human to approve the version shown to them. Paths explicitly configured as `tooling_paths` can merge after review and green checks without a ticket approval; audit that list before using unattended shipping.
-- Today, review requires a different model from the one that wrote the change. A fresh session on the same subscription, without the author's context, is planned for developers who have only one model.
-- Cleared runs on your CLI subscriptions and your Linux host. It does not resell model calls.
-- Claude Code and Codex coding lanes run on the host under the same configured role policy. Codex can instead use a project-owned container runner. Either host harness can read every file readable by the Cleared account; use a dedicated system account without other projects' secrets if you need stronger isolation.
-- The ledger records runs, costs, events, and decisions so the process can be inspected.
-- Optional project memory gives a new team a bounded briefing from project files and the previous session's handover. It is off by default; enable it with `[memory] enabled = true` in the project's tracked `.cleared/agents.conf`.
+## What it needs
+
+- Linux with Docker Engine and its Compose plugin, and git. Nothing else is installed on the machine.
+- An account that is not root, in the `docker` group. The `service` container holds the Docker socket, which gives it root's reach on the machine, as the `docker` group does for any account.
+- 5 GB free at least, 20 GB to work in comfort.
+- Ports 8791, 8792 and 8794 free on `127.0.0.1`.
+- A GitHub fine-grained token or a GitLab token for your repositories, and a Claude subscription.
+
+Docker Desktop on macOS or Windows is not supported yet.
+
+## Install
+
+From a clone of this repository, as that account:
+
+```sh
+docker compose -f v2/compose.yaml run --rm install
+```
+
+The command checks Docker, the ports and the state folder before it writes anything, builds the images on the machine (a few minutes, once), starts Cleared and prints its address with a one-time setup code. Run again, it changes nothing that runs. [docs/install.md](docs/install.md) has the details: the settings, what the command refuses, SSH from another computer, updating, stopping and removing everything.
+
+## The setup assistant
+
+Open the address the command printed and follow the assistant, in English or French. Its eight steps:
+
+1. **Your account**: the setup code, your name and a password.
+2. **Forge**: a GitHub or GitLab token, checked on the spot.
+3. **Claude Code**: the line `claude setup-token` prints, run in a terminal the page opens.
+4. **Repositories**: the ones Cleared works on, with the links between them proposed for you to tick.
+5. **Environment**: an image per service with its dependencies, built ahead.
+6. **Test secrets**: the values your tests need, encrypted on the machine (or skip).
+7. **Checks**: each part of the install green, or red with what to do.
+8. **First ticket**: a one-line change, taken through review and your approval to live.
+
+Each step says how long it took, your time and the machine's. Tokens are kept in files of the state folder, never shown again, never sent back to the browser. [docs/install.md](docs/install.md#the-setup-assistant) shows each step.
+
+When a check is red, [docs/troubleshooting.md](docs/troubleshooting.md) says what each line of `cleared doctor` means and what to do.
+
+To start tickets from a terminal or a script, without the app: [docs/run.md](docs/run.md) (`cleared run` and the API).
 
 ## Status
 
-**Alpha, Linux only.** Cleared was used on one production project in October 2026; that installation is currently disconnected pending a clean reinstall. Worktrees, model routing, cross-model review, approval checks, the ledger, and a static dashboard are exercised by the test suite. Claude Code and Codex CLI are supported today. Cleared aims to support many coding harnesses; OpenCode, Gemini CLI, and Copilot CLI are planned. Setup still assumes a GitHub repository for pull requests, a Node-oriented project, and project-specific rules. Ticket tracking can use Linear, GitHub Issues, or local SQLite. Sessions run in Orca terminals by default. With `[terminal] adapter = none`, they run detached without any terminal, started by the wake's systemd user service. A tmux adapter is planned. The read-only Cleared app (Cockpit) shows the factory live on desktop and phone. Tooling-only changes are exempt from the ticket approval check when configured that way. Claude CLI permissions and the private-term guard are safeguards; Codex also applies an operating-system sandbox to its commands. Neither isolates files readable by the Cleared account.
-
-## Requirements
-
-Linux with systemd, Node.js 24, git, jq, curl, GitHub CLI (`gh`), Claude Code and/or Codex CLI. Forge calls use the `gh` login and git credentials of the service account, or a GitHub App configured in [`[forge]`](docs/configuration.md#forge) so that pull requests, pushes and merges show as its bot with one-hour tokens. Linear credentials are needed only for the Linear tracker; GitHub Issues needs a GitHub App ID, installation ID, and private key so Cleared can renew its installation token, plus Tesseract OCR for capture uploads; local tracking needs separate operating-system accounts and an approval signing key. `serve/install.ts` never binds or publishes ports 80 and 443, nor a port already in use, and checks them before writing anything ([Decisions](docs/concepts.md#decisions)). Orca is needed only with the default `[terminal] adapter = orca`. With `none`, no terminal is needed (see [Configuration](docs/configuration.md#terminal)). Tailscale is required only if you install the dashboard and wake timers. A repository where the base branch can be protected is recommended (a private repository on a free GitHub plan cannot be; see [Security](docs/security.md#branch-protection)). Separate agent and human identities are needed before allowing unattended shipping; see [Ticket trackers](docs/trackers.md) and [Security](docs/security.md).
-
-## Open a test team
-
-v1's lanes, terminals and one-shot harness adapters were removed in milestone 4 ([plan](docs/v2/milestone-4-plan.md)). Sessions are run by the v2 service: see [`v2/README.md`](v2/README.md) to start it and try it on sample data.
+**Alpha, Linux only.** Cleared v2 is built on the `v2` branch, milestone by milestone, each requirement with its test in [the requirements matrix](docs/v2/requirements-matrix.md). The one-command install and the assistant are milestone 5; its proof, a developer new to Cleared taking a first ticket to live in under an hour on a fresh machine, has not been run yet. Known gaps of a Compose install are listed in [troubleshooting](docs/troubleshooting.md#known-gaps-of-a-compose-install): the release lock does not get the project from the assistant yet (issue #438). Claude Code is the harness the assistant sets up; the others Cleared can drive are described in [Model adapters](docs/adapters.md).
 
 ## Read more
 
-- [Concepts and ticket lifecycle](docs/concepts.md)
-- [Heartbeat and status](docs/heartbeat.md)
-- [The Cleared app](docs/app.md)
-- [Notifications](docs/notifications.md)
-- [Memory contract and briefing](docs/memory.md)
-- [Configuration reference](docs/configuration.md)
+- [Installing Cleared](docs/install.md)
+- [Troubleshooting](docs/troubleshooting.md)
+- [`cleared run` and the API](docs/run.md)
+- [Cleared v2 inside](v2/README.md): the service, the app, the sessions, every setting, the commands for people working on Cleared, and the ledger's MCP server
 - [Model adapters](docs/adapters.md)
-- [Ticket trackers](docs/trackers.md)
-- [Security boundaries](docs/security.md)
-- [Roadmap](docs/roadmap.md)
+- [The fast lane](docs/fast-lane.md)
+- [The decisions log](docs/v2/decisions-log.md) and [the milestone 5 plan](docs/v2/milestone-5-plan.md)
 - [Contributing](CONTRIBUTING.md) · [Report a vulnerability privately](SECURITY.md)
+
+The other pages of `docs/` (concepts, configuration, security, the app, trackers, notifications, heartbeat, memory, roadmap) were written for v1 and are kept until v2 replaces what they describe.
