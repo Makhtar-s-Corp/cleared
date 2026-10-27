@@ -7552,5 +7552,5 @@ The first tries found two defects, fixed here with a test each: the check's cont
 
 **Resources.** Docker, on objects labelled `cleared.dev=v2`: the scratch projects' containers, the images they built (`cleared-v2:local`, the session and egress images, the prepared image), and the tag of decision 3. Beyond the label: one listing of every image of the machine and one `docker info` while reading the server, at the start, and the builds' base image `node:24`, which carries no label and stays. Ports: three of 9700 to 9799 and one ephemeral port for the fake GitHub, all on `127.0.0.1`, and the tests' own ephemeral loopback ones. No tunnel, no secret, no Claude Code login read. Network: `npm ci`, the image builds (Docker's and npm's mirrors), `git fetch`, and GitHub for the issues and the pull request.
 
-- Pull request: PR_NUMBER, against `v2`.
+- Pull request: 447, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-proof`.
