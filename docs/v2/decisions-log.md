@@ -7578,7 +7578,7 @@ The first tries found two defects, fixed here with a test each: the check's cont
 **Captures.** The first-ticket step's proposal, in `docs/v2/first-ticket/`, taken again by `app/test/setup/first-ticket-browser.test.ts` with `CLEARED_V2_CAPTURES`, since its note changed. The live captures changed only by their rendering and were kept.
 
 **Not done here.**
-- **No Compose run and no rehearsal.** The broker on a real install, and the release request after the assistant, are proven by tests. `scripts/proof-j5.ts` is unchanged: its next run can drop `CLEARED_CONF` and `CLEARED_REPO` from its override, and follow the step's link to the plan, after which its line about #446 under what did not pass is stale. Its stand-in lock stays until the lock's key is settled.
+- **No Compose run and no rehearsal.** The broker on a real install, and the release request after the assistant, are proven by tests. `scripts/proof-j5.ts` is unchanged: its next run can drop `CLEARED_CONF` and `CLEARED_REPO` from its override, and follow the step's link to the plan. Three of its report's strings are now stale and were not edited without a run: the stand-in for #445 ("without them the release cannot be requested"), the lock's ("the Compose broker idles"), and the line about #446 under what did not pass. Its stand-in lock stays until the lock's key is settled.
 - **The lock's key** (question 1 of lane `v2-j5-first-ticket`, default (c) applied): the v1 lock still reads `human_public_key` from the project's `agents.conf` only, so on a Compose install an approved first ticket is not merged until that line is in the repository. `docs/troubleshooting.md` and `docs/install.md` now name this gap instead of #438.
 
 **Checks**, on this branch at `origin/v2` `d89fd11d`:
