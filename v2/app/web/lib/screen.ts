@@ -18,9 +18,11 @@ export type Me = {
 export class ApiError extends Error {
   override name = 'ApiError';
   readonly status: number;
-  constructor(status: number, message: string) {
+  readonly reason: string | undefined;                     // the answer's { error }, when it gave one
+  constructor(status: number, message: string, reason?: string) {
     super(message);
     this.status = status;
+    this.reason = reason;
   }
 }
 

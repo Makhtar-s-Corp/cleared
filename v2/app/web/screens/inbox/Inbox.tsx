@@ -17,6 +17,7 @@ import { Input } from '@/components/ui/input.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
 import { Toggle } from '@/components/ui/toggle.tsx';
 import { useScreen } from '@/lib/context.tsx';
+import { SetupPending, setupPending } from '@/lib/setup-pending.tsx';
 import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { planStateLine } from '@/plan-panel/model.ts';
@@ -725,7 +726,7 @@ export default function Inbox() {
   const context = useScreen();
   const { t, api } = context;
   const [data, setData] = useKept<Data | undefined>('inbox', undefined);
-  const [failed, setFailed] = useState(false);
+  const [failed, setFailed] = useState<false | 'error' | 'pending'>(false);
   const [local, setLocal] = useState<ReadonlyMap<string, Local>>(restore);
   const [plans, setPlans] = useKept<ReadonlyMap<string, Plan>>('inbox-plans', new Map());
   // On a phone the captures start in their phone frame; the switch changes the frame only.
@@ -775,8 +776,9 @@ export default function Inbox() {
       // A grace whose release is gone from the list ended elsewhere.
       change((next) => { for (const [id, l] of next) if (!items.some((item) => item.id === id) && l.kind !== 'busy') next.delete(id); });
       setData({ items, tickets, sessions });
-    } catch {
-      setFailed(true);
+      setFailed(false);
+    } catch (error) {
+      setFailed(setupPending(error) ? 'pending' : 'error');
     }
   }, [api, change, setData, setPlans]);
 
@@ -1041,7 +1043,8 @@ export default function Inbox() {
   // The detail is in view beside the list from 1024 px, or as its own page once an item is open.
   keyState.current = { shown, visible: view !== undefined && (view.open || window.matchMedia('(min-width: 1024px)').matches), busy: shownLocal !== undefined };
   if (!view) {
-    return failed
+    return failed === 'pending' ? <SetupPending t={t} />
+      : failed
       ? <div className="inbox-error"><p className="empty error inbox-failed"><span>{t('inbox_load_failed')}</span><button type="button" className="chip-button" onClick={() => { setFailed(false); void load(); }}>{t('inbox_retry')}</button></p></div>
       : <div className="inbox-loading" aria-busy="true" />;
   }

@@ -23,6 +23,8 @@
   "inbox_waiting": "{n} waiting in the inbox",
   "signed_out": "Your session has ended. Sign in again.",
   "load_failed": "Cannot reach the service right now. This page tries again on its own.",
+  "setup_pending": "Cleared runs no ticket yet: the setup is not finished. The assistant connects a repository first.",
+  "setup_pending_link": "Finish the setup",
   "title_lead": "Plans",
   "title_consumption": "Consumption",
   "title_services": "Service map",

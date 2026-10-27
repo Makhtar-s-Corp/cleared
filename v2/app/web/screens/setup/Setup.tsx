@@ -6,11 +6,13 @@
 // owner's form alone; after it, the owner's steps through the service.
 // Moving between steps changes the address in the page (history), so Back
 // in the browser goes back a step.
-import { useCallback, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ComponentType, type ReactNode } from 'react';
 import type { OwnerMade, SetupView, StepId } from '../../../../src/setup/types.ts';
 import { STEP_IDS } from '../../../../src/setup/types.ts';
 import { Button } from '@/components/ui/button.tsx';
+import { Toggle } from '@/components/ui/toggle.tsx';
 import type { Language } from '@/lib/catalogs.ts';
+import { browserStore, rememberLanguage } from '@/lib/language.ts';
 import type { Translate } from '@/lib/i18n.ts';
 import { setupPath, setupPlaceOf } from '@/lib/routes.ts';
 import { lasted } from '@/lib/time.ts';
@@ -55,11 +57,32 @@ export function Progress({ t, view, current, linked = false }: { readonly t: Tra
   );
 }
 
+// The language choice of the shell's menu, on the assistant's page too
+// (issue #431): the page follows the person's choice, else the browser's
+// languages, else CLEARED_V2_APP_LANGUAGE (src/catalog.ts, languageOf), so
+// a newcomer whose browser asks for another language than the install's
+// can change it before the menu exists.
+export function LanguageChoice({ t, language, onLanguage }: { readonly t: Translate; readonly language: Language; readonly onLanguage: (language: Language) => void }) {
+  return (
+    <div className="setup-language" role="group" aria-label={t('language_label')}>
+      {LANGUAGES.map((each) => (
+        <Toggle key={each} lang={each} data-language={each} pressed={language === each} onPressedChange={() => onLanguage(each)}>{t(`language_${each}`)}</Toggle>
+      ))}
+    </div>
+  );
+}
+
+// French first, as the shell's menu lists them.
+const LANGUAGES: readonly Language[] = ['fr', 'en'];
+
+const Languages = createContext<{ readonly language: Language; readonly onLanguage: (language: Language) => void } | null>(null);
+
 function Shell({ t, view, current, linked, children }: { readonly t: Translate; readonly view: SetupView; readonly current: StepId | null; readonly linked?: boolean; readonly children: ReactNode }) {
+  const languages = useContext(Languages);
   return (
     <div className="setup">
       <header className="setup-head">
-        <div className="setup-brand"><Logo /><span className="name">{t('app_name')}</span></div>
+        <div className="setup-brand"><Logo /><span className="name">{t('app_name')}</span>{languages ? <LanguageChoice t={t} {...languages} /> : null}</div>
         <h1>{t('setup_heading')}</h1>
         <p className="setup-lead">{t('setup_lead')}</p>
       </header>
@@ -189,9 +212,18 @@ function SignedStage({ t, start }: { readonly t: Translate; readonly start: Step
   );
 }
 
-export function SetupScreen({ language, stage, step }: { readonly language: Language; readonly stage: 'first' | 'signed'; readonly step: StepId | null }) {
+export function SetupScreen({ language: start, stage, step }: { readonly language: Language; readonly stage: 'first' | 'signed'; readonly step: StepId | null }) {
+  const [language, setLanguage] = useState<Language>(start);
+  const languages = useMemo(() => ({
+    language,
+    onLanguage: (next: Language) => { rememberLanguage(next, browserStore(), document, location.protocol === 'https:'); setLanguage(next); },
+  }), [language]);
   const t = useMemo(() => setupTranslator(language), [language]);
-  return stage === 'first' ? <FirstStage t={t} /> : <SignedStage t={t} start={step} />;
+  return (
+    <Languages.Provider value={languages}>
+      {stage === 'first' ? <FirstStage t={t} /> : <SignedStage t={t} start={step} />}
+    </Languages.Provider>
+  );
 }
 
 export default SetupScreen;

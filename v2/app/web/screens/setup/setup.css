@@ -9,6 +9,7 @@
 
 .setup-head { margin-bottom: var(--space-4); }
 .setup-brand { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
+.setup-language { margin-left: auto; display: flex; gap: var(--space-1); }
 .setup-brand .name { font-weight: var(--weight-strong); font-size: var(--text-md); letter-spacing: -.01em; }
 .setup-head h1 { margin: 0; font-size: var(--text-lg); font-weight: var(--weight-strong); letter-spacing: -.035em; line-height: 1.25; }
 .setup-lead { margin: 4px 0 0; color: var(--text-muted); font-size: var(--text-md); text-wrap: pretty; }
