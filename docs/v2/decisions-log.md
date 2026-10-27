@@ -7241,3 +7241,102 @@ The two agreement cases came later, from a second read of the lock's path: with 
 
 - Pull request: 428, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-gitlab`.
+
+## 2026-10-27: test secrets in the app, sealed at rest, given to an author's and a reviewer's session only, and cleaned from what Cleared writes (the author's choices, lane `v2-j5-secrets`, C16, P256, issue #434)
+
+**The need.** Issue #434, section 12 of [milestone-5-plan.md](milestone-5-plan.md) (matrix C16, decision 12). A project whose tests need a key, a sandbox account or a mail test server, has no place for it but its own files. This lane adds:
+- a service's test secrets, set, replaced and removed in the app by a signed-in person, each change in the ledger with its name, who and when, never its value;
+- the values encrypted at rest under `<state>/secrets.key`, so a ledger copied without the key reads nothing;
+- the values given to the sessions' tests, and removed from everything Cleared writes;
+- a Test secrets panel on the Services screen and the assistant's secrets step, which show names and dates, never a value.
+
+French and English, accessible, fake values only, made at run time. As earlier lanes noted, the brief's section 6 (`PROMPT.md`) and sections 9 and 10 of `milestone-2-plan.md` are not in the repository; the conventions followed are those of section 3.1 of the milestone 5 plan.
+
+**The branch.** The brief asked for `v2/j5-secrets`. Git refuses that name while a local branch `v2` exists, so the lane runs on `v2-j5-secrets`, as the other milestone 5 lanes did.
+
+**Decision.**
+1. **The store** (`src/secrets/store.ts`), two tables of the secrets module:
+   - `test_secrets`: one row a service and a name, the value sealed, who set it and when;
+   - `test_secret_changes`: each set, replace and remove, with the name, who and when.
+
+   The values the key opens are read once at start and kept in memory. The cleaner reads that list at each text it cleans, so it never reads the ledger or decrypts on that path. One store a ledger (`src/secrets/live.ts`): the Services screen, the assistant's step, the cleaner and the session runtime all see a value the moment it is set.
+2. **The key** (`src/secrets/key.ts`). `<state>/secrets.key`, 32 random bytes, mode 600, made at the first value (`O_EXCL`, never through a link), never before: reading needs none.
+   - A link, a file of another account, one the group or others can read, or one of another size is refused. Nothing is sealed or opened with it, the service's log says why, and the screens say the key file is refused.
+   - AES-256-GCM, a fresh 12-byte nonce at each write, the service and the name as associated data: a sealed value moved to another row does not open.
+   - A ledger copied without its key lists its names as unreadable, gives no session a value, and a value set again there is sealed under the new key.
+3. **What a name and a value may be.**
+   - A name is an environment variable's: a capital, then capitals, digits and `_`, 64 characters at most.
+   - A name is never one the container needs as it is: the proxies, `HOME`, `PATH`, the certificates, `DATABASE_URL` (what postgres gives), and every name under `CLEARED_`, `CLAUDE_`, `ANTHROPIC_`, `CODEX_`, `OPENAI_`, `CURSOR_`, `NODE_`, `NPM_CONFIG_`, `LD_`, `GIT_`, `SSH_`, `DOCKER_`, `EGRESS_` and `FAKE_`. The rule is in `src/container/services.ts`, beside the test services' own variables, and the runtime applies it again.
+   - A value is one line, 8 to 4096 characters, with no control character and no space at either end (a paste mistake). The cleaner does not look for a value under 8 characters, which would remove ordinary words, so such a value is refused rather than kept and missed.
+   - 50 values a service at most.
+4. **Who gets the values.**
+   - An author's and a reviewer's session container gets its own service's values.
+   - Each real sibling gets its own service's: it runs the project's code for the tests.
+   - Nothing else does: a fake (it answers from a contract), the egress, postgres (its environment is fixed, as milestone 1 decided), a reader, the lead, and a session that names no service.
+   - Each of the three adapters (Claude Code, Codex, Cursor) now names its session's service and role to the runtime.
+   - A name the container already sets stays the container's: the values are added under the runtime's own variables, never over them.
+5. **Never on a command line.** `docker create --env NAME=value` puts the value in the process list, where any account of the machine reads it. The runtime gives the values as `privateEnv`: `--env NAME` on the command line, the value in the docker client's own environment, where the CLI reads it. `src/container/docker.ts` carries it, and its runner hands the client that environment over its own.
+6. **The cleaner's list.**
+   - `secretValues(env)` (`src/session/clean.ts`) now adds every value the service held since it started, a replaced or removed one too. A session started before the change still holds the old value.
+   - Every call site that already cleaned with `secretValues` is reached without being edited: the session's events, the flow's comments and notes, the lead, the reader, the knowledge module, the MCP server's answers, the human terminal.
+7. **Pull requests.** The body was never cleaned by `cleanText`, and the guard does not know the values. `src/workspace/publish.ts`:
+   - refuses a branch whose commits or commit messages hold a value, as the guard refuses one: nothing is pushed, and the refusal names no value;
+   - sends the body without any value the session's report names.
+
+   The title comes from the commit messages, already checked, so it needs nothing of its own.
+8. **The routes.**
+   - `GET`, `POST` and `POST …/remove` under `/api/test-values`, for the Services screen: the app's proof, then a person the service knows, never the flow's own identities.
+   - The same under `/api/setup/secrets` for the owner, through the setup module's guard, with `POST /api/setup/secrets/done`, which needs one value saved.
+   - A refusal is a code the screens say in words. No answer, error or log line carries a value, and the tests read every answer for one.
+9. **The screens.**
+   - One panel (`app/web/screens/services/TestValues.tsx`), on the Services screen under the map (shown also when the map cannot be read) and in the assistant's step, so both say the same.
+   - Each service with its values by name, "Set on 25 October by alex", an unreadable one said with what to do, a service gone from the workspace listed apart so its values can be removed.
+   - The form: the service when there are several, the name, and the value in a password field, emptied once saved.
+   - The words say test values only, since the session's agent can read them, and that a change reaches the next session that starts.
+   - The step's catalog keys are `test_values_*`, as the assistant lane chose: the guard reads a key with "secret" in it as an assigned secret. The Services catalog repeats the shared keys, and a test keeps both copies equal.
+   - The panel's service groups carry `data-test-values-service`, not `data-service`, which the map's buttons already use.
+
+**Questions for the owner** (defaults applied):
+1. A reader's session gets no value (applied): it reads code and runs no test. Or give it its service's values too.
+2. Postgres and the other declared test services get none (applied): the plan says "the test services", but their environment is fixed and they run no project code; the real siblings do, and they get them. Or give them to every declared service too.
+3. Any signed-in person may set, replace and remove a value on the Services screen (applied), as section 12 says; only the owner in the assistant. Or the owner alone on both.
+
+**Open.**
+- **A restart forgets old values.** The cleaner's list is the values the service held since it started. A value replaced before a restart is no longer removed, if a session container started before that restart still holds it. A hash of each old value would keep it, but a hash of a short value can be guessed; nothing is kept on disk but the sealed current values.
+- **Docker shows them.** `docker inspect` of a session container shows its environment to an account in the `docker` group, which already has root's reach on the host (the README says so).
+
+**Not done here.**
+- No Docker object was made: the tests' fake `docker` records each command line and the environment it was given. Docker's `--env NAME` form, which reads the value from the client's environment, is the CLI's documented one.
+- No real secret anywhere, no real account. Out of scope, as section 12.3 says: production secrets, a vault or a cloud secret manager, secrets per ticket.
+
+**Tests first.** `88f47cf9` committed the tests alone. On it:
+- the store's, the routes', the cleaner's, the runtime's and the publish tests could not load `src/secrets/`;
+- the services tests could not import `testVariables`;
+- the two new docker cases failed: no `privateEnv`, and the runner did not pass its environment on;
+- the step's screen test failed on its stub (no value listed, no Done), and the panel's test could not load `TestValues.tsx`.
+
+The publish case that refuses a branch holding a value came after, from a second read of `publish.ts`: the guard reads the commits, but not for these values.
+
+**Files outside the lane's list**, each for the values' path, nothing else changed:
+- `src/container/docker.ts` (decision 5);
+- `src/session/adapters/claude-code.ts`, `codex.ts` and `cursor.ts`: the service and the role, one line each (decision 4);
+- `src/workspace/publish.ts` (decision 7);
+- `app/web/screens/services/Services.tsx`, `services.css` and `app/messages/services.{en,fr}.json`: the panel mounted and its words;
+- `app/fixtures/source.ts`: the panel's routes on the fixtures, names and dates only, a value read and dropped.
+
+**Captures.** `docs/v2/test-secrets/`:
+- the step at 1440, 1280, 768 and 390 px, light and dark, in English, and at 1440 in French, by `app/test/setup/secrets-browser.test.ts`;
+- the panel at the same widths, light and dark, in English, and in French, dark, by `app/test/services/test-values-browser.test.ts`.
+
+Both run with `CLEARED_V2_CAPTURES`.
+
+**Checks.**
+
+**Resources.**
+- No Docker object, no real account, no Claude Code login read.
+- No Slack, Cursor or Codex account used.
+- Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issue and the pull request, nothing else.
+- Ports: only the tests' own ephemeral loopback ones. No tunnel, no secret.
+
+- Pull request: against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-secrets`.
