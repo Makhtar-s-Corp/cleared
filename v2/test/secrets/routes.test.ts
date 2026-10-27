@@ -204,3 +204,36 @@ test('the assistant\'s step is filled and may be skipped; the owner adds values,
     assert.equal((await call('POST', '/api/setup/secrets/remove', { body: { service: 'api', name: 'PAYMENT_SANDBOX_KEY' } })).status, 200);
   });
 });
+
+// One ledger, one store: the setup module and the secrets module are given
+// the same store.db by main.ts, so a value saved in the assistant is the one
+// the cleaner removes and the sessions are given, at once.
+test('a value saved in the assistant\'s step reaches the cleaner and the sessions through the module\'s store', async () => {
+  const env = workspace();
+  const db = new DatabaseSync(':memory:');
+  const module = createSecretsModule({ env, proof: () => PROOF });
+  for (const table of module.tables) db.exec(table);
+  module.provide({ store: { db } as never });
+  db.exec(SETUP_STEPS_TABLE);
+  const deps = {
+    db, records: new SetupRecords(db), env, fromEnvironment: new Set<string>(), fetch, now: () => new Date(),
+    owner: async () => ({ id: 'u1' as UserId, name: 'alex' }), onStop: () => undefined, container: undefined as never,
+  } satisfies StepDeps;
+  const users = new MemoryUsers();
+  users.users.set('u1', { id: 'u1' as UserId, name: 'alex' });
+  const app: App = { registry: { ...defaultRegistry(), users }, tables: [], routes: SECRETS.routes?.(deps) ?? [] };
+  const server = createServer((request, response) => dispatch(app, request, response, handle));
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/api/setup/secrets`, {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ service: 'web', name: 'MAIL_TEST_PASSWORD', value: fake('shared') }),
+    });
+    assert.equal(response.status, 200);
+    assert.deepEqual(testVariablesOf('web'), { MAIL_TEST_PASSWORD: fake('shared') });
+    assert.ok(knownTestValues().includes(fake('shared')));
+  } finally {
+    server.closeAllConnections();
+    await new Promise<void>((resolve) => server.close(() => resolve()));
+    db.close();
+  }
+});

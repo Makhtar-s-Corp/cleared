@@ -7278,7 +7278,8 @@ French and English, accessible, fake values only, made at run time. As earlier l
 5. **Never on a command line.** `docker create --env NAME=value` puts the value in the process list, where any account of the machine reads it. The runtime gives the values as `privateEnv`: `--env NAME` on the command line, the value in the docker client's own environment, where the CLI reads it. `src/container/docker.ts` carries it, and its runner hands the client that environment over its own.
 6. **The cleaner's list.**
    - `secretValues(env)` (`src/session/clean.ts`) now adds every value the service held since it started, a replaced or removed one too. A session started before the change still holds the old value.
-   - Every call site that already cleaned with `secretValues` is reached without being edited: the session's events, the flow's comments and notes, the lead, the reader, the knowledge module, the MCP server's answers, the human terminal.
+   - Every call site that reads `secretValues` at each text is reached without being edited: the session's events, the flow's comments and notes, the lead, the reader, the knowledge module, the human terminal.
+   - One did not: the lanes' MCP server's redactor (`src/mcp/redact.ts`) read the list once, when the flow module was made, before the secrets module had its store. It reads it at each text now, and `test/mcp/redact.test.ts` fails without that change.
 7. **Pull requests.** The body was never cleaned by `cleanText`, and the guard does not know the values. `src/workspace/publish.ts`:
    - refuses a branch whose commits or commit messages hold a value, as the guard refuses one: nothing is pushed, and the refusal names no value;
    - sends the body without any value the session's report names.
@@ -7321,6 +7322,8 @@ The publish case that refuses a branch holding a value came after, from a second
 - `src/container/docker.ts` (decision 5);
 - `src/session/adapters/claude-code.ts`, `codex.ts` and `cursor.ts`: the service and the role, one line each (decision 4);
 - `src/workspace/publish.ts` (decision 7);
+- `src/mcp/redact.ts` (decision 6);
+- tests: `test/container/docker.test.ts`, `test/workspace/publish.test.ts`, `test/mcp/redact.test.ts`, and three that took the secrets step for a stub or "Service" for an untranslated word: `app/test/setup/setup-browser.test.ts`, `app/web/test/setup/setup.test.tsx`, `app/web/test/i18n-audit.test.tsx`. Lane `v2-j5-first-ticket` (wave 4) fills the last stub and may edit the first two too;
 - `app/web/screens/services/Services.tsx`, `services.css` and `app/messages/services.{en,fr}.json`: the panel mounted and its words;
 - `app/fixtures/source.ts`: the panel's routes on the fixtures, names and dates only, a value read and dropped.
 
