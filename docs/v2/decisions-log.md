@@ -7589,5 +7589,5 @@ The first tries found two defects, fixed here with a test each: the check's cont
 
 **Resources.** No Docker object, no real GitHub, GitLab, Slack, Cursor or Codex account, no Claude Code login read. Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issues and the pull request. Ports: only the tests' own ephemeral loopback ones; the broker's test listens on a Unix socket of its own folder. No tunnel, no secret.
 
-- Pull request: PRNUM, against `v2`.
+- Pull request: 448, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-proof-fixes`.

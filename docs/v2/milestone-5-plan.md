@@ -477,7 +477,7 @@ Matrix line P260, pull request 447 (issue #443). What the author found and chose
 
 ### 16.7 The rehearsal's findings, fixed
 
-Matrix line P261, lane `v2-j5-proof-fixes` (issues #438, #445, #446). What the author chose, as the decisions log of 2026-10-27 says. The Compose broker finds its project in the workspace the assistant writes and starts with no restart (#438); the one-service path records a passing review with the head it published and the verdict phrase it judged the review by, so the release is requested on an install by the assistant (#445); the first-ticket step says when the author's session plan waits for the person's Go in the inbox, and links to it (#446). Proven by tests, not yet by a rehearsal: the rehearsal still gives its stand-ins. The lock's key (question 1 of lane `v2-j5-first-ticket`) is not changed.
+Matrix line P261, pull request 448 (lane `v2-j5-proof-fixes`, issues #438, #445, #446). What the author chose, as the decisions log of 2026-10-27 says. The Compose broker finds its project in the workspace the assistant writes and starts with no restart (#438); the one-service path records a passing review with the head it published and the verdict phrase it judged the review by, so the release is requested on an install by the assistant (#445); the first-ticket step says when the author's session plan waits for the person's Go in the inbox, and links to it (#446). Proven by tests, not yet by a rehearsal: the rehearsal still gives its stand-ins. The lock's key (question 1 of lane `v2-j5-first-ticket`) is not changed.
 
 ## 17. Waves
 
