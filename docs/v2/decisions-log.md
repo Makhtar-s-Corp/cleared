@@ -7330,7 +7330,16 @@ The publish case that refuses a branch holding a value came after, from a second
 
 Both run with `CLEARED_V2_CAPTURES`.
 
-**Checks.**
+**Checks.** Run on this branch at `origin/v2` `eb81a2ed`.
+- `npm run typecheck` passes.
+- `npm test`, with `CLEARED_V2_PLAYWRIGHT` set and the browser tests on this server's Google Chrome (`CLEARED_V2_CHROME`: the Chromium build that `playwright-core` names is not installed here, and every browser test failed at its launch without it): 2805 Node tests, 2801 pass, 2 skipped, 2 fail. Neither is this lane's:
+  - `test/flow/proof-capture.test.ts`, the real browser's capture: its after page and its video fail. It fails the same way on a clean checkout of `origin/v2` at `eb81a2ed`, run here on the same Chrome.
+  - `app/test/foundation/budget-browser.test.ts`, the screen-switch budget: 106.9 ms at p95 under the whole suite's load, over its 100. Alone it passes on both trees (22.4 to 25.8 ms here, 23.6 to 29.4 ms on `origin/v2`). With the test's own load, `CLEARED_V2_BUDGET_SLOWDOWN=4`, it fails on both (139.6 and 144.3 ms here, 108.5 and 140.7 ms on `origin/v2`). The Services screen is not one of its five.
+- 399 Vitest tests pass.
+- The first full run found three tests that still took the secrets step for a stub (the assistant's walk in the browser, the stub test of `setup.test.tsx`) or found "Service" written alike in French and English (`i18n-audit.test.tsx`). The walk now expects the step's no-workspace line, the stub test renders the stub itself, and the two keys are on the audit's list of shared words.
+- The panel's browser test leaves the shell's search and account buttons out of axe's label-in-name rule, as `app/test/a11y-browser.test.ts` does and says why; the rest of the page is checked whole.
+- `npm run guard -- --base origin/v2`: nothing refused. A first run refused four lines of a test, a message id of ten digits read as a phone number; the id is letters now.
+- The guard does not read `docs/v2/`, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
 
 **Resources.**
 - No Docker object, no real account, no Claude Code login read.
