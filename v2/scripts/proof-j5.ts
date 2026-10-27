@@ -17,7 +17,7 @@
 //   3. Playwright walks the assistant as a newcomer would, from the setup
 //      code to the first ticket's approval in the inbox and its live.
 //   4. Each step's time comes from the assistant's own records (GET
-//      /api/setup), the command's from this script's clock; the report is
+//      /api/setup through the app), the command's from this script's clock; the report is
 //      written as proof-report.ts writes the others, outside the repository.
 //   5. Everything the rehearsal made is removed by the label: the scratch
 //      project's objects, and what the service made with the label alone
@@ -123,7 +123,7 @@ export function cleanupPlan(options: {
 // ---- the fakes ----------------------------------------------------------------
 
 // The override the rehearsal gives the service, and only the service.
-export function overrideFile(options: { readonly fakes: string; readonly path: string; readonly script: string; readonly api: string; readonly socket: string }): string {
+export function overrideFile(options: { readonly fakes: string; readonly path: string; readonly script: string; readonly api: string; readonly socket: string; readonly conf: string; readonly repo: string }): string {
   for (const value of Object.values(options))
     if (/["\\$\n]/.test(value)) throw new Error('a value of the override holds a quote, a backslash, a dollar or a new line');
   return [
@@ -136,6 +136,8 @@ export function overrideFile(options: { readonly fakes: string; readonly path: s
     `      CLEARED_V2_FAKE_SCRIPT: "${options.script}"`,
     `      CLEARED_V2_FORGE_GITHUB_API: "${options.api}"`,
     `      CLEARED_RELEASE_SOCKET: "${options.socket}"`,
+    `      CLEARED_CONF: "${options.conf}"`,
+    `      CLEARED_REPO: "${options.repo}"`,
     '    volumes:',
     `      - "${options.fakes}:${options.fakes}"`,
     '',
@@ -240,8 +242,8 @@ export function proofRows(view: readonly StepView[], measured: { readonly comman
     }
     if (id === 'first-ticket') {
       const toApproved = between(moments.todo, moments.approved);
-      const waits = [['the session plan waited its Go', between(moments.planAsked, moments.go)], ['the approval waited', between(moments.approvalAsked, moments.approved)]] as const;
-      const said = waits.flatMap(([what, ms]) => (ms === null ? [] : [`${what} ${spoken(ms)}`]));
+      const waits = [['for the session plan\'s Go', between(moments.planAsked, moments.go)], ['for the approval, its grace to undo included', between(moments.approvalAsked, moments.approved)]] as const;
+      const said = waits.flatMap(([what, ms]) => (ms === null ? [] : [`${spoken(ms)} ${what}`]));
       const note = toApproved === null ? '' : `Todo to approved: ${spoken(toApproved)}${said.length === 0 ? '' : `, of which ${said.join(' and ')}`}`;
       return { n, name, status: moments.approved ? 'done' : 'not seen', personMs: null, machineMs: null, note };
     }
@@ -384,6 +386,7 @@ const STAND_INS = [
   'the forge: a fake GitHub on loopback answers the forge step and the doctor, a gh stand-in on the service\'s PATH lists the repository and keeps the pull requests in a file, and a bare copy of the example guestbook is the remote',
   'the service: recreated once after the one command, by an override file of the rehearsal\'s own folder, to carry those fakes; v2/compose.yaml is not changed',
   'the model: the login is a made-up value pasted in the step, and the fake harness plays the author and the reviewer; no Claude Code runs',
+  'the project of the approval: the service is given the project\'s .cleared/agents.conf as CLEARED_CONF and the checkout the workspace step makes as CLEARED_REPO, since the approval of a single service reads its verdict phrase and the pull request\'s head through them only, and an install by the assistant sets neither: without them the release cannot be requested (issue #445)',
   'the lock: a stand-in on a Unix socket merges the approved branch into the bare copy and writes the release watch\'s rows, healthy after a fixed delay; the Compose broker idles, as it does without a project (issue #438)',
   'the person: Playwright clicks and fills what the assistant shows, so the person\'s times are a script\'s, not a newcomer\'s reading',
 ];
@@ -471,7 +474,14 @@ export async function rehearse(options: Options): Promise<ProofRun> {
     const imageEnv = JSON.parse((await docker(['image', 'inspect', '--format', '{{json .Config.Env}}', imageId ?? IMAGE])).out || '[]') as string[];
     const path = imageEnv.find((e) => e.startsWith('PATH='))?.slice(5) ?? '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin';
     const override = join(root, 'fakes.yaml');
-    writeFileSync(override, overrideFile({ fakes, path, script, api, socket }));
+    // The project, which the approval of a single service knows only from
+    // CLEARED_CONF (its verdict phrase, read at the start) and CLEARED_REPO
+    // (the pull request's head): an install by the assistant sets neither.
+    // The checkout is where the workspace step clones the repository.
+    const conf = join(fakes, 'agents.conf');
+    cpSync(join(seed, '.cleared', 'agents.conf'), conf);
+    const checkout = join(state, 'repositories', 'rehearsal', 'guestbook');
+    writeFileSync(override, overrideFile({ fakes, path, script, api, socket, conf, repo: checkout }));
     const recreated = await docker(['compose', '--file', COMPOSE, '--file', override, 'up', '-d', '--no-deps', 'service'], { env, log: logFile });
     if (recreated.code !== 0) throw new Error(`the service did not start again with the fakes (${recreated.code})`);
     const service = await until('the service', () => containerOf(project, 'service'), 60_000);
@@ -561,7 +571,7 @@ export async function rehearse(options: Options): Promise<ProofRun> {
     const inbox = async () => (await (await page.request.get(`${app}/api/service/inbox`)).json()) as { id: string; kind: string; state: string }[];
     const plan = await until('the session plan in the inbox', async () => (await inbox()).find((i) => i.kind === 'session_plan' && i.state === 'waiting'), 5 * MINUTE);
     moments.planAsked = new Date().toISOString();
-    problems.push('step 9: the author\'s session plan waits for its Go in the inbox, and the first-ticket step does not say so; a newcomer following the step alone waits for the delay\'s Go (10 minutes for a plan of high confidence)');
+    problems.push('step 9: the author\'s session plan waits for its Go in the inbox, and the first-ticket step does not say so; a newcomer following the step alone waits for the delay\'s Go (10 minutes for a plan of high confidence; issue #446)');
     await page.goto(`${app}/inbox#${encodeURIComponent(plan.id)}`);
     await page.locator('.d-actions [data-act="plan_go"]').waitFor({ timeout: MINUTE });
     await page.click('.d-actions [data-act="plan_go"]');
@@ -569,7 +579,7 @@ export async function rehearse(options: Options): Promise<ProofRun> {
     moments.go = new Date().toISOString();
     say('proof-j5: step 9, the session plan has its Go');
     await page.goto(`${app}/setup/first-ticket`);
-    await page.locator('[data-first-ticket="approval"]').waitFor({ timeout: 15 * MINUTE });
+    await page.locator('[data-first-ticket="approval"]').waitFor({ timeout: 6 * MINUTE });
     moments.approvalAsked = new Date().toISOString();
     say('proof-j5: step 9, the approval waits in the inbox');
     await page.click('a[href="/inbox"]');
@@ -581,11 +591,14 @@ export async function rehearse(options: Options): Promise<ProofRun> {
     moments.approved = new Date().toISOString();
     say('proof-j5: step 9 done, approved');
     await page.goto(`${app}/setup/first-ticket`);
-    await page.locator('[data-first-ticket="live"]').waitFor({ timeout: 15 * MINUTE });
+    await page.locator('[data-first-ticket="live"]').waitFor({ timeout: 6 * MINUTE });
     moments.live = new Date().toISOString();
     say('proof-j5: step 10 done, live');
     await page.locator('[data-setup-summary]').waitFor({ timeout: MINUTE });
-    view = ((await (await page.request.get(`${app}/api/setup`)).json()) as { steps: StepView[] }).steps;
+    // The assistant's records, as its pages read them (screens/setup/model.ts).
+    const records = (await (await page.request.get(`${app}/api/service/setup`)).json()) as { steps?: StepView[] };
+    if (Array.isArray(records.steps)) view = records.steps;
+    else problems.push('the assistant\'s records could not be read');
   } catch (error) {
     problems.push(`stopped: ${cell((error as Error).message)}`);
     say(`proof-j5: stopped: ${(error as Error).message}`);
@@ -594,6 +607,9 @@ export async function rehearse(options: Options): Promise<ProofRun> {
     await new Promise<void>((done) => (github ? github.close(() => done()) : done()));
     await new Promise<void>((done) => (broker ? broker.close(() => done()) : done()));
   }
+
+  // What the ledger and the service say, for the log only, before the folder goes.
+  if (problems.some((p) => p.startsWith('stopped:'))) await diagnose(state, project, logFile);
 
   // 5. The cleanup, by the label.
   const after = await labelled();
@@ -615,6 +631,26 @@ export async function rehearse(options: Options): Promise<ProofRun> {
   writeFileSync(options.report, renderReport(result), { mode: 0o600 });
   say(`proof-j5: the report is ${options.report}`);
   return result;
+}
+
+// The tickets' history, the sessions, the newest session's last events, the
+// inbox and the flow's events, then the service's last lines, read only.
+async function diagnose(state: string, project: string, logFile: string): Promise<void> {
+  const write = (title: string, rows: unknown) => appendFileSync(logFile, `---- ${title}\n${JSON.stringify(rows, null, 1).slice(0, 20_000)}\n`);
+  try {
+    const { DatabaseSync } = await import('node:sqlite');
+    const db = new DatabaseSync(join(state, 'ledger.db'), { readOnly: true });
+    const all = (sql: string) => { try { return db.prepare(sql).all(); } catch (error) { return (error as Error).message; } };
+    write('tracker_history', all('SELECT ticket, status, actor_kind, at FROM tracker_history ORDER BY id'));
+    write('tracker_comments', all('SELECT ticket, created_at, substr(body, 1, 600) AS body FROM tracker_comments ORDER BY id'));
+    write('sessions', all('SELECT id, role, status, ticket, created_at, updated_at FROM sessions ORDER BY created_at'));
+    write('the newest session\'s events', all("SELECT seq, at, type, substr(event, 1, 400) AS event FROM session_events WHERE session_id = (SELECT id FROM sessions ORDER BY created_at DESC LIMIT 1) ORDER BY seq DESC LIMIT 25"));
+    write('flow_inbox', all('SELECT id, kind, state, ticket FROM flow_inbox'));
+    write('events', all('SELECT at, kind, ticket, substr(detail, 1, 300) AS detail FROM events ORDER BY event_id DESC LIMIT 25'));
+    db.close();
+  } catch (error) { write('the ledger', (error as Error).message); }
+  const service = await containerOf(project, 'service');
+  if (service) appendFileSync(logFile, `---- the service's last lines\n${(await docker(['container', 'logs', '--tail', '80', service])).out}\n`);
 }
 
 // ---- run as gh, in the service's container ----------------------------------------

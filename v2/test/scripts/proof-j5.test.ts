@@ -107,7 +107,7 @@ test('the image\'s second name, labelled with the scratch project\'s suffix', ()
 });
 
 test('the override gives the service its fakes and nothing else: no port, no other service, its folder at its own path', () => {
-  const text = overrideFile({ fakes: '/tmp/r/fakes', path: '/usr/local/bin:/usr/bin', script: '/tmp/r/fakes/script.json', api: 'http://127.0.0.1:40001', socket: '/tmp/r/fakes/release.sock' });
+  const text = overrideFile({ fakes: '/tmp/r/fakes', path: '/usr/local/bin:/usr/bin', script: '/tmp/r/fakes/script.json', api: 'http://127.0.0.1:40001', socket: '/tmp/r/fakes/release.sock', conf: '/tmp/r/fakes/agents.conf', repo: '/tmp/r/state/repositories/o/r' });
   assert.match(text, /^services:\n {2}service:\n/m);
   assert.doesNotMatch(text, /^ {2}(app|broker|install):/m);
   assert.doesNotMatch(text, /ports:|privileged|docker\.sock/);
@@ -116,7 +116,9 @@ test('the override gives the service its fakes and nothing else: no port, no oth
   assert.match(text, /CLEARED_V2_ADAPTER: "fake"/);
   assert.match(text, /CLEARED_V2_FORGE_GITHUB_API: "http:\/\/127\.0\.0\.1:40001"/);
   assert.match(text, /CLEARED_RELEASE_SOCKET: "\/tmp\/r\/fakes\/release.sock"/);
-  assert.throws(() => overrideFile({ fakes: '/tmp/r "x', path: '/bin', script: '/s', api: 'http://127.0.0.1:1', socket: '/s' }), /quote/);
+  assert.match(text, /CLEARED_CONF: "\/tmp\/r\/fakes\/agents.conf"/);
+  assert.match(text, /CLEARED_REPO: "\/tmp\/r\/state\/repositories\/o\/r"/);
+  assert.throws(() => overrideFile({ fakes: '/tmp/r "x', path: '/bin', script: '/s', api: 'http://127.0.0.1:1', socket: '/s', conf: '/c', repo: '/r' }), /quote/);
 });
 
 const REPOS = [{ repo: 'rehearsal/guestbook', url: '/tmp/r/fakes/guestbook.git', base: 'main' }];
@@ -176,10 +178,10 @@ test('each step\'s time: the command\'s from the rehearsal\'s clock, the assista
   assert.equal(rows[4]?.machineMs, 9_000);
   assert.equal(rows[6]?.status, 'skipped');
   assert.equal(rows[8]?.personMs, null, 'the first ticket\'s record is one for 9 and 10, given on 9');
-  assert.equal(rows[8]?.note, 'Todo to approved: 1 min 45 s, of which the approval waited 15 s');
+  assert.equal(rows[8]?.note, 'Todo to approved: 1 min 45 s, of which 15 s for the approval, its grace to undo included');
   assert.equal(rows[9]?.note, 'approved to live: 1 min 00 s');
   const planned = proofRows(VIEW, { commandMs: 1, buildMs: null, moments: { ...MOMENTS, planAsked: '2026-10-27T10:00:10.000Z', go: '2026-10-27T10:00:40.000Z' } });
-  assert.equal(planned[8]?.note, 'Todo to approved: 1 min 45 s, of which the session plan waited its Go 30 s and the approval waited 15 s');
+  assert.equal(planned[8]?.note, 'Todo to approved: 1 min 45 s, of which 30 s for the session plan\'s Go and 15 s for the approval, its grace to undo included');
   assert.equal(planned[0]?.note, '', 'no build, no note');
   const missing = proofRows(VIEW.filter((v) => v.id !== 'checks'), { commandMs: 1, buildMs: null, moments: {} });
   assert.equal(missing[7]?.status, 'not seen');
