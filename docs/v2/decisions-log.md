@@ -7498,9 +7498,9 @@ The first tries found two defects, fixed here with a test each: the check's cont
 
 **Checks**, on this branch at `origin/v2` `ceb1589f`:
 - `npm run typecheck` passes.
-- `npm test`: CHECKS_NPM.
+- `npm test`: 2851 Node tests, 2716 pass, 135 skipped, 0 fail; 413 Vitest tests pass. A first run failed one case, `test/milestone-5-plan.test.ts` (P259 not named in the plan), fixed by section 15.6.
 - `test/docs.test.ts`: 12 of 12 pass; `test/wording.test.ts`: 2 of 2.
-- `npm run guard -- --base origin/v2`: CHECKS_GUARD. The guard reads `v2/` and the v2 workflow only, not `docs/` or the root README, and runs without the private-term list; the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
+- `npm run guard -- --base origin/v2`: nothing refused. A first run refused a line of `docs/run.md`, an `export` of `CLEARED_V2_API_TOKEN_FILE` read as an assigned secret; the page names the variable in prose. The guard reads `v2/` and the v2 workflow only, not `docs/` or the root README, and runs without the private-term list; the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
 
 **Resources.** No Docker object, no real GitHub, GitLab, Slack, Cursor or Codex account, no Claude Code login read, no doctor run. Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issue and the pull request. Ports: the capture's scratch service and app, and the tests', on ephemeral loopback ports. No tunnel, no secret.
 
