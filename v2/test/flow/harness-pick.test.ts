@@ -48,6 +48,8 @@ test('a ticket\'s type is its template\'s label (P214); without one, its first l
   assert.equal(ticketType(['REVIEW']), 'review');
   assert.equal(ticketType(['feature']), 'other');
   assert.equal(ticketType([]), 'other');
+  assert.equal(ticketType(['type:environment']), 'other', 'the setup session\'s template says nothing of a harness');
+  assert.equal(ticketType(['type:other', 'bug']), 'bug');
 });
 
 test('the pick: only a variant whose tests passed; the fewest tokens when every one of them reports tokens, else the shortest agent time', () => {

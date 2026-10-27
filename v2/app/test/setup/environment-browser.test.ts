@@ -6,7 +6,9 @@
 //   - each service is listed with what its base holds, not built;
 //   - Build: the page says the builds run, Build is not offered again
 //     meanwhile, and the page reads the view until each image is ready,
-//     with its tag and its build's time;
+//     with its tag and its build's time, then its declared check's result
+//     in that image, and the setup session proposed to the service with no
+//     .devcontainer (C4), which waits for a restart here: no flow runs;
 //   - no policy violation, no page error, no missing key, axe finds nothing;
 //   - with CLEARED_V2_CAPTURES=<folder>, the step is captured at 1440, 1280,
 //     768 and 390 px, light and dark, in English, and at 1440 in French.
@@ -52,8 +54,8 @@ async function checked(page: any, what: string): Promise<void> {
   assert.deepEqual(found, [], `${what}: axe`);
 }
 
-async function run(language: 'en' | 'fr'): Promise<void> {
-  const docker = fakeDockerBuildsOnPath();
+async function run(language: 'en' | 'fr', failing = false): Promise<void> {
+  const docker = fakeDockerBuildsOnPath(1_500, failing ? { code: 1, output: 'not ok 2 - the entries\n  sqlite3: command not found\n# fail 1\n' } : undefined);
   const services = {
     api: project({}, null, 'api'),
     web: project({ '.devcontainer/devcontainer.json': '{ "image": "cleared-v2-session:latest" }\n', '.cleared/agents.conf': '[merge]\nverdict = ok\n' }, null, 'web'),
@@ -102,6 +104,29 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     assert.match(api, /cleared-v2-prep-api:[0-9a-f]{16}/);
     assert.doesNotMatch(api, /\d\s?ms\b/, 'no figure in milliseconds');
     assert.equal(await page.locator('[role="alert"]').count(), 0, 'no refusal');
+    if (failing) {
+      // A check that fails in its image: its last lines, and a setup session proposed for that reason.
+      await page.locator('[data-service="api"] [data-env-check="failed"]').waitFor();
+      assert.match(await page.locator('[data-service="api"] .setup-env-output').innerText(), /sqlite3: command not found/);
+      assert.equal(await page.locator('[data-service="web"] [data-env-session="check_failed"]').count(), 1);
+      await checked(page, 'check failed');
+      if (CAPTURES) {
+        for (const [width, theme] of [[1440, 'light'], [390, 'dark']] as const) {
+          await page.evaluate((value: string) => { document.documentElement.dataset.theme = value; }, theme);
+          await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
+          await page.screenshot({ path: join(CAPTURES, `environment-check-failed-${width}-${theme}${language === 'fr' ? '-fr' : ''}.png`), fullPage: true });
+        }
+      }
+      assert.deepEqual(errors, [], 'no page error');
+      return;
+    }
+    // The declared check ran in each ready image; the service with no .devcontainer is proposed a setup session.
+    await page.locator('[data-service="api"] [data-env-check="passed"]').waitFor();
+    assert.match(await page.locator('[data-service="api"] [data-env-check]').innerText(), /npm test/);
+    assert.equal(await page.locator('[data-service="api"] [data-env-session="no_devcontainer"]').count(), 1);
+    assert.equal(await page.locator('[data-service="web"] [data-env-session]').count(), 0, 'a .devcontainer and a passing check: nothing proposed');
+    assert.equal(await page.locator('[data-act="setup_environment_session"]').count(), 0, 'no flow runs here: no start offered');
+    await checked(page, 'checked');
     await page.locator('.setup-progress li[data-step="environment"][data-state="done"]').waitFor();
 
     if (CAPTURES) {
@@ -130,3 +155,4 @@ async function run(language: 'en' | 'fr'): Promise<void> {
 
 test('the environment step in English: not built, Build, each image ready with its time', { skip }, () => run('en'));
 test('the same in French', { skip }, () => run('fr'));
+test('a check that fails in its image shows its last lines and proposes a setup session, in French', { skip }, () => run('fr', true));

@@ -20,7 +20,7 @@ export type Call = { readonly args: readonly string[]; readonly options: RunOpti
 // Flags of `docker create` that take a value, as docker.ts writes them.
 const CREATE_VALUE_FLAGS = new Set([
   '--name', '--label', '--network', '--user', '--tmpfs', '--mount', '--env', '--memory', '--memory-swap',
-  '--cpus', '--pids-limit', '--workdir', '--cap-drop', '--security-opt',
+  '--cpus', '--pids-limit', '--workdir', '--cap-drop', '--security-opt', '--entrypoint',
 ]);
 
 const ok = (stdout = ''): DockerResult => ({ code: 0, stdout, stderr: '' });

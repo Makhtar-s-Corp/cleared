@@ -1,5 +1,6 @@
 // Ready-made tickets in the tower (P214, issue #330): "Template" in the bar
-// opens Bug, Review, CI and Question; a pick fills an empty description with
+// opens Bug, Review, CI and Question, and Environment, the setup session
+// (C4, lane v2-j5-env-setup); a pick fills an empty description with
 // the template's sections, or one still as another template left it, and
 // never a description the person wrote; the title's placeholder says what to
 // write; the ticket carries the template's type label. French and English.
@@ -18,7 +19,7 @@ const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', '
 const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('tower', 'fr') });
 const toggles = (markup: string) => [...markup.matchAll(/<button[^>]*data-template="([a-z]+)"[^>]*>(?:<svg.*?<\/svg>)?([^<]*)<\/button>/g)].map((m) => [m[1], m[2]]);
 
-test('the bar offers Template, pressed when the four templates are shown, in both languages', () => {
+test('the bar offers Template, pressed when the five templates are shown, in both languages', () => {
   assert.match(html(<Bar t={en} title="" body="" />), /<button[^>]*data-bar="template"[^>]*>Template<\/button>/);
   assert.match(html(<Bar t={en} title="" body="" />), /data-bar="template"[^>]*aria-expanded="false"[^>]*aria-controls="ask-templates"|aria-expanded="false"[^>]*aria-controls="ask-templates"[^>]*data-bar="template"/);
   assert.match(html(<Bar t={fr} title="" body="" />), /data-bar="template"[^>]*>Modèle<\/button>/);
@@ -27,8 +28,8 @@ test('the bar offers Template, pressed when the four templates are shown, in bot
   const open = html(<Bar t={en} title="" body="" templatesOpen />);
   assert.match(open, /aria-expanded="true"[^>]*aria-controls="ask-templates"|aria-controls="ask-templates"[^>]*aria-expanded="true"/);
   assert.match(open, /<div[^>]*id="ask-templates"[^>]*role="group"[^>]*aria-label="Ready-made tickets"/);
-  assert.deepEqual(toggles(open), [['bug', 'Bug'], ['review', 'Review'], ['ci', 'CI'], ['question', 'Question']]);
-  assert.deepEqual(toggles(html(<Bar t={fr} title="" body="" templatesOpen />)), [['bug', 'Bug'], ['review', 'Revue'], ['ci', 'CI'], ['question', 'Question']]);
+  assert.deepEqual(toggles(open), [['bug', 'Bug'], ['review', 'Review'], ['ci', 'CI'], ['question', 'Question'], ['environment', 'Environment']]);
+  assert.deepEqual(toggles(html(<Bar t={fr} title="" body="" templatesOpen />)), [['bug', 'Bug'], ['review', 'Revue'], ['ci', 'CI'], ['question', 'Question'], ['environment', 'Environnement']]);
   assert.match(html(<Bar t={fr} title="" body="" templatesOpen />), /aria-label="Tickets prêts à l&#39;emploi"/);
   for (const text of visibleText(html(<Bar t={sentinel} title="" body="" templatesOpen />))) assert.ok(!/Template|Bug|Review|Question/.test(text), `"${text}" is not from the catalog`);
 });
@@ -60,6 +61,10 @@ test('each template\'s sections, in both languages, from the catalogs', () => {
   // A branch with no commit is not published (workspace/publish.ts): Review fixes what it can, Question writes its answer down.
   assert.match(templateBody('review', en), /fixed on this branch, each with a test/);
   assert.match(templateBody('question', fr), /là où le prochain lecteur la cherchera/);
+  // The setup session: what Cleared reads of a .devcontainer, and what it checks before the review.
+  assert.match(templateBody('environment', en), /`image`, or `build\.dockerfile`/);
+  assert.match(templateBody('environment', en), /Cleared runs both before the review/);
+  assert.match(templateBody('environment', fr), /lifecycle|cycle de vie/);
   for (const template of TICKET_TEMPLATES) assert.doesNotMatch(templateBody(template, en), /No change to the code/i, template);
   assert.equal(templateBody('review', sentinel), '«template_review_body»');
 });
