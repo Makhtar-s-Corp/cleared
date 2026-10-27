@@ -28,12 +28,20 @@ const VALUE = ['sandbox', 'fake', 'value', 'panel'].join('-');
 
 let axe: string | undefined;
 const axeSource = (): string => (axe ??= readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8'));
+// The shell's search and account buttons hold their label in their name and
+// more text beside it, which axe's label-in-name rule reads as a mismatch:
+// app/test/a11y-browser.test.ts says why and leaves them out of that rule.
+// The rest of the page, the panel included, is checked whole.
+const NAMED_BY_LABEL = [['#palette-open'], ['#person']];
+
 async function axeClean(page: any, what: string): Promise<void> {
   if (!await page.evaluate(() => typeof window.axe === 'object')) await page.evaluate(axeSource());
-  const found = await page.evaluate(async (tags: string[]) => {
-    const result = await window.axe.run(document, { resultTypes: ['violations'], runOnly: { type: 'tag', values: tags } });
+  const found = await page.evaluate(async ({ tags, named }: { tags: string[]; named: string[][] }) => {
+    const all = await window.axe.run(document, { resultTypes: ['violations'], runOnly: { type: 'tag', values: tags }, rules: { 'label-content-name-mismatch': { enabled: false } } });
+    const label = await window.axe.run({ include: [document], exclude: named }, { resultTypes: ['violations'], runOnly: { type: 'rule', values: ['label-content-name-mismatch'] } });
+    const result = { violations: [...all.violations, ...label.violations] };
     return result.violations.map((v: { id: string; nodes: { target: string[] }[] }) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`);
-  }, TAGS);
+  }, { tags: TAGS, named: NAMED_BY_LABEL });
   assert.deepEqual(found, [], `${what}: axe`);
 }
 

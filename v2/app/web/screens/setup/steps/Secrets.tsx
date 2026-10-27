@@ -27,7 +27,7 @@ export function SecretsStep({ t, api, onDone, initial }: StepProps<TestValuesVie
     <StepFrame t={t} prefix="test_values">
       <TestValuesEditor t={t} client={api} path="/secrets" idPrefix="setup" titled={false} initial={initial} onView={(view) => setReady(saved(view))} />
       {error ? <p className="setup-error" role="alert">{error}</p> : null}
-      <p className="setup-note" id="setup-test-values-done-hint">{t('test_values_step_done_hint')}</p>
+      <p className="setup-note test-values-done-hint" id="setup-test-values-done-hint">{t('test_values_step_done_hint')}</p>
       <Button variant="ink" className="primary" data-act="setup_test_values_done" aria-describedby="setup-test-values-done-hint" disabled={!ready || busy} onClick={done}>
         {t('test_values_step_done')}
       </Button>

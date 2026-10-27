@@ -119,7 +119,7 @@ export function TestValuesPanel({ t, view, idPrefix, titled = true, busy = false
             <p className="test-values-hint" id={id('value-hint')}>{t('test_values_value_hint')}</p>
           </div>
           {error ? <p className="test-values-error" role="alert">{error}</p> : null}
-          <Button variant="ink" className="primary" type="submit" data-act={`${idPrefix}_test_values_save`} disabled={busy}>{busy ? t('test_values_saving') : t('test_values_save')}</Button>
+          <Button variant={titled ? 'ink' : 'outline'} className={titled ? 'primary' : 'btn'} type="submit" data-act={`${idPrefix}_test_values_save`} disabled={busy}>{busy ? t('test_values_saving') : t('test_values_save')}</Button>
         </form>
       ) : error ? <p className="test-values-error" role="alert">{error}</p> : null}
     </Frame>
