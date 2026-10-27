@@ -28,6 +28,11 @@ export type ReviewRecord = {
   readonly round: number;
   readonly report: string;
   readonly at: string;
+  // What the flow knows of a pass (issue #445): the head it published, which
+  // the review read, and the project's [merge] verdict the review was judged
+  // by. Without them the recorder reads the lock's settings of the environment.
+  readonly commit?: string;
+  readonly verdictPhrase?: string;
 };
 
 export interface ReviewRecorder {

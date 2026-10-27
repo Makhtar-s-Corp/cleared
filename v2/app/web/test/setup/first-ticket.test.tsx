@@ -72,6 +72,27 @@ test('the ticket followed: each stage in words, the current one marked for assis
   });
 });
 
+// Issue #446: the author's session plan waits for the person's Go in the
+// inbox. The step says so and links to that item; the list keeps the
+// author's stage as the current one, so it never moves back.
+test('the plan waiting for its Go: said in words, the author\'s stage current, and a link to the plan in the inbox', () => {
+  each((t, language) => {
+    const markup = render(t, view({ ticket: { ...ticket('plan') as NonNullable<FirstTicketView['ticket']>, plan: 'session_plan:s-1:1' } }));
+    noMark(markup, `plan ${language}`);
+    assert.match(markup, /data-first-ticket="plan"/);
+    assert.equal(markup.match(/aria-current="step"/g)?.length, 1);
+    assert.match(markup, /data-stage="working"[^>]*aria-current="step"|aria-current="step"[^>]*data-stage="working"/);
+    assert.match(markup, /href="\/inbox#session_plan%3As-1%3A1"/);
+    assert.match(visibleText(markup).join(' '), language === 'en' ? /your Go/ : /votre Go/);
+  });
+});
+
+test('the proposal says the author\'s plan waits for a Go before the change, as the approval does before live', () => {
+  each((t, language) => {
+    assert.match(visibleText(render(t, view())).join(' '), language === 'en' ? /plan[^.]*your Go/ : /plan[^.]*votre Go/);
+  });
+});
+
 const steps: StepView[] = STEP_IDS.map((id, index) => ({
   ...STEP, id, state: id === 'secrets' ? 'skipped' : 'done', personMs: (index + 1) * 61_000, machineMs: id === 'environment' ? 7 * 60_000 : id === 'first-ticket' ? 11 * 60_000 : 0,
 }));

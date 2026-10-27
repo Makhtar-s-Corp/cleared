@@ -125,13 +125,13 @@ The checks of `cleared doctor`: Docker, the images, the state folder, the disk, 
 
 ### 8. First ticket
 
-A small first ticket, proposed for one of your repositories: one line added at the end of its README. One click moves it to Todo. The step follows it through its author, its review, your approval in the Inbox, the merge and the release watch, to live, then shows the time of each step and the total.
+A small first ticket, proposed for one of your repositories: one line added at the end of its README. One click moves it to Todo. The step follows it through its author, whose plan waits for your Go in the Inbox (the step links to it), its review, your approval in the Inbox, the merge and the release watch, to live, then shows the time of each step and the total.
 
 ![The first ticket, proposed](v2/first-ticket/first-ticket-proposal-1440-light.png)
 
 ![The first ticket, live, with the setup's times](v2/first-ticket/first-ticket-live-1440-light.png)
 
-On a Compose install, the release lock does not get the project from the assistant yet (issue #438), so the approved first ticket is not merged there. [Troubleshooting](troubleshooting.md#known-gaps-of-a-compose-install) lists this gap and the others.
+On a Compose install, the release lock still reads the owner's public key from the project's `.cleared/agents.conf` only, so the approved first ticket is not merged there until that line is in the repository. [Troubleshooting](troubleshooting.md#known-gaps-of-a-compose-install) lists this gap and the others.
 
 Once every step is done or skipped, Open Cleared leads to the app. A skipped step stays in `/setup` for later.
 

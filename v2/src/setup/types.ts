@@ -80,9 +80,11 @@ export type ModelView = { readonly credential: CredentialView; readonly terminal
 // ticket store. todo: in Todo, the flow starting it; working: the author;
 // review: the reviewer; approval: waiting for the owner in the inbox;
 // merging: approved, the lock merges and the release watch runs; live: Done;
-// stopped: another state (set aside, closed).
+// stopped: another state (set aside, closed). plan: the author's session
+// plan waits for the person's Go in the inbox (issue #446), drawn on the
+// author's stage of the list, which then never moves back.
 export const FIRST_TICKET_STAGES = ['todo', 'working', 'review', 'approval', 'merging', 'live'] as const;
-export type FirstTicketStage = (typeof FIRST_TICKET_STAGES)[number] | 'stopped';
+export type FirstTicketStage = (typeof FIRST_TICKET_STAGES)[number] | 'plan' | 'stopped';
 
 export type FirstTicket = {
   readonly id: string;
@@ -91,6 +93,7 @@ export type FirstTicket = {
   readonly stage: FirstTicketStage;
   readonly createdAt: string;
   readonly rolledBack: boolean;                      // the release watch put it back in Todo after it was approved
+  readonly plan?: string;                            // the session plan's inbox item while it waits for its Go
 };
 
 // GET /api/setup/first-ticket?language= and POST { service, language }.

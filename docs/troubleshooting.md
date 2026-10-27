@@ -210,7 +210,7 @@ The workspace is the list of connected repositories, written by the assistant's 
 
 These are open issues, not mistakes in the install. The doctor does not check them yet.
 
-- The release lock gets no project from the assistant (issue #438): the `broker` container waits until `CLEARED_V2_PROJECT_DIR` names a checkout, so an approved first ticket is not merged on a Compose install yet.
+- The release lock reads the owner's public key from the project's `.cleared/agents.conf` only (`[tracker] human_public_key`), so on a Compose install an approved first ticket is not merged until that line is there. The `broker` container gets its project from the workspace the assistant writes; until a repository is connected, its log says it waits.
 - The Tower's new ticket form sends an empty project on a Compose install (issue #437); the assistant's First ticket step does not go through it.
 - The service reads part of the workspace at its start only (issue #420): the lead's knowledge, the mirrors and the workspace record see a repository connected later after a restart, `docker compose -f v2/compose.yaml restart service`.
 - The Compose image has no git credential helper for `GH_TOKEN` (issue #421).

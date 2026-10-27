@@ -66,6 +66,7 @@ test('a whole ticket on the fake adapter: Todo, workspace, author with one permi
   assert.match(reviewer.input.prompt, /“no blocking issues”/);
 
   // A pass: the project is refreshed, then published; the review is recorded for the pull request; the lock is asked.
+  // The record carries the head published and the phrase the review was judged by (issue #445).
   await until(() => kinds(t).includes('release:waiting'), 'the release item');
   assert.deepEqual(t.calls, [
     'prepareWorkdir:author', 'captureHandover:author', 'prepareWorkdir:reviewer', 'refreshProject', `publish:${ticket.id}`, `requestRelease:${ticket.id}:7`,
@@ -73,6 +74,7 @@ test('a whole ticket on the fake adapter: Todo, workspace, author with one permi
   assert.equal(t.recorder.records.length, 1);
   assert.deepEqual({ ...t.recorder.records[0], at: undefined, report: undefined }, {
     ticket: ticket.id, pr: 7, session: reviewer.id, model: 'claude-sonnet-5-5', verdict: 'pass', round: 1, report: undefined, at: undefined,
+    commit: 'abc123', verdictPhrase: 'no blocking issues',
   });
   assert.match(t.recorder.records[0]!.report, /Verdict: “no blocking issues”/);
   assert.equal((await t.tickets.get(ticket.id))?.status, 'Needs Approval');

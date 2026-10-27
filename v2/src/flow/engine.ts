@@ -3038,7 +3038,10 @@ export class FlowEngine {
     ].join('\n');
     let requestedAt: string;
     try {
-      await this.registry.reviewRecorder.record({ ticket: id, pr: published.number, session: reviewer.id, model, verdict: 'pass', round, report, at: reviewedAt });
+      await this.registry.reviewRecorder.record({
+        ticket: id, pr: published.number, session: reviewer.id, model, verdict: 'pass', round, report, at: reviewedAt,
+        commit: published.head, verdictPhrase: reviewer.settings.verdict,
+      });
       const asked = await this.#effects.requestRelease({ ticket: id, pr: published.number, announcement });
       // The real lock moves the card itself when it asks; a store it did not move gets the move here.
       if ((await tickets.history(id)).at(-1)?.status !== tickets.states.validate) await tickets.move(id, tickets.states.validate, SERVICE);

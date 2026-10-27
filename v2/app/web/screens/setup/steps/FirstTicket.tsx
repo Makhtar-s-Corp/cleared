@@ -3,7 +3,7 @@
 // targets, and one button that moves it to Todo; then the ticket followed
 // stage by stage, each stage in words beside its mark, the current one
 // marked for assistive technology and said in a polite live region; the
-// approval sent to the inbox, as for every ticket. Live, the setup's
+// session plan's Go and the approval sent to the inbox, as for every ticket. Live, the setup's
 // summary: each step's time, the person's and the machine's, and the total.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { summaryOf } from '../../../../../src/setup/summary.ts';
@@ -72,7 +72,8 @@ function Proposal({ t, view, onMove, busy, error }: { readonly t: Translate; rea
 function Followed({ t, view, summary }: { readonly t: Translate; readonly view: FirstTicketView; readonly summary: SetupView | undefined }) {
   const ticket = view.ticket;
   if (!ticket) return null;
-  const reached = FIRST_TICKET_STAGES.indexOf(ticket.stage as (typeof FIRST_TICKET_STAGES)[number]);
+  // A plan waiting for its Go is the author's stage: the list never moves back.
+  const reached = FIRST_TICKET_STAGES.indexOf((ticket.stage === 'plan' ? 'working' : ticket.stage) as (typeof FIRST_TICKET_STAGES)[number]);
   return (
     <div className="setup-result" data-first-ticket={ticket.stage}>
       <p className="first-ticket-id"><span className="first-ticket-ref">{ticket.id}</span> {ticket.title}</p>
@@ -90,6 +91,7 @@ function Followed({ t, view, summary }: { readonly t: Translate; readonly view: 
       </ol>
       <p className="setup-note" role="status" aria-live="polite">{t(`first_ticket_now_${ticket.stage}`)}</p>
       {ticket.rolledBack && ticket.stage !== 'live' ? <p className="setup-note" data-rolled-back>{t('first_ticket_rolled_back')}</p> : null}
+      {ticket.stage === 'plan' && ticket.plan ? <a className="btn" href={`/inbox#${encodeURIComponent(ticket.plan)}`}>{t('first_ticket_open_plan')}</a> : null}
       {ticket.stage === 'approval' ? <a className="btn" href="/inbox">{t('first_ticket_open_inbox')}</a> : null}
       {ticket.stage === 'live' && summary ? <SetupSummary t={t} view={summary} /> : null}
     </div>
