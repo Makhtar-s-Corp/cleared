@@ -7,5 +7,6 @@
   "state_root": "Le dossier d’état {path} appartient à root, et les sessions tourneraient en root. Lancez l’installation depuis le clone : docker compose -f v2/compose.yaml run --rm install",
   "state_open": "D’autres comptes peuvent écrire dans le dossier d’état {path}. Lancez chmod go-w {path}, puis redémarrez Cleared.",
   "not_owner": "Ce conteneur tourne sous l’uid {uid}, et le dossier d’état {path} appartient à l’uid {owner}.",
-  "broker_waiting": "Le verrou de mise en production attend un projet : CLEARED_V2_PROJECT_DIR ne nomme encore aucun dépôt avec .cleared/agents.conf. Redémarrez le broker une fois le projet connecté."
+  "broker_waiting": "Le verrou de mise en production attend un projet : aucun dépôt avec .cleared/agents.conf n’est encore nommé, ni par CLEARED_V2_PROJECT_DIR ni par l’espace de travail qu’écrit l’assistant d’installation. Il démarre seul une fois le dépôt relié.",
+  "broker_project": "Le verrou de mise en production démarre pour {path}."
 }

@@ -37,7 +37,7 @@ A run that stops on a defect of Cleared is a failed run: the defect becomes an i
 
 What the code or the rehearsal shows will stop a real run, each to be closed before it:
 
-- **The lock under Compose** (issue #438): the Compose broker idles until `CLEARED_V2_PROJECT_DIR` names a checkout, and the assistant gives it none. Step 10 waits for a lock that does not run. The rehearsal replaces the lock with a stand-in, so it does not prove step 10 under Compose.
+- **The lock under Compose, not yet run** (issue #438, fixed in the code): the Compose broker now starts on the service of the workspace the assistant writes, its settings applied, on the state folder's socket. No rehearsal has run it: the rehearsal still replaces the lock with a stand-in, so step 10 under Compose is not proven.
 - **The lock's key** (question 1 of lane `v2-j5-first-ticket`, default (c) applied): v1's lock reads `human_public_key` from the project's `.cleared/agents.conf` only. Under that default the newcomer must add the line by hand, which fails pass 2. Options (a) or (b) of that question close it.
 - **`claude setup-token` in the web terminal** (section 5.6 of the plan): not yet run with a real subscription. The rehearsal pastes a made-up value.
 

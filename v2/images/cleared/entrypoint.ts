@@ -5,7 +5,8 @@
 //   service  the core (v2/src/main.ts), with the Docker socket's group
 //   app      the web app (v2/app/main.ts)
 //   broker   the release lock (serve/release-broker.ts), once a project is
-//            named: until then it says so and idles
+//            named, by hand or by the workspace the setup assistant
+//            writes: until then it says so and looks again every 5 s
 //   install  the one command (v2/src/cli/install.ts), which stays root to
 //            give the state folder to the owner of the clone
 //   cleared  any `cleared <command>` (v2/src/cli/cleared.ts)
@@ -21,6 +22,8 @@ import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { cliTranslator, languageOf } from '../../src/cli/cleared.ts';
+import { applySettings, readSettings, SETTINGS_FILE } from '../../src/setup/settings.ts';
+import { loadWorkspace } from '../../src/workspace/config.ts';
 
 export const ROOT = new URL('../../../', import.meta.url).pathname;
 export const ROLES = {
@@ -64,11 +67,30 @@ export function groupsOf(role: Role, owner: { readonly uid: number; readonly gid
   return DOCKER_ROLES.includes(role) && socketGid !== undefined && socketGid !== owner.gid ? [owner.gid, socketGid] : [owner.gid];
 }
 
-// The checkout the broker locks: the service's, with its configuration.
-export function brokerProject(env: NodeJS.ProcessEnv): string | undefined {
-  const dir = env.CLEARED_V2_PROJECT_DIR?.trim() || env.CLEARED_REPO?.trim();
+// The checkout the broker locks, with its configuration: the one
+// CLEARED_V2_PROJECT_DIR names, else, on an install by the setup assistant
+// (issue #438), the service of the workspace whose lock is the default one
+// (no broker_socket, no broker_state), the workspace being the one the
+// environment or the settings file in the state folder names.
+export function brokerProject(env: NodeJS.ProcessEnv, state?: string): string | undefined {
+  const named = env.CLEARED_V2_PROJECT_DIR?.trim() || env.CLEARED_REPO?.trim();
+  const dir = named || (state === undefined ? undefined : workspaceProject(env, state));
   return dir && existsSync(join(dir, '.cleared', 'agents.conf')) ? dir : undefined;
 }
+
+function workspaceProject(env: NodeJS.ProcessEnv, state: string): string | undefined {
+  const file = env.CLEARED_V2_WORKSPACE?.trim() || readSettings(join(state, SETTINGS_FILE)).env.CLEARED_V2_WORKSPACE;
+  if (!file) return undefined;
+  try {
+    // The author model only checks a reviewer:<model> sensitivity, which the service already checked.
+    const workspace = loadWorkspace({ CLEARED_V2_WORKSPACE: file }, { authorModel: '', stateDir: state });
+    return workspace?.services.find((service) => service.brokerSocket === null && service.brokerState === null)?.dir;
+  } catch {
+    return undefined;
+  }
+}
+
+const BROKER_LOOK_MS = 5_000;
 
 if (import.meta.main) {
   const t = cliTranslator('cleared', languageOf(process.env));
@@ -106,14 +128,31 @@ if (import.meta.main) {
     process.exit(spawnSync(process.execPath, [file, ...args], { stdio: 'inherit' }).status ?? 1);
   }
   if (role === 'broker') {
-    const project = brokerProject(process.env);
-    if (project === undefined) {
-      process.stdout.write(`${t('broker_waiting')}\n`);
-      const idle = setInterval(() => {}, 2 ** 30);
-      for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, () => { clearInterval(idle); process.exit(0); });
-    } else {
+    // The settings file gives the lock what the service has, GH_TOKEN for gh
+    // among them. The service asks the state folder's socket when no
+    // CLEARED_CONF names another (approval/broker.ts), so a project found in
+    // the workspace is served there, whatever its agents.conf says.
+    const start = async (project: string, fromWorkspace: boolean) => {
+      applySettings(process.env, join(state, SETTINGS_FILE));
       process.env.CLEARED_REPO = project;
+      if (fromWorkspace && !process.env.CLEARED_RELEASE_SOCKET) process.env.CLEARED_RELEASE_SOCKET = join(state, 'release.sock');
+      process.stdout.write(`${t('broker_project', { path: project })}\n`);
       await import(file);
+    };
+    const handNamed = Boolean(process.env.CLEARED_V2_PROJECT_DIR?.trim() || process.env.CLEARED_REPO?.trim());
+    const project = brokerProject(process.env, state);
+    if (project !== undefined) await start(project, !handNamed);
+    else {
+      process.stdout.write(`${t('broker_waiting')}\n`);
+      const stop = () => process.exit(0);
+      for (const signal of ['SIGINT', 'SIGTERM'] as const) process.on(signal, stop);
+      const look = setInterval(() => {
+        const found = handNamed ? brokerProject(process.env) : brokerProject(process.env, state);
+        if (found === undefined) return;
+        clearInterval(look);
+        for (const signal of ['SIGINT', 'SIGTERM'] as const) process.off(signal, stop);
+        void start(found, !handNamed);
+      }, BROKER_LOOK_MS);
     }
   } else await import(file);
 }

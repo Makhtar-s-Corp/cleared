@@ -79,9 +79,10 @@ services:
 
   # The release lock (serve/release-broker.ts), under the service's account:
   # it accepts the service's requests by their uid, and reads the ledger and
-  # the review records in the state folder. It waits for a project: until
-  # CLEARED_V2_PROJECT_DIR names a checkout with .cleared/agents.conf, it
-  # says so and idles.
+  # the review records in the state folder. It waits for a project: a
+  # checkout with .cleared/agents.conf that CLEARED_V2_PROJECT_DIR names, or
+  # the service of the workspace the setup assistant writes (issue #438),
+  # which it looks for every 5 s and starts on without a restart.
   broker:
     image: "cleared-v2:local"
     pull_policy: never
