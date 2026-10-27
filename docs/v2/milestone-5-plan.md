@@ -475,6 +475,10 @@ The rehearsal needs none. The real run needs a fresh Linux machine with Docker, 
 
 Matrix line P260, pull request 447 (issue #443). What the author found and chose, as the decisions log of 2026-10-27 says. The rehearsal passed its ten steps in English and in French, with stand-ins for the forge, the model, the lock and the project of the approval, so it proves the path, not the hour. It found two gaps of an install by the assistant, outside this lane's files: the release cannot be requested, since the approval of a single service knows the project only through `CLEARED_CONF` and `CLEARED_REPO` (#445), and the first-ticket step does not show the session plan's Go (#446). With #438, both are listed in [proof-j5.md](proof-j5.md) as what stops the real run. A first run moved the tag `cleared-v2:local` off another Compose project's image, which the containerd store then dropped; the rehearsal now keeps such an image under a second name. The setup session (C4) and `doctor images` (C15) were not rehearsed. This section is a file beyond section 16.4, as the delivered sections of the other lanes are: the plan's test reads each milestone 5 line here.
 
+### 16.7 The rehearsal's findings, fixed
+
+Matrix line P261, lane `v2-j5-proof-fixes` (issues #438, #445, #446). What the author chose, as the decisions log of 2026-10-27 says. The Compose broker finds its project in the workspace the assistant writes and starts with no restart (#438); the one-service path records a passing review with the head it published and the verdict phrase it judged the review by, so the release is requested on an install by the assistant (#445); the first-ticket step says when the author's session plan waits for the person's Go in the inbox, and links to it (#446). Proven by tests, not yet by a rehearsal: the rehearsal still gives its stand-ins. The lock's key (question 1 of lane `v2-j5-first-ticket`) is not changed.
+
 ## 17. Waves
 
 At most three lanes run at once (B4.3), and lanes of one wave never edit the same file.
