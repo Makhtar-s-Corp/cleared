@@ -9,6 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRuntime } from '../../src/flow/runtime.ts';
 import { defaultRegistry } from '../../src/modules/registry.ts';
+import { INBOX_TABLE } from '../../src/inbox/store.ts';
 import { openStore } from '../../src/store/db.ts';
 import { fakeEffects } from './support.ts';
 
@@ -19,8 +20,9 @@ const SETTINGS = {
 
 test('no workspace at start: no engine; the workspace written later: the engine at the next request, made once, and told', async () => {
   const env: NodeJS.ProcessEnv = { CLEARED_V2_STATE_DIR: '/state' };
-  const runtime = createRuntime({ env, effects: () => fakeEffects([]), release: async () => undefined });
+  const runtime = createRuntime({ env, effects: () => fakeEffects([]), release: async () => ({ containers: [], networks: [] }) });
   const store = openStore(':memory:');
+  store.db.exec(INBOX_TABLE);
   runtime.attach({ store });
   const registry = defaultRegistry();
   const told: unknown[] = [];
@@ -46,7 +48,7 @@ test('no workspace at start: no engine; the workspace written later: the engine 
 
 test('a workspace that is named but wrong is said once and leaves no engine, as at start', async () => {
   const env: NodeJS.ProcessEnv = { CLEARED_V2_STATE_DIR: '/state' };
-  const runtime = createRuntime({ env, effects: () => fakeEffects([]), release: async () => undefined });
+  const runtime = createRuntime({ env, effects: () => fakeEffects([]), release: async () => ({ containers: [], networks: [] }) });
   const store = openStore(':memory:');
   runtime.attach({ store });
   const said: string[] = [];

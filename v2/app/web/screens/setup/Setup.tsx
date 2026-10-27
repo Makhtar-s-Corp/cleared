@@ -21,7 +21,7 @@ import { firstView, nextStep, previousStep, setupApi, setupTranslator, stepKey, 
 import type { StepProps } from './step.tsx';
 import { ChecksStep } from './steps/Checks.tsx';
 import { EnvironmentStep } from './steps/Environment.tsx';
-import { FirstTicketStep } from './steps/FirstTicket.tsx';
+import { FirstTicketStep, SetupSummary } from './steps/FirstTicket.tsx';
 import { ForgeStep } from './steps/Forge.tsx';
 import { ModelStep } from './steps/Model.tsx';
 import { OwnerFirst, OwnerMadePanel, OwnerStep } from './steps/Owner.tsx';
@@ -182,6 +182,7 @@ function SignedStage({ t, start }: { readonly t: Translate; readonly start: Step
           <h2 id="setup-step-title">{t('setup_finished_title')}</h2>
           <p>{t('setup_finished_body', { person: lasted(view.total.personMs, t), machine: lasted(view.total.machineMs, t) })}</p>
           {view.steps.some((s) => s.state === 'skipped') ? <p className="setup-note">{t('setup_finished_skipped')}</p> : null}
+          <SetupSummary t={t} view={view} />
           <div className="setup-actions">
             <Button variant="ink" className="primary" data-act="setup_tower" onClick={() => location.assign('/')}>{t('setup_tower')}</Button>
           </div>
