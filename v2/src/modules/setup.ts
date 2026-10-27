@@ -18,7 +18,8 @@ import { throwawayContainer } from '../setup/container.ts';
 import { answer, guarded, HttpError } from '../setup/http.ts';
 import { FROM_ENVIRONMENT, refreshSettings } from '../setup/load.ts';
 import { SetupRecords } from '../setup/records.ts';
-import { STEPS, type StepDeps } from '../setup/steps.ts';
+import { STEPS as REGISTERED, type SetupStep, type StepDeps } from '../setup/steps.ts';
+import { totalOf } from '../setup/summary.ts';
 import { SETUP_TABLES } from '../setup/tables.ts';
 import { isStepId, type SetupView, type StepView } from '../setup/types.ts';
 import { header } from '../terminal/routes.ts';
@@ -35,15 +36,16 @@ export type SetupModuleOptions = {
   readonly container?: SessionContainer;            // default: a throwaway container of the session image
   readonly proof?: () => string;                    // default: the app's proof beside the ledger
   readonly fromEnvironment?: ReadonlySet<string>;   // default: what the environment set when the service started
+  readonly steps?: readonly SetupStep[];            // default: the registry's (setup/steps.ts); a test gives a step its fakes
 };
 
 export function setupView(steps: readonly StepView[], owner: string | null): SetupView {
-  const total = steps.reduce((sum, step) => ({ personMs: sum.personMs + step.personMs, machineMs: sum.machineMs + step.machineMs }), { personMs: 0, machineMs: 0 });
-  return { steps, owner, current: steps.find((step) => step.state === 'todo')?.id ?? null, total };
+  return { steps, owner, current: steps.find((step) => step.state === 'todo')?.id ?? null, total: totalOf(steps) };
 }
 
 export function createSetupModule(options: SetupModuleOptions): Module {
   const { env } = options;
+  const STEPS = options.steps ?? REGISTERED;
   const now = options.now ?? (() => new Date());
   const log = options.log ?? ((line: string) => console.log(line));
   const fromEnvironment = options.fromEnvironment ?? FROM_ENVIRONMENT;

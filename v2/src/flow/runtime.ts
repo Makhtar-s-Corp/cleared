@@ -2,7 +2,11 @@
 // process, built on the first request that needs it from the store the
 // modules received, the registry the request carries and the environment.
 // Without CLEARED_V2_PROJECT the service is not set up to run tickets: the
-// API answers 503 and /health still answers.
+// API answers 503 and /health still answers. The settings are read again at
+// each request while there are none: the assistant's workspace step writes
+// the workspace while the service runs (issue #420), and the engine is
+// built at the first request that finds it, with no restart; whoever waits
+// for it (the flow module's watchdog and batches) is told then.
 //
 // The adapters it makes start each author or reviewer session in its
 // workspace (milestone 2 plan, decisions 20 and 27): on its service (the
@@ -31,7 +35,7 @@ import { cleanText, createCleaner, secretValues, type CleanOptions } from '../se
 import type { Harness, SessionAdapter, StartInput } from '../session/contract.ts';
 import { ledgerPath, type Store } from '../store/db.ts';
 import { InboxStore } from '../inbox/store.ts';
-import { loadFlowConfig, workspaceOf, type FlowConfig } from './config.ts';
+import { FlowConfigError, loadFlowConfig, workspaceOf, type FlowConfig } from './config.ts';
 import { realEffects } from './effects.ts';
 import { previewAddress } from './proof-capture.ts';
 import { readConfig } from '../config.ts';
@@ -42,6 +46,8 @@ export type Runtime = {
   attach(deps: { readonly store: Store }): void;
   adapters(): Partial<Record<Harness, SessionAdapter>>;
   engine(registry: Registry): FlowEngine | undefined;
+  // Called once with the engine when it is built, at once if it is already.
+  whenEngine(listener: (engine: FlowEngine) => void): void;
   proof(): string;
   routes(match: (path: string) => boolean): Route[];
   // The preview of a session: its key and its own run sibling, or
@@ -62,14 +68,31 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
   let config: FlowConfig | undefined;
   let engine: FlowEngine | undefined;
   let proof: string | undefined;
+  const waiting: ((engine: FlowEngine) => void)[] = [];
+  let refused: string | undefined;
 
   const cleanOptions = (): CleanOptions => ({
     secrets: secretValues(env),
     servicePaths: [...new Set([env.CLEARED_V2_STATE_DIR, env.HOME ?? homedir(), config?.projectDir, config?.workdirRoot].filter((p): p is string => !!p && p !== '/'))],
   });
 
+  // The flow's settings, read again while there are none. A workspace that
+  // is named but wrong is said once, as it changes, and makes no engine.
+  function configOf(): FlowConfig | undefined {
+    if (config) return config;
+    try {
+      config = loadFlowConfig(env);
+      refused = undefined;
+    } catch (error) {
+      if (!(error instanceof FlowConfigError)) throw error;
+      if (refused !== error.message) console.error(`cleared-v2: ${error.message}`);
+      refused = error.message;
+    }
+    return config;
+  }
+
   function engineOf(registry: Registry): FlowEngine | undefined {
-    if (engine || !config || !store) return engine;
+    if (engine || !store || !configOf() || !config) return engine;
     // The proof receipt's after page (P210): the session's preview through this service, on loopback.
     const preview = (session: string) => {
       const target = previewTargetOf(session);
@@ -101,6 +124,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     // What the last process left running is stopped and put back (decision 12 of milestone 2).
     const recovering = engine;
     recovering.recovered = recovering.recover().catch((error) => console.error(`cleared-v2: the restart recovery failed (${error instanceof Error ? error.name : typeof error})`));
+    for (const listener of waiting.splice(0)) listener(engine);
     return engine;
   }
 
@@ -199,6 +223,10 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       return Object.fromEntries(Object.entries(options.factories ?? adapterFactories).map(([harness, make]) => [harness, withWorkspace(make({ log, cleaner: () => createCleaner(cleanOptions()), policy }))]));
     },
     engine: engineOf,
+    whenEngine(listener) {
+      if (engine) listener(engine);
+      else waiting.push(listener);
+    },
     proof: proofOf,
     routes: (match) => api.filter((route) => match(route.path)),
     previewTarget: previewTargetOf,

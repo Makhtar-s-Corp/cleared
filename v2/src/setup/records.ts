@@ -49,10 +49,11 @@ export class SetupRecords {
     this.#db.prepare('INSERT INTO v2_setup_steps (step, machine_ms) VALUES (?, ?) ON CONFLICT (step) DO UPDATE SET machine_ms = machine_ms + excluded.machine_ms').run(known(step), add);
   }
 
-  // Done: a skip before it no longer counts. Done without being shown counts from now.
-  done(step: StepId): void {
-    const at = this.#at();
-    this.#db.prepare('INSERT INTO v2_setup_steps (step, shown_at, done_at) VALUES (?, ?, ?) ON CONFLICT (step) DO UPDATE SET shown_at = COALESCE(shown_at, excluded.shown_at), done_at = excluded.done_at, skipped_at = NULL').run(known(step), at, at);
+  // Done: a skip before it no longer counts. Done without being shown counts
+  // from then. `at`: when it was done, if not now (the first ticket went
+  // live before its page looked), never before it was shown.
+  done(step: StepId, at: string = this.#at()): void {
+    this.#db.prepare('INSERT INTO v2_setup_steps (step, shown_at, done_at) VALUES (?, ?, ?) ON CONFLICT (step) DO UPDATE SET shown_at = COALESCE(shown_at, excluded.shown_at), done_at = MAX(excluded.done_at, COALESCE(shown_at, excluded.done_at)), skipped_at = NULL').run(known(step), at, at);
   }
 
   skipped(step: StepId): void {
