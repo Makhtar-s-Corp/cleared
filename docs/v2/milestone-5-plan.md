@@ -441,6 +441,10 @@ A website; translating the documentation pages (the app is translated, the pages
 
 None.
 
+### 15.6 Delivered
+
+Matrix line P259, pull request 444 (issue #442). What the author found and chose, as the decisions log of 2026-10-27 says. `docs/troubleshooting.md` quotes the ready section's catalog line by line, and the test reads that catalog, so a new line of the doctor needs its words in the page. The owner step had no capture: one was taken on the assistant's fakes (`docs/v2/setup-assistant/owner-1440-light.png`), a file beyond section 15.4. Updating, and the Compose forms of `cleared doctor` and `cleared run`, are derived from the code and said not yet run. A Compose install's open gaps (#420, #421, #436, #437, #438) are listed in the troubleshooting page, #438 also where the first ticket meets it.
+
 ## 16. The proof (`v2-j5-proof`)
 
 Matrix: B6.5p. Wave 5. Effort M.
@@ -466,6 +470,10 @@ The real run itself (question 5).
 ### 16.5 Real accounts and machines
 
 The rehearsal needs none. The real run needs a fresh Linux machine with Docker, a person who does not know Cleared, a GitHub account and a Claude subscription: the owner's.
+
+### 16.6 Delivered
+
+Matrix line P260, issue #443. What the author found and chose, as the decisions log of 2026-10-27 says. The rehearsal passed its ten steps in English and in French, with stand-ins for the forge, the model, the lock and the project of the approval, so it proves the path, not the hour. It found two gaps of an install by the assistant, outside this lane's files: the release cannot be requested, since the approval of a single service knows the project only through `CLEARED_CONF` and `CLEARED_REPO` (#445), and the first-ticket step does not show the session plan's Go (#446). With #438, both are listed in [proof-j5.md](proof-j5.md) as what stops the real run. A first run moved the tag `cleared-v2:local` off another Compose project's image, which the containerd store then dropped; the rehearsal now keeps such an image under a second name. The setup session (C4) and `doctor images` (C15) were not rehearsed. This section is a file beyond section 16.4, as the delivered sections of the other lanes are: the plan's test reads each milestone 5 line here.
 
 ## 17. Waves
 

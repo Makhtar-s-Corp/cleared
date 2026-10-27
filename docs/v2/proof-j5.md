@@ -45,7 +45,7 @@ What the code or the rehearsal shows will stop a real run, each to be closed bef
 
 ## After the run
 
-Everything of the run is removed by the label: `docker compose -f v2/compose.yaml down`, then the images labelled `cleared.dev=v2`, then the state folder. The newcomer revokes the GitHub token and the Claude login made for the run.
+Everything of the run is removed by the label, as [install.md](../install.md#removing-everything) says, then the state folder. The newcomer revokes the GitHub token and the Claude login made for the run.
 
 ## The rehearsal
 
