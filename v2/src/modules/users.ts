@@ -10,7 +10,7 @@
 // beside the ledger, mode 0600, which both processes read under the same
 // account and no session container mounts (plan, section 7).
 import { argon2, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto';
-import { closeSync, constants, fstatSync, mkdirSync, openSync, readFileSync, writeSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, linkSync, mkdirSync, openSync, readFileSync, rmSync, writeSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import type { DatabaseSync, StatementSync } from 'node:sqlite';
 import type { UserId } from '../session/contract.ts';
@@ -144,8 +144,10 @@ export class SqliteUsers implements UserDirectory {
 }
 
 // The app's proof, beside ledger.db. Whichever process starts first makes
-// it (an exclusive create, so two starting at once agree); a file another
-// account owns, a file others can read, or one that is not 64 hex
+// it: written whole in a file of its own, then linked to its name, which
+// fails if another process got there first, so two starting at once agree
+// and neither ever reads it empty or half written (issue #429). A file
+// another account owns, a file others can read, or one that is not 64 hex
 // characters is refused and left as it is.
 export const PROOF_FILE = 'v2-app-proof';
 
@@ -160,13 +162,19 @@ export function proofPath(ledger: string): string {
 // `what` names the file in a refusal: the app's proof, or the lanes' MCP token (mcp/http.ts), made the same way.
 export function readOrCreateProof(path: string, what = 'the app\'s proof'): string {
   let fd: number;
-  try {
-    mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
-    fd = openSync(path, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
-    try { writeSync(fd, `${randomBytes(32).toString('hex')}\n`); }
-    finally { closeSync(fd); }
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new ProofError(`cannot make ${what} at ${path}: ${(error as Error).message}`);
+  if (!existsSync(path)) {
+    const draft = `${path}.${randomBytes(6).toString('hex')}.new`;
+    try {
+      mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
+      fd = openSync(draft, constants.O_WRONLY | constants.O_CREAT | constants.O_EXCL | constants.O_NOFOLLOW, 0o600);
+      try { writeSync(fd, `${randomBytes(32).toString('hex')}\n`); }
+      finally { closeSync(fd); }
+      linkSync(draft, path);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new ProofError(`cannot make ${what} at ${path}: ${(error as Error).message}`);
+    } finally {
+      rmSync(draft, { force: true });
+    }
   }
   try {
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
@@ -184,6 +192,17 @@ export function readOrCreateProof(path: string, what = 'the app\'s proof'): stri
   } finally {
     closeSync(fd);
   }
+}
+
+// The app's proof as its requests read it (issue #429): read when first
+// needed and kept once whole; until then each call reads the file again,
+// so an app that started before the service made it needs no restart.
+// `forget` drops what was kept, for when the service refuses it.
+export type ProofReader = (() => string) & { forget(): void };
+
+export function proofReader(path: string, what?: string): ProofReader {
+  let kept: string | undefined;
+  return Object.assign(() => (kept ??= readOrCreateProof(path, what)), { forget: () => { kept = undefined; } });
 }
 
 // What the service's routes call on SERVICE_PROOF_HEADER (lanes 7 and 8),

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { createServer, type IncomingHttpHeaders, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER } from '../../src/api/types.ts';
+import { ProofError } from '../../src/modules/users.ts';
 import { serviceSource } from '../src/proxy.ts';
 import { signedIn, startApp } from './support.ts';
 
@@ -114,5 +115,39 @@ test('a service that does not answer is a 502, and a path outside the API is not
     assert.equal((await fetch(`${app.base}/api/service/%2e%2e/health`, { headers: { cookie } })).status, 404);
   } finally {
     await app.close();
+  }
+});
+
+// Issue #429: the app reads its proof when a request needs it. Until the
+// file holds a whole proof the service is not asked; once the service
+// refuses the proof, the next request reads the file again.
+test('a proof not ready yet is said, never sent, and a refused proof is read again', async () => {
+  const service = await fakeService((response, seen) => {
+    const ok = seen.headers[SERVICE_PROOF_HEADER] === PROOF;
+    response.writeHead(ok ? 200 : 401, { 'content-type': 'application/json' });
+    response.end(ok ? '[]' : '{"error":"unauthorized"}');
+  });
+  let current: string | undefined;
+  let forgotten = 0;
+  const proof = Object.assign(() => {
+    if (current === undefined) throw new ProofError('the app\'s proof at /state/v2-app-proof is not 64 hex characters');
+    return current;
+  }, { forget: () => { forgotten += 1; current = PROOF; } });
+  const app = await startApp({ source: serviceSource({ url: service.url, proof }) });
+  try {
+    const { cookie } = await signedIn(app);
+    const early = await fetch(`${app.base}/api/service/sessions`, { headers: { cookie } });
+    assert.equal(early.status, 503);
+    assert.deepEqual(await early.json(), { error: 'service_starting' });
+    assert.equal(service.seen.length, 0, 'the service is not asked without a proof');
+    current = 'e'.repeat(64);
+    const refused = await fetch(`${app.base}/api/service/sessions`, { headers: { cookie } });
+    assert.equal(refused.status, 401);
+    assert.equal(forgotten, 1, 'a refusal makes the app read its proof again');
+    const read = await fetch(`${app.base}/api/service/sessions`, { headers: { cookie } });
+    assert.equal(read.status, 200);
+  } finally {
+    await app.close();
+    await service.close();
   }
 });

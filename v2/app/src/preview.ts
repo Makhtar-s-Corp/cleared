@@ -29,6 +29,7 @@
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
 import { DEFAULT_PORT as SERVICE_PORT, RESERVED_PORTS } from '../../src/config.ts';
 import { SERVICE_PROOF_HEADER } from '../../src/api/types.ts';
+import { currentProof, type ProofSource } from './proxy.ts';
 
 export const DEFAULT_PREVIEW_PORT = 8794;
 export const PREVIEW_POLICY = 'sandbox allow-scripts allow-forms';
@@ -75,10 +76,13 @@ export type PreviewAnswer = { readonly status: number; readonly headers: Readonl
 export type PreviewUpstream = (path: string, method: 'GET' | 'HEAD') => Promise<PreviewAnswer>;
 
 // The live service, on loopback, with the app's proof and nothing else.
-export function servicePreview(options: { readonly url: string; readonly proof: string }): PreviewUpstream {
+export function servicePreview(options: { readonly url: string; readonly proof: ProofSource }): PreviewUpstream {
   const base = new URL(options.url);
   return (path, method) => new Promise((resolve, reject) => {
-    const upstream = httpRequest({ protocol: base.protocol, hostname: base.hostname, port: base.port, method, path, headers: { [SERVICE_PROOF_HEADER]: options.proof } }, (answer) => {
+    const proof = currentProof(options.proof);
+    if (proof === undefined) { resolve({ status: 503, headers: {}, body: Buffer.alloc(0) }); return; }
+    const upstream = httpRequest({ protocol: base.protocol, hostname: base.hostname, port: base.port, method, path, headers: { [SERVICE_PROOF_HEADER]: proof } }, (answer) => {
+      if (answer.statusCode === 401 && typeof options.proof !== 'string') options.proof.forget?.();
       const chunks: Buffer[] = [];
       let size = 0;
       answer.on('data', (chunk: Buffer) => {
