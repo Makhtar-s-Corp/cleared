@@ -5,9 +5,10 @@
 //   - a newcomer opens the address, is sent to /setup, types the code the
 //     service printed, a name and a password, sees the public key, goes on;
 //   - the forge step checks a credential on the fake GitHub; the model step
-//     takes a pasted login; every later step is skipped: the stubs, and the
-//     checks step once its lines are drawn (lane v2-j5-doctor fills it, its
-//     reads of Docker answered by a fake `docker` program on PATH);
+//     takes a pasted login; every later step is skipped: the stub, the
+//     secrets step with no workspace (lane v2-j5-secrets), and the checks
+//     step once its lines are drawn (lane v2-j5-doctor fills it, its reads
+//     of Docker answered by a fake `docker` program on PATH);
 //   - each page has no policy violation, no page error, no missing key, and
 //     axe finds no violation of WCAG 2.2 AA;
 //   - with CLEARED_V2_CAPTURES=<folder>, the forge step is captured at 1440,
@@ -152,12 +153,13 @@ async function run(language: 'en' | 'fr'): Promise<void> {
 
     for (const id of ['workspace', 'environment', 'secrets', 'checks', 'first-ticket']) {
       await page.waitForURL(`${app.base}/setup/${id}`);
-      // The workspace, environment and checks steps are filled (lanes v2-j5-connect, v2-j5-images and v2-j5-doctor, each with its own tests); the others are stubs.
+      // The workspace, environment, secrets and checks steps are filled (lanes v2-j5-connect, v2-j5-images, v2-j5-secrets and v2-j5-doctor, each with its own tests); the other is a stub.
       const marker = id === 'workspace' ? '[data-workspace-step] [name="repository"]' : id === 'checks' ? '[data-check="docker"]'
-        : id === 'environment' ? '[data-environment-none]' : `[data-step-stub="${id}"]`;
+        : id === 'environment' ? '[data-environment-none]' : id === 'secrets' ? '[data-test-values-none]' : `[data-step-stub="${id}"]`;
       await page.locator(marker).first().waitFor();
       if (id === 'environment') await checked(page, 'the environment with no workspace');
-      if (id === 'secrets') await checked(page, 'a stub');
+      if (id === 'secrets') await checked(page, 'the test secrets with no workspace');
+      if (id === 'first-ticket') await checked(page, 'a stub');
       await page.click('[data-act="setup_skip"]');
     }
     await page.locator('[data-setup-finished]').waitFor();

@@ -12,7 +12,7 @@ import { Progress } from '../../screens/setup/Setup.tsx';
 import { OwnerFirst, OwnerStep } from '../../screens/setup/steps/Owner.tsx';
 import { ForgeStep } from '../../screens/setup/steps/Forge.tsx';
 import { ModelStep } from '../../screens/setup/steps/Model.tsx';
-import { SecretsStep } from '../../screens/setup/steps/Secrets.tsx';
+import { StepStub } from '../../screens/setup/step.tsx';
 import { html, visibleText } from '../render.tsx';
 
 const en = setupTranslator('en');
@@ -108,10 +108,11 @@ test('the model step: the command to run, a terminal to run it in, and the field
   });
 });
 
+// The stub itself, not a step's screen: each step's lane fills its own (the secrets step's, lane v2-j5-secrets, has its tests).
 test('a step a later lane fills says so, and offers Skip', () => {
   each((t, language) => {
-    const markup = html(<SecretsStep t={t} step={step('secrets')} api={api} onDone={noop} />);
-    noMark(markup, `secrets ${language}`);
-    assert.match(markup, /data-step-stub="secrets"/);
+    const markup = html(<StepStub t={t} id="first-ticket" />);
+    noMark(markup, `stub ${language}`);
+    assert.match(markup, /data-step-stub="first-ticket"/);
   });
 });

@@ -60,7 +60,7 @@ export function TestValuesPanel({ t, view, idPrefix, titled = true, busy = false
       ) : null}
       {view.key === 'unusable' ? <p className="test-values-error" role="alert">{t('test_values_key_unusable')}</p> : null}
       <p className="test-values-warning">{t('test_values_warning')} {t('test_values_next_session')}</p>
-      {!view.workspace ? <p className="test-values-empty">{t('test_values_no_workspace')}</p> : null}
+      {!view.workspace ? <p className="test-values-empty" data-test-values-none>{t('test_values_no_workspace')}</p> : null}
       {view.services.length > 0 ? (
         <ul className="test-values-services">
           {view.services.map((group) => (
