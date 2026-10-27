@@ -23,6 +23,8 @@
   "inbox_waiting": "{n} en attente dans la réception",
   "signed_out": "Votre session a pris fin. Reconnectez-vous.",
   "load_failed": "Le service ne répond pas pour l'instant. Cette page réessaie d'elle-même.",
+  "setup_pending": "Cleared ne mène encore aucun ticket : l'installation n'est pas terminée. L'assistant relie d'abord un dépôt.",
+  "setup_pending_link": "Terminer l'installation",
   "title_lead": "Plans",
   "title_consumption": "Consommation",
   "title_services": "Carte des services",

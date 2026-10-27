@@ -70,12 +70,16 @@ test('the first step: the setup code, the owner\'s name and password, each with 
   });
 });
 
-test('the owner step once done: the public key and the line it goes in, to commit to the project', () => {
+// Issue #432: no step asks for a hand-edited file. Cleared keeps the public
+// half and checks the approvals with it; the line stays at hand, folded,
+// for a release lock set up by hand.
+test('the owner step once done: nothing to add to a repository, the public half folded for a lock set up by hand', () => {
   each((t, language) => {
     const markup = html(<OwnerStep t={t} step={VIEW.steps[0] as StepView} api={api} onDone={noop} initial={{ name: 'alex', publicKey: 'TUNvd0JRWURLMlZ3QXlFQQ', setting: 'human_public_key' }} />);
     noMark(markup, `owner ${language}`);
-    assert.match(markup, /human_public_key = TUNvd0JRWURLMlZ3QXlFQQ/);
-    assert.match(markup, /\.cleared\/agents\.conf/);
+    assert.match(markup, /<details[^>]*>[\s\S]*human_public_key = TUNvd0JRWURLMlZ3QXlFQQ[\s\S]*<\/details>/);
+    const shown = visibleText(markup.replace(/<details[\s\S]*<\/details>/, '')).join(' ');
+    assert.doesNotMatch(shown, /agents\.conf|commit/i, 'nothing outside the fold asks for a file or a commit');
   });
 });
 

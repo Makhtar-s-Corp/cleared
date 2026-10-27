@@ -12,8 +12,8 @@
 //
 // Every role but the install runs as the owner of the state folder, never
 // as root: the container starts as root, the entrypoint takes that owner's
-// uid and gid, adds the socket's group for the service, then loads the
-// role's program in the same process. A state folder that is not there,
+// uid and gid, adds the socket's group for the service and the cleared
+// command, then loads the role's program in the same process. A state folder that is not there,
 // that is root's (Docker made it for the mount, the install never ran) or
 // that others may write stops the role with exit 78. HOME is a folder of
 // the state folder: no home of the machine is mounted.
@@ -54,9 +54,14 @@ export function stateOwner(path: string, seen: (path: string) => Seen = look): {
   return { uid: stats.uid, gid: stats.gid };
 }
 
-// The service alone talks to Docker (D10): the socket's group is its own.
+// The service alone talks to Docker (D10): the socket's group is its own,
+// and the cleared command's, run in the service's container for `cleared
+// doctor` (issue #430). Only that container mounts the socket, so the app's
+// and the broker's never find one.
+const DOCKER_ROLES: readonly Role[] = ['service', 'cleared'];
+
 export function groupsOf(role: Role, owner: { readonly uid: number; readonly gid: number }, socketGid: number | undefined): number[] {
-  return role === 'service' && socketGid !== undefined && socketGid !== owner.gid ? [owner.gid, socketGid] : [owner.gid];
+  return DOCKER_ROLES.includes(role) && socketGid !== undefined && socketGid !== owner.gid ? [owner.gid, socketGid] : [owner.gid];
 }
 
 // The checkout the broker locks: the service's, with its configuration.

@@ -5,10 +5,10 @@
 //   - a newcomer opens the address, is sent to /setup, types the code the
 //     service printed, a name and a password, sees the public key, goes on;
 //   - the forge step checks a credential on the fake GitHub; the model step
-//     takes a pasted login; every later step is skipped: the stub, the
-//     secrets step with no workspace (lane v2-j5-secrets), and the checks
-//     step once its lines are drawn (lane v2-j5-doctor fills it, its reads
-//     of Docker answered by a fake `docker` program on PATH);
+//     takes a pasted login; every later step is skipped, each saying it
+//     has no workspace yet, and the checks step once its lines are drawn
+//     (lane v2-j5-doctor fills it, its reads of Docker answered by a fake
+//     `docker` program on PATH);
 //   - each page has no policy violation, no page error, no missing key, and
 //     axe finds no violation of WCAG 2.2 AA;
 //   - with CLEARED_V2_CAPTURES=<folder>, the forge step is captured at 1440,
@@ -113,7 +113,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await page.fill('#setup-name', 'alex');
     await page.fill('#setup-password', PASSWORD);
     await page.click('[data-act="setup_owner"]');
-    await page.locator('[data-public-key]').waitFor();
+    await page.locator('[data-public-key]').waitFor({ state: 'attached' });   // folded for a lock set up by hand (issue #432)
     await checked(page, 'owner done');
     await page.click('[data-act="setup_next"]');
 
@@ -153,13 +153,14 @@ async function run(language: 'en' | 'fr'): Promise<void> {
 
     for (const id of ['workspace', 'environment', 'secrets', 'checks', 'first-ticket']) {
       await page.waitForURL(`${app.base}/setup/${id}`);
-      // The workspace, environment, secrets and checks steps are filled (lanes v2-j5-connect, v2-j5-images, v2-j5-secrets and v2-j5-doctor, each with its own tests); the other is a stub.
+      // Every later step is filled (lanes v2-j5-connect, v2-j5-images, v2-j5-secrets, v2-j5-doctor and v2-j5-first-ticket,
+      // each with its own tests); with no workspace yet, each says so.
       const marker = id === 'workspace' ? '[data-workspace-step] [name="repository"]' : id === 'checks' ? '[data-check="docker"]'
-        : id === 'environment' ? '[data-environment-none]' : id === 'secrets' ? '[data-test-values-none]' : `[data-step-stub="${id}"]`;
+        : id === 'environment' ? '[data-environment-none]' : id === 'secrets' ? '[data-test-values-none]' : '[data-first-ticket="waiting"]';
       await page.locator(marker).first().waitFor();
       if (id === 'environment') await checked(page, 'the environment with no workspace');
       if (id === 'secrets') await checked(page, 'the test secrets with no workspace');
-      if (id === 'first-ticket') await checked(page, 'a stub');
+      if (id === 'first-ticket') await checked(page, 'the first ticket with no workspace');
       await page.click('[data-act="setup_skip"]');
     }
     await page.locator('[data-setup-finished]').waitFor();
