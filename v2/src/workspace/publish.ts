@@ -22,10 +22,11 @@
 //      it, then the commits; the proof receipt first (P210, flow/receipt.ts),
 //      in the project's language ([owner] language at the base), guarded on
 //      its own and left out when the guard refuses it. A reused pull
-//      request gets the new receipt in place of the old one. The title
-//      and the body go without the test secrets' values (C16).
+//      request gets the new receipt in place of the old one. A commit or
+//      a commit message that holds a test secret's value is refused as the
+//      guard refuses one, and the body goes without any (C16).
 import { execFile, spawn } from 'node:child_process';
-import { copyFileSync, lstatSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, lstatSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -261,6 +262,10 @@ async function guardPushOpen(input: PublishInput, at: { base: string; ref: strin
   const refused = await runGuard(input.project, base, [messages, changes]);
   if (refused !== undefined)
     throw new PublishRefused('guard', `${input.branch} not published: the guard refuses it (input no. 1 is the commit messages, no. 2 the changes)\n${refused}`);
+  // A test secret's value (C16) is in the session's environment, and the guard does not know it.
+  for (const [what, file] of [['a commit message', messages], ['a change', changes]] as const)
+    if (withoutTestValues(readFileSync(file, 'utf8')) !== readFileSync(file, 'utf8'))
+      throw new PublishRefused('guard', `${input.branch} not published: ${what} holds the value of a test secret; remove it from the branch history`);
 
   const environments = input.gitEnv && input.ghEnv ? { git: input.gitEnv, gh: input.ghEnv } : await forgeEnvironments(input.project);
   const gitEnv = input.gitEnv ?? environments.git;
@@ -297,9 +302,9 @@ async function guardPushOpen(input: PublishInput, at: { base: string; ref: strin
   writeFileSync(file, body);
   if (report && (await runGuard(input.project, base, [file])) !== undefined) body = first(bare);
 
-  // A session holds its service's test secrets (C16): none reaches the forge in the title or the body.
+  // The session's report may name a test secret's value (C16): none reaches the forge.
   try {
-    const opened = await forge.createPullRequest({ repo: input.repo, base: input.base, head: input.branch, title: withoutTestValues(subjects[0] ?? input.branch), body: withoutTestValues(body) });
+    const opened = await forge.createPullRequest({ repo: input.repo, base: input.base, head: input.branch, title: subjects[0] ?? input.branch, body: withoutTestValues(body) });
     return { url: opened.url, number: opened.number, head, created: true };
   } catch (error) {
     throw error instanceof ForgeError ? new PublishError(`${input.branch} is pushed, but ${error.message}`) : error;

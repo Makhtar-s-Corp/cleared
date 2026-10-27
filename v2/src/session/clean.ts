@@ -109,7 +109,8 @@ export function secretValues(env: NodeJS.ProcessEnv): string[] {
 
 // Text with the test secrets' values alone replaced, everything else kept as
 // it was: for what Cleared sends out without cleaning it otherwise, a pull
-// request's title and body (workspace/publish.ts).
+// request's body, and to find a value in a branch's commits
+// (workspace/publish.ts).
 export function withoutTestValues(text: string): string {
   return removeValues(text, knownTestValues());
 }

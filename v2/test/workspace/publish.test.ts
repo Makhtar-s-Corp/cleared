@@ -213,18 +213,32 @@ test('a refused branch leaves no ref of it in the project checkout', async () =>
 });
 
 // The test secrets (docs/v2/milestone-5-plan.md, decision 12, C16): a
-// session holds its service's test values, so a commit subject or a report
-// that names one reaches the forge without it, in the title and the body.
-test('a test secret\'s value is removed from the pull request\'s title and body', async () => {
-  const value = ['sandbox', 'fake', 'value', '7'].join('-');
-  const state = tempDir('publish-secrets');
-  testValuesOf(new DatabaseSync(':memory:'), { CLEARED_V2_STATE_DIR: state }).set('guestbook', 'PAYMENT_SANDBOX_KEY', value, 'u1');
+// session holds its service's test values. A commit or a commit message
+// that holds one is refused, nothing pushed; a report that names one
+// reaches the pull request's body without it.
+function testValue(n: number): string {
+  const value = ['sandbox', 'fake', 'value', String(n)].join('-');
+  testValuesOf(new DatabaseSync(':memory:'), { CLEARED_V2_STATE_DIR: tempDir('publish-secrets') }).set('guestbook', 'PAYMENT_SANDBOX_KEY', value, 'u1');
+  return value;
+}
+
+test('a commit or a commit message that holds a test secret\'s value is refused: nothing is pushed', async () => {
+  const value = testValue(7);
+  for (const [files, message] of [[{ 'src/app.ts': `export const key = "${value}";\n` }, 'Use the sandbox'], [{ 'src/app.ts': 'export const order = "newest";\n' }, `Test against ${value}`]] as const) {
+    const { workdir, input, gh, remoteHead } = await setup();
+    commit(workdir, files, message);
+    await assert.rejects(publish(input), (error: unknown) => error instanceof PublishRefused && error.code === 'guard' && /test secret/.test(error.message) && !error.message.includes(value));
+    assert.equal(remoteHead(), '', 'nothing pushed');
+    assert.deepEqual(gh.calls(), []);
+  }
+});
+
+test('a test secret\'s value is removed from the pull request\'s body', async () => {
+  const value = testValue(8);
   const { workdir, input, gh } = await setup();
-  commit(workdir, { 'src/app.ts': 'export const order = "newest";\n' }, `Test against ${value}`);
+  commit(workdir, { 'src/app.ts': 'export const order = "newest";\n' }, 'Newest first');
   await publish({ ...input, report: `## Done\nRan the payment tests with ${value}.\n` });
   const create = gh.calls()[1]!;
-  const title = create.args[create.args.indexOf('--title') + 1] ?? '';
-  assert.equal(title, 'Test against [removed: secret]');
   assert.ok(create.body?.includes('Ran the payment tests with [removed: secret].'), 'the report stays, without the value');
   assert.ok(!create.body?.includes(value) && !create.args.some((arg) => arg.includes(value)));
 });
