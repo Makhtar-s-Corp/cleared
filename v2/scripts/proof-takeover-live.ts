@@ -385,7 +385,7 @@ async function main(): Promise<void> {
   }, stepMs, 1_000);
 
   // Take over, a line to the harness, and, for an author, the Shell and the Editor; then Give back.
-  async function takeOver(session: SessionSummary, options: { readonly shell: boolean; readonly editor: boolean; readonly giveBack: boolean }): Promise<string> {
+  async function takeOver(session: SessionSummary, options: { readonly shellLines: boolean; readonly editor: boolean; readonly giveBack: boolean }): Promise<string> {
     const notes: string[] = [];
     const taken = eventsOf(session.id).at(-1)?.seq ?? 0;
     await page.goto(`${APP}/sessions/${encodeURIComponent(session.id)}`);
@@ -416,7 +416,7 @@ async function main(): Promise<void> {
     } else {
       notes.push('the terminal opened on the Shell, not the harness');
     }
-    if (options.shell) {
+    if (options.shellLines) {
       await page.locator('[data-act="terminal_shell"]').first().click();
       gesture('opened the Shell');
       await page.locator('[data-terminal-state="open"][data-mode="shell"]').first().waitFor({ timeout: 60_000 });
@@ -491,7 +491,7 @@ async function main(): Promise<void> {
   const ranA = signedIn && await phase('A-author', async () => {
     const ticket = await createTicket(0);
     authorA = await live(ticket, 'author', true);
-    const note = await takeOver(authorA, { shell: true, editor: true, giveBack: true });
+    const note = await takeOver(authorA, { shellLines: true, editor: true, giveBack: true });
     return `${authorA.id.slice(0, 8)} of ${ticket}: ${note}`;
   });
   // ---- 2. ticket A: the reviewer taken over and given back; #233 on the author's screen ----
@@ -499,7 +499,7 @@ async function main(): Promise<void> {
     const author = authorA;
     await phase('A-reviewer', async () => {
       const reviewer = await live(author.ticket, 'reviewer');
-      const note = await takeOver(reviewer, { shell: false, editor: false, giveBack: true });
+      const note = await takeOver(reviewer, { shellLines: false, editor: false, giveBack: true });
       await page.goto(`${APP}/sessions/${encodeURIComponent(author.id)}`);
       const shown = (await page.locator('.phrase-title').first().innerText().catch(() => '?')).trim();
       const phaseNow = (await sessions()).find((s) => s.id === author.id)?.phase;
@@ -541,7 +541,7 @@ async function main(): Promise<void> {
   const restarted = signedIn && !stopped && await phase('B-restart', async () => {
     const ticket = await createTicket(1);
     authorB = await live(ticket, 'author');
-    await takeOver(authorB, { shell: false, editor: false, giveBack: false });
+    await takeOver(authorB, { shellLines: false, editor: false, giveBack: false });
     const containers = (await docker.containers(authorB.id)).length;
     gesture('restarted the service (SIGTERM, then the same command)');
     service.kill('SIGTERM');
@@ -572,7 +572,7 @@ async function main(): Promise<void> {
         await until('a new author', async () => (await sessions()).find((s) => s.ticket === first.ticket && s.role === 'author' && s.id !== first.id));
         session = await live(first.ticket, 'author', true);
       }
-      const note = await takeOver(session, { shell: true, editor: true, giveBack: true });
+      const note = await takeOver(session, { shellLines: true, editor: true, giveBack: true });
       return `${session.id === first.id ? 'the same session' : `a new session ${session.id.slice(0, 8)}`}: ${note}`;
     });
     await phase('B-end', async () => {
