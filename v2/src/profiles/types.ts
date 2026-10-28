@@ -79,7 +79,7 @@ export type SessionVersions = { readonly profile: number; readonly environment: 
 // What a write refuses, as the screens say it (profiles_error_<code>). No
 // refusal carries the value it refused.
 export const PROFILE_REFUSALS = [
-  'body', 'harness', 'model', 'same_models', 'prompt', 'tools', 'mcp', 'skills', 'secret',
+  'body', 'harness', 'model', 'same_models', 'prompt', 'tools', 'mcp', 'skills', 'sensitive',
   'image', 'network', 'hosts', 'cpus', 'memory', 'version', 'unchanged',
 ] as const;
 export type ProfileRefusal = (typeof PROFILE_REFUSALS)[number];

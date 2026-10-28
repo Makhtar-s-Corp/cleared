@@ -85,7 +85,7 @@ function refuseSecrets(change: unknown, object: string): void {
   texts(change, object, found);
   for (const { path, text } of found)
     for (const [category, pattern] of [...GUARD_PATTERNS, ...TOKEN_PATTERNS])
-      if (pattern.test(text)) throw new ProfileError('secret', `${path} holds what looks like a secret (${category}): a profile holds no secret, the service mounts the connections`);
+      if (pattern.test(text)) throw new ProfileError('sensitive', `${path} holds what looks like a secret (${category}): a profile holds no secret, the service mounts the connections`);
 }
 
 // ---- reading a change ------------------------------------------------------

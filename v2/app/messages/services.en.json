@@ -143,7 +143,7 @@
   "profiles_error_tools": "Each allowed command names its command first.",
   "profiles_error_mcp": "Sessions have no MCP server beyond Cleared's own yet.",
   "profiles_error_skills": "Sessions have the project's skills, mounted as they are.",
-  "profiles_error_secret": "This looks like a secret. A profile holds none: the service keeps the connections.",
+  "profiles_error_sensitive": "This looks like a secret. A profile holds none: the service keeps the connections.",
   "profiles_error_image": "The image is one Cleared builds, named cleared-v2-<name>:<tag>.",
   "profiles_error_network": "The network is the project's hosts, or the model API alone.",
   "profiles_error_hosts": "An allowed host is a host name, and a model-only network adds none.",
@@ -152,5 +152,7 @@
   "profiles_error_version": "There is no such version.",
   "profiles_error_unchanged": "That is the current version already.",
   "profiles_error_other": "The change could not be made. Try again in a moment.",
-  "profiles_first": "How the service ran before profiles."
+  "profiles_first": "How the service ran before profiles.",
+  "profiles_prompts_none": "none",
+  "profiles_cpus_own": "Cleared's"
 }

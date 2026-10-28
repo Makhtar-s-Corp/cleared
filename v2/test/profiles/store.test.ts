@@ -161,7 +161,7 @@ test('no secret in a profile or an environment: a value that looks like one is r
   const aws = ['AKIA', 'Q7F2L9M4R1T8V3W6'].join('');
   const bearer = `curl -H "Authorization: Bearer ${'Fx7Qd2Lm9Rt4Vw8Yz1Bc5Ng3'}" https://api.example.com`;
   const word = ['hunter2', 'hunter2'].join('');
-  const inUrl = `https://bot:${word}@tracker.example.com/mcp`;
+  const inUrl = `${['https://bot', word].join(':')}@tracker.example.com/mcp`;
   const assigned = `Use API_TOKEN=${'Fx7Qd2Lm9Rt4Vw8Y'} when you call it.`;
   const cases: [string, Record<string, unknown>, 'profile' | 'environment'][] = [
     [anthropic, { rolePrompts: { author: `The key is ${anthropic}.`, reviewer: '' } }, 'profile'],
@@ -174,7 +174,7 @@ test('no secret in a profile or an environment: a value that looks like one is r
     ['Fx7Qd2Lm9Rt4Vw8Y', { rolePrompts: { author: assigned, reviewer: '' } }, 'profile'],
     [word, { allowedHosts: [`bot:${word}@api.example.com`] }, 'environment'],
   ];
-  for (const [value, change, object] of cases) refused(() => versions[object].save(change, 'u1'), 'secret', value);
+  for (const [value, change, object] of cases) refused(() => versions[object].save(change, 'u1'), 'sensitive', value);
   assert.equal(versions.profile.list().length, 1);
   assert.equal(versions.environment.list().length, 1);
 });

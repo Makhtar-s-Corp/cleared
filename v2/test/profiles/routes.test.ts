@@ -86,7 +86,7 @@ test('a refusal is a code, never the value; a refused write adds no version', as
   await serve(async (call) => {
     const value = ['ghp', 'Q7f2L9m4R1t8V3w6Y0z5B2c7N4h9K1j3P6sD'].join('_');
     const secret = await call('POST', `${PROFILES_PATH}/agent`, { body: { rolePrompts: { author: `Use ${value}.`, reviewer: '' } } });
-    assert.deepEqual([secret.status, secret.json], [400, { error: 'secret' }]);
+    assert.deepEqual([secret.status, secret.json], [400, { error: 'sensitive' }]);
     assert.ok(!secret.text.includes(value));
     assert.deepEqual((await call('POST', `${PROFILES_PATH}/agent`, { body: { harness: 'cursor' } })).json, { error: 'harness' });
     assert.deepEqual((await call('POST', `${PROFILES_PATH}/agent/restore`, { body: { version: 'one' } })).json, { error: 'version' });

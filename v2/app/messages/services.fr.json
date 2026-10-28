@@ -143,7 +143,7 @@
   "profiles_error_tools": "Chaque commande autorisée nomme d'abord sa commande.",
   "profiles_error_mcp": "Les sessions n'ont pas encore d'autre serveur MCP que celui de Cleared.",
   "profiles_error_skills": "Les sessions ont les skills du projet, montés tels quels.",
-  "profiles_error_secret": "Cela ressemble à un secret. Un profil n'en contient aucun\u00a0: le service garde les connexions.",
+  "profiles_error_sensitive": "Cela ressemble à un secret. Un profil n'en contient aucun\u00a0: le service garde les connexions.",
   "profiles_error_image": "L'image est une de celles que Cleared construit, nommée cleared-v2-<nom>:<tag>.",
   "profiles_error_network": "Le réseau est celui des hôtes du projet, ou l'API du modèle seule.",
   "profiles_error_hosts": "Un hôte autorisé est un nom d'hôte, et un réseau limité au modèle n'en ajoute aucun.",
@@ -152,5 +152,7 @@
   "profiles_error_version": "Cette version n'existe pas.",
   "profiles_error_unchanged": "C'est déjà la version en cours.",
   "profiles_error_other": "Le changement n'a pas pu être fait. Réessayez dans un moment.",
-  "profiles_first": "Le service tel qu'il tournait avant les profils."
+  "profiles_first": "Le service tel qu'il tournait avant les profils.",
+  "profiles_prompts_none": "aucune",
+  "profiles_cpus_own": "ceux de Cleared"
 }

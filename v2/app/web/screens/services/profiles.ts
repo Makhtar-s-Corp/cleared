@@ -12,7 +12,7 @@ export function profileFacts(body: AgentProfile, t: Translate): string[] {
     t('profiles_fact_harness', { value: t(body.harness === 'auto' ? 'profiles_harness_auto' : 'profiles_harness_claude_code') }),
     t('profiles_fact_author_model', { value: own(body.authorModel) }),
     t('profiles_fact_reviewer_model', { value: own(body.reviewerModel) }),
-    t('profiles_fact_prompts', { value: prompts.length > 0 ? prompts.join(', ') : t('profiles_none') }),
+    t('profiles_fact_prompts', { value: prompts.length > 0 ? prompts.join(', ') : t('profiles_prompts_none') }),
     t('profiles_fact_tools', { value: body.allowedTools.length > 0 ? t('profiles_tools_more', { list: body.allowedTools.join(', ') }) : t('profiles_tools_default') }),
     t('profiles_fact_mcp', { value: t('profiles_none') }),
     t('profiles_fact_skills', { value: t('profiles_skills_project') }),
@@ -25,7 +25,7 @@ export function environmentFacts(body: AgentEnvironment, t: Translate): string[]
     t('profiles_fact_image', { value: own(body.image) }),
     t('profiles_fact_network', { value: t(body.network === 'model-only' ? 'profiles_network_model_only' : 'profiles_network_project') }),
     t('profiles_fact_hosts', { value: body.allowedHosts.length > 0 ? body.allowedHosts.join(', ') : t('profiles_hosts_none') }),
-    t('profiles_fact_cpus', { value: own(body.cpus) }),
+    t('profiles_fact_cpus', { value: body.cpus ?? t('profiles_cpus_own') }),
     t('profiles_fact_memory', { value: own(body.memory) }),
   ];
 }

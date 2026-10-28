@@ -16,7 +16,7 @@
 .profiles-version-head { display: flex; align-items: center; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
 .profiles-version-head button { min-height: 36px; padding: 0 10px; }
 .profiles-version-title { margin: 0; display: flex; gap: var(--space-1); align-items: baseline; font-size: var(--text-sm); font-weight: var(--weight-strong); }
-.profiles-current { color: var(--text-secondary); font-weight: normal; }
+.profiles-current { color: var(--text-secondary); font-weight: var(--weight-regular); }
 .profiles-meta { margin: 2px 0 0; }
 .profiles-facts { list-style: none; margin: 4px 0 0; padding: 0; overflow-wrap: anywhere; }
 

@@ -67,7 +67,7 @@ test('a version\'s facts: the service\'s own where it names none', () => {
 
 test('a refusal is said in words, any unknown one as the general one', () => {
   each((t, language) => {
-    assert.equal(profileRefusal(t, { error: 'secret' }), t('profiles_error_secret'), language);
+    assert.equal(profileRefusal(t, { error: 'sensitive' }), t('profiles_error_sensitive'), language);
     assert.equal(profileRefusal(t, { error: 'unchanged' }), t('profiles_error_unchanged'), language);
     assert.equal(profileRefusal(t, { error: 'what is this' }), t('profiles_error_other'), language);
     assert.equal(profileRefusal(t, null), t('profiles_error_other'), language);
