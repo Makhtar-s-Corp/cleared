@@ -6,7 +6,7 @@
    20 px, the steps a quiet list of numbered circles (done with a check's green, the current one indigo), the step a
    white panel with a 1px line and an 8 px radius. */
 
-.setup-page { min-height: 100vh; background: var(--sidebar); }
+.setup-page { min-height: 100vh; }
 .setup { max-width: 1120px; margin: 0 auto; padding: 0 var(--space-5) var(--space-6); }
 
 .setup-head { margin-bottom: var(--space-4); }
