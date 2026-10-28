@@ -318,5 +318,8 @@
   "facts_agent": "Agent",
   "facts_model": "Model",
   "facts_started": "Started",
-  "screen_waiting": "The before and after captures will show here as soon as the author changes a screen."
+  "screen_waiting": "The before and after captures will show here as soon as the author changes a screen.",
+  "session_versions": "Agent profile: {profile}. Environment: version {environment}.",
+  "session_versions_profile": "version {version}",
+  "session_versions_profile_auto": "version {version}, harness picked automatically: {harness}"
 }

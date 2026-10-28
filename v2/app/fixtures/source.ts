@@ -31,6 +31,7 @@
 // The week's figures (C17) are the service's own weekFigures over the
 // consumption fixture's ledger; with `week`, it holds a week of merged tickets.
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
 import { KEEPALIVE_MS } from '../../src/api/events.ts';
 import { changeFrame, leadFrame as leadFrameOf, sseFrame as sseFrameOf, type Ask, type CaptureChoice, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
 import { ticketCost } from '../../src/consumption/ticket-cost.ts';
@@ -52,6 +53,8 @@ import { contractItem, knowledgeItem, requestItems } from './inbox.ts';
 import { serviceMapFixture } from './services.ts';
 import { variableRefusal } from '../../src/container/services.ts';
 import { TEST_VALUE_MIN, type TestValuesView } from '../../src/secrets/types.ts';
+import { profilesView, versionView } from '../../src/profiles/routes.ts';
+import { PROFILE_SCHEMA, ProfileError, profileVersions, type VersionStore } from '../../src/profiles/store.ts';
 import { RECIPES, schedulesFixture, ticketSteps, towerFixture } from './tower.ts';
 
 const BODY_LIMIT = 16 * 1024;
@@ -138,6 +141,14 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
     workspace: true, key: 'ready',
     services: [...testValues].map(([name, values]) => ({ name, inWorkspace: true, values: [...values].map(([value, saved]) => ({ service: name, name: value, ...saved, readable: true })) })),
   });
+  // The agent profile's and the environment's versions (issue #452): the
+  // service's own store, in memory, with one edit already, so an old version
+  // can be restored. A person is named by their id, as the fixtures' users are.
+  const profilesDb = new DatabaseSync(':memory:');
+  profilesDb.exec(PROFILE_SCHEMA);
+  const profiles = profileVersions(profilesDb, now);
+  profiles.profile.save({ harness: 'auto', allowedTools: ['npm run lint'] }, 'owner');
+  const named = async (id: string) => id;
   const batches = new BatchRunner({
     db: consumption.db, tickets: created, project, levers: consumption.levers, weekStopPercent: 85, now,
     flow: { launch: async (ticket, by) => { await created.move(ticket, created.states.progress, { kind: 'human', id: by }); }, subscribe: () => () => undefined },
@@ -254,6 +265,22 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
         const saved = { setAt: now().toISOString(), setBy: user };
         values.set(body.name, saved);
         return sendJson(response, 200, { value: { service: body.service, name: body.name, ...saved, readable: true }, replaced });
+      }
+    }
+    // The agent profile and the environment (issue #452): the service's refusals, by code.
+    if (collection === 'profiles') {
+      if (method === 'GET' && parts.length === 1) return sendJson(response, 200, await profilesView(profiles, named));
+      const object: VersionStore<unknown> | undefined = id === 'agent' ? profiles.profile : id === 'environment' ? profiles.environment : undefined;
+      if (method === 'POST' && object && (parts.length === 2 || (sub === 'restore' && parts.length === 3))) {
+        const body = await readJson(request);
+        try {
+          if (parts.length === 2) return sendJson(response, 200, await versionView(object.save(body, user), named));
+          const version = (body as { version?: unknown } | null)?.version;
+          return sendJson(response, 200, await versionView(object.restore(typeof version === 'number' ? version : Number.NaN, user), named));
+        } catch (error) {
+          if (error instanceof ProfileError) return sendJson(response, 400, { error: error.code });
+          throw error;
+        }
       }
     }
     // The batches (requirement C6): the service's checks, and a pass before each read.

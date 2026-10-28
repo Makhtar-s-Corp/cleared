@@ -29,5 +29,7 @@
   "receipt_cost": "Coût : {count} jetons",
   "receipt_cost_unreported": "Coût : jetons non déclarés par les agents",
   "receipt_usd": "{usd} déclarés par les agents (équivalent API)",
-  "receipt_time": "Durée : {time} de la première session à cette pull request"
+  "receipt_time": "Durée : {time} de la première session à cette pull request",
+  "receipt_versions": "Version du profil d'agent : {profile}. Version de l'environnement : {environment}.",
+  "receipt_versions_then": "{first}, puis {next}"
 }

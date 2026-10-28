@@ -27,7 +27,7 @@ import { DockerError, assertSessionId, type ContainerSpec, type Docker, type Lim
 import type { ImageChoice } from './devcontainer.ts';
 import { PreparedImages, type PreparedChoice } from './prepared.ts';
 import { testVariablesOf } from '../secrets/live.ts';
-import type { Role } from '../session/contract.ts';
+import type { Role, StartInput } from '../session/contract.ts';
 import { ServiceError, dependencyChange, testVariables, ticketLayerDockerfile, type ServiceSpec, type SiblingSpec } from './services.ts';
 
 // The session image pins Claude Code's version; the tag follows it.
@@ -64,6 +64,14 @@ export const DEFAULT_LIMITS: Limits = { memory: '4g', cpus: '2', pids: 1024 };
 export const SERVICE_LIMITS: Limits = { memory: '1g', cpus: '1', pids: 512 };
 export const EGRESS_LIMITS: Limits = { memory: '256m', cpus: '0.5', pids: 128 };
 export const FAKE_LIMITS: Limits = { memory: '256m', cpus: '0.5', pids: 128 };
+
+// A session's limits as its adapter gives them: the runtime's, else
+// Cleared's, with the environment's CPUs and memory over them (issue #452).
+// Neither naming any, nothing: the spec is as it was before environments.
+export function limitsOf(runtime: Limits | undefined, session: StartInput['limits']): { readonly limits: Limits } | undefined {
+  if (!session?.cpus && !session?.memory) return runtime === undefined ? undefined : { limits: runtime };
+  return { limits: { ...(runtime ?? DEFAULT_LIMITS), ...session } };
+}
 
 export function sessionNames(session: string) {
   const base = `cleared-v2-${session}`;

@@ -2,7 +2,10 @@
 // node:sqlite as lib/ledger.ts opens it, so that the tracker tables and the
 // runs merge-pr.ts reads stay in the same file (docs/v2/milestone-1-plan.md,
 // decision 11). This file owns three tables: session_events, sessions and
-// policy_rules. Every other table belongs to the module that declares it.
+// policy_rules; and creates the tables of the agent profile's and the
+// environment's versions, with each session's (profiles/store.ts, issue
+// #452), so a session never starts on a ledger without them. Every other table belongs
+// to the module that declares it.
 // What changes a table that exists is a versioned migration (migrations.ts,
 // milestone 2 decision 19), run here once the tables it needs exist.
 import { mkdirSync, readFileSync } from 'node:fs';
@@ -11,6 +14,7 @@ import { basename, dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { Harness, Role, SessionId, UserId } from '../session/contract.ts';
 import type { AgUiEvent, EventLog, SessionEvent } from '../session/events.ts';
+import { PROFILE_SCHEMA } from '../profiles/store.ts';
 import { MIGRATIONS, migrate, type Migration } from './migrations.ts';
 
 export const SCHEMA = `
@@ -170,6 +174,8 @@ export function openStore(path: string): Store {
   const db = openDatabase(path);
   try {
     migrate(db);
+    // After the migrations: the copy one makes is the ledger as it was.
+    db.exec(PROFILE_SCHEMA);
   } catch (error) {
     db.close();
     throw error;

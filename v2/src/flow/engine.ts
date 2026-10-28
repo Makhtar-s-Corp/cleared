@@ -165,6 +165,8 @@ import { StepStore, deriveSteps, publicStep, stepName, stepSiblings, type Step, 
 import { foldState, sessionPlanOf } from './state.ts';
 import { VARIANT_PARALLEL, VariantStore, diffLines, publicVariant, variantPrompt, type Variant, type VariantKey } from './variants.ts';
 import { PICK_DEFAULT, PICK_STOP_PERCENT, pickPrompt, pickWinner, ticketType, type PickMeasure } from './harness-pick.ts';
+import { profileVersions, recordSessionVersions, sessionVersions, type ProfileVersions } from '../profiles/store.ts';
+import { DEFAULT_ENVIRONMENT, DEFAULT_PROFILE, type AgentEnvironment, type AgentProfile } from '../profiles/types.ts';
 
 export type { ProjectSettings } from './config.ts';
 export type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
@@ -464,6 +466,7 @@ export class FlowEngine {
   #captureChoices: CaptureChoiceStore;                              // the human's choice of the receipt's captures, by ticket (P226)
   #envChecks: EnvCheckStore;                                        // the setup sessions' checks, by ticket (C4)
   #envRuns = new Map<TicketId, string>();                           // when each ticket's run started: its checks' rounds count from there
+  #profiles: ProfileVersions;                                       // the agent profile's and the environment's versions (issue #452)
 
   constructor(deps: FlowDeps) {
     this.registry = deps.registry;
@@ -486,6 +489,7 @@ export class FlowEngine {
     this.#fastLanes = new FastLaneStore(deps.store.db);
     this.#captureChoices = new CaptureChoiceStore(deps.store.db);
     this.#envChecks = new EnvCheckStore(deps.store.db);
+    this.#profiles = profileVersions(deps.store.db, this.#now);
     this.#runner = new TrainRunner({
       db: deps.store.db, trains: this.#trains, tickets: this.registry.ticketStore, project: this.config.project, retryMs: this.config.mergeRetryMs,
       lock: (name) => this.#lockOf(this.#service(name)), now: this.#now, clean: this.#clean, emit: (event) => this.#emit(event),
@@ -935,6 +939,7 @@ export class FlowEngine {
     const state = foldState(events, phase);
     const plan = sessionPlanOf(events);
     const takenOver = this.#paused.get(id);
+    const versions = sessionVersions(this.#store.db, id, row.role);
     // The service and the preview key the runtime stored when the session's
     // containers started (lane 15), when its row holds them; the session
     // plan of an author that proposed one (lane 17); who took it over (lane 20).
@@ -944,6 +949,7 @@ export class FlowEngine {
       state: { ...state, ...(plan ? { plan } : {}), ...(takenOver ? { takenOver } : {}) },
       ...(row.service ? { service: row.service } : {}), ...(row.previewKey ? { previewKey: row.previewKey } : {}), ...(takenOver ? { takenOver } : {}),
       ...(this.#dormant.has(id) ? { dormant: true as const } : {}),
+      ...(versions ? { versions } : {}),
     };
   }
 
@@ -1034,10 +1040,14 @@ export class FlowEngine {
   // Todo itself, when it puts one back, never starts anything.
   // `variants`: 2 to 4 authors at once (issue #271); absent or 1, one. A
   // list of harnesses is a harness pick (issue #329): a variant on each.
-  async start(ticketId: TicketId, by: UserId, origin?: Origin, variants?: number | readonly Harness[]): Promise<void> {
+  // A profile on `harness: auto` (issue #452) makes a ticket that names
+  // neither a number of variants nor harnesses a harness pick on the
+  // harnesses enabled, when there are two at least.
+  async start(ticketId: TicketId, by: UserId, origin?: Origin, asked?: number | readonly Harness[]): Promise<void> {
     const tickets = this.registry.ticketStore;
     const ticket = await tickets.get(ticketId);
     if (!ticket) throw new FlowError('not_found', `unknown ticket ${ticketId}`);
+    const variants = asked ?? this.#autoHarnesses(ticket);
     const count = typeof variants === 'object' ? variants.length : variants ?? 1;
     const refused = count === 1 && typeof variants !== 'object' ? undefined : this.variantsRefusal(variants as number | readonly Harness[]);
     if (refused) throw new FlowError('invalid', refused);
@@ -2038,17 +2048,32 @@ export class FlowEngine {
 
   // The configured author model, or the one the owner chose on the Consumption
   // screen, unless the ticket's reviewer is on that model: the reviewer is another one.
+  // Then the profile's (issue #452), under the same rule; the Consumption
+  // screen's choice is the owner's switch of the moment, and comes first.
   #chosenModel(ticket: Ticket): string {
-    const chosen = this.#levers?.read().model;
-    return chosen && chosen !== this.#reviewerModel(ticket) ? chosen : this.config.authorModel;
+    const reviewer = this.#reviewerModel(ticket);
+    for (const chosen of [this.#levers?.read().model, this.#profiles.profile.current().body.authorModel]) if (chosen && chosen !== reviewer) return chosen;
+    return this.config.authorModel;
   }
 
   // The reviewer a `reviewer:<model>` sensitivity names, on the first service
   // of the ticket that names one (decision 24); else the configured one. The
-  // workspace's configuration refuses one naming the author model.
+  // workspace's configuration refuses one naming the author model. Then
+  // the profile's (issue #452), which names another than its author's.
   #reviewerModel(ticket: Ticket): string {
     for (const service of this.#servicesOf(ticket)) if (service.sensitivity.startsWith('reviewer:')) return service.sensitivity.slice('reviewer:'.length);
-    return this.config.reviewerModel;
+    return this.#profiles.profile.current().body.reviewerModel ?? this.config.reviewerModel;
+  }
+
+  // The harnesses of a pick a profile on auto asks for: the ones enabled
+  // whose adapter is registered, on a workspace of one service; fewer than
+  // two, none, and the ticket runs on Claude Code as before. A Quick ticket
+  // keeps its fast lane on Haiku, and a setup session (C4) its one author.
+  #autoHarnesses(ticket: Ticket): readonly Harness[] | undefined {
+    if (this.#profiles.profile.current().body.harness !== 'auto' || this.#several) return undefined;
+    if (ticket.labels.includes(QUICK_LABEL) || isEnvironmentTicket(ticket.labels)) return undefined;
+    const enabled = (this.config.pickHarnesses ?? PICK_DEFAULT).map((p) => p.harness).filter((harness) => this.registry.sessionAdapters[harness]);
+    return enabled.length >= VARIANTS_MIN ? enabled.slice(0, VARIANTS_MAX) : undefined;
   }
 
   // start() in the background, for the routes: a person's click does not
@@ -2163,16 +2188,25 @@ export class FlowEngine {
     const service = step?.service ?? (this.#several ? this.#servicesOf(ticket)[0]?.name : undefined);
     const given = [...(author ? this.#authorTools(ticket, author === 'plan') : []), ...(step?.note ? [step.note] : [])];
     const tools = given.length > 0 ? given : undefined;
+    // The profile's and the environment's current versions (issue #452), read
+    // before any wait, as the caller read the model from the same version.
+    const profile = this.#profiles.profile.current();
+    const environment = this.#profiles.environment.current();
+    const rolePrompt = role === 'author' ? profile.body.rolePrompts.author : role === 'reviewer' ? profile.body.rolePrompts.reviewer : '';
+    const limits = { ...(environment.body.cpus ? { cpus: environment.body.cpus } : {}), ...(environment.body.memory ? { memory: environment.body.memory } : {}) };
     const input: StartInput = {
       project: this.config.project, ticket: ticket.id, role, harness, model, workdir, briefing,
-      policy: this.#policy(role, settings, tools, author === 'plan'), prompt, services: settings.services, ...(service ? { service } : {}), ...(tools ? { tools } : {}),
+      policy: this.#policy(role, settings, tools, author === 'plan', profile.body, environment.body), prompt: rolePrompt ? `${prompt}\n\n${rolePrompt}` : prompt,
+      services: settings.services, ...(service ? { service } : {}), ...(tools ? { tools } : {}),
       ...(step?.siblings ? { siblings: step.siblings } : {}),
+      ...(environment.body.image ? { image: environment.body.image } : {}), ...(Object.keys(limits).length > 0 ? { limits } : {}),
     };
     const handle = await adapter.start(input);
     // The fake adapter plays a first turn's host calls inside start(): the gate may exist already.
     if (author === 'plan' && !this.#gates.has(handle.id)) this.#gates.set(handle.id, { phase: 'planning', stepOpen: false });
     const at = this.#now().toISOString();
     this.#store.sessions.put({ id: handle.id, project: input.project, ticket: ticket.id, role, harness, model, status: role === 'reviewer' ? 'reviewing' : 'working', createdAt: at, updatedAt: at });
+    recordSessionVersions(this.#store.db, handle.id, { profile: profile.version, environment: environment.version, auto: profile.body.harness === 'auto' });
     const live: Live = { id: handle.id, input, settings, handle, lastActivity: this.#now().getTime(), closed: false, waitOpen: false };
     this.#live.set(live.id, live);
     this.#inputs.set(live.id, { input, settings });
@@ -2231,10 +2265,14 @@ export class FlowEngine {
     return [...out];
   }
 
-  #policy(role: Role, settings: ProjectSettings, tools?: readonly HostTool[], planning = false): Policy {
+  // The profile's allowed commands after the project's; the environment's
+  // hosts after the project's, or none past the model API and the registry
+  // on a model-only network (issue #452).
+  #policy(role: Role, settings: ProjectSettings, tools?: readonly HostTool[], planning = false, profile: AgentProfile = DEFAULT_PROFILE, environment: AgentEnvironment = DEFAULT_ENVIRONMENT): Policy {
     return {
       role, ...(planning ? { planning } : {}), base: this.config.base, workdir: WORKDIR_MOUNT, scripts: settings.scripts, credentialFile: LOGIN_FILE_MOUNT,
-      safeCommands: [...DEFAULT_SAFE_COMMANDS, ...settings.safeCommands], allowedHosts: settings.hosts, forbiddenHosts: [],
+      safeCommands: [...DEFAULT_SAFE_COMMANDS, ...settings.safeCommands, ...profile.allowedTools],
+      allowedHosts: environment.network === 'model-only' ? [] : [...settings.hosts, ...environment.allowedHosts], forbiddenHosts: [],
       ticketFiles: [], learned: [...this.#store.policyRules.learned(this.config.project), ...toolRules(tools)],
       ...(role === 'reviewer' && settings.testCommand ? { testCommand: settings.testCommand } : {}),
     };
@@ -2949,6 +2987,8 @@ export class FlowEngine {
         if (row.role === 'author' && event.name === 'cleared.proof_captured') captures.set(event.value.service, event.value);
       }
     const cost = ticketCost(this.#store.db, { project: reviewer.input.project, ticket: id });
+    const versions = this.#flowRows(id).map((row) => sessionVersions(this.#store.db, row.id, row.role)).filter((v) => v !== undefined);
+    const distinct = (pick: (v: { profile: number; environment: number }) => number) => [...new Set(versions.map(pick))].sort((a, b) => a - b);
     return {
       ticket: id,
       tests: tests.sort((a, b) => a.round - b.round),
@@ -2958,6 +2998,7 @@ export class FlowEngine {
       elapsedMs: cost.elapsedMs,
       captures: [...captures.values()],
       ...(this.config.linkBase ? { linkBase: this.config.linkBase } : {}),
+      ...(versions.length > 0 ? { versions: { profile: distinct((v) => v.profile), environment: distinct((v) => v.environment) } } : {}),
     };
   }
 

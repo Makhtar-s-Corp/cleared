@@ -27,6 +27,7 @@ import type { WeekFigures, WeekService, WeekTicket } from '../consumption/week.t
 import type { Decision, Harness, Role, SessionId, UserId } from '../session/contract.ts';
 import type { ContextShare, Question, SessionEvent, SessionPhase, SessionState, ToolInput } from '../session/events.ts';
 import type { Verdict } from '../session/policy.ts';
+import type { SessionVersions } from '../profiles/types.ts';
 import type { Ticket, TicketId } from '../tickets/contract.ts';
 
 // A session the owner took over (decision 30) is paused until Give back:
@@ -57,6 +58,7 @@ export type SessionSummary = {
   readonly service?: string;                                // the workspace service it works on; absent before lane 15 starts sessions per service
   readonly takenOver?: TakenOver | null;                    // who took it over (decision 30, lane 20); absent or null otherwise
   readonly dormant?: true;                                  // stopped by the watchdog while it waited for a person: the answer resumes it, and it can be handed over (B6.3)
+  readonly versions?: SessionVersions;                      // the agent profile's and the environment's versions it started on (issue #452); an author's or a reviewer's only
 };
 
 // The session plan an author proposes before writing code (decision 22,

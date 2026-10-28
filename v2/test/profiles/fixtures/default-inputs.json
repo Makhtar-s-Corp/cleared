@@ -1,0 +1,164 @@
+[
+  {
+    "project": "guestbook",
+    "ticket": "LOCAL-1",
+    "role": "author",
+    "harness": "claude-code",
+    "model": "claude-opus-5-5",
+    "workdir": "/work/LOCAL-1",
+    "briefing": {
+      "projectPage": "A guestbook.",
+      "decisions": [],
+      "glossary": [],
+      "lessons": [],
+      "lastHandover": null
+    },
+    "policy": {
+      "role": "author",
+      "base": "main",
+      "workdir": "/workspace",
+      "scripts": [
+        "test",
+        "typecheck"
+      ],
+      "credentialFile": "/run/cleared/claude.token",
+      "safeCommands": [
+        "npm test",
+        "npm test *",
+        "node --test*",
+        "node --test* *",
+        "git status",
+        "git status *",
+        "git diff",
+        "git diff *",
+        "git log",
+        "git log *",
+        "git add *",
+        "git commit *",
+        "git checkout -b *",
+        "git branch",
+        "git branch --show-current",
+        "ls",
+        "ls *",
+        "cat *",
+        "head *",
+        "tail *",
+        "grep *",
+        "find *",
+        "pwd",
+        "npm ci"
+      ],
+      "allowedHosts": [
+        "registry.npmjs.org"
+      ],
+      "forbiddenHosts": [],
+      "ticketFiles": [],
+      "learned": []
+    },
+    "prompt": "Ticket LOCAL-1: Newest entry first\n\nThe guestbook lists entries newest first.\n\nWork on the checkout you are in: it is on the ticket branch. Change what the ticket asks and nothing else, write or update tests, run them, and commit your work with git.\nNever push, and never open a pull request: Cleared publishes the branch from the host once the change is reviewed.\nCommit messages carry no email address and no Co-Authored-By trailer: the guard that runs before the branch leaves refuses an address.\nIf you must ask the owner a question, give options and end the label of the one you would take with \"(Recommended)\". Unanswered past its delay, the lead decides, then that option applies; a question without one parks the ticket until someone answers.\nWhen you stop, write HANDOVER.md at the root of the checkout (the end-of-session notice gives the headings). Never commit it.",
+    "services": [
+      {
+        "alias": "postgres",
+        "image": "postgres:16",
+        "env": {
+          "POSTGRES_HOST_AUTH_METHOD": "trust"
+        },
+        "tmpfs": [
+          "/var/lib/postgresql/data"
+        ],
+        "ready": [
+          "pg_isready",
+          "--quiet",
+          "--host",
+          "127.0.0.1",
+          "--username",
+          "postgres"
+        ],
+        "sessionEnv": {
+          "DATABASE_URL": "postgres://postgres@postgres:5432/postgres"
+        }
+      }
+    ]
+  },
+  {
+    "project": "guestbook",
+    "ticket": "LOCAL-1",
+    "role": "reviewer",
+    "harness": "claude-code",
+    "model": "claude-sonnet-5-5",
+    "workdir": "/work/LOCAL-1",
+    "briefing": {
+      "projectPage": "A guestbook.",
+      "decisions": [],
+      "glossary": [],
+      "lessons": [],
+      "lastHandover": null
+    },
+    "policy": {
+      "role": "reviewer",
+      "base": "main",
+      "workdir": "/workspace",
+      "scripts": [
+        "test",
+        "typecheck"
+      ],
+      "credentialFile": "/run/cleared/claude.token",
+      "safeCommands": [
+        "npm test",
+        "npm test *",
+        "node --test*",
+        "node --test* *",
+        "git status",
+        "git status *",
+        "git diff",
+        "git diff *",
+        "git log",
+        "git log *",
+        "git add *",
+        "git commit *",
+        "git checkout -b *",
+        "git branch",
+        "git branch --show-current",
+        "ls",
+        "ls *",
+        "cat *",
+        "head *",
+        "tail *",
+        "grep *",
+        "find *",
+        "pwd",
+        "npm ci"
+      ],
+      "allowedHosts": [
+        "registry.npmjs.org"
+      ],
+      "forbiddenHosts": [],
+      "ticketFiles": [],
+      "learned": []
+    },
+    "prompt": "You review a pull request you did not write. Find defects; do not approve by default.\n\nThe change answers ticket LOCAL-1: Newest entry first\n\nThe guestbook lists entries newest first.\n\nRead `CLAUDE.md`. Read the entire change with `git diff main...HEAD` and `git log main..HEAD`. Open touched files and their callers. Do not edit anything and do not send anything.\nThe service declares no test command: you run no command that runs code, and you judge from the code.\n\nCheck in this order:\n1. Logic errors, missing cases, swallowed exit codes, silent failures, or reports that contradict the code.\n2. Secrets, real data, external sends, production writes, and a weakened guard.\n3. Conflicts with repository rules or decisions the project records.\n4. Tests that do not prove their names, or new behavior without a test.\n\nDo not report style preferences or praise the author. If uncertain, say what would settle it.\n\nFinish with:\n\nVerdict: “fix before merge” or “no blocking issues”.\nDefects: one per line, most serious first, as `file:line`, actual behavior, triggering input, expected behavior.\nTo verify: what you could not establish.\nQuestions for the user: one closed question per line with a recommendation, or “None.”\n\nWrite in English, in complete sentences a product owner can follow, with a concrete example when a defect is about behavior.\n\nYou cannot write files in this session, so do not write HANDOVER.md. Your final message must be the full report: it alone is saved and posted. If you are asked for HANDOVER.md at the end of the session, answer in one sentence that your report is your handover; do not repeat the report and do not try to write the file.",
+    "services": [
+      {
+        "alias": "postgres",
+        "image": "postgres:16",
+        "env": {
+          "POSTGRES_HOST_AUTH_METHOD": "trust"
+        },
+        "tmpfs": [
+          "/var/lib/postgresql/data"
+        ],
+        "ready": [
+          "pg_isready",
+          "--quiet",
+          "--host",
+          "127.0.0.1",
+          "--username",
+          "postgres"
+        ],
+        "sessionEnv": {
+          "DATABASE_URL": "postgres://postgres@postgres:5432/postgres"
+        }
+      }
+    ]
+  }
+]
