@@ -7625,5 +7625,5 @@ The first tries found two defects, fixed here with a test each: the check's cont
 
 **Resources.** No Docker object, no container, no tunnel, no listening port but the tests' own ephemeral loopback ones. GitHub: the issues, one read-only fetch of a private repository with this server's gh login, and the pull request. No Claude Code login read. Network: `npm ci` of the lock file, `git fetch`.
 
-- Pull request: PRNUM, against `v2`.
+- Pull request: 454, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-setup-robustness`.
