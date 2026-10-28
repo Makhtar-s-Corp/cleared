@@ -157,7 +157,6 @@
   "profiles_cpus_own": "ceux de Cleared",
   "dreaming_title": "Apprendre des sessions passées",
   "dreaming_intro": "Chaque nuit, une passe par service relit les demandes de changement des relecteurs des 30 derniers jours. Un défaut demandé sur deux tickets ou plus devient une proposition dans la boîte de réception, qui cite ces relectures. Rien n'est écrit avant que le propriétaire l'approuve. La passe n'appelle aucun modèle, et elle attend tant que le quota de la semaine est à son seuil.",
-  "dreaming_service": "{service}",
   "dreaming_off": "Désactivée : aucune passe pour ce service.",
   "dreaming_never": "Activée. Aucune passe pour le moment.",
   "dreaming_last_one": "Activée. Dernière passe le {date} : une proposition.",

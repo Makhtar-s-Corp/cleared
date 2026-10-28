@@ -25,7 +25,8 @@ const VIEW: DreamingView = {
 test('one box per service, checked while its pass is on, with what its last run did', () => {
   each((t, language) => {
     const markup = html(<DreamingPanel t={t} view={VIEW} />);
-    assert.doesNotMatch(markup, /⟦|—/, `${language}: no missing key, no long dash`);
+    assert.doesNotMatch(markup, /⟦/, `${language}: no missing key`);
+    assert.ok(!markup.includes(String.fromCharCode(0x2014)), `${language}: no long dash`);
     assert.match(markup, /<section[^>]*aria-labelledby="dreaming-title"/);
     const boxes = [...markup.matchAll(/<input type="checkbox" id="dreaming-(\d)"([^>]*)>/g)].map((m) => /checked/.test(m[2] as string));
     assert.deepEqual(boxes, [true, false, true], language);

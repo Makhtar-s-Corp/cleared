@@ -68,7 +68,7 @@ test('a proposal of the nightly pass: the pass instead of a ticket, each source 
   assert.match(shown(french), /Sessions passées/);
   assert.match(shown(french), /Tiré de 2 relectures/);
   assert.equal(itemLine(item, viewOf([item]), fr), 'Vu dans 2 relectures · pour guestbook');
-  for (const text of [html, french]) assert.doesNotMatch(text, /«dream_|\u2014/);
+  for (const text of [html, french]) assert.ok(!/«dream_/.test(text) && !text.includes(String.fromCharCode(0x2014)));
   // A handover's item keeps its ticket and its rule.
   assert.doesNotMatch(shown(detailOf(knowledgeItem(FIXTURE_NOW))), /Past sessions|reviews/);
 });
