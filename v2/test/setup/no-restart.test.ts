@@ -98,7 +98,8 @@ test('the assistant, then a first ticket and a Tower ticket, with no restart: ea
   const { default: flow } = await import('../../src/modules/flow.ts');
   const { default: inbox } = await import('../../src/modules/inbox.ts');
   const { default: knowledge } = await import('../../src/modules/knowledge.ts');
-  const { default: lead } = await import('../../src/modules/lead.ts');
+  const { default: lead, leadRuntime, plansOf, schedulesOf } = await import('../../src/modules/lead.ts');
+  const { runtime: flowRuntime } = await import('../../src/flow/runtime.ts');
   const { default: notify } = await import('../../src/modules/notify.ts');
   const { default: run } = await import('../../src/modules/run.ts');
   const { default: secrets } = await import('../../src/modules/secrets.ts');
@@ -191,9 +192,21 @@ test('the assistant, then a first ticket and a Tower ticket, with no restart: ea
     assert.deepEqual(listedTickets.filter((t) => t.id === firstId || t.id === typed.json.id).map((t) => t.project), [project, project]);
     // The first ticket's author proposes its plan, which waits for the owner's Go.
     await until(async () => ((await call('/api/setup/first-ticket?language=en')).json?.ticket?.stage === 'plan' ? true : undefined), 'the session plan in the inbox');
+    // So does the Tower ticket's, started by its route without waiting: its
+    // checkout and its siblings are written under the state folder, so the
+    // test ends once both authors wait for a Go, with nothing left to write there.
+    const plans = await until(() => {
+      const rows = store.db.prepare("SELECT ticket FROM flow_inbox WHERE kind = 'session_plan' AND state = 'waiting' ORDER BY ticket").all().map((row) => String(row.ticket));
+      return rows.length === 2 ? rows : undefined;
+    }, 'both session plans in the inbox');
+    assert.deepEqual(plans, [firstId, typed.json.id].sort());
     assert.equal(existsSync(dockerLog) ? readFileSync(dockerLog, 'utf8') : '', '', 'no docker call');
     assert.deepEqual(asked, [], 'no request reached the tracker');
   } finally {
+    // The modules' stop leaves what main.ts ends by exiting: the engine's,
+    // the lead's, its plans', its schedules' and the dispatcher's timers.
+    const engine = flowRuntime.engine(app.registry);
+    await Promise.all([engine?.close(), leadRuntime.lead(app.registry)?.close(), plansOf(app.registry)?.close(), schedulesOf(app.registry)?.close(), notify.dispatcher()?.close()]);
     await app.stop?.();
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
