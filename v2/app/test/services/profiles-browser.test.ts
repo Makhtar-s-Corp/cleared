@@ -110,7 +110,7 @@ test('in French, dark, every word of the panel is French', { skip }, async () =>
   });
 });
 
-for (const [width, theme] of [[1280, 'light'], [768, 'light'], [390, 'light'], [390, 'dark']] as const) {
+for (const [width, theme] of [[1280, 'light'], [768, 'light'], [390, 'light'], [1280, 'dark'], [768, 'dark'], [390, 'dark'], [1440, 'dark']] as const) {
   test(`at ${width} px, ${theme}, the panel does not make the page scroll sideways`, { skip }, async () => {
     await withBrowser({ language: 'en', width, theme }, async (page) => {
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `no horizontal scroll at ${width} px`);

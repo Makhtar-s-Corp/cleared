@@ -7803,12 +7803,18 @@ Changed with the code: the label gate's case (decision 10), the adapter test's f
 
 **Not done here.**
 - No real session: everything ran on the fakes, with no Docker. The image and the limits are proven on the fake `docker` of the adapter's tests.
+- No capture of the session card's new line: the fixtures' sessions are not built by the engine, so they carry no versions; the line is proven by `app/web/test/session/profile-versions.test.tsx`, in both languages.
+- The lead and a reader show no versions: they take no profile. "Every session shows its versions" holds for every author and reviewer.
 - The lead and the reader take no profile.
 - A form to edit a profile in the app (question 1).
 - No progress dashboard: the owner's rules ask a sub-agent to keep one for a long task, and the brief forbids starting any sub-agent.
 
-**Checks**, on this branch at `origin/v2` `584d3ebe`:
-CHECKS_PLACEHOLDER
+**Checks**, on this branch with `origin/v2` merged at `1caf1492`:
+- `npm run typecheck` in `v2/`: clean.
+- `npm test` in `v2/`, after the merge of `origin/v2`: 2927 Node tests, 2786 pass, 141 skipped (the browser tests, run apart below), 0 fail; 423 Vitest tests pass. Run again after the last two fixes for the files they touch (`test/profiles/`, `test/flow/profiles.test.ts`): all pass.
+- The browser job's list of `.github/workflows/v2.yml`, run as the job runs it, with the Chromium build this server has (1243; playwright-core asks for 1248, which is not installed here): 103 tests and the tab-switch budget alone, all pass, none skipped. The new `app/test/services/profiles-browser.test.ts` is in that list; its captures are in `docs/v2/agent-profiles/` (the panel at 1440, 1280, 768 and 390 pixels, light and dark, and in French).
+- `test/flow/harness-pick.test.ts` and `test/session/cursor/reachability.test.ts` unchanged, both pass.
+- `npm run guard -- --base origin/v2`: nothing refused, once the refusal's code was `sensitive` (a catalog key with "secret" in its name is an assigned secret to the guard) and the test's URL with credentials was built by a join. The guard does not read `docs/v2/` and ran without the private-term list, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
 
 **Resources.** No Docker object, no container, no tunnel, no listening port but the tests' own ephemeral loopback ones. No real GitHub, GitLab, Slack, Cursor or Codex account, no Claude Code login read, no secret: the secret-shaped values of the tests are built from parts at run time. Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issue and the pull request.
 
