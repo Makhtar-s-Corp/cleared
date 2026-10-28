@@ -7,7 +7,7 @@ import { FIXTURE_NOW, OWNER_ID, towerFixture, workspaceFixture } from '../../fix
 import { loadCatalog } from '../../src/catalog.ts';
 import { translator, type Translate } from '../lib/i18n.ts';
 import { Bar } from '../screens/tower/Tower.tsx';
-import { towerModel } from '../screens/tower/model.ts';
+import { ticketProject, towerModel } from '../screens/tower/model.ts';
 import { html, renderTower, renderTowerBody, strings, visibleText } from './render.tsx';
 
 const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
@@ -62,4 +62,17 @@ test('in French, and every word from the catalog or the data', async () => {
     if (!/\p{L}/u.test(rest)) continue;
     assert.ok(allowed.has(rest), `not from the catalog nor the data: ${JSON.stringify(rest)}`);
   }
+});
+
+// Issue #437: on a Compose install the app names no project (`/api/me` answers
+// ''), and the service refuses a ticket of another project than its
+// workspace's. A ticket and a batch name the workspace's id, as GET
+// /api/workspace gives it; the app's name only when the workspace was not read.
+test('a new ticket names the workspace\'s id, not the app\'s project name', async () => {
+  const model = towerModel(await workspaceFixture(FIXTURE_NOW), FIXTURE_NOW, OWNER_ID);
+  assert.equal(model.project, 'guestbook');
+  assert.equal(ticketProject(model, ''), 'guestbook');
+  assert.equal(ticketProject(model, 'cleared'), 'guestbook');
+  assert.equal(ticketProject({ ...model, project: null }, 'cleared'), 'cleared');
+  assert.equal(ticketProject(null, 'cleared'), 'cleared');
 });

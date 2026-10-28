@@ -127,6 +127,7 @@ export type SetupOptions = {
   clean?: (text: string) => string;                  // the service's cleaner; the identity by default
   levers?: LeverReader;                              // the Consumption screen's levers; none by default
   eventClock?: boolean;                              // the fake stamps its events with the simulated clock, as the watchdog reads them
+  forget?: (session: SessionId) => Promise<unknown>; // removes a session's volume; none by default
 };
 
 export async function setup(options: SetupOptions = {}) {
@@ -149,6 +150,7 @@ export async function setup(options: SetupOptions = {}) {
   const deps = {
     store, inbox, registry, config: { ...CONFIG, ...options.config }, effects: fakeEffects(calls, options.effects),
     now: () => new Date(clock.now), ...(options.locks ? { locks: options.locks } : {}), ...(options.clean ? { clean: options.clean } : {}), ...(options.levers ? { levers: options.levers } : {}),
+    ...(options.forget ? { forget: options.forget } : {}),
   };
   const engine = new FlowEngine(deps);
   const flowEvents: FlowEvent[] = [];

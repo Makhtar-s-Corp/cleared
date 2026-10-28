@@ -145,6 +145,17 @@ test('an interrupt, an error and a verdict are rows; reasoning and unknown event
   assert.deepEqual(timeline(model).map((row) => row.kind), ['interrupted', 'error', 'verdict']);
 });
 
+test('a lost container is an error row with its code, its recreation a row of its own with the attempt (issue #453)', () => {
+  const model = modelOf([
+    { type: 'RUN_ERROR', message: 'the session\'s container stopped (exit code 137)', code: 'container_lost' },
+    { type: 'CUSTOM', name: 'cleared.container_recreated', value: { attempt: 2, limit: 3, waitedMs: 10_000 } },
+    { type: 'RUN_ERROR', message: 'The session\'s container stopped 4 times.', code: 'container_failed' },
+  ]);
+  const rows = timeline(model);
+  assert.deepEqual(rows.map((row) => row.kind), ['error', 'recreated', 'error']);
+  assert.deepEqual(rows.map((row) => (row.kind === 'error' ? row.code : row.kind === 'recreated' ? `${row.attempt}/${row.limit}` : '')), ['container_lost', '2/3', 'container_failed']);
+});
+
 test('a message of the review channel is a row with its side, its round and its limit; an answer says how long the request waited', () => {
   const model = emptyModel();
   const at = (minute: number) => new Date(2026, 9, 21, 9, minute).toISOString();

@@ -4,9 +4,14 @@ import { LeadConfigError, loadLeadConfig } from '../../src/lead/config.ts';
 
 const project = { CLEARED_V2_PROJECT: 'guestbook' };
 
-test('the lead is on when the project is set, with the defaults of the plan', () => {
+// The lead runs once the flow runs (lead/engine.ts): the setting is read at
+// start, and the assistant writes a workspace file later, never
+// CLEARED_V2_PROJECT (issue #420). So only CLEARED_V2_LEAD_ENABLED turns it off.
+test('the lead is on unless turned off, with the defaults of the plan', () => {
   assert.deepEqual(loadLeadConfig(project), { enabled: true, model: 'claude-opus-5-5', contextPercent: 50, handoverPercent: 40, batchMs: 60_000 });
-  assert.equal(loadLeadConfig({}).enabled, false);
+  assert.equal(loadLeadConfig({ CLEARED_V2_WORKSPACE: '/state/workspace.conf' }).enabled, true, 'a workspace file, no project');
+  assert.equal(loadLeadConfig({}).enabled, true, 'no workspace yet: on, and the lead waits for the flow');
+  assert.equal(loadLeadConfig({ CLEARED_V2_LEAD_ENABLED: 'off' }).enabled, false);
   assert.equal(loadLeadConfig({ ...project, CLEARED_V2_LEAD_ENABLED: 'off' }).enabled, false);
   assert.equal(loadLeadConfig({ ...project, CLEARED_V2_LEAD_ENABLED: '0' }).enabled, false);
   assert.equal(loadLeadConfig({ ...project, CLEARED_V2_LEAD_ENABLED: 'on' }).enabled, true);

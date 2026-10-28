@@ -48,6 +48,8 @@ test('the measured steps and the custom names are the plan\'s', () => {
     'cleared.production_checked',
     // Milestone 5: a session waits for its service's prepared image (C15, issue #422).
     'cleared.prepared_image',
+    // Milestone 6: the session's container recreated after it stopped (issue #453).
+    'cleared.container_recreated',
   ]);
 });
 

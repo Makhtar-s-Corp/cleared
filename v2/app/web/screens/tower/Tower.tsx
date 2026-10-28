@@ -32,7 +32,7 @@ import { QUESTION_MAX, askBody, askFailure, askHref, questionProblem, startAsk }
 import {
   BATCH_LINES_MAX, BATCH_LINES_MIN, batchFailure, batchLine, batchLines, batchProblem, holdLine, startBatch,
   DRAFT_MAX, VARIANT_CHOICES, createTicket, duration, formatModel, harnessSquare, heading, leadHref, leadState, liveDot, liveOrder, loadTower, needId, needSentence, needTitle, pickedFor, planProgress, recipeKey,
-  recipeDone, recipeFailure, recipeProblem, runRecipe, scheduleLine, serviceParts, serviceState, serviceTone, stepTag, takenOverText, towerModel, towerSummary,
+  recipeDone, recipeFailure, recipeProblem, runRecipe, scheduleLine, serviceParts, serviceState, serviceTone, stepTag, takenOverText, ticketProject, towerModel, towerSummary,
   type BatchRow, type LeadCard as LeadCardModel, type LeadThread, type LiveCard, type NeedCard, type PlanRow, type ScheduleRow, type ServiceRow, type TowerModel,
 } from './model.ts';
 import { pickTemplate, templateLabels } from './templates.ts';
@@ -429,7 +429,7 @@ export default function Tower() {
       const services = model?.serviceNames.filter((name) => pickedFor(title, picked).includes(name)) ?? [];
       const several = (model?.serviceNames.length ?? 0) >= 2;
       const count = several ? 1 : variants;
-      const ticket = await createTicket(context.api, { title: typed, body, project: context.me.project, services, variants: count, labels: templateLabels(template) });
+      const ticket = await createTicket(context.api, { title: typed, body, project: ticketProject(model, context.me.project), services, variants: count, labels: templateLabels(template) });
       setTitle('');
       setBody('');
       setPicked([]);
@@ -514,8 +514,7 @@ export default function Tower() {
     }
     setBatching(true);
     try {
-      // The workspace's id, as the service names its project; the header's name is a label.
-      const made = await startBatch(context.api, model?.project ?? context.me.project, titles);
+      const made = await startBatch(context.api, ticketProject(model, context.me.project), titles);
       setBatchNote(t('batch_created', { id: made.id, n: made.items.length }));
       setBatchText('');
       void refresh();

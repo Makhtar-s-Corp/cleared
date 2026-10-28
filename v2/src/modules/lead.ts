@@ -198,13 +198,18 @@ const lead: Module = {
   // and networks are released, without waiting for the tower to poll.
   // The schedules come due while the service is down: their first tick is
   // the start's, after the flow's recovery, not the timer's a minute later (P33).
+  // With no workspace yet, all of it is done once the flow runs on the one
+  // the assistant writes (issue #420).
   start: (registry) => {
-    plansOf(registry);
-    leadRuntime.lead(registry);
-    quotaOf(registry);
-    void mapsOf(registry)?.refresh().catch((error) => console.error(`cleared-v2: the service map's first refresh failed (${error instanceof Error ? error.name : typeof error})`));
-    const first = schedules;
-    if (first) void flowRuntime.engine(registry)?.recovered.then(() => first.tick()).catch((error) => console.error(`cleared-v2: the schedules' first tick failed (${error instanceof Error ? error.name : typeof error})`));
+    flowRuntime.whenEngine((engine) => {
+      plansOf(registry);
+      leadRuntime.lead(registry);
+      quotaOf(registry);
+      void mapsOf(registry)?.refresh().catch((error) => console.error(`cleared-v2: the service map's first refresh failed (${error instanceof Error ? error.name : typeof error})`));
+      const first = schedules;
+      if (first) void engine.recovered.then(() => first.tick()).catch((error) => console.error(`cleared-v2: the schedules' first tick failed (${error instanceof Error ? error.name : typeof error})`));
+    });
+    flowRuntime.engine(registry);
   },
 };
 

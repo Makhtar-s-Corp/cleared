@@ -88,7 +88,10 @@ export type Row = (
   | QuestionRow
   | { readonly kind: 'denied'; readonly at: string; readonly requestId: string; readonly rule: string }
   | { readonly kind: 'interrupted'; readonly at: string }
-  | { readonly kind: 'error'; readonly at: string; readonly message: string }
+  // `code`: the RUN_ERROR's, which the screen says in the person's language when it knows it.
+  | { readonly kind: 'error'; readonly at: string; readonly message: string; readonly code?: string }
+  // The flow recreated the session's container (issue #453).
+  | { readonly kind: 'recreated'; readonly at: string } & CustomValue['cleared.container_recreated']
   | { readonly kind: 'verdict'; readonly at: string; readonly verdict: 'pass' | 'changes_requested'; readonly round: number }
   | ChannelRow
   | { readonly kind: 'plan'; readonly at: string; readonly confidence: SessionPlan['confidence']; readonly go: SessionPlan['go'] }
@@ -232,7 +235,7 @@ function addEvent(model: SessionModel, stored: SessionEvent, at: string, event: 
       if (event.outcome.type === 'cancelled') model.rows.push({ kind: 'interrupted', at });
       break;
     case 'RUN_ERROR':
-      model.rows.push({ kind: 'error', at, message: event.message });
+      model.rows.push({ kind: 'error', at, message: event.message, ...(event.code === undefined ? {} : { code: event.code }) });
       break;
     case 'CUSTOM':
       custom(model, stored, at, event);
@@ -306,6 +309,9 @@ function custom(model: SessionModel, stored: SessionEvent, at: string, event: Ex
       break;
     case 'cleared.checkpoint':
       model.checkpoints.push({ ...event.value, seq: stored.seq });
+      break;
+    case 'cleared.container_recreated':
+      model.rows.push({ kind: 'recreated', at, ...event.value });
       break;
     case 'cleared.replay': {
       const { seq: step, ...value } = event.value;

@@ -61,6 +61,7 @@ export type RuntimeOptions = {
   readonly effects?: (config: FlowConfig) => FlowEffects;
   readonly factories?: Readonly<Partial<Record<Harness, AdapterFactory>>>;
   readonly release?: FlowDeps['release'];   // a real Docker's releaseStopped otherwise
+  readonly forget?: FlowDeps['forget'];     // a real Docker's removeVolumes otherwise
   readonly docker?: Docker;                 // what the interrupted environment checks are released with; a real Docker otherwise
 };
 
@@ -109,6 +110,7 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
       effects: made.siblings ? made : { ...made, siblings: ({ ticket, service, workdir }) => siblingsOf({ ticket, service: service.name, workdir }, flow) },
       clean: (text) => cleanText(text, cleanOptions()),
       release: options.release ?? ((sessions) => new Docker().releaseStopped(sessions)),
+      forget: options.forget ?? ((session) => new Docker().removeVolumes(session)),
       levers: new LeverStore(store.db, config.project),
       // The plans' week stop holds a harness pick's variants too (issue #329).
       weekStopPercent: loadPlanConfig(env).weekStopPercent,

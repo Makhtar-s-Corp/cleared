@@ -1,7 +1,9 @@
 // The lead's settings (docs/v2/milestone-2-plan.md, lane 5), from the
-// service's environment. The lead is on when the service runs a project
-// (CLEARED_V2_PROJECT), unless CLEARED_V2_LEAD_ENABLED turns it off; a
-// setting that is set but wrong is an error, not a silent default.
+// service's environment. The lead is on unless CLEARED_V2_LEAD_ENABLED
+// turns it off, and runs once the flow runs (lead/engine.ts): on the
+// workspace the settings name at start, or on the one the assistant writes
+// later (issue #420). A setting that is set but wrong is an error, not a
+// silent default.
 
 export class LeadConfigError extends Error {
   override name = 'LeadConfigError';
@@ -37,5 +39,5 @@ export function loadLeadConfig(env: NodeJS.ProcessEnv = process.env): LeadConfig
     if (!Number.isInteger(number) || number <= 0) throw new LeadConfigError(`CLEARED_V2_LEAD_BATCH_SECONDS must be a positive whole number, not "${seconds}"`);
     batchMs = number * 1000;
   }
-  return { enabled: !!env.CLEARED_V2_PROJECT && !['off', '0', 'false'].includes(switched), model, contextPercent, handoverPercent, batchMs };
+  return { enabled: !['off', '0', 'false'].includes(switched), model, contextPercent, handoverPercent, batchMs };
 }

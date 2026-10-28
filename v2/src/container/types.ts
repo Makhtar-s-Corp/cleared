@@ -37,7 +37,8 @@ export type EnvironmentCheck = { readonly command: string; readonly passed: bool
 // GET /api/setup/environment, and POST /api/setup/environment/build (202).
 // `sessions`: whether a setup session can start from here, the flow running
 // with this workspace; `no_flow` when it does not run, `restart` when it
-// runs on a workspace read before this one was connected (issue #420).
+// runs on a workspace read before this one was connected, until a restart
+// (issue #420, docs/install.md, What needs a restart).
 export type EnvironmentView = { readonly workspace: boolean; readonly services: readonly EnvironmentService[]; readonly sessions: 'ready' | 'no_flow' | 'restart' };
 
 // POST /api/setup/environment/session: a setup session for `service`, its

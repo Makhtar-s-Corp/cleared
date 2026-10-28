@@ -3,24 +3,21 @@
 // stdin and writes the runner's lines to its stdout.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { EventEmitter } from 'node:events';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
-import { PassThrough } from 'node:stream';
 import { Docker, LABEL, SESSION_LABEL } from '../../../src/container/docker.ts';
 import { parseServices } from '../../../src/container/services.ts';
-import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../../../src/container/session-runtime.ts';
+import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT, sessionNames } from '../../../src/container/session-runtime.ts';
 import { RUNNER_COMMAND, claudeCodeRuntime, createClaudeCodeAdapter } from '../../../src/session/adapters/claude-code.ts';
 import { CONFIG_PROGRAM, INTERACTIVE_LAUNCH, LOGIN_TOKEN_PROGRAM } from '../../../src/session/adapters/claude-code/interactive.ts';
 import { adapterFactories } from '../../../src/session/adapters/index.ts';
 import { createCleaner } from '../../../src/session/clean.ts';
-import { HandoverRefused, HostToolRefused, type HostCallContext, type HostTool, type SessionHandle, type StartInput } from '../../../src/session/contract.ts';
+import { CONTAINER_LOST, HandoverRefused, HostToolRefused, type HostCallContext, type HostTool, type SessionHandle, type StartInput } from '../../../src/session/contract.ts';
 import type { AgUiEvent, EventLog, SessionEvent } from '../../../src/session/events.ts';
 import { DEFAULT_SAFE_COMMANDS } from '../../../src/session/policy.ts';
 import { FakeDocker } from '../../container/fake-docker.ts';
+import { FakeRunner } from './fake-runner.ts';
 
 const SESSION = '0b7e6f2c-3d4a-4e5f-8a9b-1c2d3e4f5a6b';
 
@@ -39,39 +36,6 @@ function memoryLog(): EventLog & { readonly all: SessionEvent[] } {
   };
 }
 
-// One fake runner per attach: what the adapter wrote, and a way to answer.
-class FakeRunner {
-  readonly stdin = new PassThrough();
-  readonly stdout = new PassThrough();
-  readonly stderr = new PassThrough();
-  readonly received: Record<string, unknown>[] = [];
-  readonly process: ChildProcessWithoutNullStreams;
-  private readonly emitter = new EventEmitter();
-
-  constructor() {
-    createInterface({ input: this.stdin }).on('line', (line) => this.received.push(JSON.parse(line) as Record<string, unknown>));
-    this.process = Object.assign(this.emitter, {
-      stdin: this.stdin, stdout: this.stdout, stderr: this.stderr, pid: 4242, exitCode: null,
-      kill: () => { this.exit(137); return true; },
-    }) as unknown as ChildProcessWithoutNullStreams;
-  }
-
-  say(value: unknown) { this.stdout.write(JSON.stringify(value) + '\n'); }
-  sdk(message: unknown) { this.say({ type: 'sdk', message }); }
-  exit(code: number) {
-    this.stdout.end();
-    setImmediate(() => this.emitter.emit('close', code, null));
-  }
-  async waitFor(check: (line: Record<string, unknown>) => boolean): Promise<Record<string, unknown>> {
-    for (let i = 0; i < 400; i++) {
-      const line = this.received.find(check);
-      if (line) return line;
-      await new Promise((r) => setTimeout(r, 2));
-    }
-    throw new Error(`the runner never received the line; got ${JSON.stringify(this.received)}`);
-  }
-}
-
 const input = (workdir: string): StartInput => ({
   project: 'guestbook', ticket: 'LOCAL-1', role: 'author', harness: 'claude-code', model: 'claude-haiku-5-5', workdir,
   briefing: { projectPage: 'A guestbook.', decisions: [], glossary: [], lessons: [], lastHandover: null },
@@ -86,8 +50,13 @@ async function setup() {
   writeFileSync(join(workdir, 'package.json'), '{"scripts":{"test":"node --test"}}\n');
   const fake = new FakeDocker();
   const runners: FakeRunner[] = [];
+  // A killed session container ends its attached runner with 137 and no exit line.
+  fake.onKill = () => { runners.at(-1)?.exit(137); };
   const docker = new Docker(fake.runner, (args) => {
     fake.calls.push({ args: [...args], options: {}, result: { code: 0, stdout: '', stderr: '' } });
+    // `docker start --attach` runs the container it names.
+    const attached = fake.containers.find((c) => c.id === args.at(-1));
+    if (attached) attached.state = 'running';
     const runner = new FakeRunner();
     runners.push(runner);
     return runner.process;
@@ -100,7 +69,7 @@ async function setup() {
     newId: () => (n++ === 0 ? SESSION : `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`),
     now: () => new Date('2026-10-21T20:00:00.000Z'),
   });
-  return { dir, workdir, fake, runners, log, adapter, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+  return { dir, workdir, fake, docker, runners, log, adapter, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
 const types = (events: readonly SessionEvent[]) => events.map((e) => (e.event.type === 'CUSTOM' ? e.event.name : e.event.type));
@@ -341,8 +310,9 @@ test('a runner that dies is a RUN_ERROR and the session is closed; stop still cl
     runner.stderr.write('a crash trace\n');
     runner.exit(1);
     await settle();
+    // With no exit line, the container's command ended: the container stopped (issue #453).
     const errors = events(t.log).filter((e) => e.type === 'RUN_ERROR');
-    assert.deepEqual(errors.map((e) => e.type === 'RUN_ERROR' && e.code), ['runner_exit']);
+    assert.deepEqual(errors.map((e) => e.type === 'RUN_ERROR' && e.code), [CONTAINER_LOST]);
     await assert.rejects(handle.send({ text: 'hello?', by: 'user-1' }), /stopped/);
     await handle.stop();
     assert.equal(t.fake.containers.filter((c) => c.labels[SESSION_LABEL] === SESSION).length, 0);
@@ -593,5 +563,68 @@ test('a Give back while the runner is still handing its harness over reloads it,
     await runner.waitFor((line) => line.type === 'stop');
     runner.exit(0);
     await stopping;
+  } finally { t.cleanup(); }
+});
+
+test('a runner that says why it exits is a runner_exit, not a lost container', async () => {
+  const t = await setup();
+  try {
+    await t.adapter.start(input(t.workdir));
+    const runner = t.runners[0] as FakeRunner;
+    runner.say({ type: 'exit', code: 1 });
+    runner.exit(1);
+    await settle();
+    assert.deepEqual(events(t.log).filter((e) => e.type === 'RUN_ERROR').map((e) => e.type === 'RUN_ERROR' && e.code), ['runner_exit']);
+  } finally { t.cleanup(); }
+});
+
+test('a session container killed mid turn (docker kill on the labelled container) is a lost container; stop removes what it left, and resume recreates it on the same checkout', async () => {
+  const t = await setup();
+  try {
+    const handle = await t.adapter.start({ ...input(t.workdir), services: parseServices('postgres:16') });
+    const runner = t.runners[0] as FakeRunner;
+    runner.sdk({ type: 'command_lifecycle', state: 'started', command_uuid: 'turn-1' });
+    writeFileSync(join(t.workdir, 'draft.ts'), 'export const draft = 1;\n');
+    await settle();
+    await t.docker.kill(SESSION, sessionNames(SESSION).container);
+    const kill = t.fake.calls.find((c) => c.args[0] === 'kill');
+    assert.ok(kill, 'docker kill ran');
+    // Its target came from a list filtered on the label, as every targeted command's does.
+    const list = t.fake.calls[t.fake.calls.indexOf(kill) - 1];
+    assert.ok(list?.args[0] === 'ps' && list.args.includes(`label=${LABEL}`) && list.args.includes(`label=${SESSION_LABEL}=${SESSION}`));
+    await settle();
+    const errors = events(t.log).filter((e) => e.type === 'RUN_ERROR');
+    assert.deepEqual(errors.map((e) => e.type === 'RUN_ERROR' && [e.code, e.message]), [[CONTAINER_LOST, 'the session\'s container stopped (exit code 137)']]);
+    await assert.rejects(handle.send({ text: 'still there?', by: 'user-1' }), /stopped/);
+    // The kill leaves the egress and the test service behind: resume alone would collide with them.
+    assert.ok(t.fake.containers.filter((c) => c.labels[SESSION_LABEL] === SESSION).length >= 2);
+    await assert.rejects(t.adapter.resume(SESSION), /already has/);
+    await handle.stop();
+    assert.equal(t.fake.containers.filter((c) => c.labels[SESSION_LABEL] === SESSION).length, 0);
+    assert.equal(t.fake.volumes.filter((v) => v.labels[SESSION_LABEL] === SESSION).length, 1, 'the config volume, which holds the transcript, stays');
+    const resumed = await t.adapter.resume(SESSION);
+    const second = t.runners.at(-1) as FakeRunner;
+    assert.notEqual(second, runner);
+    assert.equal((await second.waitFor((l) => l.type === 'start')).resume, true);
+    const create = t.fake.calls.filter((c) => c.args[0] === 'create' && c.args.includes('cleared.role=session')).at(-1);
+    assert.ok(create?.args.includes(`type=bind,source=${t.workdir},target=${WORKDIR_MOUNT}`), 'the same checkout is mounted');
+    assert.equal(readFileSync(join(t.workdir, 'draft.ts'), 'utf8'), 'export const draft = 1;\n', 'the uncommitted file is kept');
+    const stopping = resumed.stop();
+    await second.waitFor((l) => l.type === 'stop');
+    second.exit(0);
+    await stopping;
+  } finally { t.cleanup(); }
+});
+
+test('a container removed while the adapter stops it is not a lost container', async () => {
+  const t = await setup();
+  try {
+    const handle = await t.adapter.start(input(t.workdir));
+    const runner = t.runners[0] as FakeRunner;
+    // The runner never answers stop; the removal ends it with 137 and no exit line.
+    t.fake.intercept = (args) => { if (args[0] === 'rm') runner.exit(137); return undefined; };
+    await handle.stop();
+    await settle();
+    assert.equal(events(t.log).some((e) => e.type === 'RUN_ERROR' && e.code === CONTAINER_LOST), false);
   } finally { t.cleanup(); }
 });
