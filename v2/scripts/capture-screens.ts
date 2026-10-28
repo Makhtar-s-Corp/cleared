@@ -44,6 +44,11 @@
 // plan-ask (a session's Plan tab scrolled to its question to the code) and
 // inbox-release (the release card selected, the phone's layout at 390).
 //
+// Lane j6-ui-hallmark's, named only: services (the service map), ask (the
+// fixtures' question to the code), access (the tower with the API access
+// panel open, from the account menu; from 768 px, where the person's menu
+// holds it) and plan (the lead screen at the fixtures' first plan).
+//
 // --via load (the default) opens each screen's address as a page; --via
 // click opens the tower, then reaches each screen by a click on a link of
 // the page, which the app answers without a document load (lane 34): the
@@ -60,6 +65,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { ASK_ID } from '../app/fixtures/ask.ts';
 import { RESOLVED_AUTHOR_ID } from '../app/fixtures/cost.ts';
 import { fixturePreview } from '../app/fixtures/session.ts';
 import { fixtureSource } from '../app/fixtures/source.ts';
@@ -74,7 +80,7 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox', 'palette-inbox-permission', 'login', 'account', 'consumption', 'tower-template', 'resolved', 'plan-ask', 'inbox-release'] as const;
+export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox', 'palette-inbox-permission', 'login', 'account', 'consumption', 'tower-template', 'resolved', 'plan-ask', 'inbox-release', 'services', 'ask', 'access', 'plan'] as const;
 // The extras captured as the whole page, not the window.
 const WHOLE = new Set<string>(['consumption', 'resolved']);
 export type CaptureScreen = typeof SCREENS[number] | typeof EXTRAS[number];
@@ -155,6 +161,7 @@ export async function capture(options: { readonly out: string; readonly screens?
           'inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`, 'inbox-handled': '/inbox', 'sheet-inbox': '/inbox', 'palette-inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`,
           consumption: '/consumption', 'tower-template': '/', resolved: `/sessions/${RESOLVED_AUTHOR_ID}`, 'plan-ask': `/sessions/${author?.id ?? ''}#plan`,
           'inbox-release': `/inbox#${encodeURIComponent(release?.id ?? '')}`,
+          services: '/services', ask: `/ask/${ASK_ID}`, access: '/', plan: '/plans/plan-1',
         };
         let documents = 0;
         page.on('load', () => { documents += 1; });
@@ -224,6 +231,13 @@ export async function capture(options: { readonly out: string; readonly screens?
           if (screen === 'account' && await page.locator('#person').isVisible()) {
             await page.locator('#person').click();
             await page.locator('#language').waitFor();
+            await settle(page);
+            menu = true;
+          }
+          if (screen === 'access' && await page.locator('#person').isVisible()) {
+            await page.locator('#person').click();
+            await page.locator('#access-open').click();
+            await page.locator('.access').first().waitFor();
             await settle(page);
             menu = true;
           }
