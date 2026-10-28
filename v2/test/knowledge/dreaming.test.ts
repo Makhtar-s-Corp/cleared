@@ -238,13 +238,13 @@ test('a handover\'s knowledge rejected counts too, and nothing already proposed,
 test('a secret-looking value never reaches a proposal: the defect that holds one is left out, whatever the shape', async () => {
   // Fictitious values, built from parts so that no file holds one.
   const fakes = [
-    ['gh', 'p_', 'FAKEfake0123456789FAKEfake0123'].join(''),
-    ['gl', 'pat-', 'FAKEfake0123456789FAKE'].join(''),
+    ['gh', 'p_', 'FAKEfakeZYXWVUTSRQFAKEfake0123'].join(''),
+    ['gl', 'pat-', 'FAKEfakeZYXWVUTSRQFAKE'].join(''),
     ['AK', 'IA', 'FAKE0000EXAMPLE0'].join(''),
-    ['Bearer ', 'fakeFAKE0123456789fake'].join(''),
+    ['Bearer ', 'fakeFAKEZYXWVUTSRQfake'].join(''),
     ['API', '_KEY=', 'fakeFAKE01234567'].join(''),
     ['deploy', ':', 'hunter22fake', '@', 'db.example.test'].join(''),
-    ['sk-', 'ant-', 'FAKEfake0123456789FAKEfake0123'].join(''),
+    ['sk-', 'ant-', 'FAKEfakeZYXWVUTSRQFAKEfake0123'].join(''),
   ];
   for (const fake of fakes) {
     const { store, inbox, dreaming, clock } = setup();
