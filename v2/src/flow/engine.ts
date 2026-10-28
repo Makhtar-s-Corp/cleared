@@ -2162,10 +2162,12 @@ export class FlowEngine {
   // and retried for ten minutes. Only the ids of this ledger's own rows are
   // named, so another instance's sessions on the same host are never
   // touched, nor one this engine runs or resumes; the volumes stay. A
-  // failure is said and the service goes on.
+  // reader's are never named: its row says done while it waits for a
+  // follow-up, and the reader module releases its own (reader/service.ts).
+  // A failure is said and the service goes on.
   #stopped(since?: string): SessionId[] {
     if (!this.#release) return [];
-    return this.#store.sessions.list().filter((row) => row.project === this.config.project && !LIVE_PHASES.has(row.status) && !this.#live.has(row.id) && !this.#resuming.has(row.id)
+    return this.#store.sessions.list().filter((row) => row.project === this.config.project && row.role !== 'reader' && !LIVE_PHASES.has(row.status) && !this.#live.has(row.id) && !this.#resuming.has(row.id)
       && (since === undefined || row.updatedAt >= since) && isSessionId(row.id)).map((row) => row.id);
   }
 
