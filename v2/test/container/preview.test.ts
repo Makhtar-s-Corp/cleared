@@ -12,7 +12,8 @@ import { Docker } from '../../src/container/docker.ts';
 import { PREVIEW_DEPTH, PREVIEW_POLICY, previewRoutes, type PreviewTarget } from '../../src/container/preview.ts';
 import { sessionNames } from '../../src/container/session-runtime.ts';
 import { createRuntime } from '../../src/flow/runtime.ts';
-import { defaultRegistry, type Route } from '../../src/modules/registry.ts';
+import { defaultRegistry, matchRoute, type Route } from '../../src/modules/registry.ts';
+import { previewAddress } from '../../src/flow/proof-capture.ts';
 import type { SessionAdapter, SessionHandle, StartInput } from '../../src/session/contract.ts';
 import { openStore } from '../../src/store/db.ts';
 import { projectCheckout } from '../../src/workspace/checkout.ts';
@@ -60,11 +61,33 @@ function setup(answer: (url: string) => object = () => ({ status: 200, headers: 
 
 test('the preview is a GET under the session and its key, at every depth up to the bound', () => {
   const { routes } = setup();
-  assert.equal(routes.length, PREVIEW_DEPTH + 1);
-  for (const [depth, route] of routes.entries()) {
+  assert.equal(routes.length, PREVIEW_DEPTH + 2);
+  const root = routes.at(-1);
+  assert.equal(root?.method, 'GET');
+  assert.equal(root?.path, '/api/sessions/:id/preview/:key/');
+  for (const [depth, route] of routes.slice(0, -1).entries()) {
     assert.equal(route.method, 'GET');
     assert.equal(route.path, ['/api/sessions/:id/preview/:key', ...Array.from({ length: depth }, (_, i) => `:p${i}`)].join('/'));
   }
+});
+
+// The proof receipt's after page (P210) opens the address previewAddress
+// builds, the root with its trailing slash, so the page's relative links stay
+// under its key; the real run of 2026-10-28 got the router's 404 there.
+test('the receipt\'s after page, the root with its trailing slash, reaches the sibling\'s root', async () => {
+  const { routes, urls } = setup();
+  const url = new URL(previewAddress({ host: '127.0.0.1', port: 8791 }, { session: SESSION, key: KEY, alias: 'guestbook', port: 8793 }, PROOF).url);
+  const match = matchRoute(routes, 'GET', url.pathname);
+  assert.ok(match, `no route for ${url.pathname}`);
+  const answer = await call(match.route, match.params, { proof: PROOF, url: url.pathname });
+  assert.equal(answer.status, 200);
+  assert.equal(answer.body.toString(), '<p>hi</p>');
+  assert.deepEqual(urls, ['http://172.30.0.3:8793/']);
+  // Without the slash, the same root.
+  const bare = matchRoute(routes, 'GET', url.pathname.slice(0, -1));
+  assert.ok(bare);
+  await call(bare.route, bare.params, { proof: PROOF });
+  assert.deepEqual(urls, ['http://172.30.0.3:8793/', 'http://172.30.0.3:8793/']);
 });
 
 test('without the app\'s proof the preview answers 401 and reaches nothing', async () => {
