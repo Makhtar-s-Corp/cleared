@@ -1,9 +1,10 @@
 // The design tokens (docs/v2/ui-overhaul-plan.md, 2.2.5, 2.2.8 and 2.4,
-// lane 35): each theme comes from a base, a contrast and an accent, the
-// neutrals mixed from the first two; every text colour reads at AA (4.5:1)
-// on every ground it is drawn on, in both themes; four spacing steps, three
-// text sizes, two weights; and no slop: no gradient but the grace bar's
-// fill, no emoji and no exclamation mark in any catalog.
+// lane 35; docs/v2/ui-hallmark/DESIGN.md, lane j6-ui-hallmark): the one
+// theme, light, comes from a base, a contrast and an accent, the neutrals
+// mixed from the first two; every text colour reads at AA (4.5:1) on every
+// ground it is drawn on; six spacing steps, five text sizes, three weights;
+// and no slop: no gradient at all, no emoji and no exclamation mark in any
+// catalog.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, statSync } from 'node:fs';
@@ -15,20 +16,22 @@ const SHEET = readFileSync(join(WEB, 'styles/app.css'), 'utf8');
 // Sheets left off the scale: none since lane 38 brought the inbox's on, after lane 37's merge.
 const PENDING: ReadonlySet<string> = new Set();
 
-// The declarations of the first rule whose selector is exactly `selector`.
-function block(selector: string): Map<string, string> {
-  const start = SHEET.indexOf(`${selector} {`);
-  assert.ok(start >= 0, `app.css has a rule for ${selector}`);
-  const body = SHEET.slice(SHEET.indexOf('{', start) + 1, SHEET.indexOf('}', start)).replace(/\/\*[^]*?\*\//g, '');
-  const out = new Map<string, string>();
-  for (const [, name, value] of body.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)) out.set(name!, value!.trim());
+// The declarations of every rule whose selector is exactly `selector`, at the start of a line, in order.
+function blocks(selector: string): Map<string, string>[] {
+  const out: Map<string, string>[] = [];
+  for (const match of SHEET.matchAll(new RegExp(`^${selector.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')} \\{`, 'gm'))) {
+    const start = match.index!;
+    const body = SHEET.slice(SHEET.indexOf('{', start) + 1, SHEET.indexOf('}', start)).replace(/\/\*[^]*?\*\//g, '');
+    const vars = new Map<string, string>();
+    for (const [, name, value] of body.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;]+);/g)) vars.set(name!, value!.trim());
+    out.push(vars);
+  }
   return out;
 }
 
-const LIGHT = block(':root');
-const DARK = block(':root[data-theme="dark"]');
-const SHARED = block(':root, :root[data-theme="dark"]');
-const theme = (dark: boolean) => new Map([...LIGHT, ...(dark ? DARK : []), ...SHARED]);
+// The theme's colours and scale, then the roles mixed from them: two :root rules.
+const [LIGHT = new Map<string, string>(), SHARED = new Map<string, string>()] = blocks(':root');
+const theme = () => new Map([...LIGHT, ...SHARED]);
 
 type Rgb = readonly [number, number, number];
 
@@ -82,34 +85,37 @@ const PAIRS: readonly (readonly [string, readonly string[]])[] = [
   ['--on-ink', ['--ink']], ['--count-ink', ['--awaiting']],
 ];
 
-test('every text colour reads at AA on every ground it is drawn on, in both themes', () => {
-  for (const dark of [false, true]) {
-    const vars = theme(dark);
-    for (const [ink, grounds] of PAIRS) {
-      for (const ground of grounds) {
-        const r = ratio(colour(ink, vars), colour(ground, vars));
-        assert.ok(r >= 4.5, `${dark ? 'dark' : 'light'}: ${ink} on ${ground} is ${r.toFixed(2)}:1`);
-      }
+test('every text colour reads at AA on every ground it is drawn on', () => {
+  const vars = theme();
+  for (const [ink, grounds] of PAIRS) {
+    for (const ground of grounds) {
+      const r = ratio(colour(ink, vars), colour(ground, vars));
+      assert.ok(r >= 4.5, `${ink} on ${ground} is ${r.toFixed(2)}:1`);
     }
   }
 });
 
-test('each theme is a base, a contrast and an accent; the neutrals are mixed from them, not written', () => {
-  for (const vars of [LIGHT, DARK]) for (const name of ['--theme-base', '--theme-contrast', '--theme-accent']) assert.match(vars.get(name) ?? '', /^#[0-9A-Fa-f]{6}$/, name);
+test('one theme, light: no dark theme, nothing chosen by the system (issue #451)', () => {
+  assert.equal(blocks(':root').length, 2, 'the theme and its roles, nothing else on :root');
+  assert.doesNotMatch(SHEET, /data-theme="dark"|prefers-color-scheme|@custom-variant dark/);
+  assert.match(SHEET, /color-scheme: light;/);
+});
+
+test('the theme is a base, a contrast and an accent; the neutrals are mixed from them, not written', () => {
+  for (const name of ['--theme-base', '--theme-contrast', '--theme-accent']) assert.match(LIGHT.get(name) ?? '', /^#[0-9A-Fa-f]{6}$/, name);
   for (const name of ['--canvas', '--surface', '--sidebar', '--sunken', '--surface-muted', '--tab-fill', '--selected', '--hairline', '--text-secondary', '--text-muted', '--text-faint', '--placeholder']) {
     assert.match(SHARED.get(name) ?? '', /^color-mix\(in srgb, var\(--theme-contrast\) var\(--mix-[a-z-]+\), var\(--theme-base\)\)$/, name);
   }
   assert.equal(SHARED.get('--text'), 'var(--theme-contrast)');
   assert.equal(SHARED.get('--link'), 'var(--theme-accent)');
-  // A theme says only its three colours, its mixes and what no mix gives (amber, green, red).
-  for (const name of DARK.keys()) assert.ok(/^--(theme-|mix-|awaiting|success|danger|count-ink|e-|halo-|stage-review|harness-)/.test(name) || name === '--select', `dark redefines ${name}`);
 });
 
-test('four spacing steps, three text sizes and two weights, and every sheet of the app uses only them', () => {
-  assert.deepEqual(['--space-1', '--space-2', '--space-3', '--space-4'].map((n) => LIGHT.get(n)), ['4px', '8px', '16px', '24px']);
-  // In rem, so the person's own font size scales the text (lane 38): 12, 14 and 20 px at the browser's default.
-  assert.deepEqual(['--text-sm', '--text-md', '--text-lg', '--text-input'].map((n) => LIGHT.get(n)), ['0.75rem', '0.875rem', '1.25rem', '1rem']);
-  assert.deepEqual(['--weight-regular', '--weight-strong'].map((n) => LIGHT.get(n)), ['400', '550']);
+test('six spacing steps, five text sizes and three weights, and every sheet of the app uses only them', () => {
+  assert.deepEqual(['--space-1', '--space-2', '--space-3', '--space-4', '--space-5', '--space-6'].map((n) => LIGHT.get(n)), ['4px', '8px', '16px', '24px', '32px', '48px']);
+  // In rem, so the person's own font size scales the text (lane 38): 13, 14, 20, 28 and 40 px at the browser's default
+  // (the Hallmark redesign, lane j6-ui-hallmark: a heading and a figure set large and heavy, DESIGN.md, Type).
+  assert.deepEqual(['--text-sm', '--text-md', '--text-lg', '--text-xl', '--text-display', '--text-input'].map((n) => LIGHT.get(n)), ['0.8125rem', '0.875rem', '1.25rem', '1.75rem', '2.5rem', '1rem']);
+  assert.deepEqual(['--weight-regular', '--weight-strong', '--weight-heavy'].map((n) => LIGHT.get(n)), ['400', '600', '800']);
   // Every rule of every sheet (the sign-in page's included): no size or weight but a token; --text-input is a
   // phone's fields' size, where iOS zooms on less (art director of lane 35, item 9). Lane 35 held the app's and
   // the tower's sheets to it, lane 38 the others.
@@ -118,8 +124,8 @@ test('four spacing steps, three text sizes and two weights, and every sheet of t
     if (PENDING.has(name)) continue;
     const sheet = name === 'styles/app.css' ? SHEET.slice(SHEET.indexOf('* {')) : readFileSync(file, 'utf8');
     const rules = sheet.replace(/\/\*[^]*?\*\//g, '');
-    for (const [, value] of rules.matchAll(/font-size:\s*([^;}]+)/g)) assert.match(value!, /^(var\(--text-(sm|md|lg|input)\)|inherit)$/, `${name}: font-size: ${value}`);
-    for (const [, value] of rules.matchAll(/font-weight:\s*([^;}]+)/g)) assert.match(value!, /^(var\(--weight-(regular|strong)\)|inherit)$/, `${name}: font-weight: ${value}`);
+    for (const [, value] of rules.matchAll(/font-size:\s*([^;}]+)/g)) assert.match(value!, /^(var\(--text-(sm|md|lg|xl|display|input)\)|inherit)$/, `${name}: font-size: ${value}`);
+    for (const [, value] of rules.matchAll(/font-weight:\s*([^;}]+)/g)) assert.match(value!, /^(var\(--weight-(regular|strong|heavy)\)|inherit)$/, `${name}: font-weight: ${value}`);
     for (const [, value] of rules.matchAll(/\bfont:\s*([^;}]+)/g)) if (value !== 'inherit') assert.match(value!, /var\(--weight-[a-z]+\) var\(--text-[a-z]+\)/, `${name}: font: ${value}`);
   }
 });
@@ -156,12 +162,10 @@ function files(dir: string, ext: RegExp): string[] {
   });
 }
 
-test('no gradient in any sheet of the app but the grace bar\'s fill', () => {
+test('no gradient in any sheet of the app, the grace bar\'s fill included (issue #451: flat colours only)', () => {
   for (const file of files(WEB, /\.css$/)) {
     const sheet = readFileSync(file, 'utf8').replace(/\/\*[^]*?\*\//g, '');
-    for (const match of sheet.matchAll(/([^{}]+)\{[^}]*\b(?:linear|radial|conic)-gradient\(/g)) {
-      assert.equal(match[1]!.trim(), '.grace-fill', `${file}: a gradient in ${match[1]!.trim()}`);
-    }
+    for (const match of sheet.matchAll(/([^{}]+)\{[^}]*\b(?:linear|radial|conic)-gradient\(/g)) assert.fail(`${file}: a gradient in ${match[1]!.trim()}`);
   }
   for (const file of files(WEB, /\.tsx?$/)) assert.doesNotMatch(readFileSync(file, 'utf8'), /(?:linear|radial|conic)-gradient\(/, file);
 });

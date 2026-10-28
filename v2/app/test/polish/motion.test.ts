@@ -15,8 +15,9 @@ test('every keyframe moves only opacity and transform; nothing pulses', () => {
   assert.doesNotMatch(SHEET, /animation:\s*pulse/);
 });
 
-test('what waits has a ring, not a glow, in both themes', () => {
-  for (const [, value] of SHEET.matchAll(/--e-awaiting:\s*([^;]+);/g)) assert.equal(value!.trim(), '0 0 0 1.5px var(--awaiting)');
+test('what waits has a ring, not a glow: a 2px frame as every frame of the one theme (Signal, lane j6-ui-hallmark)', () => {
+  const rings = [...SHEET.matchAll(/--e-awaiting:\s*([^;]+);/g)].map((m) => m[1]!.trim());
+  assert.deepEqual(rings, ['0 0 0 2px var(--awaiting)']);
 });
 
 test('paragraphs and list items wrap pretty', () => {

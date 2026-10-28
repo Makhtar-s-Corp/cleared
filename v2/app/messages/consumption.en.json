@@ -1,5 +1,6 @@
 {
   "consumption_eyebrow": "The last 7 days",
+  "consumption_period_to": "to",
   "consumption_title": "What your agents consume",
   "consumption_subtitle": "Understand the pace. Keep some margin.",
   "consumption_harness_claude-code": "Claude Code",

@@ -1,7 +1,7 @@
 // The command palette's items (docs/v2/ui-overhaul-plan.md, 2.2.2, lane
 // 35), from what the cache holds: what waits for the person, the gestures
 // of the screen shown, the screens, the sessions by ticket and title, then
-// the theme, the shortcut sheet and the sidebar. Pure: Palette.tsx draws
+// the shortcut sheet and the sidebar. Pure: Palette.tsx draws
 // the items and runs them.
 //
 // A gesture is a button the screen already draws (Take over, Give back,
@@ -13,14 +13,13 @@ import type { ScreenName } from '../lib/routes.ts';
 import type { Translate } from '../lib/i18n.ts';
 import { needId, needTitle, type NeedCard } from '../screens/tower/model.ts';
 import { duration } from '../lib/time.ts';
-import { SCREENS, type SessionRow, type Theme } from './model.ts';
+import { SCREENS, type SessionRow } from './model.ts';
 
 export type PaletteGroup = 'waiting' | 'actions' | 'goto' | 'sessions' | 'general';
 
 export type PaletteRun =
   | { readonly kind: 'navigate'; readonly href: string }
   | { readonly kind: 'gesture'; readonly id: string }
-  | { readonly kind: 'theme' }
   | { readonly kind: 'sheet' }
   | { readonly kind: 'sidebar' };
 
@@ -66,7 +65,6 @@ export type PaletteInput = {
   readonly needs: readonly NeedCard[];
   readonly sessions: readonly SessionRow[];
   readonly gestures: readonly string[];                  // the ids of GESTURES the screen shows now
-  readonly theme: Theme;
   readonly t: Translate;                                 // the shell's catalog over the tower's
 };
 
@@ -76,7 +74,7 @@ export type PaletteInput = {
 const BLOCKS: Readonly<Record<string, number>> = { permission: 0, question: 1, session_plan: 2, release: 3, plan: 4, contract: 5, knowledge: 6 };
 const blocking = (needs: readonly NeedCard[]): NeedCard[] => [...needs].sort((a, b) => (BLOCKS[a.kind] ?? 9) - (BLOCKS[b.kind] ?? 9));
 
-export function paletteItems({ screen, needs, sessions, gestures, theme, t }: PaletteInput): PaletteItem[] {
+export function paletteItems({ screen, needs, sessions, gestures, t }: PaletteInput): PaletteItem[] {
   const waiting = blocking(needs).map((card): PaletteItem => ({
     id: `waiting-${card.id}`, group: 'waiting', label: needTitle(card, t),
     detail: [t(`need_${card.kind}`, { age: duration(card.minutes, t) }), needId(card, t)].filter(Boolean).join(' · '),
@@ -93,7 +91,6 @@ export function paletteItems({ screen, needs, sessions, gestures, theme, t }: Pa
     keywords: [row.ticket, row.ticket.replace(/^[A-Z]+-/, '')], run: { kind: 'navigate', href: `/sessions/${encodeURIComponent(row.id)}` },
   }));
   const general: PaletteItem[] = [
-    { id: 'theme', group: 'general', label: t(theme === 'dark' ? 'theme_light' : 'theme_dark'), keywords: [], run: { kind: 'theme' } },
     { id: 'sheet', group: 'general', label: t('cmd_sheet'), keywords: [], shortcut: ['?'], run: { kind: 'sheet' } },
     { id: 'sidebar', group: 'general', label: t('cmd_sidebar'), keywords: [], shortcut: ['['], run: { kind: 'sidebar' } },
   ];

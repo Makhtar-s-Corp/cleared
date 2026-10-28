@@ -14,15 +14,31 @@
 /// <reference types="vitest/config" />
 import tailwindcss from '@tailwindcss/vite';
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 
 const here = (path: string) => fileURLToPath(new URL(path, import.meta.url));
+
+// Hallmark's stamp (styles/app.css, lane j6-ui-hallmark) is the first line of the built sheet, as its linter reads
+// it; Tailwind writes its licence banner first, so the two trade places. Both are kept.
+const stampFirst = (): Plugin => ({
+  name: 'hallmark-stamp-first',
+  generateBundle(_options, bundle) {
+    for (const asset of Object.values(bundle)) {
+      if (asset.type !== 'asset' || !asset.fileName.endsWith('.css') || typeof asset.source !== 'string') continue;
+      const banner = /^\/\*! tailwindcss [^*]*\*\/\s*/.exec(asset.source);
+      const rest = banner ? asset.source.slice(banner[0].length) : '';
+      const stamp = /^\/\*! Hallmark[^]*?\*\/\s*(?:\/\*! Hallmark[^]*?\*\/\s*)*/.exec(rest);
+      // The minifier keeps a comment only as /*! */; the stamp is written back as the plain comment Hallmark reads.
+      if (banner && stamp) asset.source = `${stamp[0].replaceAll('/*! Hallmark', '/* Hallmark')}${banner[0]}${rest.slice(stamp[0].length)}`;
+    }
+  },
+});
 
 export default defineConfig({
   root: here('.'),
   publicDir: here('../public'),
   base: '/',
-  plugins: [tailwindcss()],
+  plugins: [tailwindcss(), stampFirst()],
   resolve: {
     alias: [
       { find: /^@\//, replacement: `${here('.')}/` },

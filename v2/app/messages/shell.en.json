@@ -16,8 +16,6 @@
   "nav_inbox": "Inbox",
   "nav_sessions": "Sessions",
   "source_fixtures": "Sample data, not the service",
-  "theme_dark": "Switch to the dark theme",
-  "theme_light": "Switch to the light theme",
   "signed_in_as": "Signed in as {name}",
   "sign_out": "Sign out",
   "inbox_waiting": "{n} waiting in the inbox",

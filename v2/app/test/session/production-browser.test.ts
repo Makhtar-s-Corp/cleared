@@ -6,7 +6,7 @@
 // through the app, in a new tab; in English and in French, with no
 // horizontal scroll on a phone. With CLEARED_V2_SHOTS set to a folder it
 // writes the card's captures there, at 1440, 1280, 768 and 390 pixels,
-// light and dark.
+// light.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/session/production-browser.test.ts
 import test from 'node:test';
@@ -89,9 +89,9 @@ test('in French, and on a phone without a horizontal scroll', { skip }, async ()
   });
 });
 
-test('the card at four widths, light and dark, and in French: the line drawn, no horizontal scroll (the captures with CLEARED_V2_SHOTS)', { skip }, async () => {
+test('the card at four widths, and in French: the line drawn, no horizontal scroll (the captures with CLEARED_V2_SHOTS)', { skip }, async () => {
   for (const width of [1440, 1280, 768, 390])
-    for (const scheme of ['light', 'dark'] as const)
+    for (const scheme of ['light'] as const)
       await withBrowser({ language: 'en', width, scheme }, async (page) => {
         assert.ok(await noOverflow(page), `no horizontal scroll at ${width}`);
         await shot(page, `post-deploy-en-${width}-${scheme}`);

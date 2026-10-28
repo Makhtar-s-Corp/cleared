@@ -3,7 +3,7 @@
 // with the items palette.ts makes from the cache. The shell's own dialog,
 // not cmdk's (components/ui/command.tsx says why): focus stays in it, Esc
 // or a click outside closes it, and the focus goes back where it was.
-import { ArrowRight, Broadcast, Circle, Keyboard, ListChecks, Moon, SidebarSimple, Sun, TerminalWindow, Tray, X, type Icon } from '@phosphor-icons/react';
+import { ArrowRight, Broadcast, Circle, Keyboard, ListChecks, SidebarSimple, TerminalWindow, Tray, X, type Icon } from '@phosphor-icons/react';
 import { useMemo, useState, type KeyboardEvent } from 'react';
 import { defaultFilter } from 'cmdk';
 import { Button } from '@/components/ui/button.tsx';
@@ -15,18 +15,17 @@ import { GROUP_LABEL, groupOrder, keywordsOf, rank, shownItems, type PaletteGrou
 
 const GOTO_ICONS: Readonly<Record<string, Icon>> = { '/': Broadcast, '/inbox': Tray, '/sessions': TerminalWindow, '/lead': ListChecks };
 
-function iconOf(item: PaletteItem, dark: boolean): Icon | null {
+function iconOf(item: PaletteItem): Icon | null {
   switch (item.run.kind) {
     case 'navigate': return item.group === 'goto' ? GOTO_ICONS[item.run.href] ?? ArrowRight : item.group === 'sessions' ? TerminalWindow : null;
     case 'gesture': return ArrowRight;
-    case 'theme': return dark ? Sun : Moon;
     case 'sheet': return Keyboard;
     case 'sidebar': return SidebarSimple;
   }
 }
 
-export default function Palette({ t, items, dark, onRun, onClose }: {
-  readonly t: Translate; readonly items: readonly PaletteItem[]; readonly dark: boolean;
+export default function Palette({ t, items, onRun, onClose }: {
+  readonly t: Translate; readonly items: readonly PaletteItem[];
   readonly onRun: (item: PaletteItem) => void; readonly onClose: () => void;
 }) {
   const [search, setSearch] = useState('');
@@ -55,7 +54,7 @@ export default function Palette({ t, items, dark, onRun, onClose }: {
             {grouped.map(({ group, items: rows }) => (
               <CommandGroup key={group} value={group} heading={t(GROUP_LABEL[group])} data-group={group}>
                 {rows.map((item) => {
-                  const Glyph = iconOf(item, dark);
+                  const Glyph = iconOf(item);
                   return (
                     <CommandItem key={item.id} value={item.id} keywords={keywordsOf(item)} data-item={item.id} onSelect={() => onRun(item)}>
                       {item.group === 'waiting' ? <span className="state-dot" data-state="waiting" aria-hidden="true" />

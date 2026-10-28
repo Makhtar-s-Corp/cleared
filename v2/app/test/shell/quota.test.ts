@@ -31,7 +31,7 @@ test('the sidebar\'s screens are the development\'s: Consumption is not among th
   assert.deepEqual(NAV.map((item) => item.screen), ['tower', 'inbox', 'session', 'lead']);
   assert.ok(SCREENS.some((item) => item.screen === 'consumption'), 'every screen keeps its entry');
   assert.equal(hrefOf('consumption'), '/consumption');
-  const goto = paletteItems({ screen: 'tower', needs: [], sessions: [], gestures: [], theme: 'light', t: en }).filter((item) => item.group === 'goto');
+  const goto = paletteItems({ screen: 'tower', needs: [], sessions: [], gestures: [], t: en }).filter((item) => item.group === 'goto');
   assert.ok(goto.some((item) => item.run.kind === 'navigate' && item.run.href === '/consumption'), 'the palette goes to Consumption');
 });
 

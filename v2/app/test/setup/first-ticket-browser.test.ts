@@ -8,7 +8,7 @@
 //   - approved and Done: live, the step done, the setup's summary shown;
 //   - no policy violation, no page error, no missing key, axe finds nothing;
 //   - with CLEARED_V2_CAPTURES=<folder>, the proposal and live are captured
-//     at 1440, 1280, 768 and 390 px, light and dark, in English, and at
+//     at 1440, 1280, 768 and 390 px, in English, and at
 //     1440 in French.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/setup/first-ticket-browser.test.ts
@@ -60,7 +60,7 @@ async function capture(page: any, language: 'en' | 'fr', name: string): Promise<
     await page.screenshot({ path: join(CAPTURES, `${name}-1440-light-fr.png`), fullPage: true });
     return;
   }
-  for (const theme of ['light', 'dark']) {
+  for (const theme of ['light']) {
     await page.evaluate((value: string) => { document.documentElement.dataset.theme = value; }, theme);
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });

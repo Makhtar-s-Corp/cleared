@@ -25,9 +25,9 @@ test('the app serves the lead\'s pages, catalog, stylesheet and scripts, and its
     assert.equal(catalog.lead_remember, 'What does the Lead remember?');
     const files = await pageFiles(app, '/lead', cookie);
     assert.ok(files.styles.length >= 2, 'the shell\'s sheet, then the lead\'s');
-    assert.doesNotMatch(files.css, /gradient|prefers-color-scheme/i, 'flat colours, and the theme is the person\'s choice');
+    assert.doesNotMatch(files.css, /gradient|prefers-color-scheme/i, 'flat colours, and never the system\'s scheme');
     assert.match(files.css, /\.lead-screen/);
-    assert.match(files.css, /\[data-theme=(?:"dark"|dark)\]/);
+    assert.doesNotMatch(files.css, /\[data-theme=(?:"dark"|dark)\]/, 'one theme, light (issue #451)');
     assert.ok(/\/api\/service\/lead\/stream\?after=/.test(files.js), 'the lead screen\'s chunk, preloaded with the page');
     assert.ok(files.js.includes('data-plan-action'), 'the plan panel, drawn by the lead screen');
 

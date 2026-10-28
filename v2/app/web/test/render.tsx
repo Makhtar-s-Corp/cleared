@@ -27,7 +27,7 @@ import type { NotifyView } from '../shell/notify.ts';
 // The markup with what shadcn/ui's components add for Tailwind left out:
 // their data-slot, and the utility classes of their variants, so a test
 // reads the kit's classes (btn primary, plain, option...) as the sheets do.
-const UTILITY = /^(?:[a-z-]+:.*|border-0|cursor-pointer|rounded-(?:md|full)|bg-(?:primary|card|transparent)|text-(?:primary-foreground|muted-foreground|link|xs)|font-\[var\(--weight-strong\)\]|shadow-control|p-0|min-w-0|outline-none)$/;
+const UTILITY = /^(?:[a-z-]+:.*|border-0|cursor-pointer|rounded-(?:md|full)|bg-(?:primary|card|transparent|\[var\(--surface\)\])|text-(?:primary-foreground|muted-foreground|link|xs)|font-\[var\(--weight-strong\)\]|shadow-control|\[box-shadow:var\(--e-[a-z]+\)\]|p-0|min-w-0|outline-none)$/;
 
 // Also: attribute names in lower case and &#39; for an apostrophe, as HTML
 // writes them and as the renderers did.
@@ -38,6 +38,9 @@ export function tidy(markup: string): string {
   });
 }
 
+// A line of facts as components/facts/Facts.tsx draws it (lane j6-ui-hallmark): each fact a cell, a rule between.
+export const factsHtml = (...facts: readonly string[]): string => facts.map((fact) => `<span class="fact">${fact}</span>`).join('<span class="fact-sep"><span class="sr-only">, </span></span>');
+
 export const html = (node: ReactNode): string => tidy(renderToStaticMarkup(<>{node}</>));
 
 // The text between tags, and the attributes a person reads or hears.
@@ -45,7 +48,15 @@ export function visibleText(markup: string): string[] {
   const out: string[] = [];
   for (const match of markup.matchAll(/\s(?:aria-label|title|placeholder|alt)="([^"]*)"/g)) out.push(match[1] ?? '');
   for (const run of markup.replace(/<[^>]*>/g, '\n').split('\n')) out.push(run);
-  return out.map((text) => text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").trim()).filter(Boolean);
+  const runs = out.map((text) => text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").trim()).filter(Boolean);
+  // A line of facts (components/facts/Facts.tsx, lane j6-ui-hallmark) is drawn as cells, its separator a rule that
+  // says a comma to a screen reader: read back as the line the model joined, "a · b".
+  const joined: string[] = [];
+  for (let i = 0; i < runs.length; i += 1) {
+    if (runs[i] === ',' && joined.length > 0 && i + 1 < runs.length) joined.push(`${joined.pop()} · ${runs[++i]}`);
+    else joined.push(runs[i]!);
+  }
+  return joined;
 }
 
 export function strings(value: unknown, into: Set<string> = new Set()): Set<string> {
@@ -92,4 +103,4 @@ export const renderNotifyMenu = (view: NotifyView, t: Translate) => html(<Notify
 
 // The shell's sidebar for a screen, before /api/me answers (no count, no dot).
 export const renderSidebar = (screen: ScreenName, t: Translate, extra: Partial<SidebarProps> = {}) =>
-  html(<Sidebar t={t} mode="open" screen={screen} project="Guestbook" userName="alex" source="service" me={null} waiting={null} lead="unknown" groups={[]} theme="light" {...extra} />);
+  html(<Sidebar t={t} mode="open" screen={screen} project="Guestbook" userName="alex" source="service" me={null} waiting={null} lead="unknown" groups={[]} {...extra} />);

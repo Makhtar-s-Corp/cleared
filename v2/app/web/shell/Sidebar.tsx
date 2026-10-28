@@ -3,10 +3,10 @@
 // opens the palette, the four screens with the inbox's count, the lead's
 // dot and their chords, the live sessions grouped by state, and at the foot
 // the quota gauge, the sample-data line, the person (whose menu opens the API
-// access panel too), the notifications and the theme. Open
+// access panel too) and the notifications. One theme, light. Open
 // on a computer, a rail of icons on a tablet or when folded, a top bar and
 // a bottom bar on a phone (styles/app.css).
-import { Broadcast, Gauge, ListChecks, MagnifyingGlass, Moon, SidebarSimple, Sun, TerminalWindow, Tray, type Icon } from '@phosphor-icons/react';
+import { Broadcast, Gauge, ListChecks, MagnifyingGlass, SidebarSimple, TerminalWindow, Tray, type Icon } from '@phosphor-icons/react';
 import { memo, useState } from 'react';
 import { Button } from '@/components/ui/button.tsx';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover.tsx';
@@ -18,7 +18,7 @@ import type { Me } from '@/lib/screen.ts';
 import { isMac, Keys } from './Kbd.tsx';
 import { keyLabel } from './keys.ts';
 import { Logo } from './Logo.tsx';
-import { inboxBadge, NAV, type LeadDot, type SessionGroup, type SidebarMode, type Theme } from './model.ts';
+import { inboxBadge, NAV, type LeadDot, type SessionGroup, type SidebarMode } from './model.ts';
 import { NotifyButton } from './NotifyButton.tsx';
 import type { WeeklyQuota } from './quota.ts';
 import { weekdayClock } from '@/lib/time.ts';
@@ -44,8 +44,6 @@ export type SidebarProps = {
   readonly groups: readonly SessionGroup[];
   readonly quota?: WeeklyQuota | null;                    // the week's quota, null until the shell has read it
   readonly zone?: string;                                 // the person's time zone, for the reset
-  readonly theme: Theme;
-  readonly onTheme?: () => void;
   readonly language?: Language;
   readonly onLanguage?: (language: Language) => void;
   readonly onSearch?: () => void;
@@ -54,14 +52,6 @@ export type SidebarProps = {
   readonly onAccess?: () => void;                          // the API access panel (shell/Access.tsx)
   readonly onPick?: (href: string) => void;               // a screen or a session picked here: the focus stays on it
 };
-
-export function ThemeButton({ t, theme, onFlip }: { readonly t: Translate; readonly theme: Theme; readonly onFlip?: () => void }) {
-  return (
-    <Button variant="ghost" className="icon theme" id="theme" aria-label={t(theme === 'dark' ? 'theme_light' : 'theme_dark')} aria-pressed={theme === 'dark'} data-tip={t(theme === 'dark' ? 'theme_light' : 'theme_dark')} onClick={onFlip}>
-      {theme === 'dark' ? <Sun size={16} aria-hidden="true" /> : <Moon size={16} aria-hidden="true" />}
-    </Button>
-  );
-}
 
 // The week's quota at the sidebar's foot (the product owner's decision of 2026-10-25, 11:14, P227): its percent in
 // the Consumption screen's verdict colour, its reset as a weekday and a clock, the whole a link to Consumption, read
@@ -142,7 +132,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
           <p className="side-title" id="side-sessions-title">{t('side_sessions')}</p>
           {props.groups.map((group) => (
             <div className="side-group" key={group.key} data-group={group.key}>
-              <p className="side-group-title" id={`side-group-${group.key}`}><span className="state-dot" data-state={group.key} aria-hidden="true" />{t(`side_group_${group.key}`)}</p>
+              <p className="side-group-title" id={`side-group-${group.key}`}><span className="state-dot" data-state={group.key} aria-hidden="true" />{t(`side_group_${group.key}`)}<span className="side-group-count" aria-hidden="true">{group.rows.length}</span></p>
               <ul aria-labelledby={`side-group-${group.key}`}>
                 {group.rows.slice(0, GROUP_MAX).map((row) => (
                   <li key={row.id}>
@@ -171,8 +161,6 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
             </PopoverTrigger>
             <PopoverContent side="top" align="start" className="person-menu" aria-labelledby="person-menu-title">
               <p className="menu-note" id="person-menu-title">{signedIn}</p>
-              {/* On a phone the theme's button is here, the top bar has no room for it. */}
-              <Button className="plain menu-theme" onClick={props.onTheme}>{t(props.theme === 'dark' ? 'theme_light' : 'theme_dark')}</Button>
               {/* Each language named in itself (lane i18n): the person finds theirs whatever the page's. */}
               <div className="menu-language" id="language" role="group" aria-label={t('language_label')}>
                 {LANGUAGES.map((language) => (
@@ -187,7 +175,6 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
             </PopoverContent>
           </Popover>
           <NotifyButton t={t} me={props.me} />
-          <ThemeButton t={t} theme={props.theme} onFlip={props.onTheme} />
         </div>
       </div>
     </aside>

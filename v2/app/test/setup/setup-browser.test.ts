@@ -12,7 +12,7 @@
 //   - each page has no policy violation, no page error, no missing key, and
 //     axe finds no violation of WCAG 2.2 AA;
 //   - with CLEARED_V2_CAPTURES=<folder>, the forge step is captured at 1440,
-//     1280, 768 and 390 px, light and dark.
+//     1280, 768 and 390 px, light.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/setup/setup-browser.test.ts
 import test from 'node:test';
@@ -121,7 +121,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await page.locator('#setup-forge-value').waitFor();
     await checked(page, 'forge');
     if (CAPTURES && language === 'en') {
-      for (const theme of ['light', 'dark']) {
+      for (const theme of ['light']) {
         await page.evaluate((value: string) => { document.documentElement.dataset.theme = value; }, theme);
         for (const width of WIDTHS) {
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });

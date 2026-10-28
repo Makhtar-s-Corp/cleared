@@ -55,8 +55,9 @@ export function PlanPanel({ plan, t, options = {}, onAction }: {
   return (
     <section className={`plan-panel${plan.state === 'proposed' ? ' awaiting' : ''}`} data-plan={plan.id} data-state={plan.state} aria-labelledby={id} aria-busy={busy ? 'true' : undefined}>
       <div className="plan-head">
-        <p className="plan-eyebrow">{planStateLine(plan, t)}</p>
+        {/* The title first, its state beside it as a tag (Signal, lane j6-ui-hallmark: no label over a heading). */}
         <h2 id={id}>{plan.title}</h2>
+        <p className="plan-eyebrow">{planStateLine(plan, t)}</p>
         <p className="plan-summary">{plan.summary}</p>
       </div>
       <ol className="plan-items" aria-label={t('plan_items_label')}>

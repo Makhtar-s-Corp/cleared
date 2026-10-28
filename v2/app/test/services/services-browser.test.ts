@@ -20,7 +20,7 @@ const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
 const SHOTS = process.env.CLEARED_V2_SHOTS;
 declare const document: any;
 
-async function withBrowser(options: { language: 'en' | 'fr'; width?: number; theme?: 'light' | 'dark' }, run: (page: any, base: string) => Promise<void>): Promise<void> {
+async function withBrowser(options: { language: 'en' | 'fr'; width?: number; theme?: 'light' }, run: (page: any, base: string) => Promise<void>): Promise<void> {
   // The tower's source draws the workspace of two services, whose line has the map's link; the rest is the fixtures'.
   const app = await startApp({ source: towerSource(() => FIXTURE_NOW, await fixtureSource({ now: () => FIXTURE_NOW })), extra: { language: options.language } });
   const require = createRequire(join(PLAYWRIGHT as string, 'package.json'));
@@ -98,19 +98,19 @@ test('a service picked by the keyboard shows its impact; Refresh asks the servic
   });
 });
 
-test('in French, dark, every word is French', { skip }, async () => {
-  await withBrowser({ language: 'fr', theme: 'dark' }, async (page, base) => {
+test('in French, every word is French', { skip }, async () => {
+  await withBrowser({ language: 'fr' }, async (page, base) => {
     await page.goto(`${base}/services`);
     await page.locator('.services-grid').waitFor();
     const text: string = await page.evaluate(() => document.querySelector('.services').innerText);
     assert.match(text, /Carte des services/);
     assert.match(text, /guestbook appelle filter-api\s:\sPOST \/check/);
     assert.doesNotMatch(text, /\d{4}-\d{2}-\d{2}T/, 'no ISO time');
-    await shot(page, 'services-fr-1440-dark');
+    await shot(page, 'services-fr-1440-light');
   });
 });
 
-for (const [width, theme] of [[1280, 'light'], [768, 'light'], [390, 'light'], [1280, 'dark'], [768, 'dark'], [390, 'dark']] as const) {
+for (const [width, theme] of [[1280, 'light'], [768, 'light'], [390, 'light']] as const) {
   test(`at ${width} px, ${theme}, the page does not scroll sideways, and the list of links is there`, { skip }, async () => {
     await withBrowser({ language: 'en', width, theme }, async (page, base) => {
       await page.goto(`${base}/services`);

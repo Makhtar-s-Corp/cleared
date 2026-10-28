@@ -8,7 +8,7 @@
 //   - each page has no policy violation, no page error, no missing key, and
 //     axe finds no violation of WCAG 2.2 AA;
 //   - with CLEARED_V2_CAPTURES=<folder>, the GitLab choice is captured at
-//     1440, 1280, 768 and 390 px, light and dark, in English, and the saved
+//     1440, 1280, 768 and 390 px, in English, and the saved
 //     step at 1440 in French.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/setup/forge-gitlab-browser.test.ts
@@ -59,7 +59,7 @@ async function checked(page: any, what: string): Promise<void> {
 async function shots(page: any, name: string): Promise<void> {
   if (!CAPTURES) return;
   mkdirSync(CAPTURES, { recursive: true });
-  for (const theme of ['light', 'dark']) {
+  for (const theme of ['light']) {
     await page.evaluate((value: string) => { document.documentElement.dataset.theme = value; }, theme);
     for (const width of WIDTHS) {
       await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });

@@ -66,16 +66,15 @@ export function TerminalFrame({ t, status, mode = DEFAULT_MODE, harness = '', ca
 }
 
 // The terminal's colours from the page's tokens, as the command block's:
-// ink with its text in light, the canvas in dark; on both, the ANSI colours
-// lifted to the dark theme's own (the default red reads at about 3:1).
+// the ink, its text the paper's; the ANSI colours lifted so each reads on
+// the ink (the default red reads at about 3:1). One theme, light (issue #451).
 const ANSI = { red: '#FF6B6B', brightRed: '#FF8A8A', green: '#3DD068', brightGreen: '#5FE08A', yellow: '#F7B955', brightYellow: '#FFCB70', blue: '#52A8FF', brightBlue: '#7DBEFF', magenta: '#D2A8FF', brightMagenta: '#E2C5FF', cyan: '#3DC6D8', brightCyan: '#6FD8E6' };
 function themeOf(): Record<string, string> {
   const style = getComputedStyle(document.documentElement);
   const token = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
-  const dark = document.documentElement.dataset.theme === 'dark';
-  const background = dark ? token('--canvas', '#0A0A0A') : token('--ink', '#171717');
-  const foreground = dark ? token('--text', '#EDEDED') : token('--on-ink', '#FFFFFF');
-  return { ...ANSI, background, foreground, cursor: foreground, cursorAccent: background, selectionBackground: 'rgba(255, 255, 255, 0.2)' };
+  const background = token('--ink', '#0E1726');
+  const foreground = token('--on-ink', '#FFFFFF');
+  return { ...ANSI, background, foreground, cursor: foreground, cursorAccent: background, selectionBackground: token('--ink-hover', '#26324A') };
 }
 
 // Fit only a terminal that is shown: a hidden one measures nothing.
@@ -181,10 +180,6 @@ export function WebTerminal({ session, csrf, active, t, harness, root, fixedMode
       const sized = new ResizeObserver(() => refit.current());
       sized.observe(element);
       cleanups.unshift(() => sized.disconnect());
-      // The theme follows the page's.
-      const themed = new MutationObserver(() => { term.options.theme = themeOf(); });
-      themed.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-      cleanups.unshift(() => themed.disconnect());
 
       setStatus({ kind: 'open', cols: term.cols, rows: term.rows });
       term.focus();

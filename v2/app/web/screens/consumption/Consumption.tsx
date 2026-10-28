@@ -236,13 +236,17 @@ export function ConsumptionView({ data, t, language, now, busy = false, note = '
   const levers = leverViews(data.levers, t);
   return (
     <section className="consumption" aria-labelledby="consumption-title" data-screen="consumption">
+      {/* The heading first; the period it covers on an ink plate beside it (Signal, lane j6-ui-hallmark: no label over
+          a heading), its two dates parted by a word. */}
       <header className="consumption-head">
         <div>
-          <p className="consumption-eyebrow">{t('consumption_eyebrow')}</p>
           <h1 id="consumption-title">{t('consumption_title')}</h1>
           <p className="consumption-sub">{t('consumption_subtitle')}</p>
         </div>
-        <p className="consumption-period">{periodText(data.days, language)}</p>
+        <div className="consumption-when">
+          <p className="consumption-eyebrow">{t('consumption_eyebrow')}</p>
+          <p className="consumption-period"><Period text={periodText(data.days, language)} to={t('consumption_period_to')} /></p>
+        </div>
       </header>
       <div className="consumption-grid">
         <div className="main-col">
@@ -295,6 +299,14 @@ export function ConsumptionView({ data, t, language, now, busy = false, note = '
       </footer>
     </section>
   );
+}
+
+// A range of dates as Intl writes it ("Oct 15 – 21, 2026"), its dash said as a word ("15 au 21 oct. 2026"):
+// Hallmark's copy has no dash.
+function Period({ text, to }: { readonly text: string; readonly to: string }) {
+  const parts = text.split(/\s?[\u2013\u2014-]\s?/);
+  if (parts.length !== 2) return <>{text}</>;
+  return <>{parts[0]}<span className="period-to">{` ${to} `}</span>{parts[1]}</>;
 }
 
 export default function ConsumptionPage() {

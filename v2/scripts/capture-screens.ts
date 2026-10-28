@@ -3,10 +3,10 @@
 // the app and its preview listener start in this process on ephemeral
 // loopback ports (port 0: the kernel picks a free one, never 8787 to 8799),
 // a throwaway account signs in through the page, and each screen is
-// captured at each width in each theme, then everything is stopped.
+// captured at each width, light (the one theme, issue #451), then everything is stopped.
 //
 //   node scripts/capture-screens.ts --out ../docs/v2/ui-overhaul/after/34
-//     [--screens tower,inbox,sessions,session,lead,review,review-editor,review-takeover] [--widths 1440,390] [--themes light,dark]
+//     [--screens tower,inbox,sessions,session,lead,review,review-editor,review-takeover] [--widths 1440,390] [--themes light]
 //     [--via load|click] [--language fr|en]
 //
 // The language is the app's default, French, unless --language en asks for
@@ -44,6 +44,11 @@
 // plan-ask (a session's Plan tab scrolled to its question to the code) and
 // inbox-release (the release card selected, the phone's layout at 390).
 //
+// Lane j6-ui-hallmark's, named only: services (the service map), ask (the
+// fixtures' question to the code), access (the tower with the API access
+// panel open, from the account menu; from 768 px, where the person's menu
+// holds it) and plan (the lead screen at the fixtures' first plan).
+//
 // --via load (the default) opens each screen's address as a page; --via
 // click opens the tower, then reaches each screen by a click on a link of
 // the page, which the app answers without a document load (lane 34): the
@@ -60,6 +65,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import { ASK_ID } from '../app/fixtures/ask.ts';
 import { RESOLVED_AUTHOR_ID } from '../app/fixtures/cost.ts';
 import { fixturePreview } from '../app/fixtures/session.ts';
 import { fixtureSource } from '../app/fixtures/source.ts';
@@ -74,7 +80,7 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox', 'palette-inbox-permission', 'login', 'account', 'consumption', 'tower-template', 'resolved', 'plan-ask', 'inbox-release'] as const;
+export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox', 'palette-inbox-permission', 'login', 'account', 'consumption', 'tower-template', 'resolved', 'plan-ask', 'inbox-release', 'services', 'ask', 'access', 'plan'] as const;
 // The extras captured as the whole page, not the window.
 const WHOLE = new Set<string>(['consumption', 'resolved']);
 export type CaptureScreen = typeof SCREENS[number] | typeof EXTRAS[number];
@@ -90,6 +96,7 @@ const ACCOUNT = 'owner';
 const { chromium } = createRequire(import.meta.url)('playwright-core') as { chromium: any };
 declare const document: any;
 declare const requestAnimationFrame: (run: () => void) => number;
+declare const window: any;
 
 const list = (value: string | undefined, all: readonly string[]): string[] => (value ? value.split(',').map((v) => v.trim()).filter(Boolean) : [...all]);
 
@@ -101,7 +108,7 @@ async function listen(server: Server): Promise<string> {
 export async function capture(options: { readonly out: string; readonly screens?: readonly string[]; readonly widths?: readonly string[]; readonly themes?: readonly string[]; readonly via?: 'load' | 'click'; readonly language?: 'fr' | 'en' }): Promise<{ readonly files: string[]; readonly errors: string[]; readonly away: string[] }> {
   const screens = options.screens ?? SCREENS;
   const widths = options.widths ?? Object.keys(WIDTHS).reverse();
-  const themes = options.themes ?? ['light', 'dark'];
+  const themes = options.themes ?? ['light'];
   for (const s of screens) if (![...SCREENS, ...EXTRAS].includes(s as CaptureScreen)) throw new Error(`unknown screen ${s}`);
   for (const w of widths) if (!WIDTHS[w]) throw new Error(`unknown width ${w}`);
   mkdirSync(options.out, { recursive: true });
@@ -155,6 +162,7 @@ export async function capture(options: { readonly out: string; readonly screens?
           'inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`, 'inbox-handled': '/inbox', 'sheet-inbox': '/inbox', 'palette-inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`,
           consumption: '/consumption', 'tower-template': '/', resolved: `/sessions/${RESOLVED_AUTHOR_ID}`, 'plan-ask': `/sessions/${author?.id ?? ''}#plan`,
           'inbox-release': `/inbox#${encodeURIComponent(release?.id ?? '')}`,
+          services: '/services', ask: `/ask/${ASK_ID}`, access: '/', plan: '/plans/plan-1',
         };
         let documents = 0;
         page.on('load', () => { documents += 1; });
@@ -227,6 +235,13 @@ export async function capture(options: { readonly out: string; readonly screens?
             await settle(page);
             menu = true;
           }
+          if (screen === 'access' && await page.locator('#person').isVisible()) {
+            await page.locator('#person').click();
+            await page.locator('#access-open').click();
+            await page.locator('.access').first().waitFor();
+            await settle(page);
+            menu = true;
+          }
           let folded = false;
           if (screen === 'rail-tooltip') {
             if (await page.locator('.app[data-sidebar="open"]').count() > 0) {
@@ -238,7 +253,8 @@ export async function capture(options: { readonly out: string; readonly screens?
             await page.waitForTimeout(300);
           }
           const file = join(options.out, `${screen}-${w}-${theme}.png`);
-          await page.screenshot({ path: file, animations: 'disabled', caret: 'hide', fullPage: WHOLE.has(screen) });
+          if (WHOLE.has(screen)) await wholePage(page, file, WIDTHS[w]!);
+          else await page.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
           files.push(file);
           if (screen === 'review-editor') await page.locator('[role="tab"][aria-controls="tab-terminal"]').click();
           if (screen === 'review-takeover') {
@@ -268,6 +284,22 @@ export async function capture(options: { readonly out: string; readonly screens?
   return { files, errors, away };
 }
 
+// The whole page, as a window as tall as the page sees it (lane j6-ui-hallmark): a screenshot of the full page
+// keeps the window's height, so a bar fixed to the window's foot (the phone's bar of screens) and a sidebar 100vh tall
+// were drawn where the window ended, mid-page. The window grows to the page's height, then goes back.
+export async function wholePage(page: any, file: string, size: { readonly width: number; readonly height: number }): Promise<void> {
+  for (let round = 0; round < 4; round += 1) {
+    const height = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight));
+    const current = page.viewportSize().height;
+    if (height <= current) break;
+    await page.setViewportSize({ width: size.width, height });
+    await page.evaluate(async () => { await new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))); });
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
+  await page.setViewportSize(size);
+}
+
 // The screen has drawn its data: no element busy, the fonts loaded, then
 // two frames so the last layout is painted.
 async function settle(page: any): Promise<void> {
@@ -294,7 +326,7 @@ if (import.meta.main) {
     console.error('capture-screens: --out <folder> is required');
     process.exit(64);
   }
-  const result = await capture({ out: resolve(values.out), screens: list(values.screens, SCREENS), widths: list(values.widths, Object.keys(WIDTHS).reverse()), themes: list(values.themes, ['light', 'dark']), via: values.via === 'click' ? 'click' : 'load', language: values.language === 'en' ? 'en' : 'fr' });
+  const result = await capture({ out: resolve(values.out), screens: list(values.screens, SCREENS), widths: list(values.widths, Object.keys(WIDTHS).reverse()), themes: list(values.themes, ['light']), via: values.via === 'click' ? 'click' : 'load', language: values.language === 'en' ? 'en' : 'fr' });
   for (const file of result.files) console.log(file);
   for (const error of result.errors) console.error(`page error: ${error}`);
   for (const url of result.away) console.error(`request off the app's origin: ${url}`);
