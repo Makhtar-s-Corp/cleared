@@ -181,6 +181,37 @@ test('a devcontainer naming Cleared\'s session image builds on this install\'s; 
   assert.match(seen[1]?.dockerfile ?? '', new RegExp(`^FROM ${record.tag}-devcontainer$`, 'm'));
 });
 
+// The live run of 2026-10-28 (issue #465): a setup session wrote `FROM
+// cleared-v2-session`, as the Environment template asks, and Docker looked
+// for it on Docker Hub, since this install's image has a tag of its own.
+test('a devcontainer Dockerfile starting from Cleared\'s session image, under any tag, builds on this install\'s; other images and a stage of that name are left as written', async () => {
+  const fake = new FakeDocker();
+  const seen = recordBuilds(fake);
+  const dockerfile = [
+    'FROM cleared-v2-session',
+    'RUN true',
+    'from cleared-v2-session:latest as tools',
+    'FROM --platform=linux/amd64 cleared-v2-session:2.0.1 AS other',
+    'FROM node:24 AS cleared-v2-session',
+    'FROM cleared-v2-session',
+    'FROM example.org/cleared-v2-session:1',
+    '',
+  ].join('\n');
+  const { source } = project({ '.devcontainer/devcontainer.json': '{ "build": { "dockerfile": "Dockerfile", "context": ".." } }\n', '.devcontainer/Dockerfile': dockerfile });
+  await images(fake).ensure(source);
+  assert.deepEqual(seen[0]?.dockerfile.split('\n'), [
+    `FROM ${SESSION_IMAGE}`,
+    'RUN true',
+    `from ${SESSION_IMAGE} as tools`,
+    `FROM --platform=linux/amd64 ${SESSION_IMAGE} AS other`,
+    'FROM node:24 AS cleared-v2-session',
+    'FROM cleared-v2-session',
+    'FROM example.org/cleared-v2-session:1',
+    '',
+  ]);
+  assert.ok((valueOf(builds(fake)[0]?.args ?? [], '--file') ?? '').endsWith('/.devcontainer/Dockerfile'));
+});
+
 test('a build that fails is recorded with its reason, and the next call tries again', async () => {
   const fake = new FakeDocker();
   const { source } = project();

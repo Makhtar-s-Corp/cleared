@@ -14,8 +14,9 @@
 // changes the lock file.
 //
 // The image starts from Cleared's session image, the image the devcontainer
-// file names (Cleared's own session image under any tag is this install's),
-// or the one its Dockerfile builds, first, under <tag>-devcontainer. The
+// file names (Cleared's own session image under any tag is this install's,
+// in a FROM line of its Dockerfile too), or the one its Dockerfile builds,
+// first, under <tag>-devcontainer. The
 // manifests and lock files are copied to PREPARED_WORKDIR and the install
 // command runs there, without a shell: the session's checkout is mounted
 // over /workspace, which would hide anything the image put there, so the
@@ -139,6 +140,26 @@ const text = async (dir: string, object: string): Promise<string> => git(dir, ['
 // Cleared's own session image, under any tag, is the one this install built.
 const fromImage = (named: string, baseImage: string): string => (/^cleared-v2-session(?::[A-Za-z0-9_.-]+)?$/.test(named) ? baseImage : named);
 
+// A FROM line: the keyword and its options, the image, then the rest (AS and a stage's name).
+const FROM_LINE = /^(\s*from\s+(?:--\S+\s+)*)(\S+)(.*)$/i;
+
+// The devcontainer's Dockerfile with Cleared's session image, under any tag,
+// as this install's: the Environment template asks to start from
+// cleared-v2-session, which Docker would otherwise look for on Docker Hub
+// (issue #465). A stage named so before the line is left as written.
+export function onSessionImage(dockerfile: string, baseImage: string): string {
+  const stages = new Set<string>();
+  return dockerfile.split('\n').map((line) => {
+    const match = FROM_LINE.exec(line);
+    if (!match) return line;
+    const [, head, image, rest] = match as unknown as [string, string, string, string];
+    const out = stages.has(image.toLowerCase()) ? line : `${head}${fromImage(image, baseImage)}${rest}`;
+    const stage = /^\s+as\s+(\S+)/i.exec(rest)?.[1];
+    if (stage) stages.add(stage.toLowerCase());
+    return out;
+  }).join('\n');
+}
+
 // What the base branch holds for the service's image, and its hash; undefined
 // when the checkout has no base fetched. `at`: another ref of the checkout
 // instead of the base, a ticket's branch as the setup session's check reads
@@ -243,6 +264,10 @@ export async function buildPrepared(input: {
     const choice = readDevcontainer(join(tree, inputs.devcontainerRoot), input.baseImage);
     if (choice.kind !== 'dockerfile') throw new PreparedError('the devcontainer file names no Dockerfile');
     from = `${tag}-devcontainer`;
+    // The Dockerfile is the export's copy, never the checkout's.
+    const written = readFileSync(choice.dockerfile, 'utf8');
+    const mapped = onSessionImage(written, input.baseImage);
+    if (mapped !== written) writeFileSync(choice.dockerfile, mapped);
     await docker.build({ context: choice.context, dockerfile: choice.dockerfile, tag: from, labels, ...session });
   }
   const root = source.path === null ? tree : join(tree, source.path);
