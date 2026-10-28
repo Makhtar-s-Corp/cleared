@@ -38,6 +38,9 @@ export function tidy(markup: string): string {
   });
 }
 
+// A line of facts as components/facts/Facts.tsx draws it (lane j6-ui-hallmark): each fact a cell, a rule between.
+export const factsHtml = (...facts: readonly string[]): string => facts.map((fact) => `<span class="fact">${fact}</span>`).join('<span class="fact-sep"><span class="sr-only">, </span></span>');
+
 export const html = (node: ReactNode): string => tidy(renderToStaticMarkup(<>{node}</>));
 
 // The text between tags, and the attributes a person reads or hears.

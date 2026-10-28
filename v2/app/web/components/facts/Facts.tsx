@@ -8,6 +8,8 @@ import { Fragment } from 'react';
 const FIGURE = /^(\d[\d\s  .,]*(?:\s?[% ]?%)?)(\s.+)$/u;
 
 export function Facts({ text, figures = false }: { readonly text: string; readonly figures?: boolean }) {
+  // One fact is a line of text, as before.
+  if (!text.includes(' · ')) return <>{text}</>;
   return (
     <>
       {text.split(' · ').map((fact, i) => {

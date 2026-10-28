@@ -34,10 +34,11 @@ import {
   placeholderKey, planFrom, planGesture, replyFor, sendReply, stopText, threadRows, trainHeadline, trainTone, waitsOn,
   type ComposerMode, type LeadDraft, type LeadView, type Reply, type StreamLike, type TrainLine,
 } from './model.ts';
+import { Facts } from '@/components/facts/Facts.tsx';
 
 export function HeaderLine({ state, now, t }: { readonly state: LeadState; readonly now: Date; readonly t: Translate }) {
   const line = headerLine(state, now, t);
-  return <p className={line.tone === 'down' ? 'lead-line lead-down' : 'lead-line'} id="lead-line">{line.text}</p>;
+  return <p className={line.tone === 'down' ? 'lead-line lead-down' : 'lead-line'} id="lead-line"><Facts text={line.text} /></p>;
 }
 
 // A question that waits shows its options as the clickable answers, the
@@ -98,7 +99,7 @@ export function Thread({ view, t, busy = false, onAnswer, onStart }: { readonly 
           const line = message.kind === 'refresh'
             ? t('lead_refresh_line', { generation: message.generation ?? '', time: clockOf(message.at, view.now, view.language) })
             : t('lead_system_line', { text: message.text, time: clockOf(message.at, view.now, view.language) });
-          return <Fragment key={message.seq}>{gap}<li className="system-line"><span>{line}</span></li></Fragment>;
+          return <Fragment key={message.seq}>{gap}<li className="system-line"><span><Facts text={line} /></span></li></Fragment>;
         }
         if (message.by === 'owner') return <Fragment key={message.seq}>{gap}<li className="owner-row"><p className="bubble owner">{message.text}</p></li></Fragment>;
         const question = message.kind === 'question';

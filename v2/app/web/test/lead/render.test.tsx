@@ -4,7 +4,7 @@
 // with its items, chips, estimates, footer and buttons, the memory panel,
 // and which plan /lead shows.
 import { test } from 'vitest';
-import { renderLead, renderMemory, renderPlanPanel, renderThread } from '../render.tsx';
+import { renderLead, renderMemory, renderPlanPanel, renderThread, factsHtml } from '../render.tsx';
 import assert from 'node:assert/strict';
 import type { LeadState, Plan } from '../../../../src/api/types.ts';
 import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
@@ -45,7 +45,7 @@ test('the header line says the lead is always on, its context share and when it 
 
 test('the down state is a danger pill in the lead card, the live states are not', async () => {
   const live = renderLead(await view(), en);
-  assert.match(live, /<p class="lead-line" id="lead-line">Always on · context 45% · refreshed from memory 10\u00a0min ago<\/p>/);
+  assert.ok(live.includes(`<p class="lead-line" id="lead-line">${factsHtml('Always on', 'context 45%', 'refreshed from memory 10\u00a0min ago')}</p>`), live);
   assert.doesNotMatch(live, /lead-down/);
   const v = await view();
   const down = renderLead({ ...v, state: { ...v.state, phase: 'down' } }, en);
@@ -57,7 +57,7 @@ test('the thread: the owner in ink on the right, the lead with its square, a gre
   assert.equal(count(html, /class="bubble owner"/), 2);
   assert.equal(count(html, /class="lead-row"/), 2, 'the question and the reply with the plan');
   assert.equal(count(html, /<span class="lead-mark small" aria-hidden="true">L<\/span>/), 2);
-  assert.match(html, /<li class="system-line"><span>Refreshed from memory · generation 3 · 09:31<\/span><\/li>/);
+  assert.ok(html.includes(`<li class="system-line"><span>${factsHtml('Refreshed from memory', 'generation 3', '09:31')}</span></li>`), html);
   assert.match(text(html), /Goal: make the guestbook readable once it has many entries\. I want it before Friday\./);
   assert.match(text(html), /Pages of 20\. The phone keeps the long list\./);
   assert.match(text(html), /Here is a plan in five tickets\./);
