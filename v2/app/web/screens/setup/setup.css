@@ -2,40 +2,49 @@
    styles/app.css: a page of its own, the progress line at the left of the
    step from 1024 px, above it below. Same tokens as the sign-in page, flat
    colours; a step's state is said in words beside its mark, never by its
-   colour alone. */
+   colour alone. Signal (lane j6-ui-hallmark): the product's name on an ink band, the heading set at 40 px heavy, the
+   steps a route of numbered plates on an ink line (done in ink, the current one cobalt), the step a square panel in
+   an ink frame. */
 
 .setup-page { min-height: 100vh; }
-.setup { max-width: 1080px; margin: 0 auto; padding: var(--space-4) 32px 48px; }
+.setup { max-width: 1120px; margin: 0 auto; padding: 0 var(--space-5) var(--space-6); }
 
-.setup-head { margin-bottom: var(--space-4); }
-.setup-brand { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-3); }
-/* The language choice (issue #431), drawn as the account menu's. */
-.setup-language { margin-left: auto; display: flex; gap: 2px; padding: 3px; border-radius: 8px; background: var(--surface-muted); font-size: var(--text-sm); }
-.setup-language button { min-height: 28px; padding: 0 var(--space-2); border: 0; border-radius: 6px; background: transparent; color: var(--text-muted); cursor: pointer; }
-.setup-language button[aria-pressed="true"] { background: var(--surface); box-shadow: var(--e-outline); color: var(--text); font-weight: var(--weight-strong); }
+.setup-head { margin-bottom: var(--space-5); }
+.setup-brand { display: flex; align-items: center; gap: var(--space-3); margin: 0 calc(-1 * var(--space-5)) var(--space-5); padding: var(--space-3) var(--space-5); background: var(--ink); color: var(--on-ink); }
+/* The band runs the window's width, past the page's measure: its ink drawn out on both sides, flat. */
+.setup-brand { box-shadow: 0 0 0 100vmax var(--ink); clip-path: inset(0 -100vmax); }
+.setup-brand .logo { fill: var(--on-ink); }
+/* The language choice (issue #431): two cells joined edge to edge, on the ink band. */
+.setup-language { margin-left: auto; display: flex; gap: 0; padding: 0; border-radius: 0; box-shadow: inset 0 0 0 var(--frame) var(--on-ink); font-size: var(--text-sm); }
+.setup-language button { min-height: 32px; padding: 0 var(--space-3); border: 0; border-radius: 0; background: transparent; color: var(--on-ink); font-weight: var(--weight-strong); cursor: pointer; }
+.setup-language button:hover { background: var(--ink-hover); }
+.setup-language button[aria-pressed="true"] { background: var(--on-ink); color: var(--ink); }
 @media (max-width: 767px) { .setup-language button { min-height: 44px; } }
-.setup-brand .name { font-weight: var(--weight-strong); font-size: var(--text-md); letter-spacing: -.01em; }
-.setup-head h1 { margin: 0; font-size: var(--text-lg); font-weight: var(--weight-strong); letter-spacing: -.035em; line-height: 1.25; }
-.setup-lead { margin: 4px 0 0; color: var(--text-muted); font-size: var(--text-md); text-wrap: pretty; }
+.setup-brand .name { font-weight: var(--weight-heavy); font-size: var(--text-lg); letter-spacing: -.02em; }
+.setup-head h1 { margin: 0; font-size: var(--text-display); font-weight: var(--weight-heavy); letter-spacing: -.035em; line-height: 1.02; }
+.setup-lead { margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: var(--text-md); text-wrap: pretty; }
 
-.setup-body { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.setup-body { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: var(--space-5); align-items: start; }
 
-.setup-progress { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.setup-progress li { display: flex; align-items: flex-start; gap: 10px; padding: 8px 10px; border-radius: var(--radius); }
-.setup-progress li[aria-current="step"] { background: var(--sunken); }
-.setup-mark { display: inline-grid; place-items: center; flex: none; width: 22px; height: 22px; border-radius: 50%; box-shadow: var(--e-outline); font-size: var(--text-sm); color: var(--text-secondary); }
+/* The route: each step a numbered plate on one ink line, as a corridor sign. */
+.setup-progress { position: relative; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; }
+.setup-progress::before { content: ""; position: absolute; left: 23px; top: 18px; bottom: 18px; width: var(--frame); background: var(--ink); pointer-events: none; }
+.setup-progress li { position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 8px 10px; border-radius: 0; }
+.setup-progress li[aria-current="step"] { background: var(--surface); box-shadow: inset 0 0 0 var(--frame) var(--ink); }
+.setup-mark { display: inline-grid; place-items: center; flex: none; width: 28px; height: 28px; border-radius: 0; background: var(--surface); box-shadow: inset 0 0 0 var(--frame) var(--ink); font-size: var(--text-sm); font-weight: var(--weight-heavy); color: var(--text); }
 .setup-progress li[data-state="done"] .setup-mark { background: var(--ink); color: var(--on-ink); box-shadow: none; }
-.setup-progress li[data-state="skipped"] .setup-mark { color: var(--text-faint); }
+.setup-progress li[aria-current="step"] .setup-mark { background: var(--theme-accent); color: var(--on-ink); box-shadow: none; }
+.setup-progress li[data-state="skipped"] .setup-mark { background: var(--surface-muted); color: var(--text-secondary); box-shadow: inset 0 0 0 var(--frame) var(--dashed); }
 .setup-progress-text { display: flex; flex-direction: column; min-width: 0; }
-.setup-progress-name, .setup-progress-text a { color: var(--text); font-weight: var(--weight-strong); font-size: var(--text-md); text-decoration: none; }
+.setup-progress-name, .setup-progress-text a { color: var(--text); font-weight: var(--weight-heavy); font-size: var(--text-md); text-decoration: none; }
 .setup-progress-text a:hover { text-decoration: underline; }
 .setup-progress-text a:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
-.setup-progress-state { color: var(--text-muted); font-size: var(--text-sm); }
+.setup-progress-state { color: var(--text-secondary); font-size: var(--text-sm); }
 
-.setup-main { min-width: 0; padding: var(--space-4); border-radius: 12px; background: var(--surface); box-shadow: var(--e-card); }
-.setup-count { margin: 0 0 var(--space-1); color: var(--text-muted); font-size: var(--text-sm); }
-.setup-step h2 { margin: 0 0 var(--space-2); font-size: var(--text-lg); font-weight: var(--weight-strong); letter-spacing: -.02em; }
-.setup-step h3 { margin: var(--space-4) 0 var(--space-2); font-size: var(--text-md); font-weight: var(--weight-strong); }
+.setup-main { min-width: 0; padding: var(--space-5); border-radius: 0; background: var(--surface); box-shadow: var(--e-card); }
+.setup-count { display: inline-block; margin: 0 0 var(--space-3); padding: 2px var(--space-2); background: var(--sunken); color: var(--text); font-size: var(--text-sm); font-weight: var(--weight-heavy); }
+.setup-step h2 { margin: 0 0 var(--space-3); font-size: var(--text-xl); font-weight: var(--weight-heavy); letter-spacing: -.03em; line-height: 1.12; }
+.setup-step h3 { margin: var(--space-4) 0 var(--space-2); padding-bottom: var(--space-1); border-bottom: var(--frame) solid var(--ink); font-size: var(--text-md); font-weight: var(--weight-heavy); }
 .setup-step p { margin: 0 0 var(--space-2); max-width: 68ch; text-wrap: pretty; }
 .setup-intro { color: var(--text-secondary); }
 .setup-note, .setup-hint { color: var(--text-muted); font-size: var(--text-sm); }
@@ -44,18 +53,20 @@
 
 .setup-form { display: flex; flex-direction: column; max-width: 420px; margin-top: var(--space-3); }
 .setup-form label { font-size: var(--text-sm); font-weight: var(--weight-strong); color: var(--text-secondary); margin-bottom: var(--space-1); }
-.setup-form input { height: 44px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); font-size: var(--text-input); }
-.setup-form input:focus { outline: 2px solid transparent; box-shadow: 0 0 0 2px var(--link); }
+.setup-form input { height: 44px; padding: 0 var(--space-2); border: 0; border-radius: 0; background: var(--surface); box-shadow: var(--e-control); font-size: var(--text-input); }
+.setup-form input:focus { outline: 2px solid transparent; box-shadow: var(--e-control), 0 0 0 5px var(--halo-progress); }
 .setup-form .setup-hint { margin: 4px 0 var(--space-3); }
 .setup-form input + .setup-error, .setup-form input + .primary { margin-top: var(--space-3); }
 
-.setup-step .primary, .setup-actions .primary { min-height: 44px; padding: 0 20px; border: 0; border-radius: var(--radius); background: var(--ink); color: var(--on-ink); font-weight: var(--weight-strong); cursor: pointer; }
-.setup-step .primary:hover, .setup-actions .primary:hover { opacity: .88; }
+.setup-step .primary, .setup-actions .primary { min-height: 48px; padding: 0 var(--space-4); border: 0; border-radius: 0; background: var(--theme-accent); color: var(--on-ink); font-weight: var(--weight-heavy); cursor: pointer; }
+.setup-step .primary:hover, .setup-actions .primary:hover { background: var(--accent-hover); }
+.setup-step .primary:active, .setup-actions .primary:active { background: var(--accent-press); }
+.setup-step .primary:disabled, .setup-actions .primary:disabled { background: var(--surface-muted); color: var(--text-faint); box-shadow: inset 0 0 0 var(--frame) var(--dashed); cursor: default; }
 .setup-step .btn, .setup-actions .btn { min-height: 36px; padding: 0 16px; }
 .setup-form .primary { align-self: flex-start; margin-top: var(--space-1); }
 
-.setup-error { padding: var(--space-2); border-radius: var(--radius); background: var(--sunken); color: var(--danger-text); }
-.setup-ok { padding: var(--space-2) var(--space-2) var(--space-2) 12px; border-radius: var(--radius); background: var(--sunken); box-shadow: inset 3px 0 0 var(--success); }
+.setup-error { padding: var(--space-2) var(--space-3); border-radius: 0; background: var(--surface); box-shadow: inset 0 0 0 var(--frame) var(--danger), inset 6px 0 0 var(--danger); color: var(--danger-text); font-weight: var(--weight-strong); }
+.setup-ok { padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4); border-radius: 0; background: var(--success-fill); box-shadow: inset 6px 0 0 var(--success); }
 .setup-saved { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-3) 0; }
 .setup-saved p { margin: 0; }
 
@@ -64,9 +75,9 @@
 .setup-right-name { font-weight: var(--weight-strong); }
 .setup-right-access { color: var(--text-secondary); }
 .setup-right-use { color: var(--text-muted); }
-.setup-tag { margin-left: 8px; padding: 1px 6px; border-radius: 999px; box-shadow: var(--e-outline); color: var(--text-secondary); font-size: var(--text-sm); white-space: nowrap; }
+.setup-tag { margin-left: 8px; padding: 1px 6px; border-radius: 0; background: var(--sunken); color: var(--text); font-size: var(--text-sm); font-weight: var(--weight-strong); white-space: nowrap; }
 
-.setup-code { margin: 0 0 var(--space-2); padding: 10px 12px; border-radius: var(--radius); background: var(--sunken); overflow-x: auto; font-family: var(--mono); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
+.setup-code { margin: 0 0 var(--space-2); padding: 10px 12px; border-radius: 0; background: var(--sunken); overflow-x: auto; font-family: var(--mono); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
 .setup-more { margin-top: var(--space-2); }
 .setup-more summary { cursor: pointer; color: var(--text-secondary); }
 .setup-more[open] summary { margin-bottom: var(--space-2); }
@@ -75,7 +86,7 @@
 .setup-terminal .term { display: flex; flex-direction: column; gap: 8px; }
 .setup-terminal .term-head { display: flex; align-items: center; justify-content: space-between; gap: 8px 12px; flex-wrap: wrap; }
 .setup-terminal .term-mode { margin: 0; font-size: var(--text-md); font-weight: var(--weight-strong); }
-.setup-terminal .term-host { height: 300px; padding: 8px 4px 8px 10px; border-radius: 8px; background: var(--ink); overflow: hidden; }
+.setup-terminal .term-host { height: 300px; padding: 8px 4px 8px 10px; border-radius: 0; background: var(--ink); overflow: hidden; }
 .setup-terminal .term-host .xterm { height: 100%; }
 .setup-terminal .term-foot { display: flex; align-items: center; gap: 8px 12px; flex-wrap: wrap; }
 .setup-terminal .term-state { display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: baseline; gap: 2px 8px; flex: 1 1 260px; margin: 0; font-size: var(--text-sm); color: var(--text-secondary); }
@@ -86,18 +97,24 @@
 .setup-terminal .term-detail.bad { color: var(--danger-text); }
 
 .setup-result { margin-top: var(--space-2); }
-.setup-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-4); padding-top: var(--space-3); box-shadow: 0 -1px 0 var(--hairline); }
+.setup-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-5) calc(-1 * var(--space-5)) calc(-1 * var(--space-5)); padding: var(--space-3) var(--space-5); border-top: var(--frame) solid var(--ink); background: var(--sunken); }
 .setup-actions-gap { flex: 1; }
 
 @media (max-width: 1023px) {
   .setup-body { grid-template-columns: minmax(0, 1fr); }
-  .setup-progress { flex-direction: row; flex-wrap: wrap; gap: 4px; }
+  .setup-progress { flex-direction: row; flex-wrap: nowrap; gap: 4px; overflow-x: auto; }
+  .setup-progress li { flex: none; }
+  .setup-progress::before { left: 18px; right: 18px; top: 22px; bottom: auto; width: auto; height: var(--frame); }
   .setup-progress li { padding: 6px 8px; }
 }
 
 @media (max-width: 640px) {
-  .setup { padding: var(--space-3) 16px 32px; }
+  .setup { padding: 0 16px 32px; }
+  .setup-brand { margin: 0 -16px var(--space-4); padding: var(--space-2) 16px; }
+  .setup-head h1 { font-size: var(--text-xl); }
   .setup-main { padding: var(--space-3); }
+  .setup-actions { margin: var(--space-4) calc(-1 * var(--space-3)) calc(-1 * var(--space-3)); padding: var(--space-3); }
+  .setup-progress::before { display: none; }
   .setup-progress li:not([aria-current="step"]) .setup-progress-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   .setup-rights { grid-template-columns: minmax(0, 1fr); gap: 2px; }
   .setup-rights li { display: block; margin-bottom: var(--space-2); }

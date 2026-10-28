@@ -4,9 +4,9 @@
 .forge-choice { margin: var(--space-3) 0; padding: 0; border: 0; min-width: 0; }
 .forge-choice legend { margin-bottom: var(--space-1); padding: 0; font-size: var(--text-sm); font-weight: var(--weight-strong); color: var(--text-secondary); }
 .forge-options { display: flex; flex-wrap: wrap; gap: var(--space-2); }
-.forge-option { display: inline-flex; align-items: center; gap: 10px; min-height: 44px; padding: 0 var(--space-3); border-radius: var(--radius); box-shadow: var(--e-outline); font-weight: var(--weight-strong); cursor: pointer; }
+.forge-option { display: inline-flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 var(--space-4); border-radius: 0; box-shadow: inset 0 0 0 1px var(--outline); font-weight: var(--weight-strong); cursor: pointer; }
 .forge-option:hover { background: var(--sunken); }
-.forge-option:has(input:checked) { box-shadow: 0 0 0 2px var(--ink); }
+.forge-option:has(input:checked) { box-shadow: inset 0 0 0 var(--frame) var(--ink); background: var(--surface-muted); }
 .forge-option input { width: 18px; height: 18px; margin: 0; accent-color: var(--ink); }
 .forge-option input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .forge-make { margin: 0 0 var(--space-3); }
