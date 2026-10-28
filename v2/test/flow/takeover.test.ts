@@ -77,7 +77,7 @@ function journalPhase(h: Harness, id: SessionId): string | undefined {
   let phase: string | undefined;
   for (const e of events(h, id)) {
     if (e.type === 'STATE_SNAPSHOT') phase = e.snapshot.phase;
-    if (e.type === 'STATE_DELTA') for (const op of e.delta) if (op.path === '/phase') phase = String(op.value);
+    if (e.type === 'STATE_DELTA') for (const op of e.delta) if (op.path === '/phase' && 'value' in op) phase = String(op.value);
   }
   return phase;
 }
