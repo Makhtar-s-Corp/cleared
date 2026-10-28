@@ -7758,7 +7758,11 @@ Changed with the code: the label gate's case (decision 10), the adapter test's f
 - **No progress dashboard:** the owner's rules ask a sub-agent to keep one for a long task, and the brief forbids starting any sub-agent.
 
 **Checks**, on this branch at `origin/v2` `584d3ebe`:
-- CHECKS_PLACEHOLDER
+- `npm run typecheck` in `v2/`: clean (a first run caught a test option's return type, fixed).
+- `npm test` in `v2/`: 2898 Node tests, 2763 pass, 135 skipped, 0 fail; 417 Vitest tests pass.
+- An earlier full run, before the last test commits, failed `test/approval/broker.test.ts` ("the broker ran merge-pr.ts, which merged through gh") under the full suite's load; run alone it passed (3 of 3), and it passed in the two later full runs. This lane touches nothing it runs.
+- `node --test test/flow/container-kill.test.ts test/flow/container-lost.test.ts`: 10 pass.
+- `npm run guard -- --base origin/v2`: nothing refused. The guard does not read `docs/v2/` and ran without the private-term list, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none. No em dash in the diff.
 
 **Resources.** No Docker object made or touched: the tests use the fake docker CLI; `docker images` and `docker ps` were run once each, filtered on `cleared.dev=v2`, to look for a session image (none). No real GitHub, GitLab, Slack, Cursor or Codex account, no Claude Code login read. Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issue and the pull request. Ports: only the tests' own ephemeral loopback ones. No tunnel, no secret.
 

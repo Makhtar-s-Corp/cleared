@@ -127,7 +127,7 @@ export type SetupOptions = {
   clean?: (text: string) => string;                  // the service's cleaner; the identity by default
   levers?: LeverReader;                              // the Consumption screen's levers; none by default
   eventClock?: boolean;                              // the fake stamps its events with the simulated clock, as the watchdog reads them
-  forget?: (session: SessionId) => Promise<void>;    // removes a session's volume; none by default
+  forget?: (session: SessionId) => Promise<unknown>; // removes a session's volume; none by default
 };
 
 export async function setup(options: SetupOptions = {}) {
