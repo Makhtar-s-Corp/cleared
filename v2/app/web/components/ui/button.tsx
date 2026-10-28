@@ -16,10 +16,10 @@ export const buttonVariants = cva(
   {
     variants: {
       variant: {
-        ink: 'rounded-none bg-primary text-primary-foreground font-[var(--weight-strong)] hover:bg-[var(--accent-hover)] active:bg-[var(--accent-press)] disabled:bg-[var(--surface-muted)] disabled:text-[var(--text-faint)]',
-        outline: 'rounded-none bg-card shadow-control hover:bg-accent active:bg-[var(--selected)] disabled:text-[var(--text-faint)] disabled:shadow-outline',
-        chip: 'rounded-none bg-card shadow-control text-xs hover:bg-accent active:bg-[var(--selected)]',
-        ghost: 'rounded-none bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground active:bg-[var(--selected)]',
+        ink: 'rounded-md bg-primary text-primary-foreground font-[var(--weight-strong)] hover:bg-[var(--accent-hover)] active:bg-[var(--accent-press)] disabled:bg-[var(--surface-muted)] disabled:text-[var(--text-faint)]',
+        outline: 'rounded-md bg-card shadow-control hover:bg-accent active:bg-[var(--selected)] disabled:text-[var(--text-faint)] disabled:shadow-outline',
+        chip: 'rounded-md bg-card shadow-control text-xs hover:bg-accent active:bg-[var(--selected)]',
+        ghost: 'rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground active:bg-[var(--selected)]',
         link: 'bg-transparent p-0 text-link hover:underline',
       },
     },

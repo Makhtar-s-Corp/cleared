@@ -64,7 +64,7 @@ test('the English tower reads as the capture', async () => {
   const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
   const html = renderTower(towerModel(await towerFixture(FIXTURE_NOW), FIXTURE_NOW), t);
   // The summary's facts are each kept whole (lane 38): read them back as the line they make.
-  const text = visibleText(html).join('\n').replace(/\n·\n/g, ' · ');
+  const text = visibleText(html).join('\n').replace(/\n,\n/g, ' · ');
   for (const expected of [
     'Three things need you.', '4 sessions running · 1 plan in progress · 2 landed today', 'Open inbox', 'Release', '12\u00a0min', 'Permission', '3\u00a0min', 'Plan', '25\u00a0min', 'Goal',
     'The Lead proposes 5 tickets, about 2h of work and 4% of the week.', 'Always on · context 31% · refreshed 10\u00a0min ago',

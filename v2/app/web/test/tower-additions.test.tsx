@@ -39,7 +39,7 @@ test('the schedules sit in the plans card with their next run; none, and the car
   const base = await towerFixture(FIXTURE_NOW);
   const markup = renderTowerBody(towerModel({ ...base, schedules: schedulesFixture(FIXTURE_NOW) }, FIXTURE_NOW), en);
   assert.match(markup, /<h3 class="sub-title" id="schedules-title">Schedules<\/h3>/);
-  assert.match(markup, /<li class="schedule" data-schedule="schedule-1"><span class="schedule-name">dependency-update<\/span><span class="schedule-line">Next run tomorrow at 03:00 · \$0\.50<\/span><\/li>/);
+  assert.match(markup, /<li class="schedule" data-schedule="schedule-1"><span class="schedule-name">dependency-update<\/span><span class="schedule-line"><span class="fact">Next run tomorrow at 03:00<\/span><span class="fact-sep"><span class="sr-only">, <\/span><\/span><span class="fact">\$0\.50<\/span><\/span><\/li>/, 'the run and the budget, two facts parted by a rule (lane j6-ui-hallmark)');
   assert.match(markup, /<li class="schedule off" data-schedule="schedule-3">/);
   const before = renderTowerBody(towerModel(base, FIXTURE_NOW), en);
   assert.doesNotMatch(before, /schedule/);

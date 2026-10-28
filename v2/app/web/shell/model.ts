@@ -61,7 +61,7 @@ export function leadDot(state: LeadState | null | undefined): LeadDot {
 export type SessionState = 'waiting' | 'working' | 'reviewing' | 'ended';
 export type SessionRow = { readonly id: string; readonly ticket: string; readonly title: string; readonly role: Role; readonly state: SessionState };
 
-function stateOf(session: SessionSummary): SessionState {
+export function stateOf(session: SessionSummary): SessionState {
   const phase: string = session.phase;
   if (phase === 'waiting_human') return 'waiting';
   if (phase === 'reviewing') return 'reviewing';

@@ -21,7 +21,7 @@ const minutesAgo = (minutes: number) => new Date(FIXTURE_NOW.getTime() - minutes
 function text(html: string): string {
   return html.replace(/<[^>]*>/g, '\n').split('\n').map((line) => line.replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim()).filter(Boolean).join('\n')
     // The summary's facts are each kept whole (lane 38): read them back as the line they make.
-    .replace(/\n·\n/g, ' · ');
+    .replace(/\n,\n/g, ' · ');
 }
 
 const item = (position: number, state: PlanItem['state'], title = `Item ${position}`): PlanItem => ({
