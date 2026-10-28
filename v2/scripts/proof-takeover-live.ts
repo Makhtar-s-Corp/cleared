@@ -361,8 +361,15 @@ async function main(): Promise<void> {
     gesture(`created ${made.id} from the tower bar: ${t.title}`);
     return made.id;
   }
-  const live = (ticket: string, role: 'author' | 'reviewer') => until(`the ${role} of ${ticket} to work`, async () =>
-    (await sessions()).find((s) => s.ticket === ticket && s.role === role && (s.phase === (role === 'author' ? 'working' : 'reviewing')) && !s.takenOver));
+  // A live session of the ticket. With `changed`, an author that has changed
+  // that file already, as step 11 waits for: the Editor tab lists the
+  // session's changed files only.
+  const live = (ticket: string, role: 'author' | 'reviewer', changed?: string) => until(`the ${role} of ${ticket} to work${changed ? ` on ${changed}` : ''}`, async () => {
+    const found = (await sessions()).find((s) => s.ticket === ticket && s.role === role && (s.phase === (role === 'author' ? 'working' : 'reviewing')) && !s.takenOver);
+    if (!found || !changed) return found;
+    const files = await api<{ files: { path: string }[] }>(`/sessions/${encodeURIComponent(found.id)}/files`);
+    return files.files.some((f) => f.path === changed) ? found : undefined;
+  }, stepMs, 1_000);
 
   // Take over, a line to the harness, and, for an author, the Shell and the Editor; then Give back.
   async function takeOver(session: SessionSummary, options: { readonly shell: boolean; readonly editor: boolean; readonly giveBack: boolean }): Promise<string> {
@@ -462,7 +469,7 @@ async function main(): Promise<void> {
   // ---- 1. ticket A: the author taken over, the Shell, the Editor, Give back ----
   const ranA = signedIn && await phase('A-author', async () => {
     const ticket = await createTicket(0);
-    authorA = await live(ticket, 'author');
+    authorA = await live(ticket, 'author', 'src/page.ts');
     const note = await takeOver(authorA, { shell: true, editor: true, giveBack: true });
     return `${authorA.id.slice(0, 8)} of ${ticket}: ${note}`;
   });
@@ -484,7 +491,8 @@ async function main(): Promise<void> {
   await phase('A-end', async () => {
     const ticket = tickets.A;
     if (!ticket) return 'no ticket';
-    const card = await until('the review\'s end or the release card', async () => {
+    // A failed author phase leaves its session taken over: nothing to wait for.
+    const card = !ranA ? 'the author\'s phase failed' : await until('the review\'s end or the release card', async () => {
       const item = (await api<NextInboxItem[]>('/inbox')).find((i) => i.ticket === ticket && i.kind === 'release' && i.state === 'waiting');
       if (item) return `the release card waits (${item.kind === 'release' ? item.groups?.flatMap((g) => g.files).includes('src/page.ts') ? 'src/page.ts in its diff' : 'src/page.ts not in its diff' : ''})`;
       const t = await api<Ticket>(`/tickets/${encodeURIComponent(ticket)}`);
@@ -525,11 +533,11 @@ async function main(): Promise<void> {
       if (row && (row.phase === 'working' || row.phase === 'waiting_human')) {
         session = row;
       } else {
-        const t = await api<Ticket>(`/tickets/${encodeURIComponent(first.ticket)}`);
-        if (t.status === 'Todo') { await api(`/tickets/${encodeURIComponent(first.ticket)}/move`, 'POST', { status: 'In Progress' }).catch(() => undefined); }
+        // As the restart's note says: move it to Todo to start it again (Todo to Todo starts it too).
         await api(`/tickets/${encodeURIComponent(first.ticket)}/move`, 'POST', { status: 'Todo' });
         gesture(`moved ${first.ticket} to Todo to start it again`);
-        session = await until('a new author', async () => (await sessions()).find((s) => s.ticket === first.ticket && s.role === 'author' && s.id !== first.id && s.phase === 'working'));
+        await until('a new author', async () => (await sessions()).find((s) => s.ticket === first.ticket && s.role === 'author' && s.id !== first.id));
+        session = await live(first.ticket, 'author', 'src/page.ts');
       }
       const note = await takeOver(session, { shell: true, editor: true, giveBack: true });
       return `${session.id === first.id ? 'the same session' : `a new session ${session.id.slice(0, 8)}`}: ${note}`;
