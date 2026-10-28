@@ -213,6 +213,10 @@ export function createMapper(options: { readonly sessionId: SessionId }): Mapper
   let run: string | undefined;                    // the running turn's id
   let runs = 0;
   let interrupted = false;
+  // An interrupt asked while no turn was open: the runner may open its next
+  // turn and the SDK end it at once with error_during_execution (the live
+  // Take over run of 2026-10-28). That end is the interrupt, not a failure.
+  let early = false;
   let loginWait = false;                          // a login error ended the turn; the runner waits for a new token
   const rates = new Map<string, string>();        // the last rate limit said per window
   const calls = new Map<string, { name: string; input: ToolInput }>();
@@ -238,6 +242,7 @@ export function createMapper(options: { readonly sessionId: SessionId }): Mapper
   function end(events: AgUiEvent[], phase: SessionPhase, status: string, usage?: Usage): AgUiEvent[] {
     run = undefined;
     interrupted = false;
+    early = false;
     return [...events, change(usage === undefined ? { phase, status } : { phase, status, usage })];
   }
 
@@ -322,7 +327,7 @@ export function createMapper(options: { readonly sessionId: SessionId }): Mapper
       ({ type: 'RUN_FINISHED', threadId: sessionId, runId, outcome: { type: outcome }, usage: [usage], result: { stopReason, total_cost_usd: cost } });
     const waitingForMessage = (event: AgUiEvent) => end([event], 'waiting_human', 'Waiting for a message', total);
 
-    if (interrupted) return waitingForMessage(finished('cancelled', 'cancelled'));
+    if (interrupted || (early && subtype === 'error_during_execution')) return waitingForMessage(finished('cancelled', 'cancelled'));
     // A login error is not the session failing: the runner resumes it once the login is renewed.
     if (loginWait) return end([finished('cancelled', 'cancelled')], 'waiting_human', 'Waiting for a new login', total);
     if (subtype === 'success' && frame.is_error !== true) {
@@ -403,7 +408,7 @@ export function createMapper(options: { readonly sessionId: SessionId }): Mapper
         return [...begin(undefined), ...toolResults(frame)];
       case 'result':
         // The result of no turn, printed after a resume: nothing ran.
-        if (run === undefined && frame.num_turns === 0) return [];
+        if (run === undefined && frame.num_turns === 0) { early = false; return []; }
         return [...begin(undefined), ...result(frame)];
       default:
         return [];
@@ -488,6 +493,7 @@ export function createMapper(options: { readonly sessionId: SessionId }): Mapper
     },
     interrupting() {
       if (run !== undefined) interrupted = true;
+      else early = true;
     },
     state() {
       return state;

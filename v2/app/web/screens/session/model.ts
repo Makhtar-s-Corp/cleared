@@ -531,7 +531,11 @@ export function known(t: Translate, key: string, values?: Record<string, string 
   } catch { return undefined; }
 }
 
-export const phaseOf = (view: SessionView): SessionPhase => view.thread.state?.phase ?? view.summary.phase;
+// The journal's phase moves first while a session lives; once its row says it
+// ended, the row is the word: the adapter's own delta when its runner stops,
+// or a Give back's snapshot, may come last in the journal (#233).
+export const phaseOf = (view: SessionView): SessionPhase =>
+  ENDED.has(view.summary.phase) ? view.summary.phase : view.thread.state?.phase ?? view.summary.phase;
 
 export function statusTone(view: SessionView): 'waiting' | 'progress' | 'review' | 'ended' | 'paused' {
   const phase = phaseOf(view);

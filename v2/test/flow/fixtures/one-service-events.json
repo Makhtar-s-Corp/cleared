@@ -183,6 +183,36 @@
      "stepName": "author"
     },
     {
+     "type": "STATE_SNAPSHOT",
+     "snapshot": {
+      "status": "Done",
+      "phase": "done",
+      "steps": [
+       {
+        "name": "workspace",
+        "startedAt": "2026-10-21T10:00:00.000Z",
+        "finishedAt": "2026-10-21T10:00:00.000Z"
+       },
+       {
+        "name": "author",
+        "startedAt": "2026-10-21T10:00:00.000Z",
+        "finishedAt": "2026-10-21T10:00:00.000Z"
+       },
+       {
+        "name": "waiting_human",
+        "startedAt": "2026-10-21T10:00:00.000Z",
+        "finishedAt": "2026-10-21T10:00:00.000Z"
+       }
+      ],
+      "files": [],
+      "checks": [],
+      "usage": {
+       "inputTokens": 100,
+       "outputTokens": 10
+      }
+     }
+    },
+    {
      "type": "STEP_STARTED",
      "stepName": "author"
     },
@@ -251,6 +281,41 @@
     {
      "type": "STEP_FINISHED",
      "stepName": "author"
+    },
+    {
+     "type": "STATE_SNAPSHOT",
+     "snapshot": {
+      "status": "Done",
+      "phase": "done",
+      "steps": [
+       {
+        "name": "workspace",
+        "startedAt": "2026-10-21T10:00:00.000Z",
+        "finishedAt": "2026-10-21T10:00:00.000Z"
+       },
+       {
+        "name": "author",
+        "startedAt": "2026-10-21T10:00:00.000Z",
+        "finishedAt": "2026-10-21T10:00:00.000Z"
+       },
+       {
+        "name": "waiting_human",
+        "startedAt": "2026-10-21T10:00:00.000Z",
+        "finishedAt": "2026-10-21T10:00:00.000Z"
+       },
+       {
+        "name": "author",
+        "startedAt": "2026-10-21T10:00:00.000Z",
+        "finishedAt": "2026-10-21T10:00:00.000Z"
+       }
+      ],
+      "files": [],
+      "checks": [],
+      "usage": {
+       "inputTokens": 200,
+       "outputTokens": 20
+      }
+     }
     },
     {
      "type": "CUSTOM",
@@ -331,6 +396,26 @@
     {
      "type": "STEP_FINISHED",
      "stepName": "review"
+    },
+    {
+     "type": "STATE_SNAPSHOT",
+     "snapshot": {
+      "status": "Done",
+      "phase": "done",
+      "steps": [
+       {
+        "name": "review",
+        "startedAt": "2026-10-21T10:00:00.000Z",
+        "finishedAt": "2026-10-21T10:00:00.000Z"
+       }
+      ],
+      "files": [],
+      "checks": [],
+      "usage": {
+       "inputTokens": 100,
+       "outputTokens": 10
+      }
+     }
     },
     {
      "type": "CUSTOM",
@@ -445,6 +530,31 @@
     {
      "type": "STEP_FINISHED",
      "stepName": "review"
+    },
+    {
+     "type": "STATE_SNAPSHOT",
+     "snapshot": {
+      "status": "Done",
+      "phase": "done",
+      "steps": [
+       {
+        "name": "review",
+        "startedAt": "2026-10-21T10:00:00.000Z",
+        "finishedAt": "2026-10-21T10:00:00.000Z"
+       },
+       {
+        "name": "review",
+        "startedAt": "2026-10-21T10:00:00.000Z",
+        "finishedAt": "2026-10-21T10:00:00.000Z"
+       }
+      ],
+      "files": [],
+      "checks": [],
+      "usage": {
+       "inputTokens": 200,
+       "outputTokens": 20
+      }
+     }
     },
     {
      "type": "CUSTOM",

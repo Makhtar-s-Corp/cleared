@@ -218,9 +218,11 @@ test('an idle session is stopped at 15 minutes: 14:59 still runs, 15:00 stops an
   assert.equal(t.store.sessions.get(id)?.status, 'stopped');
   assert.equal((await t.tickets.get(t.ticket.id))?.status, 'Todo');
   assert.match((await t.tickets.comments(t.ticket.id)).at(-1)?.body ?? '', /15 minutes/);
-  const last = t.store.events.after(id).at(-1)?.event;
+  // The stop, then the snapshot of the phase it ended with (#233).
+  const [last, closing] = t.store.events.after(id).slice(-2).map((e) => e.event);
   assert.equal(last?.type, 'RUN_ERROR');
   if (last?.type === 'RUN_ERROR') assert.equal(last.code, 'idle');
+  assert.equal(closing?.type === 'STATE_SNAPSHOT' ? closing.snapshot.phase : closing?.type, 'stopped');
   await assert.rejects(t.engine.send(id, 'hello?', 'u1'), /stopped|not running/i);
 });
 
@@ -246,9 +248,11 @@ test('a session over the ticket budget is stopped, its ticket put back with a no
   const id = t.startedSessions[0]!.id;
   assert.equal(t.store.sessions.get(id)?.status, 'stopped');
   assert.match((await t.tickets.comments(t.ticket.id)).at(-1)?.body ?? '', /budget of \$5/);
-  const last = t.store.events.after(id).at(-1)?.event;
+  // The stop, then the snapshot of the phase it ended with (#233).
+  const [last, closing] = t.store.events.after(id).slice(-2).map((e) => e.event);
   assert.equal(last?.type, 'RUN_ERROR');
   if (last?.type === 'RUN_ERROR') assert.equal(last.code, 'budget');
+  assert.equal(closing?.type === 'STATE_SNAPSHOT' ? closing.snapshot.phase : closing?.type, 'stopped');
   await t.engine.tick();
   await t.engine.settled();
   await new Promise((resolve) => setTimeout(resolve, 30));
