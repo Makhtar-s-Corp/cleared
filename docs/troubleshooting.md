@@ -69,7 +69,24 @@ Each session takes two Docker networks: one with no way out, and one for its pro
 - **failed:** Docker refused the list of labelled networks: {reason}
 - **What to do:** Stop the sessions you no longer need, or widen default-address-pools in /etc/docker/daemon.json and restart Docker.
 
-Restarting Docker stops every container of the machine, Cleared's and others'. A stopped session's networks are not always freed yet (issue #265): `docker network ls --filter label=cleared.dev=v2` lists Cleared's, and a network of a session that no longer runs can be removed with `docker network rm`.
+Restarting Docker stops every container of the machine, Cleared's and others'. The service releases the networks of its stopped sessions within a minute, and all of them at its next start (issue #265); the `orphans` line below lists the ones left. A session that finds no free subnet does not wait: its ticket goes back to Todo at once, and the ticket's note says Docker's address pools are full.
+
+### `orphans`: networks and volumes left without a live session
+
+The networks and volumes labelled `cleared.dev=v2` that no live session holds. A session is live when the ledger says it runs; a session the ledger does not know (an environment check, another Cleared install on the same machine, which shares the label) is live while one of its containers runs. These lines are notes, never failures, and the doctor removes nothing: it reads the ledger without writing it and asks Docker labelled lists only.
+
+- **note:** Networks labelled cleared.dev=v2 that no live session holds ({count}): {names}.
+- **What to do:** Nothing was removed. The service releases its own stopped sessions' networks within a minute, and all of them at its next start. For a network that stays, check that no other Cleared install on this machine uses it, then remove it by name: docker network rm <name>.
+- **note:** Volumes of stopped sessions, kept so that each one can resume ({count}): {names}.
+- **What to do:** Nothing was removed. Once the ticket named after a volume is done and will not be resumed, remove that volume by name: docker volume rm <name>.
+- **note:** Volumes labelled cleared.dev=v2 of sessions this install's ledger does not know ({count}): {names}.
+- **What to do:** Nothing was removed. They may belong to another Cleared install on this machine, or to a check that was interrupted. Check before you remove one by name: docker volume rm <name>.
+- **note:** The ledger could not be read, so the networks and volumes left without a session are not listed: {reason}
+- **What to do:** Run cleared doctor again; if it still fails, check the state folder (the state line above) and the ledger.db file in it.
+- **note:** Docker refused the labelled lists of networks and volumes: {reason}
+- **What to do:** Run node scripts/doctor.ts docker for the details, then cleared doctor again.
+
+A list longer than six names ends with "{names}, and {count} more". A session's config volume is kept after its stop on purpose: the harness resumes from it. Remove objects by name only, never with `docker system prune` or `docker network prune`, which take what is not Cleared's.
 
 ### `state`: the state folder
 
