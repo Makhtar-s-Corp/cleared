@@ -70,3 +70,23 @@ test('the tick looks only at sessions stopped in the last ten minutes, and asks 
   assert.equal(fake.networks.length, 0);
   assert.equal(fake.containers.length, 0);
 });
+
+// A reader that answered writes its row `done` and waits for a follow-up
+// in a session that still runs (reader/service.ts); the reader module
+// releases its own (its idle rule, recoverAsks at a restart). The real run
+// of 2026-10-28 (issue #469) saw the flow's tick remove a waiting reader's
+// containers 22 seconds after its answer.
+test('a reader\'s session is never the flow\'s to release, at a tick or at the restart', async () => {
+  const t = await setup();
+  const fake = new FakeDocker();
+  const reader = '00000000-0000-4000-8000-0000000000bb';
+  const at = new Date(t.clock.now).toISOString();
+  t.store.sessions.put({ id: reader, project: 'guestbook', ticket: 'ask-00000000-0000-4000-8000-000000000001', role: 'reader', harness: 'claude-code', model: 'claude-haiku-5-5', status: 'done', createdAt: at, updatedAt: at });
+  leftBehind(fake, reader);
+  const engine = new FlowEngine({ ...t.deps, release: (sessions) => new Docker(fake.runner).releaseStopped(sessions) });
+  await engine.tick();
+  await engine.recover();
+  assert.equal(fake.containers.length, 3);
+  assert.equal(fake.networks.length, 2);
+  assert.deepEqual(fake.calls.filter((c) => c.args[0] === 'rm' || c.args[1] === 'rm'), []);
+});
