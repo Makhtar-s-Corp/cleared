@@ -78,7 +78,7 @@ The networks and volumes labelled `cleared.dev=v2` that no live session holds. A
 - **note:** Networks labelled cleared.dev=v2 that no live session holds ({count}): {names}.
 - **What to do:** Nothing was removed. The service releases its own stopped sessions' networks within a minute, and all of them at its next start. For a network that stays, check that no other Cleared install on this machine uses it, then remove it by name: docker network rm <name>.
 - **note:** Volumes of stopped sessions, kept so that each one can resume ({count}): {names}.
-- **What to do:** Nothing was removed. Once the ticket named after a volume is done and will not be resumed, remove that volume by name: docker volume rm <name>.
+- **What to do:** Nothing was removed. Once the ticket in brackets after a volume's name is done and will not be resumed, remove that volume by name: docker volume rm <name>.
 - **note:** Volumes labelled cleared.dev=v2 of sessions this install's ledger does not know ({count}): {names}.
 - **What to do:** Nothing was removed. They may belong to another Cleared install on this machine, or to a check that was interrupted. Check before you remove one by name: docker volume rm <name>.
 - **note:** The ledger could not be read, so the networks and volumes left without a session are not listed: {reason}

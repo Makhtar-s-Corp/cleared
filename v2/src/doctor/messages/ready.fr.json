@@ -22,7 +22,7 @@
   "orphans_networks": "Réseaux étiquetés cleared.dev=v2 qu'aucune session en cours ne tient ({count}) : {names}.",
   "orphans_networks_todo": "Rien n'a été supprimé. Le service libère les réseaux de ses propres sessions arrêtées en moins d'une minute, et tous à son prochain démarrage. Pour un réseau qui reste, vérifiez qu'aucune autre installation de Cleared sur cette machine ne l'utilise, puis supprimez-le par son nom : docker network rm <nom>.",
   "orphans_kept": "Volumes de sessions arrêtées, gardés pour que chacune puisse reprendre ({count}) : {names}.",
-  "orphans_kept_todo": "Rien n'a été supprimé. Quand le ticket nommé après un volume est terminé et ne sera pas repris, supprimez ce volume par son nom : docker volume rm <nom>.",
+  "orphans_kept_todo": "Rien n'a été supprimé. Quand le ticket entre parenthèses après le nom d'un volume est terminé et ne sera pas repris, supprimez ce volume par son nom : docker volume rm <nom>.",
   "orphans_unknown": "Volumes étiquetés cleared.dev=v2 de sessions que le registre de cette installation ne connaît pas ({count}) : {names}.",
   "orphans_unknown_todo": "Rien n'a été supprimé. Ils peuvent appartenir à une autre installation de Cleared sur cette machine, ou à une vérification interrompue. Vérifiez avant d'en supprimer un par son nom : docker volume rm <nom>.",
   "orphans_more": "{names}, et {count} autres",
