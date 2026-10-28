@@ -143,7 +143,7 @@ const WRAPPERS = new Set([
   'npx', 'pnpx', 'bunx', 'sudo', 'su', 'doas', 'env', 'eval', 'exec', 'xargs', 'parallel', 'timeout', 'nohup', 'time', 'command', 'builtin',
   'busybox', 'nice', 'ionice', 'stdbuf', 'setsid', 'chroot', 'unshare', 'nsenter', 'strace', 'ltrace', 'watch', 'script', 'unbuffer', 'flock',
   'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh', 'source', '.',
-  'apt', 'apt-get', 'apk', 'brew', 'dnf', 'yum', 'docker', 'podman', 'kubectl', 'chmod', 'chown', 'dd', 'mv', 'ln', 'tee', 'install',
+  'apt', 'apt-get', 'apk', 'brew', 'dnf', 'yum', 'docker', 'podman', 'chmod', 'chown', 'dd', 'mv', 'ln', 'tee', 'install',
   // Package managers that are runtimes too: their subcommands install as often as they run.
   'bun', 'deno', 'uv', 'uvx', 'pipx', 'poetry', 'conda', 'gem', 'cargo', 'go',
 ]);

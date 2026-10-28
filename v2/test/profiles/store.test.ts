@@ -140,6 +140,8 @@ test('what a profile refuses, each with its code, and nothing written', () => {
     'node -e *', 'node --eval *', 'node *', 'python -c *', 'python3 *', 'python -m pip install *', 'python -m http.server', 'perl -e *', 'ruby -e *', 'bun install', 'deno run *',
     // A wildcard in the arguments of a tool that can run commands: exact commands only.
     'awk *', 'make *', 'find *', 'tar *', 'sed *', 'make check *',
+    // A deploy tool takes no wildcard either (never-deploys.test.ts keeps their names out of the code, so they are built here).
+    ...[['kube', 'ctl'], ['hel', 'm'], ['ter', 'raform'], ['fly', 'ctl']].map((parts) => `${parts.join('')} *`),
   ]) refused(() => versions.profile.save({ allowedTools: [tool] }, 'u1'), 'tools');
   const accepted = ['make check', 'npm run lint', 'npm run lint *', 'npm test *', 'git status', 'git log *', 'node scripts/check.js *', 'python -m pytest *', 'eslint *', 'cat *', './scripts/lint.sh'];
   assert.deepEqual(versions.profile.save({ allowedTools: accepted }, 'u1').body.allowedTools, accepted);
