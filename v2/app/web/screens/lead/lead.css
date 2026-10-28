@@ -4,7 +4,6 @@
    inbox can show the same panel with this sheet (lane 10); every other rule
    is under .lead-screen, so it cannot reach the inbox's own classes. */
 :root { --ok-text: #15803D; --ok-surface: #F2FBF5; --awaiting-outline: rgba(245,166,35,.55); }
-:root[data-theme="dark"] { --ok-text: var(--success); --ok-surface: rgba(61,208,104,.12); --awaiting-outline: rgba(245,166,35,.5); }
 
 
 .lead-screen { display: grid; grid-template-columns: minmax(0, 1fr) clamp(420px, 42vw, 600px); gap: 20px; align-items: stretch; height: calc(100dvh - 56px); padding: 20px 28px; }
@@ -117,7 +116,6 @@
 .lane { padding: 2px 8px; border-radius: 999px; font-size: var(--text-sm); white-space: nowrap; }
 .lane.full { background: var(--surface-muted); color: var(--text-secondary); }
 .lane.fast { background: var(--surface-muted); color: var(--text-secondary); }   /* a lane is a fact, not a success (lane 38) */
-:root[data-theme="dark"] .lane.full, :root[data-theme="dark"] .lane.fast { background: var(--sunken); }
 .plan-estimate { min-width: 92px; padding-top: 2px; font-size: var(--text-sm); color: var(--text-faint); text-align: right; white-space: nowrap; }
 .plan-facts { display: flex; flex-wrap: wrap; gap: 6px 16px; list-style: none; margin: 0; padding: 12px 20px; border-top: 1px solid var(--hairline); font-size: var(--text-md); color: var(--text-secondary); }
 .plan-fact { flex: 0 1 auto; white-space: nowrap; }

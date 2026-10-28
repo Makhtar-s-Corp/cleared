@@ -3,10 +3,10 @@
 // the app and its preview listener start in this process on ephemeral
 // loopback ports (port 0: the kernel picks a free one, never 8787 to 8799),
 // a throwaway account signs in through the page, and each screen is
-// captured at each width in each theme, then everything is stopped.
+// captured at each width, light (the one theme, issue #451), then everything is stopped.
 //
 //   node scripts/capture-screens.ts --out ../docs/v2/ui-overhaul/after/34
-//     [--screens tower,inbox,sessions,session,lead,review,review-editor,review-takeover] [--widths 1440,390] [--themes light,dark]
+//     [--screens tower,inbox,sessions,session,lead,review,review-editor,review-takeover] [--widths 1440,390] [--themes light]
 //     [--via load|click] [--language fr|en]
 //
 // The language is the app's default, French, unless --language en asks for
@@ -107,7 +107,7 @@ async function listen(server: Server): Promise<string> {
 export async function capture(options: { readonly out: string; readonly screens?: readonly string[]; readonly widths?: readonly string[]; readonly themes?: readonly string[]; readonly via?: 'load' | 'click'; readonly language?: 'fr' | 'en' }): Promise<{ readonly files: string[]; readonly errors: string[]; readonly away: string[] }> {
   const screens = options.screens ?? SCREENS;
   const widths = options.widths ?? Object.keys(WIDTHS).reverse();
-  const themes = options.themes ?? ['light', 'dark'];
+  const themes = options.themes ?? ['light'];
   for (const s of screens) if (![...SCREENS, ...EXTRAS].includes(s as CaptureScreen)) throw new Error(`unknown screen ${s}`);
   for (const w of widths) if (!WIDTHS[w]) throw new Error(`unknown width ${w}`);
   mkdirSync(options.out, { recursive: true });
@@ -308,7 +308,7 @@ if (import.meta.main) {
     console.error('capture-screens: --out <folder> is required');
     process.exit(64);
   }
-  const result = await capture({ out: resolve(values.out), screens: list(values.screens, SCREENS), widths: list(values.widths, Object.keys(WIDTHS).reverse()), themes: list(values.themes, ['light', 'dark']), via: values.via === 'click' ? 'click' : 'load', language: values.language === 'en' ? 'en' : 'fr' });
+  const result = await capture({ out: resolve(values.out), screens: list(values.screens, SCREENS), widths: list(values.widths, Object.keys(WIDTHS).reverse()), themes: list(values.themes, ['light']), via: values.via === 'click' ? 'click' : 'load', language: values.language === 'en' ? 'en' : 'fr' });
   for (const file of result.files) console.log(file);
   for (const error of result.errors) console.error(`page error: ${error}`);
   for (const url of result.away) console.error(`request off the app's origin: ${url}`);

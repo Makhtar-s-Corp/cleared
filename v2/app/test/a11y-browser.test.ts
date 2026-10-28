@@ -1,5 +1,7 @@
 // The app against WCAG 2.2 AA in a real browser (P224), on the fixtures
-// source, in French and in English, light and dark, at 1440 and 390 px:
+// source, in French and in English, at 1440 and 390 px; the page is light
+// whatever the system's scheme or an old stored choice of a dark theme
+// (issue #451: one theme, light):
 //   - axe (axe-core, run in the page) finds no violation of the WCAG 2.0,
 //     2.1 and 2.2 A and AA rules on the sign-in page, the tower, the inbox
 //     with a release open, the sessions, a session and its Plan tab, a
@@ -32,6 +34,7 @@ declare const window: any;
 
 const LANGUAGES = ['fr', 'en'] as const;
 type Language = typeof LANGUAGES[number];
+// The system's scheme and the stored choice a page may come with: the app draws light under both.
 const THEMES = ['light', 'dark'] as const;
 const WIDTHS = [{ width: 1440, height: 900 }, { width: 390, height: 844 }] as const;
 
@@ -89,7 +92,7 @@ async function withApp(language: Language, run: (browser: any, base: string) => 
 }
 
 async function open(browser: any, language: Language, theme: string, viewport: { width: number; height: number }): Promise<{ page: any; errors: string[]; close(): Promise<void> }> {
-  const context = await browser.newContext({ viewport, locale: language === 'fr' ? 'fr-FR' : 'en-US' });
+  const context = await browser.newContext({ viewport, locale: language === 'fr' ? 'fr-FR' : 'en-US', colorScheme: theme === 'dark' ? 'dark' : 'light' });
   await context.addInitScript(`try { localStorage.setItem('cleared-v2-theme', '${theme}'); } catch {}`);
   const page = await context.newPage();
   const errors: string[] = [];
@@ -133,15 +136,16 @@ const PLACES: readonly Place[] = [
 ];
 
 for (const language of LANGUAGES) {
-  test(`${language}: no WCAG 2.2 AA violation on the main screens, light and dark, at 1440 and 390 px`, { skip }, async () => {
+  test(`${language}: no WCAG 2.2 AA violation on the main screens, at 1440 and 390 px, light under a dark system scheme too`, { skip }, async () => {
     await withApp(language, async (browser, base) => {
       const found: string[] = [];
       for (const theme of THEMES) {
         for (const viewport of WIDTHS) {
           const { page, errors, close } = await open(browser, language, theme, viewport);
-          const at = `${theme}, ${viewport.width} px`;
+          const at = `${theme === 'dark' ? 'a dark system scheme and an old dark choice' : 'light'}, ${viewport.width} px`;
           const check = async (name: string) => {
-            assert.deepEqual(await page.evaluate(() => [document.documentElement.lang, document.documentElement.dataset.theme]), [language, theme], `${name}, ${at}: the page in its language and theme`);
+            assert.deepEqual(await page.evaluate(() => [document.documentElement.lang, document.documentElement.dataset.theme, getComputedStyle(document.documentElement).colorScheme, getComputedStyle(document.body).backgroundColor]), [language, 'light', 'light', 'rgb(239, 240, 241)'], `${name}, ${at}: the page in its language, light, on the paper`);
+            assert.equal(await page.evaluate(() => { try { return localStorage.getItem('cleared-v2-theme'); } catch { return null; } }), null, `${name}, ${at}: an old choice of theme is forgotten`);
             const result = await violations(page);
             if (result.length > 0) found.push(`${name}, ${at}:\n  ${said(result)}`);
           };

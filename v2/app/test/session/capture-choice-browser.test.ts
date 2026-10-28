@@ -104,7 +104,7 @@ test('in French, and on a phone with no horizontal scroll', { skip }, async () =
   });
 });
 
-test('the card\'s captures at the four widths, light and dark, and in French; 44 px buttons up to 1100 px', { skip }, async () => {
+test('the card\'s captures at the four widths, and in French; 44 px buttons up to 1100 px', { skip }, async () => {
   const dir = SHOTS ?? mkdtempSync(join(tmpdir(), 'cleared-v2-capture-choice-'));
   try {
     const card = async (page: any, name: string, width: number) => {
@@ -113,7 +113,7 @@ test('the card\'s captures at the four widths, light and dark, and in French; 44
       if (width <= 1100) assert.ok((await heights(page)).every((h) => h >= 44), `${name}: each choice at least 44 px tall`);
     };
     for (const width of [1440, 1280, 768, 390])
-      for (const scheme of ['light', 'dark'] as const)
+      for (const scheme of ['light'] as const)
         await withBrowser({ language: 'en', width, scheme }, (page) => card(page, `capture-choice-en-${width}-${scheme}`, width));
     await withBrowser({ language: 'fr', width: 1440 }, (page) => card(page, 'capture-choice-fr-1440-light', 1440));
     await withBrowser({ language: 'fr', width: 390 }, (page) => card(page, 'capture-choice-fr-390-light', 390));

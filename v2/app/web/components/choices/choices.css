@@ -4,7 +4,6 @@
    amber only while the question waits. Each screen sets the size of its
    question text; the rest is here. */
 .choices { --choice-highlight: #FCE2B3; --choice-field-ring: 0 0 0 1px rgba(0,0,0,.42); display: grid; gap: 12px; min-width: 0; white-space: normal; font-size: var(--text-md); }
-:root[data-theme="dark"] .choices { --choice-highlight: #4A3612; --choice-field-ring: 0 0 0 1px rgba(255,255,255,.4); }
 .choice-q { display: grid; gap: 10px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .choice-text { display: grid; gap: 6px; width: 100%; margin-bottom: 12px; padding: 0; font-weight: var(--weight-strong); line-height: 1.4; overflow-wrap: anywhere; text-wrap: pretty; }
 .choice-question { white-space: pre-wrap; }

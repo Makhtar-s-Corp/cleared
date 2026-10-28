@@ -3,7 +3,7 @@
 // ended (fixtures/consumption.ts), read by the service's own consumption():
 // a row per ticket type and agent, in English and in French, and no
 // horizontal scroll on a phone. With CLEARED_V2_SHOTS set to a folder it
-// writes the panel's captures there, at 1440, 1280, 768 and 390 pixels, light and dark.
+// writes the panel's captures there, at 1440, 1280, 768 and 390 pixels, light.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/consumption/wins-browser.test.ts
 import test from 'node:test';
@@ -88,7 +88,7 @@ test('the wins of the harness pick, a row per ticket type and agent, as the ledg
     for (const width of [1440, 1280, 768, 390]) {
       await resize(page, width, 900);
       assert.ok(await noOverflow(page), `no horizontal scroll at ${width}`);
-      for (const theme of ['light', 'dark']) {
+      for (const theme of ['light']) {
         await page.evaluate((value: string) => { document.documentElement.dataset.theme = value; }, theme);
         await shot(page, `wins-en-${width}-${theme}`);
       }

@@ -38,8 +38,8 @@ async function screens(now: Date, language: 'en' | 'fr'): Promise<readonly (read
   const model = towerModel(tower, now);
   out.push(['tower', html(<TowerBody model={model} t={tOf('tower', language)} language={language} />)]);
   out.push(['sessions index', renderIndex({ sessions: tower.sessions, tickets: tower.tickets, now }, tOf('session', language))]);
-  const items = paletteItems({ screen: 'tower', needs: model.needs, sessions: sessionRows(tower.sessions, tower.tickets), gestures: [], theme: 'light', t: tOf('tower', language) });
-  out.push(['palette', html(<Palette t={tOf('tower', language)} items={items} dark={false} onRun={() => {}} onClose={() => {}} />)]);
+  const items = paletteItems({ screen: 'tower', needs: model.needs, sessions: sessionRows(tower.sessions, tower.tickets), gestures: [], t: tOf('tower', language) });
+  out.push(['palette', html(<Palette t={tOf('tower', language)} items={items} onRun={() => {}} onClose={() => {}} />)]);
 
   const session = sessionFixture(FIXTURE_NOW);
   const thread = emptyModel();

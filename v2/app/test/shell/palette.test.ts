@@ -15,9 +15,9 @@ import type { ScreenName } from '../../web/lib/routes.ts';
 const catalog = (language: 'en' | 'fr') => ({ ...loadCatalog('shell', language), ...loadCatalog('tower', language) });
 const en = translator(catalog('en'));
 
-async function items(screen: ScreenName, gestures: readonly string[] = [], theme: 'light' | 'dark' = 'light'): Promise<PaletteItem[]> {
+async function items(screen: ScreenName, gestures: readonly string[] = []): Promise<PaletteItem[]> {
   const data = await towerFixture(FIXTURE_NOW);
-  return paletteItems({ screen, needs: towerModel(data, FIXTURE_NOW).needs, sessions: sessionRows(data.sessions, data.tickets), gestures, theme, t: en });
+  return paletteItems({ screen, needs: towerModel(data, FIXTURE_NOW).needs, sessions: sessionRows(data.sessions, data.tickets), gestures, t: en });
 }
 
 const groups = (list: readonly PaletteItem[]) => [...new Set(list.map((item) => item.group))];
@@ -31,7 +31,7 @@ test('what waits for you first, then the screen\'s gestures, the screens, the se
   assert.equal(waiting[0]!.label, 'Install date-fns', 'a request by its intent, as the inbox says it');
   assert.match((waiting[0]!.run as { href: string }).href, /^\/inbox#/);
   assert.match((waiting[2]!.run as { href: string }).href, /^\/plans\//);
-  const empty = paletteItems({ screen: 'tower', needs: [], sessions: [], gestures: [], theme: 'light', t: en });
+  const empty = paletteItems({ screen: 'tower', needs: [], sessions: [], gestures: [], t: en });
   assert.deepEqual(groups(empty), ['goto', 'general'], 'no empty group');
 });
 
@@ -66,12 +66,15 @@ test('a screen\'s gestures on that screen only: nothing of another screen but it
   assert.deepEqual((await items('session', [])).filter((item) => item.group === 'actions'), []);
 });
 
-test('the theme item names the other theme; the sheet and the sidebar have their keys', async () => {
-  const general = (theme: 'light' | 'dark') => items('tower', [], theme).then((list) => list.filter((item) => item.group === 'general'));
-  assert.deepEqual((await general('light')).map((item) => [item.label, item.shortcut?.join(' ') ?? '']), [
-    ['Switch to the dark theme', ''], ['Keyboard shortcuts', '?'], ['Collapse or expand the sidebar', '['],
+test('one theme, light: no theme item (issue #451); the sheet and the sidebar have their keys', async () => {
+  const general = (await items('tower', [])).filter((item) => item.group === 'general');
+  assert.deepEqual(general.map((item) => [item.label, item.shortcut?.join(' ') ?? '']), [
+    ['Keyboard shortcuts', '?'], ['Collapse or expand the sidebar', '['],
   ]);
-  assert.equal((await general('dark'))[0]!.label, 'Switch to the light theme');
+  for (const language of ['en', 'fr'] as const) {
+    const all = catalog(language);
+    assert.ok(!('theme_dark' in all) && !('theme_light' in all), `${language}: no words for a theme switch`);
+  }
 });
 
 test('every label the palette draws is in both catalogs', () => {
@@ -123,7 +126,7 @@ test('the three rows kept with no query are what blocks a session first: request
   const plan = needs.find((n) => n.kind === 'plan')!;
   // The fixtures source's order on the tower: oldest first, the requests last.
   const aged = [{ ...plan, kind: 'knowledge' as const, id: 'k' }, { ...plan, kind: 'contract' as const, id: 'c' }, release, plan, permission, { ...permission, id: 'p2' }];
-  const list = paletteItems({ screen: 'inbox', needs: aged, sessions: [], gestures: [], theme: 'light', t: en });
+  const list = paletteItems({ screen: 'inbox', needs: aged, sessions: [], gestures: [], t: en });
   const shown = shownItems(list, '').filter((i) => i.group === 'waiting').map((i) => i.id);
   assert.deepEqual(shown, [`waiting-${permission.id}`, 'waiting-p2', `waiting-${release.id}`]);
 });

@@ -1,65 +1,55 @@
-/* Cleared v2 app: the tokens, the shell (sidebar, top bar, palette, shortcut sheet, menus, empty states) and the
-   parts every screen shares. The screens' own sheets hold the rest; the tower's rows are in screens/tower/tower.css.
-   The theme (docs/v2/ui-overhaul-plan.md, 2.2.5 and 2.2.8, lane 35): each theme is three colours, a base, a contrast
-   and an accent; every neutral is a mix of the contrast into the base, by a share each theme sets. The kit's roles
-   (--canvas, --surface, --ink, ...) are read from those, and shadcn/ui's names (--background, --card, ...) from the
-   kit's, so the screens' sheets and the components keep their names. Every colour is flat.
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: custom (Signal, from Wayfind's signage material) · redesign: full · deal: manual
+ * paper: #EFF0F1 cool paper · accent: #1F45D6 cobalt, #F2B33D amber for figures · display: Geist 800 · body: Geist, Geist Mono for ids
+ * nav: the sidebar kept, its current place an ink plate · signature: the figure plate (what waits, the week's quota) · states: loading, empty, error, full
+ * axes: light/grotesk-sans/cool · posture: committed · contrast: pass · v2.0.0 */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4 · weakest: H, the screens were one grey list each; every screen now leads with one heavy heading and its figure on an ink plate */
+/* Hallmark · waive 64 · Geist Mono for ids and commands only, the project's rule (matrix B3.8) */
+/* Cleared v2 app (docs/v2/ui-hallmark/DESIGN.md, lane j6-ui-hallmark, issue #451): the tokens, the shell (sidebar, top
+   bar, palette, shortcut sheet, menus, empty states, skeletons) and the parts every screen shares. The screens' own
+   sheets hold the rest. One light theme, never the system's scheme: a base, a contrast (the ink) and an accent (cobalt);
+   every neutral is a mix of the ink into the base, by a share set here. The kit's roles (--canvas, --surface, --ink,
+   ...) are read from those, and shadcn/ui's names (--background, --card, ...) from the kit's, so the screens' sheets and
+   the components keep their names. Every colour is flat; depth is a 2px ink frame or a 1px rule, never a blur.
    Tailwind brings its theme and its utilities, in layers, without its preflight: the rules below, unlayered, win. */
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
 @import "tailwindcss/utilities.css" layer(utilities);
-/* Dark is chosen with the button (data-theme on <html>), never by the system. */
-@custom-variant dark (&:where([data-theme="dark"], [data-theme="dark"] *));
 @font-face { font-family: Geist; src: url("/fonts/Geist-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 @font-face { font-family: "Geist Mono"; src: url("/fonts/GeistMono-Variable.woff2") format("woff2"); font-weight: 100 900; font-display: swap; }
 /* Until Geist arrives, a local face scaled to its width and its ascent and descent (measured in Chromium against
    Arial, whose metrics Liberation Sans shares), so the text does not move when Geist swaps in. */
 @font-face { font-family: "Geist Fallback"; src: local("Arial"), local("Helvetica"), local("Liberation Sans"); size-adjust: 102.34%; ascent-override: 89.9%; descent-override: 21.5%; line-gap-override: 0%; }
 :root {
-  /* the light theme: white, near-black, a deep blue */
-  --theme-base: #FFFFFF; --theme-contrast: #171717; --theme-accent: #0B63CE;
-  --mix-canvas: 0%; --mix-sidebar: 3%; --mix-surface: 0%; --mix-popover: 0%; --mix-sunken: 3.5%; --mix-surface-muted: 5%;
-  --mix-tab-fill: 5%; --mix-selected: 8%; --mix-hairline: 9%; --mix-outline: 9%; --mix-input: 15%; --mix-dashed: 20%;
-  --mix-placeholder: 62%; --mix-faint: 65%; --mix-muted: 70%; --mix-secondary: 78%;
-  /* what no mix gives: amber for what waits for the person, green, red */
-  --awaiting: #F5A623; --awaiting-text: #9A4D08; --awaiting-surface: #FFFBF2; --awaiting-pill: #FFF8EB; --count-ink: #1A1305;
-  --success: #16A34A; --danger: #EE0000; --danger-text: #C40000;
-  --stage-review: #0A9DB0;
-  --harness-claude: #D97757; --harness-codex: #10A37F; --harness-other: #8F8F8F;
-  --e-card: 0 0 0 1px var(--outline), 0 1px 2px rgba(0,0,0,.04);
-  --e-bar: 0 0 0 1px var(--outline), 0 4px 14px -8px rgba(0,0,0,.15);
-  --e-menu: 0 0 0 1px var(--outline), 0 16px 40px -12px rgba(0,0,0,.22);
-  --e-awaiting: 0 0 0 1.5px var(--awaiting);
-  --halo-progress: rgba(11,99,206,.12); --halo-review: rgba(10,157,176,.14);
-  /* the scale: four spacing steps, three text sizes, two weights, one row height, one motion */
-  --space-1: 4px; --space-2: 8px; --space-3: 16px; --space-4: 24px;
-  --text-sm: 0.75rem; --text-md: 0.875rem; --text-lg: 1.25rem;   /* 12, 14 and 20 px at the default size */
+  /* the one theme: white, a blue-black ink, cobalt */
+  --theme-base: #FFFFFF; --theme-contrast: #0E1726; --theme-accent: #1F45D6;
+  --mix-canvas: 6.5%; --mix-sidebar: 11%; --mix-surface: 0%; --mix-popover: 0%; --mix-sunken: 9%; --mix-surface-muted: 4%;
+  --mix-tab-fill: 13%; --mix-selected: 17%; --mix-hairline: 20%; --mix-outline: 34%; --mix-input: 100%; --mix-dashed: 45%;
+  --mix-placeholder: 67%; --mix-faint: 70%; --mix-muted: 76%; --mix-secondary: 86%;
+  /* what no mix gives: amber for what waits for the person, green, red, teal */
+  --awaiting: #F2B33D; --awaiting-text: #8A4500; --awaiting-surface: #FDF3DC; --awaiting-pill: #FBE6B3; --count-ink: #0E1726;
+  --success: #12823B; --success-text: #0F6E32; --danger: #C3122B; --danger-text: #B0102A;
+  --stage-review: #07778A;
+  --harness-claude: #C2532C; --harness-codex: #0B7D5F; --harness-other: #5C6575;
+  --accent-hover: #1838B0; --accent-press: #122C8C; --ink-hover: #26324A;
+  --scrim: rgb(14 23 38 / 0.48);
+  --e-card: 0 0 0 2px var(--ink);
+  --e-bar: 0 0 0 2px var(--ink);
+  --e-menu: 0 0 0 2px var(--ink);
+  --e-awaiting: 0 0 0 2px var(--awaiting);
+  --halo-progress: #D5DDF8; --halo-review: #CDE7EB; --halo-waiting: #FBE6B3;
+  /* the scale: six spacing steps, five text sizes, three weights, one row height, one motion */
+  --space-1: 4px; --space-2: 8px; --space-3: 16px; --space-4: 24px; --space-5: 32px; --space-6: 48px;
+  --text-sm: 0.8125rem; --text-md: 0.875rem; --text-lg: 1.25rem; --text-xl: 1.75rem; --text-display: 2.5rem;   /* 13, 14, 20, 28 and 40 px */
   --text-input: 1rem;   /* a phone's fields only: iOS zooms into a field under 16 px */
-  --weight-regular: 400; --weight-strong: 550;
-  --row: 34px; --top-bar: 56px; --side-open: 240px; --side-rail: 56px; --bottom-bar: 56px;
-  --radius: 8px;
+  --weight-regular: 400; --weight-strong: 600; --weight-heavy: 800;
+  --row: 40px; --top-bar: 64px; --side-open: 256px; --side-rail: 64px; --bottom-bar: 60px;
+  --radius: 0px; --frame: 2px;
   --motion: 140ms; --ease: cubic-bezier(.2,.8,.2,1);
   --sans: Geist, "Geist Fallback", -apple-system, "Segoe UI", Arial, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
   color-scheme: light;
 }
-/* The dark theme: the same roles from three other colours and other shares. */
-:root[data-theme="dark"] {
-  --theme-base: #0C0C0D; --theme-contrast: #EDEDED; --theme-accent: #5AA9FF;
-  --mix-canvas: 2.5%; --mix-sidebar: 0%; --mix-surface: 4%; --mix-popover: 6%; --mix-sunken: 7%; --mix-surface-muted: 3%;
-  --mix-tab-fill: 7%; --mix-selected: 11%; --mix-hairline: 12%; --mix-outline: 13%; --mix-input: 19%; --mix-dashed: 24%;
-  --mix-placeholder: 55%; --mix-faint: 58%; --mix-muted: 64%; --mix-secondary: 78%;
-  --awaiting-text: #F7B955; --awaiting-surface: #1C1708; --awaiting-pill: #231A07;
-  --success: #3DD068; --danger: #FF4D4D; --danger-text: #FF6B6B;
-  --stage-review: #3DC6D8;
-  --e-card: 0 0 0 1px var(--outline);
-  --e-bar: 0 0 0 1px var(--outline);
-  --e-menu: 0 0 0 1px var(--outline), 0 16px 40px -12px rgba(0,0,0,.6);
-  --e-awaiting: 0 0 0 1.5px var(--awaiting);
-  --halo-progress: rgba(90,169,255,.18); --halo-review: rgba(61,198,216,.18);
-  color-scheme: dark;
-}
 /* The roles, mixed from the theme; then shadcn/ui's names for them. */
-:root, :root[data-theme="dark"] {
+:root {
   --canvas: color-mix(in srgb, var(--theme-contrast) var(--mix-canvas), var(--theme-base));
   --sidebar: color-mix(in srgb, var(--theme-contrast) var(--mix-sidebar), var(--theme-base));
   --surface: color-mix(in srgb, var(--theme-contrast) var(--mix-surface), var(--theme-base));
@@ -79,15 +69,15 @@
   --text: var(--theme-contrast);
   --ink: var(--theme-contrast); --on-ink: var(--theme-base);
   --link: var(--theme-accent); --stage-progress: var(--theme-accent);
-  --select: color-mix(in srgb, var(--theme-accent) 20%, transparent);
+  --select: var(--halo-progress);
   --e-outline: 0 0 0 1px var(--outline);
-  --e-control: 0 0 0 1px var(--input);
-  --e-header: 0 1px 0 var(--hairline);
+  --e-control: 0 0 0 var(--frame) var(--input);
+  --e-header: 0 var(--frame) 0 var(--ink);
   /* shadcn/ui's variables, for the components under components/ui */
   --background: var(--canvas); --foreground: var(--text);
   --card: var(--surface); --card-foreground: var(--text);
   --popover-foreground: var(--text);
-  --primary: var(--ink); --primary-foreground: var(--on-ink);
+  --primary: var(--theme-accent); --primary-foreground: var(--on-ink);
   --secondary: var(--surface-muted); --secondary-foreground: var(--text);
   --muted: var(--sunken); --muted-foreground: var(--text-muted);
   --accent: var(--tab-fill); --accent-foreground: var(--text);
@@ -106,28 +96,38 @@
   --color-awaiting: var(--awaiting); --color-awaiting-text: var(--awaiting-text); --color-link: var(--link);
   --color-faint: var(--text-faint); --color-secondary-text: var(--text-secondary); --color-placeholder: var(--placeholder);
   --font-sans: var(--sans); --font-mono: var(--mono);
-  --radius-sm: 6px; --radius-md: var(--radius); --radius-lg: 10px; --radius-xl: 12px;
+  --radius-sm: 0px; --radius-md: var(--radius); --radius-lg: 0px; --radius-xl: 0px;
   --shadow-control: var(--e-control); --shadow-outline: var(--e-outline); --shadow-card: var(--e-card);
 }
 * { box-sizing: border-box; }
 html { -webkit-text-size-adjust: 100%; scroll-padding-top: var(--top-bar); }
+html, body { overflow-x: clip; }
 /* React's root adds no box: the page lays out as if the shell were the body's own. */
 #root { display: contents; }
-body { margin: 0; min-height: 100vh; background: var(--canvas); color: var(--text); font: var(--weight-regular) var(--text-md)/1.45 var(--sans); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; }
-::selection { background: var(--select); }
+body { margin: 0; min-height: 100vh; background: var(--canvas); color: var(--text); font: var(--weight-regular) var(--text-md)/1.5 var(--sans); font-variant-numeric: tabular-nums; -webkit-font-smoothing: antialiased; caret-color: var(--theme-accent); }
+::selection { background: var(--select); color: var(--text); }
 h1, h2, h3, p { margin: 0; }
+h1, h2, h3 { overflow-wrap: break-word; min-width: 0; letter-spacing: -0.02em; }
 /* No paragraph ends on one word (Impeccable's detector, lane 38); a line cut with an ellipsis does not wrap at all. */
 p, li, dd { text-wrap: pretty; }
-a { color: var(--link); text-decoration: none; } a:hover { text-decoration: underline; }
-button, input, textarea { font: inherit; color: inherit; }
-/* One focus ring: an outline, which forced colours keep (a box-shadow ring alone vanishes there). */
-:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+a { color: var(--link); text-decoration: none; text-underline-offset: 0.18em; } a:hover { text-decoration: underline; } a:active { color: var(--accent-press); }
+button, input, textarea, select { font: inherit; color: inherit; }
+button:active:not(:disabled) { filter: none; }
+/* One focus ring: an outline, which forced colours keep (a box-shadow ring alone vanishes there). Instant, 3 px cobalt. */
+:focus-visible { outline: 3px solid var(--ring); outline-offset: 2px; transition: none; }
 .muted { color: var(--text-muted); } .faint { color: var(--text-faint); } .small { font-size: var(--text-sm); }
-.id { font: var(--weight-regular) var(--text-sm)/1.4 var(--mono); color: var(--text-faint); white-space: nowrap; }
+.id { font: var(--weight-regular) var(--text-sm)/1.4 var(--mono); color: var(--text-secondary); white-space: nowrap; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 /* A live line that says nothing yet stays in the page, taking no room, so its message is read out when it comes. */
 :is(.choice-note, .plan-note):empty { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
 @media (forced-colors: active) { :focus-visible { outline-color: Highlight; } }
+/* Decorations never take a pointer. */
+.dot, .state-dot, .lead-dot, .live, .sq, .logo, .avatar, .skeleton-line { pointer-events: none; }
+/* A loading region: bars in the shape of what comes, flat, still; its words kept for a screen reader. */
+.skeleton { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3) 0; }
+.skeleton-row { display: grid; grid-template-columns: 96px minmax(0, 1fr) 72px; gap: var(--space-3); align-items: center; min-height: var(--row); border-bottom: 1px solid var(--hairline); }
+.skeleton-line { display: block; height: 10px; background: var(--tab-fill); }
+.skeleton-line.wide { width: 80%; } .skeleton-line.short { width: 60%; }
 
 /* shell: the sidebar beside the main column, or a top bar and a bottom bar on a phone */
 .skip { position: absolute; left: -999px; top: var(--space-2); }
@@ -253,7 +253,6 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 
 /* the palette and the shortcut sheet: a dialog over the app */
 .overlay { position: fixed; inset: 0; z-index: 50; display: flex; justify-content: center; align-items: flex-start; padding: 12vh var(--space-3) var(--space-3); background: rgba(10,10,10,.36); animation: fade var(--motion) var(--ease); }
-:root[data-theme="dark"] .overlay { background: rgba(0,0,0,.55); }
 .dialog:focus { outline: none; }
 .dialog { display: flex; flex-direction: column; width: min(640px, 100%); max-height: min(680px, 80vh); overflow: hidden; border-radius: 12px; background: var(--popover); box-shadow: var(--e-menu); animation: rise var(--motion) var(--ease); }
 @keyframes fade { from { opacity: 0; } }
@@ -409,7 +408,6 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
   .side-foot .source-pill { display: flex; }
   .lead-status { display: none; }
   .source-pill { padding: 2px var(--space-2); }
-  .side-foot-row .theme { display: none; }
   /* The gauge in the top bar (the owner's answer of 12:20): the percent over a thin bar, a 44 px target. */
   .quota-gauge { flex: none; align-items: center; justify-content: center; gap: 3px; min-width: 44px; height: 44px; padding: 0 var(--space-1); }
   .quota-gauge[aria-current="page"] { box-shadow: none; background: var(--tab-fill); }
@@ -434,7 +432,7 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
   .palette-item .keys { display: none; }
   html { scroll-padding-bottom: calc(var(--bottom-bar) + env(safe-area-inset-bottom)); }
 }
-@media (min-width: 768px) { .source-pill .short, .menu-theme { display: none; } }
+@media (min-width: 768px) { .source-pill .short { display: none; } }
 /* A touch screen wider than a phone (a tablet with the rail): 44 px targets, the look unchanged. */
 @media (pointer: coarse) and (min-width: 768px) {
   .nav-item, .app[data-sidebar="rail"] .nav-item, .side-session, .search, .person, .icon, .chip-button { min-height: 44px; }

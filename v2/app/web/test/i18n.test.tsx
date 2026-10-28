@@ -267,8 +267,8 @@ for (const language of LANGUAGES) {
     const t = tOf('tower', language);
     const model = towerModel(fixture, FIXTURE_NOW);
     for (const screen of ['tower', 'inbox', 'sessions', 'session', 'lead', 'ask'] as ScreenName[]) {
-      const items = paletteItems({ screen, needs: model.needs, sessions: sessionRows(fixture.sessions, fixture.tickets), gestures: ['allow_once', 'allow_always', 'reject_once', 'takeover', 'giveback', 'new_ticket'], theme: 'light', t });
-      assertCatalog(`palette ${screen}`, html(<Palette t={t} items={items} dark={false} onRun={() => {}} onClose={() => {}} />), language, data);
+      const items = paletteItems({ screen, needs: model.needs, sessions: sessionRows(fixture.sessions, fixture.tickets), gestures: ['allow_once', 'allow_always', 'reject_once', 'takeover', 'giveback', 'new_ticket'], t });
+      assertCatalog(`palette ${screen}`, html(<Palette t={t} items={items} onRun={() => {}} onClose={() => {}} />), language, data);
       for (const mac of [false, true]) assertCatalog(`sheet ${screen}`, html(<ShortcutSheet t={t} screen={screen} mac={mac} onClose={() => {}} />), language, data);
     }
   });

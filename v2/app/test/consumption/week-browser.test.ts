@@ -5,7 +5,7 @@
 // Codex reports none, the estimates against what they took, a row per
 // service; in English and in French, and no horizontal scroll at any width.
 // With CLEARED_V2_SHOTS set to a folder it writes the panel's captures there,
-// at 1440, 1280, 768 and 390 pixels, light and dark.
+// at 1440, 1280, 768 and 390 pixels, light.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/consumption/week-browser.test.ts
 import test from 'node:test';
@@ -96,7 +96,7 @@ test('the week\'s figures as the ledger holds them: what merged, what it took, p
     for (const width of [1440, 1280, 768, 390]) {
       await resize(page, width, 900);
       assert.ok(await noOverflow(page), `no horizontal scroll at ${width}`);
-      for (const theme of ['light', 'dark']) {
+      for (const theme of ['light']) {
         await page.evaluate((value: string) => { document.documentElement.dataset.theme = value; }, theme);
         await shot(page, `week-en-${width}-${theme}`);
       }

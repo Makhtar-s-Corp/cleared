@@ -92,4 +92,4 @@ export const renderNotifyMenu = (view: NotifyView, t: Translate) => html(<Notify
 
 // The shell's sidebar for a screen, before /api/me answers (no count, no dot).
 export const renderSidebar = (screen: ScreenName, t: Translate, extra: Partial<SidebarProps> = {}) =>
-  html(<Sidebar t={t} mode="open" screen={screen} project="Guestbook" userName="alex" source="service" me={null} waiting={null} lead="unknown" groups={[]} theme="light" {...extra} />);
+  html(<Sidebar t={t} mode="open" screen={screen} project="Guestbook" userName="alex" source="service" me={null} waiting={null} lead="unknown" groups={[]} {...extra} />);

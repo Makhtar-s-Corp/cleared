@@ -3,7 +3,6 @@
    detail side by side. Below 1024 px: the list, and the detail as a page of
    its own with a back link and its buttons at the bottom (DESIGN.md, 4). */
 .inbox { --ok-text: #15803D; --after-ring: rgba(22,163,74,.6); --device-ring: rgba(0,0,0,.1); --awaiting-highlight: #FCE2B3; --field-ring: 0 0 0 1px rgba(0,0,0,.42); --option-ring: 0 0 0 1px rgba(0,0,0,.24); }
-:root[data-theme="dark"] .inbox { --ok-text: var(--success); --after-ring: rgba(61,208,104,.6); --device-ring: rgba(255,255,255,.16); --awaiting-highlight: #4A3612; --field-ring: 0 0 0 1px rgba(255,255,255,.4); --option-ring: 0 0 0 1px rgba(255,255,255,.26); }
 
 .inbox { display: grid; grid-template-columns: 380px minmax(0, 1fr); gap: var(--space-4); align-items: start; padding: var(--space-3) var(--space-4) var(--space-4); }
 .inbox.empty-inbox { grid-template-columns: minmax(0, 560px); }
@@ -159,7 +158,6 @@
 
 /* a release of several services: the train (decision 21) */
 .inbox { --danger-surface: #FFF6F6; --danger-ring: rgba(238,0,0,.32); --ok-fill: #ECF8F0; --ok-ring: rgba(22,163,74,.35); --progress-fill: rgba(0,112,243,.08); }
-:root[data-theme="dark"] .inbox { --danger-surface: rgba(255,77,77,.08); --danger-ring: rgba(255,107,107,.4); --ok-fill: rgba(61,208,104,.12); --ok-ring: rgba(61,208,104,.4); --progress-fill: rgba(82,168,255,.12); }
 /* a train's state beside its kind in the list, so a failure is seen without opening it */
 /* train-chip-<state>, never the bare state: .blocked is the detail's panel */
 .chip.train-chip-landing { background: var(--progress-fill); color: var(--stage-progress); }

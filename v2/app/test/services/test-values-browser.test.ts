@@ -3,7 +3,7 @@
 // whose test values are names and dates only: the panel lists the example
 // workspace's services under the map; a value added by the keyboard is
 // listed by name, its field emptied; Remove takes it away; a refusal is said
-// in words; axe finds nothing, in English and in French, light and dark; on
+// in words; axe finds nothing, in English and in French, light; on
 // a phone the page does not scroll sideways. With CLEARED_V2_CAPTURES set to
 // a folder it writes the panel's captures there.
 //
@@ -45,7 +45,7 @@ async function axeClean(page: any, what: string): Promise<void> {
   assert.deepEqual(found, [], `${what}: axe`);
 }
 
-async function withBrowser(options: { language: 'en' | 'fr'; width?: number; theme?: 'light' | 'dark' }, run: (page: any) => Promise<void>): Promise<void> {
+async function withBrowser(options: { language: 'en' | 'fr'; width?: number; theme?: 'light' }, run: (page: any) => Promise<void>): Promise<void> {
   const app = await startApp({ source: towerSource(() => FIXTURE_NOW, await fixtureSource({ now: () => FIXTURE_NOW })), extra: { language: options.language } });
   const require = createRequire(join(PLAYWRIGHT as string, 'package.json'));
   const { chromium } = require('playwright-core') as { chromium: { launch(options: Record<string, unknown>): Promise<any> } };
@@ -102,17 +102,17 @@ test('the panel lists the services under the map; a value added is listed by nam
   });
 });
 
-test('in French, dark, every word of the panel is French', { skip }, async () => {
-  await withBrowser({ language: 'fr', theme: 'dark' }, async (page) => {
+test('in French, every word of the panel is French', { skip }, async () => {
+  await withBrowser({ language: 'fr' }, async (page) => {
     const text: string = await page.locator('.services-test-values').innerText();
     assert.match(text, /Secrets de test/);
     assert.doesNotMatch(text, /\d{4}-\d{2}-\d{2}T/, 'no ISO time');
-    await axeClean(page, 'fr dark');
-    await shot(page, 'test-values-fr-1440-dark');
+    await axeClean(page, 'fr');
+    await shot(page, 'test-values-fr-1440-light');
   });
 });
 
-for (const [width, theme] of [[1280, 'light'], [768, 'light'], [390, 'light'], [1280, 'dark'], [768, 'dark'], [390, 'dark'], [1440, 'dark']] as const) {
+for (const [width, theme] of [[1280, 'light'], [768, 'light'], [390, 'light']] as const) {
   test(`at ${width} px, ${theme}, the panel does not make the page scroll sideways`, { skip }, async () => {
     await withBrowser({ language: 'en', width, theme }, async (page) => {
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `no horizontal scroll at ${width} px`);

@@ -4,7 +4,7 @@
 // it names, and the /ask/:id screen opens with it, in English and in French,
 // with no horizontal scroll on a phone. An empty question sends nothing. No
 // request leaves the app. With CLEARED_V2_SHOTS set to a folder it writes
-// the card's captures there, at the four widths, light and dark.
+// the card's captures there, at the four widths, light.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/session/plan-ask-browser.test.ts
 import test from 'node:test';
@@ -112,7 +112,7 @@ test('in French, on a phone: a named line is the ask\'s target, and nothing scro
 // Defined only when captures are asked for: the browser job of CI fails on a skipped test.
 if (SHOTS) test('the card\'s captures, at each width in each theme', { skip }, async () => {
   const sizes = { 1440: [1440, 900], 1280: [1280, 800], 768: [768, 1024], 390: [390, 844] } as const;
-  for (const dark of [false, true]) {
+  for (const dark of [false]) {
     for (const [width, [w, h]] of Object.entries(sizes)) {
       await withPlan({ language: 'en', width: w, height: h, dark }, async ({ page }) => {
         await page.fill('#plan-ask-input', 'Where is an entry stored before the page shows it?');
