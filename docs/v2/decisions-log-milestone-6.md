@@ -498,4 +498,5 @@ Each ticket went back to Todo after its publish with "The release could not be r
 
 **Resources.** No listener, no container, no network other than GitHub (this lane's issue and pull request). Quota: this one session, no model call from Cleared.
 
+- Pull request: 484, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-decisions-log-split`.
