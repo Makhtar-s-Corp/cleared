@@ -8059,6 +8059,8 @@ Each ticket went back to Todo after its publish with "The release could not be r
 - With `CLEARED_V2_PLAYWRIGHT`: `test/flow/proof-capture.test.ts` and `app/test/ask/citations-browser.test.ts`, 8 of 8.
 - `npm run guard -- --base origin/v2`: nothing refused.
 
+**The merge of 466** (lane `v2-j6-live-takeover`, at `origin/v2` `55469b3`). The log keeps that lane's entry, then this one; the matrix merged by itself, each id once; `src/flow/engine.ts` merged by itself, this lane's capture at the passing review and its reader rule kept. After the merge: `npm run typecheck` clean; `npm test` runs 2964 Node tests, 2823 pass, 141 skipped, 0 fail, and 434 Vitest tests pass; `npm run guard -- --base origin/v2`: nothing refused.
+
 **Resources.** One service and one app of this branch on 127.0.0.1:9851 to 9853, stopped at the end; no other listener, no tunnel. Removed by `cleared.dev=v2` and the exact names of this install's eight sessions: 2 containers, 2 networks, 8 volumes, and the images `cleared-v2-<session>-sib-guestbook:ticket` (two) and `cleared-v2-base-guestbook:d711d6bd7f02`. Nothing of the other installs was touched. Network: GitHub (the example repository's clone, two branches pushed and two pull requests opened by the service, the links fetched, this lane's issue and pull request, three issues opened), the sessions' model calls and npm through their egress, Playwright's ffmpeg download. The Claude Code login was mounted, never opened, copied or printed; the `gh` token went to the service's environment only.
 
 - Pull request: 470, against `v2`.
