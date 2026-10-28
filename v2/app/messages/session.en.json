@@ -313,5 +313,8 @@
   "ask_failed_invalid": "The service refused the question: check the service, the file and the line it names.",
   "ask_failed_gone": "The service does not know this question.",
   "ask_failed_off": "Questions to the code are off on this service.",
-  "ask_failed": "The question was not sent. Try again."
+  "ask_failed": "The question was not sent. Try again.",
+  "session_versions": "Agent profile: {profile}. Environment: version {environment}.",
+  "session_versions_profile": "version {version}",
+  "session_versions_profile_auto": "version {version}, harness picked automatically: {harness}"
 }

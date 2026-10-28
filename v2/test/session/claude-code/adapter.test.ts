@@ -8,7 +8,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Docker, LABEL, SESSION_LABEL } from '../../../src/container/docker.ts';
 import { parseServices } from '../../../src/container/services.ts';
-import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT, sessionNames } from '../../../src/container/session-runtime.ts';
+import { DEFAULT_LIMITS, LOGIN_FILE_MOUNT, SESSION_IMAGE, WORKDIR_MOUNT, sessionNames } from '../../../src/container/session-runtime.ts';
 import { RUNNER_COMMAND, claudeCodeRuntime, createClaudeCodeAdapter } from '../../../src/session/adapters/claude-code.ts';
 import { CONFIG_PROGRAM, INTERACTIVE_LAUNCH, LOGIN_TOKEN_PROGRAM } from '../../../src/session/adapters/claude-code/interactive.ts';
 import { adapterFactories } from '../../../src/session/adapters/index.ts';
@@ -76,6 +76,29 @@ const types = (events: readonly SessionEvent[]) => events.map((e) => (e.event.ty
 const events = (log: { all: SessionEvent[] }) => log.all.map((e) => e.event);
 const custom = (log: { all: SessionEvent[] }, name: string) => events(log).filter((e): e is Extract<AgUiEvent, { type: 'CUSTOM' }> => e.type === 'CUSTOM' && e.name === name).map((e) => e.value);
 const settle = () => new Promise((r) => setTimeout(r, 20));
+
+// The environment's version (issue #452): its image and its limits, over
+// the runtime's; none named, the session is created as before.
+test('the session\'s environment names its image and its limits; without them, Cleared\'s own', async () => {
+  const t = await setup();
+  try {
+    const handle = await t.adapter.start({ ...input(t.workdir), image: 'cleared-v2-session:custom', limits: { cpus: '1', memory: '2g' } });
+    const create = t.fake.calls.find((c) => c.args[0] === 'create' && c.args.includes('cleared.role=session'));
+    assert.ok(create);
+    const args = create.args;
+    assert.deepEqual(args.slice(args.indexOf('--memory'), args.indexOf('--memory') + 8), ['--memory', '2g', '--memory-swap', '2g', '--cpus', '1', '--pids-limit', String(DEFAULT_LIMITS.pids)]);
+    assert.equal(args[args.indexOf('--') + 1], 'cleared-v2-session:custom');
+    await handle.stop();
+  } finally { t.cleanup(); }
+  const u = await setup();
+  try {
+    const handle = await u.adapter.start(input(u.workdir));
+    const args = u.fake.calls.find((c) => c.args[0] === 'create' && c.args.includes('cleared.role=session'))?.args ?? [];
+    assert.deepEqual(args.slice(args.indexOf('--memory'), args.indexOf('--memory') + 8), ['--memory', DEFAULT_LIMITS.memory, '--memory-swap', DEFAULT_LIMITS.memory, '--cpus', DEFAULT_LIMITS.cpus, '--pids-limit', String(DEFAULT_LIMITS.pids)]);
+    assert.equal(args[args.indexOf('--') + 1], SESSION_IMAGE);
+    await handle.stop();
+  } finally { u.cleanup(); }
+});
 
 test('start creates the labelled session, attaches the runner and sends start, then the prompt', async () => {
   const t = await setup();

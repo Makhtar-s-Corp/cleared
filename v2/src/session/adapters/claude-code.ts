@@ -40,7 +40,7 @@ import { createInterface } from 'node:readline';
 import type { RunnerInput, RunnerOutput } from '../../../images/session/runner/main.ts';
 import { Docker, type Limits } from '../../container/docker.ts';
 import type { ServiceSpec } from '../../container/services.ts';
-import { WORKDIR_MOUNT, sessionNames, startSession, stopSession } from '../../container/session-runtime.ts';
+import { WORKDIR_MOUNT, limitsOf, sessionNames, startSession, stopSession } from '../../container/session-runtime.ts';
 import type { Cleaner } from '../clean.ts';
 import { HostToolRefused, type Answer, type InteractiveResume, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
 import { handoverOf } from '../handover.ts';
@@ -241,6 +241,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
   async function launch(session: Session, resume: boolean): Promise<void> {
     const { id, input } = session;
     const { service } = input;
+    const image = input.image ?? runtime.image;
     await startSession(docker, {
       session: id, workdir: input.workdir, tokenFile: runtime.loginFile, allowDir: join(runtime.stateDir, 'egress', id),
       allowHosts: input.policy.allowedHosts, hostAddresses: runtime.hostAddresses, services: input.services ?? runtime.services ?? [],
@@ -248,10 +249,10 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
       user: runtime.user, command: RUNNER_COMMAND, interactive: true,
       // Its service's test secrets, for an author or a reviewer (C16).
       ...(service === undefined ? {} : { service }), role: input.role,
-      ...(runtime.image === undefined ? {} : { image: runtime.image }),
-      ...(runtime.limits === undefined ? {} : { limits: runtime.limits }),
-      // The service's prepared image (C15), when the runtime names none; a wait for its build is said on the ticket.
-      ...(service === undefined || runtime.image !== undefined ? {} : {
+      ...(image === undefined ? {} : { image }),
+      ...(limitsOf(runtime.limits, input.limits) ?? {}),
+      // The service's prepared image (C15), when neither the session nor the runtime names one; a wait for its build is said on the ticket.
+      ...(service === undefined || image !== undefined ? {} : {
         prepared: { service, stateDir: runtime.stateDir, onWait: () => emit(session, [{ type: 'CUSTOM', name: 'cleared.prepared_image', value: { service, state: 'waiting' } }]) },
       }),
     });

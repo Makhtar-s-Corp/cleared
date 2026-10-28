@@ -42,6 +42,9 @@ export type ReceiptData = {
   readonly elapsedMs: number;                     // from the ticket's first stored event to its last
   readonly captures: readonly ReceiptCapture[];
   readonly linkBase?: string | undefined;         // the app's address, as CLEARED_NOTIFY_LINK_BASE gives it
+  // The agent profile's and the environment's versions the ticket's authors
+  // and reviewers ran on, each list in order (issue #452); none, no line.
+  readonly versions?: { readonly profile: readonly number[]; readonly environment: readonly number[] } | undefined;
 };
 
 function catalogOf(language: Language): Catalog {
@@ -105,6 +108,10 @@ function captureLine(capture: ReceiptCapture, data: ReceiptData, t: Translate): 
   return `${line}. ${needLine(capture.need, t)}`;
 }
 
+// "1", or "1, then 2" when a version changed between the ticket's sessions.
+const versionList = (list: readonly number[], t: Translate): string =>
+  list.map(String).reduce((first, next) => t('receipt_versions_then', { first, next }));
+
 export function renderReceipt(data: ReceiptData, language: Language): string {
   const t = translator(catalogOf(language));
   const lines = [RECEIPT_START, `### ${t('receipt_title')}`, ''];
@@ -119,6 +126,7 @@ export function renderReceipt(data: ReceiptData, language: Language): string {
   const cost = data.tokens === null ? t('receipt_cost_unreported') : t('receipt_cost', { count: quantity(data.tokens, t) });
   lines.push(`- ${data.costUsd === null ? cost : `${cost}, ${t('receipt_usd', { usd: dollars(data.costUsd, language) })}`}`);
   lines.push(`- ${t('receipt_time', { time: lasted(data.elapsedMs, t) })}`);
+  if (data.versions) lines.push(`- ${t('receipt_versions', { profile: versionList(data.versions.profile, t), environment: versionList(data.versions.environment, t) })}`);
   lines.push(RECEIPT_END);
   return lines.join('\n');
 }
