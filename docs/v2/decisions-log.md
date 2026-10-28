@@ -7878,3 +7878,14 @@ Changed with the code: the label gate's case (decision 10), the adapter test's f
 - What the memory holds from outside the inbox (an older `lib/memory` entry) is not compared: the comparison is with what the inbox wrote (`knowledge_skill`) and every knowledge item.
 - No capture of the inbox's card: the fixtures' inbox is shared by the other browser tests, so the pass's proposal is not added to it; the card is proven by `app/web/test/inbox/additions.test.tsx`, in both languages.
 - No progress dashboard: the owner's rules ask a sub-agent to keep one for a long task, and the brief forbids starting any sub-agent.
+
+**Checks**, on this branch; `origin/v2` was still at `c40a7e91` when it was fetched last, so nothing was merged:
+- `npm run typecheck` in `v2/`: clean.
+- `npm test` in `v2/`: 2948 Node tests, 2811 pass, 137 skipped (the browser tests, run apart below), 0 fail; 427 Vitest tests pass.
+- The browser job's list of `.github/workflows/v2.yml`, run as the job runs it, with the Chromium build this server has (1243): 101 tests and the tab-switch budget alone, all pass, none skipped.
+- `npm run guard -- --base origin/v2`: nothing refused, once the fake keys of the secret case held no run of ten digits, which the guard reads as a phone number. The guard ran without the private-term list, so the lane's diff was also searched for the owner's name and the first piloted project's: none.
+
+**Resources.** No Docker object, no container, no tunnel, no listening port but the tests' own ephemeral loopback ones. No real model call, no quota spent, no Claude Code login read, no secret: the secret-shaped values of the tests are built from parts at run time. Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issue and the pull request.
+
+- Pull request: (this lane's), against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-dreaming`.
