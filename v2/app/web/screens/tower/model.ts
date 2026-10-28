@@ -439,6 +439,11 @@ export function newTicket(title: string, body: string, project: string, services
   };
 }
 
+// The project a new ticket or batch names: the workspace's id, as the
+// service names its project; the app's name (the header's label, which a
+// Compose install leaves empty, issue #437) only when the workspace was not read.
+export const ticketProject = (model: TowerModel | null, appProject: string): string => model?.project ?? appProject;
+
 export function createTicket(api: ScreenContext['api'], input: { readonly title: string; readonly body: string; readonly project: string; readonly services?: readonly string[]; readonly variants?: number; readonly labels?: readonly string[] }): Promise<Ticket> {
   return api<Ticket>('/tickets', { method: 'POST', body: newTicket(input.title, input.body, input.project, input.services, input.variants, input.labels) });
 }
