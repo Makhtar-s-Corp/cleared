@@ -1,5 +1,5 @@
 // The shell in the browser: who is signed in, the sidebar (the screens, the
-// inbox count, the lead's dot, the live sessions, the theme, notifications,
+// inbox count, the lead's dot, the live sessions, notifications,
 // signing out), the screen's bar, the command palette, the keyboard and its
 // sheet (lane 35, docs/v2/ui-overhaul-plan.md, 2.2 and U8), the API access
 // panel (shell/Access.tsx, C18), and the screen of the address, with its
@@ -39,8 +39,8 @@ import type { Ticket } from '../../../src/tickets/contract.ts';
 import { isMac } from './Kbd.tsx';
 import type { Action } from './keys.ts';
 import {
-  SIDEBAR_KEY, applyTheme, currentTheme, hrefOf, leadDot, sessionGroups, sessionRows, sidebarMode, toggledSidebar, waitingCount,
-  OPEN_FROM, RAIL_FROM, type SessionRow, type Theme,
+  SIDEBAR_KEY, hrefOf, leadDot, sessionGroups, sessionRows, sidebarMode, toggledSidebar, waitingCount,
+  OPEN_FROM, RAIL_FROM, type SessionRow,
 } from './model.ts';
 import { GESTURES, paletteItems, type PaletteItem } from './palette.ts';
 import { AccessPanel } from './Access.tsx';
@@ -239,7 +239,6 @@ function Shell({ shared }: { readonly shared: Shared }) {
   const [lead, setLead] = useState<LeadState | null | undefined>(undefined);
   const [rows, setRows] = useState<readonly SessionRow[]>([]);
   const [needs, setNeeds] = useState<readonly NeedCard[]>([]);
-  const [theme, setTheme] = useState<Theme>(() => currentTheme());
   const [stored, setStored] = useState<string | null>(storedSidebar);
   const [overlay, setOverlay] = useState<Overlay>(null);
   const [gestures, setGestures] = useState<readonly string[]>([]);
@@ -354,11 +353,6 @@ function Shell({ shared }: { readonly shared: Shared }) {
   // Last of the switch's changes to the page, since it forces a layout.
   useScrollKept(place.path);
 
-  const flipTheme = useCallback(() => {
-    const next: Theme = currentTheme() === 'dark' ? 'light' : 'dark';
-    applyTheme(next, true);
-    setTheme(next);
-  }, []);
   const toggleSidebar = useCallback(() => {
     const next = toggledSidebar(mode);
     setStored(next);
@@ -391,7 +385,6 @@ function Shell({ shared }: { readonly shared: Shared }) {
     requestAnimationFrame(() => {
       switch (run.kind) {
         case 'navigate': navigate(run.href); break;
-        case 'theme': flipTheme(); break;
         case 'sheet': open('sheet'); break;
         case 'sidebar': toggleSidebar(); break;
         case 'gesture': {
@@ -403,7 +396,7 @@ function Shell({ shared }: { readonly shared: Shared }) {
         }
       }
     });
-  }, [navigate, flipTheme, toggleSidebar, open]);
+  }, [navigate, toggleSidebar, open]);
 
   // The sidebar draws again only when what it shows changes (Sidebar is memo).
   const groups = useMemo(() => sessionGroups(rows), [rows]);
@@ -435,8 +428,8 @@ function Shell({ shared }: { readonly shared: Shared }) {
   }, [openPalette, toggleSidebar, navigate, mode, open]);
   useShortcuts({ screen: place.screen, overlay: overlay !== null, mac, run: runKey });
 
-  const items = useMemo(() => (overlay === 'palette' ? paletteItems({ screen: place.screen, needs, sessions: rows, gestures, theme, t: towerT }) : []),
-    [overlay, place.screen, needs, rows, gestures, theme, towerT]);
+  const items = useMemo(() => (overlay === 'palette' ? paletteItems({ screen: place.screen, needs, sessions: rows, gestures, t: towerT }) : []),
+    [overlay, place.screen, needs, rows, gestures, towerT]);
 
   const host = (screen: ScreenName, path: string) => (me && raw
     ? <ScreenHost screen={screen} path={path} me={me} language={language} cache={cache} raw={raw} navigate={navigate} inboxChanged={inboxChanged} />
@@ -446,7 +439,7 @@ function Shell({ shared }: { readonly shared: Shared }) {
       <div className="app" data-sidebar={mode} inert={overlay !== null}>
         <a className="skip" href="#screen">{t('skip_to_content')}</a>
         <Sidebar t={t} mode={mode} screen={place.screen} session={place.session} project={start.project} userName={start.userName} source={start.source} me={me}
-          waiting={waiting} lead={leadDot(lead)} groups={groups} quota={quota} zone={zone} theme={theme} onTheme={flipTheme} language={language} onLanguage={pickLanguage}
+          waiting={waiting} lead={leadDot(lead)} groups={groups} quota={quota} zone={zone} language={language} onLanguage={pickLanguage}
           onSearch={openPalette} onToggle={toggleSidebar} onSignOut={onSignOut} onAccess={openAccess} onPick={onPick} />
         <div className="main">
           {/* The bar names the screen: the page's banner, so nothing on it lies outside a landmark. */}
@@ -464,7 +457,7 @@ function Shell({ shared }: { readonly shared: Shared }) {
           </main>
         </div>
       </div>
-      {overlay === 'palette' ? <Suspense fallback={null}><Palette t={towerT} items={items} dark={theme === 'dark'} onRun={runItem} onClose={() => setOverlay(null)} /></Suspense> : null}
+      {overlay === 'palette' ? <Suspense fallback={null}><Palette t={towerT} items={items} onRun={runItem} onClose={() => setOverlay(null)} /></Suspense> : null}
       {overlay === 'sheet' ? <ShortcutSheet t={t} screen={place.screen} mac={mac} onClose={() => setOverlay(null)} /> : null}
       {overlay === 'access' && raw ? <AccessPanel t={t} api={raw} onClose={() => setOverlay(null)} /> : null}
     </>

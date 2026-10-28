@@ -38,6 +38,11 @@ jobs:
           node-version: 24
           cache: npm
           cache-dependency-path: v2/package-lock.json
+      - name: Flat colours guard
+        # The owner's rules for the look (issue #451): no gradient anywhere in the web app, light only, no blurred shadow,
+        # no translucent white, nothing clickable that moves, nothing from another site. Node's own modules only, so it
+        # runs before the install and fails fast.
+        run: node --test app/test/redesign/flat.test.ts
       - name: Install
         run: npm ci
       - name: Types
@@ -87,7 +92,7 @@ jobs:
       - name: Browser tests
         # The browser tests of app/test, run with the installed package and its Chromium: eight, and lane 34's
         # (the tab-switch budget, three runs in CI, and the session stack and the screens' boundary), and lane 35's (the
-        # palette, the keys and the sidebar), and P224's (axe on the main screens, light and dark, French and English, 1440
+        # palette, the keys and the sidebar), and P224's (axe on the main screens, French and English, 1440
         # and 390 px, and Close by keyboard). The TAP output is
         # kept for the summary. Every test that ran must pass, none may be skipped, and there must be at least as many tests
         # as listed files, so an emptied file or a failed run fails the job without a fixed count to keep up to date.

@@ -38,7 +38,9 @@ import { harnessName, terminalChoice } from '@/components/terminal/model.ts';
 import { WebTerminal } from '@/components/terminal/Terminal.tsx';
 import { CopilotThreads, useThread } from '@/copilot/provider.tsx';
 import { useGo, useScreen } from '@/lib/context.tsx';
+import { Facts } from '@/components/facts/Facts.tsx';
 import { Empty } from '@/shell/Empty.tsx';
+import { stateOf, type SessionState } from '@/shell/model.ts';
 import { commandParts, intentSentence, looksLikeCommand } from '@/lib/intent.ts';
 import { sessionStatus } from '@/lib/status.ts';
 import { since } from '@/lib/time.ts';
@@ -590,6 +592,8 @@ export function Composer({ view, t, text = '', sending = false, interrupting = f
   );
 }
 
+const INDEX_GROUPS: readonly SessionState[] = ['waiting', 'working', 'reviewing', 'ended'];
+
 export function SessionIndex({ sessions, tickets, now, t, onNew }: { readonly sessions: readonly SessionSummary[]; readonly tickets: readonly Ticket[]; readonly now: Date; readonly t: Translate; readonly onNew?: () => void }) {
   const titles = new Map(tickets.map((ticket) => [ticket.id, ticket.title]));
   // One row per ticket (lane 36): the session its view acts on; a reader's or the lead's alone.
@@ -601,36 +605,50 @@ export function SessionIndex({ sessions, tickets, now, t, onNew }: { readonly se
   // What waits for the person first, as the tower orders it (lane 38, the critique), then the most recent.
   const waits = (s: SessionSummary) => (s.phase === 'waiting_human' ? 0 : 1);
   const ordered = shown.sort((a, b) => waits(a) - waits(b) || Date.parse(b.updatedAt) - Date.parse(a.updatedAt));
+  // The session groups, as the sidebar's (shell/model.ts): what needs the person, what works, what is in review, then
+  // what ended; each group keeps the order above.
+  const groups = INDEX_GROUPS.map((key) => ({ key, rows: ordered.filter((s) => stateOf(s) === key) })).filter((group) => group.rows.length > 0);
   // Rows as the tower's (lane 38): the row is the link, named by the title and described by the rest.
   return (
     <div className="index">
       {/* The top bar names the screen (lane 38's art director): its heading is read out, not drawn twice. */}
       <h1 className="sr-only">{t('index_title')}</h1>
       {ordered.length === 0 ? <Empty block icon={Terminal} text={t('index_empty')} note={t('index_empty_note')} action={{ label: t('index_new_ticket'), onClick: () => onNew?.() }} /> : (
-        <ul className="sessions">
-          {ordered.map((s) => {
-            // A reader's session (decision 28) is its question's: the ask
-            // screen shows it, and its ticket is the ask's id.
-            const reader = s.role === 'reader';
-            const id = `index-${s.id.replace(/[^\w-]/g, '')}`;
-            return (
-            <li key={s.id} className="session-card" data-phase={s.phase}>
-              <a className="open index-row" href={reader ? askHref(s.ticket) : `/sessions/${s.id}`} data-row aria-labelledby={`${id}-title`} aria-describedby={`${id}-kind ${id}-phrase ${id}-meta`}>
-                <span className="index-kind session-head" id={`${id}-kind`}><span className={liveDot(s.phase, s.role)} aria-hidden="true" /><span className="role">{t(`role_${s.role}`)}</span></span>
-                <span className="index-main">
-                  <span className="session-title" id={`${id}-title`}>{reader ? t('reader_title') : titles.get(s.ticket) ?? s.ticket}</span>
-                  <span className="phrase" id={`${id}-phrase`}>{sessionStatus(s, t)}</span>
-                </span>
-                <span className="index-meta session-foot" id={`${id}-meta`}>
-                  <span className="model"><span className={`sq ${harnessSquare(s.harness)}`} aria-hidden="true" />{formatModel(s.harness, s.model)}</span>
-                  {reader ? null : <span className="id">{s.ticket}</span>}
-                  <span className="elapsed">{since(s.startedAt, now, t)}</span>
-                </span>
-              </a>
-            </li>
-            );
-          })}
-        </ul>
+        <>
+          {/* The groups as a board of figures (Signal, lane j6-ui-hallmark): how many wait, work, are in review, ended. */}
+          <ul className="figure-row index-figures" aria-label={t('index_groups_label')}>
+            {groups.map((group) => <li key={group.key} data-group={group.key}><b>{group.rows.length}</b><span>{t(`index_group_${group.key}`)}</span></li>)}
+          </ul>
+          {groups.map((group) => (
+            <section key={group.key} className="index-group" data-group={group.key} aria-labelledby={`index-group-${group.key}`}>
+              <h2 className="board-head" id={`index-group-${group.key}`}><span className="state-dot" data-state={group.key} aria-hidden="true" />{t(`index_group_${group.key}`)}<span className="board-count" aria-hidden="true">{group.rows.length}</span></h2>
+              <ul className="sessions">
+                {group.rows.map((s) => {
+                  // A reader's session (decision 28) is its question's: the ask
+                  // screen shows it, and its ticket is the ask's id.
+                  const reader = s.role === 'reader';
+                  const id = `index-${s.id.replace(/[^\w-]/g, '')}`;
+                  return (
+                  <li key={s.id} className="session-card" data-phase={s.phase}>
+                    <a className="open index-row" href={reader ? askHref(s.ticket) : `/sessions/${s.id}`} data-row aria-labelledby={`${id}-title`} aria-describedby={`${id}-kind ${id}-phrase ${id}-meta`}>
+                      <span className="index-kind session-head" id={`${id}-kind`}><span className={liveDot(s.phase, s.role)} aria-hidden="true" /><span className="role">{t(`role_${s.role}`)}</span></span>
+                      <span className="index-main">
+                        <span className="session-title" id={`${id}-title`}>{reader ? t('reader_title') : titles.get(s.ticket) ?? s.ticket}</span>
+                        <span className="phrase" id={`${id}-phrase`}><Facts text={sessionStatus(s, t)} /></span>
+                      </span>
+                      <span className="index-meta session-foot" id={`${id}-meta`}>
+                        <span className="model"><span className={`sq ${harnessSquare(s.harness)}`} aria-hidden="true" /><Facts text={formatModel(s.harness, s.model)} /></span>
+                        {reader ? null : <span className="id">{s.ticket}</span>}
+                        <span className="elapsed">{since(s.startedAt, now, t)}</span>
+                      </span>
+                    </a>
+                  </li>
+                  );
+                })}
+              </ul>
+            </section>
+          ))}
+        </>
       )}
     </div>
   );

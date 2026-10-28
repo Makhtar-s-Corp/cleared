@@ -20,6 +20,7 @@ import {
   CHANGE_MAX, TABS, cutNote, fileLines, goLine, lineDiff, planAskScope, planView, stepCost, stepLine, stepsView, type BrowserView, type DiffLine, type Tab, type TakeoverView,
 } from './tabs.ts';
 import { Counts } from './Counts.tsx';
+import { Facts } from '@/components/facts/Facts.tsx';
 
 const ICONS: Readonly<Record<Tab, Icon>> = { plan: ListChecks, terminal: TerminalWindow, editor: Code, browser: Browser };
 
@@ -107,7 +108,7 @@ export function StepsCard({ view, t }: { readonly view: SessionView; readonly t:
           return (
             <li key={row.position} className={row.current ? 'ticket-step current' : 'ticket-step'} data-step={row.position} data-state={row.state} aria-current={row.current ? 'step' : undefined}>
               <span className="step-n" aria-hidden="true">{row.position}</span>
-              <span className="step-what">{stepLine(row, t)}{row.current ? <span className="step-this">{t('ticket_step_this')}</span> : null}</span>
+              <span className="step-what"><Facts text={stepLine(row, t)} />{row.current ? <span className="step-this">{t('ticket_step_this')}</span> : null}</span>
               <span className={`step-state ${row.state}`}>{t(`ticket_step_${row.state}`)}</span>
               {cost ? <span className="step-cost">{cost}</span> : null}
             </li>

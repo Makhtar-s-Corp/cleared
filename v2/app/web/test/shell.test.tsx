@@ -50,7 +50,8 @@ test('the sidebar\'s foot carries the notifications button, hidden until the pag
   const html = renderSidebar('tower', shell);
   assert.match(html, /<div class="notify" id="notify" hidden="">/);
   assert.match(html, /<button type="button" class="icon" id="notify-summary" aria-label="Notifications"/);
-  assert.ok(html.indexOf('id="person"') < html.indexOf('id="notify"') && html.indexOf('id="notify"') < html.indexOf('id="theme"'), 'between the person and the theme');
+  assert.ok(html.indexOf('id="person"') < html.indexOf('id="notify"'), 'after the person');
+  assert.doesNotMatch(html, /id="theme"|menu-theme/, 'no theme button: one theme, light (issue #451)');
   assert.doesNotMatch(html, /id="clock"/, 'no clock (U8)');
 });
 

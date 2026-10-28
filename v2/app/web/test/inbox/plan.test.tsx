@@ -31,7 +31,10 @@ function viewOf(overrides: Partial<InboxView> = {}): InboxView {
 
 const planItem = () => inboxFixture(FIXTURE_NOW).items.find((i): i is PlanItemInbox => i.kind === 'plan') as PlanItemInbox;
 const acts = (html: string) => [...html.matchAll(/data-act="([a-z_]+)"/g)].map((m) => m[1]);
-const lineOf = (html: string, id: string) => new RegExp(`data-item="${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[\\s\\S]*?<span class="item-line">([^<]*)</span>`).exec(html)?.[1];
+// A line of facts (components/facts/Facts.tsx, lane j6-ui-hallmark) read back as the line the model joined.
+const ITEM_LINE = '<span class="item-line">((?:<span class="fact">[^<]*</span>|<span class="fact-sep"><span class="sr-only">, </span></span>)*)</span>';
+const factsOf = (markup: string) => [...markup.matchAll(/<span class="fact">([^<]*)<\/span>/g)].map((m) => m[1]).join(' · ');
+const lineOf = (html: string, id: string) => { const inner = new RegExp(`data-item="${id.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"[\\s\\S]*?${ITEM_LINE}`).exec(html)?.[1]; return inner === undefined ? undefined : factsOf(inner); };
 
 test('the screen\'s lead ticket is the service\'s', () => {
   assert.equal(LEAD_TICKET, SERVICE_LEAD_TICKET);

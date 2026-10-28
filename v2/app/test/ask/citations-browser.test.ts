@@ -4,7 +4,7 @@
 // opened in a new tab without the app's page, in English and in French,
 // with no horizontal scroll on a phone. No request leaves the app: GitHub
 // is answered by the test. With CLEARED_V2_SHOTS set to a folder it writes
-// the screen's captures there, at the four widths, light and dark.
+// the screen's captures there, at the four widths, light.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/ask/citations-browser.test.ts
 import test from 'node:test';
@@ -100,7 +100,7 @@ test('in French, and on a phone without a horizontal scroll', { skip }, async ()
 // Defined only when captures are asked for: the browser job of CI fails on a skipped test.
 if (SHOTS) test('the screen\'s captures, at each width in each theme', { skip }, async () => {
   const sizes = { 1440: [1440, 900], 1280: [1280, 800], 768: [768, 1024], 390: [390, 844] } as const;
-  for (const dark of [false, true]) {
+  for (const dark of [false]) {
     for (const [width, [w, h]] of Object.entries(sizes)) {
       await withBrowser({ language: 'en', width: w, height: h, dark }, async ({ page }) => {
         await page.locator('.answer-text a.citation').first().hover();

@@ -16,7 +16,7 @@
 //   - each page has no policy violation, no page error, no missing key, and
 //     axe finds no violation of WCAG 2.2 AA;
 //   - with CLEARED_V2_CAPTURES=<folder>, the proposal is captured at 1440,
-//     1280, 768 and 390 px, light and dark, in English, and once in French.
+//     1280, 768 and 390 px, in English, and once in French.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/setup/workspace-browser.test.ts
 import test from 'node:test';
@@ -144,7 +144,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
 
     if (CAPTURES) {
       mkdirSync(CAPTURES, { recursive: true });
-      const themes = language === 'en' ? ['light', 'dark'] : ['light'];
+      const themes = ['light'];
       const widths = language === 'en' ? WIDTHS : [1440];
       for (const theme of themes) {
         await page.evaluate((value: string) => { document.documentElement.dataset.theme = value; }, theme);
@@ -174,7 +174,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     assert.equal(await page.locator('[data-workspace-no-devcontainer] a[href="/setup/environment"]').count(), 1);
     await checked(page, 'no .devcontainer said');
     if (CAPTURES) {
-      for (const [width, theme] of (language === 'en' ? [[1440, 'light'], [390, 'dark']] : [[1440, 'light']]) as [number, string][]) {
+      for (const [width, theme] of (language === 'en' ? [[1440, 'light'], [390, 'light']] : [[1440, 'light']]) as [number, string][]) {
         await page.evaluate((value: string) => { document.documentElement.dataset.theme = value; }, theme);
         await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
         await page.screenshot({ path: join(CAPTURES, `workspace-written-${width}-${theme}${language === 'fr' ? '-fr' : ''}.png`), fullPage: true });

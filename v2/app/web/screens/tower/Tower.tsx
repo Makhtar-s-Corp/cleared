@@ -14,7 +14,7 @@
 // form of one ticket per line, and the batches under way are a side card.
 // P214: "Template" in the bar shows the ready-made tickets (templates.ts).
 import { Check, HandGrabbing, ListChecks, Package, TerminalWindow, X } from '@phosphor-icons/react';
-import { Fragment, useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
 import type { Recipe } from '../../../../src/api/types.ts';
 import { TICKET_TEMPLATES, type TicketTemplate } from '../../../../src/tickets/templates.ts';
 import { Button } from '@/components/ui/button.tsx';
@@ -36,12 +36,9 @@ import {
   type BatchRow, type LeadCard as LeadCardModel, type LeadThread, type LiveCard, type NeedCard, type PlanRow, type ScheduleRow, type ServiceRow, type TowerModel,
 } from './model.ts';
 import { pickTemplate, templateLabels } from './templates.ts';
+import { Facts } from '@/components/facts/Facts.tsx';
 import './tower.css';
 
-// A line of facts, each kept whole on a line (lane 38's art director: no fact cut, no line ending on its "·").
-function Facts({ text }: { readonly text: string }) {
-  return <>{text.split(' · ').map((fact, i) => <Fragment key={i}>{i > 0 ? <span className="fact-sep">{' · '}</span> : null}<span className="fact">{fact}</span></Fragment>)}</>;
-}
 
 // The services a new ticket names: a chip per service of a workspace of
 // several, shown with the description once a title is typed.
@@ -240,12 +237,12 @@ export function LiveSession({ card, t }: { readonly card: LiveCard; readonly t: 
         <span className="row-kind session-head" id={`${id}-kind`}><span className={liveDot(card.phase, card.role, card.takenOver)} aria-hidden="true" /><span className="role">{t(`role_${card.role}`)}</span></span>
         <span className="row-main">
           <span className="session-title" id={`${id}-title`}>{card.title}</span>
-          {card.takenOver ? <span className="phrase taken-line" id={`${id}-phrase`}><HandGrabbing size={14} aria-hidden="true" />{takenOverText(card.takenOver, t)}</span> : <span className="phrase" id={`${id}-phrase`}>{sessionStatus(card, t)}</span>}
+          {card.takenOver ? <span className="phrase taken-line" id={`${id}-phrase`}><HandGrabbing size={14} aria-hidden="true" />{takenOverText(card.takenOver, t)}</span> : <span className="phrase" id={`${id}-phrase`}><Facts text={sessionStatus(card, t)} /></span>}
         </span>
         <span className="row-meta session-foot" id={`${id}-meta`}>
           {card.step ? <span className="svc-tag" data-step={card.step.position}>{stepTag(card.step, t)}</span>
             : card.service ? <span className="svc-tag">{card.service}</span> : null}
-          <span className="model"><span className={`sq ${harnessSquare(card.harness)}`} aria-hidden="true" />{formatModel(card.harness, card.model)}</span>
+          <span className="model"><span className={`sq ${harnessSquare(card.harness)}`} aria-hidden="true" /><Facts text={formatModel(card.harness, card.model)} /></span>
           <span className="id">{card.ticket}</span>
           <span className="elapsed">{duration(card.minutes, t)}</span>
         </span>
@@ -267,7 +264,7 @@ function LeadSide({ lead, t, draft, onDraft }: { readonly lead: LeadCardModel | 
     <section className="side-card" aria-labelledby="lead-title">
       <div className="lead-head">
         <span className="lead-mark" aria-hidden="true">{t('lead_initial')}</span>
-        <div><h2 id="lead-title"><a href="/lead">{t('lead_title')}</a></h2><p className={`lead-state ${state.kind}`}>{state.text}</p></div>
+        <div><h2 id="lead-title"><a href="/lead">{t('lead_title')}</a></h2><p className={`lead-state ${state.kind}`}><Facts text={state.text} /></p></div>
       </div>
       {lead?.line ? <p className="note lead-line"><q>{lead.line}</q></p> : <p className="note faint">{t('lead_no_line')}</p>}
       <form className="lead-ask" id="lead-ask" autoComplete="off" onSubmit={submit}>
@@ -290,7 +287,7 @@ function PlanLine({ row, t }: { readonly row: PlanRow; readonly t: Translate }) 
       <a className="plan-row" href={`/plans/${encodeURIComponent(row.id)}`}>
         <span className="plan-title">{row.title}</span>
         <span className="plan-bar" role="img" aria-label={bar}>{row.segments.map((segment, index) => <span key={index} className={`seg ${segment}`} />)}</span>
-        <span className="plan-line">{line}</span>
+        <span className="plan-line"><Facts text={line} /></span>
       </a>
     </li>
   );
@@ -302,7 +299,7 @@ function Schedules({ rows, now, language, t }: { readonly rows: readonly Schedul
     <>
       <h3 className="sub-title" id="schedules-title">{t('schedules_title')}</h3>
       <ul className="schedules" aria-labelledby="schedules-title">
-        {rows.map((row) => <li key={row.id} className={row.enabled ? 'schedule' : 'schedule off'} data-schedule={row.id}><span className="schedule-name">{row.name}</span><span className="schedule-line">{scheduleLine(row, now, language, t)}</span></li>)}
+        {rows.map((row) => <li key={row.id} className={row.enabled ? 'schedule' : 'schedule off'} data-schedule={row.id}><span className="schedule-name">{row.name}</span><span className="schedule-line"><Facts text={scheduleLine(row, now, language, t)} /></span></li>)}
       </ul>
     </>
   );

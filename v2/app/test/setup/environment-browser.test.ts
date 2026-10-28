@@ -11,7 +11,7 @@
 //     .devcontainer (C4), which waits for a restart here: no flow runs;
 //   - no policy violation, no page error, no missing key, axe finds nothing;
 //   - with CLEARED_V2_CAPTURES=<folder>, the step is captured at 1440, 1280,
-//     768 and 390 px, light and dark, in English, and at 1440 in French.
+//     768 and 390 px, in English, and at 1440 in French.
 //
 //   CLEARED_V2_PLAYWRIGHT=$PWD/node_modules/playwright-core node --test app/test/setup/environment-browser.test.ts
 import test from 'node:test';
@@ -111,7 +111,7 @@ async function run(language: 'en' | 'fr', failing = false): Promise<void> {
       assert.equal(await page.locator('[data-service="web"] [data-env-session="check_failed"]').count(), 1);
       await checked(page, 'check failed');
       if (CAPTURES) {
-        for (const [width, theme] of [[1440, 'light'], [390, 'dark']] as const) {
+        for (const [width, theme] of [[1440, 'light'], [390, 'light']] as const) {
           await page.evaluate((value: string) => { document.documentElement.dataset.theme = value; }, theme);
           await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });
           await page.screenshot({ path: join(CAPTURES, `environment-check-failed-${width}-${theme}${language === 'fr' ? '-fr' : ''}.png`), fullPage: true });
@@ -132,7 +132,7 @@ async function run(language: 'en' | 'fr', failing = false): Promise<void> {
     if (CAPTURES) {
       mkdirSync(CAPTURES, { recursive: true });
       if (language === 'en') {
-        for (const theme of ['light', 'dark']) {
+        for (const theme of ['light']) {
           await page.evaluate((value: string) => { document.documentElement.dataset.theme = value; }, theme);
           for (const width of WIDTHS) {
             await page.setViewportSize({ width, height: width === 390 ? 844 : 900 });

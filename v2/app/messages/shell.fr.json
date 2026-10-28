@@ -16,8 +16,6 @@
   "nav_inbox": "Réception",
   "nav_sessions": "Sessions",
   "source_fixtures": "Données d'exemple, pas le service",
-  "theme_dark": "Passer au thème sombre",
-  "theme_light": "Passer au thème clair",
   "signed_in_as": "Connecté en tant que {name}",
   "sign_out": "Se déconnecter",
   "inbox_waiting": "{n} en attente dans la réception",

@@ -7768,3 +7768,26 @@ Changed with the code: the label gate's case (decision 10), the adapter test's f
 
 - Pull request: 458, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-session-survives`.
+
+## 2026-10-28: the web app redesigned with Hallmark: Signal, one light theme, every screen recomposed (the author's choices, lane `v2-j6-ui-hallmark`, P265, B3.8, issue #451)
+
+**The need.** The owner asked for a full visual redesign of `v2/app/web` with the Hallmark skill, assertive enough that the difference shows at first glance on every screen, under rules of their own: light only, flat colours checked in CI, no translucent white on information, nothing clickable that moves, no photo and nothing remote, AA contrast, visible focus, 44 px targets, reduced motion, readable figures; logic, routes, forms, texts, test hooks and tests kept, no assertion weakened; the sidebar for the development only.
+
+**The branch.** Renamed to `v2-j6-ui-hallmark`, from `origin/v2` at `1f49a708`; `origin/v2` merged in at `1caf1492` (no conflict).
+
+**Decision.**
+1. **A custom theme, Signal.** Hallmark's deal gave Console, Blueprint and Lumen, all on a dark or mid ground, which the light-only rule refuses; the run is custom, from the material of Hallmark's Wayfind (public signage): square 2px ink frames, ink plates carrying one figure, cobalt for the primary action and what is live, amber for what waits. The faces stay Geist and Geist Mono (B3.8), cut heavy for headings and figures, because Wayfind's all-mono face would slow the long French text. The system is locked in `docs/v2/ui-hallmark/DESIGN.md`.
+2. **The scale grew, and stays closed.** `tokens.test.ts` held three text sizes and two weights; a heading set large needs more. It now holds six spacing steps, five sizes (13, 14, 20, 28, 40 px) and three weights (400, 600, 800), and every sheet still uses only them. The gradient test lost its one exception (the grace bar's fill had none left).
+3. **Dark mode removed.** Its tokens, the sheets' dark blocks, the theme button, the palette's item, the account menu's, the terminal's branch and the catalogs' words are gone; `theme.js` forgets an old choice and always sets light. The browser tests that looped over a dark theme now check that the page stays light under a dark system scheme and an old stored choice (`a11y-browser.test.ts`), that a page told it is dark draws the same paper (`access-browser.test.ts`), that no theme item nor its words exist (`palette.test.ts`) and that the built sheet has no dark rule (`lead/app.test.ts`). The 654 dark captures under `docs/v2/` are removed (the owner's rule); the earlier entries that name them keep their history in git.
+4. **The CI check.** `app/test/redesign/flat.test.ts`, Node's modules only, run by the verify job's new step "Flat colours guard" before the install (`runs-on` unchanged): the word gradient in no file of `app/web` or `app/public`, no dark theme, no blurred shadow, no translucent white, no move or scale on a hover or a press, no font or url from another site.
+5. **Middle dots and dashes.** Hallmark refuses meta lines joined by two middle dots or more, and dashes in copy. The models' strings are unchanged; `components/facts/Facts.tsx` draws such a line as cells parted by a rule that says a comma to a screen reader, and the tests read it back as the line the model joined. Consumption's period, which Intl writes with an en dash, says "15 au 21 oct. 2026" (new key `consumption_period_to`).
+6. **What moved on the page.** No label over a heading: the plan's state follows its title in the document, Consumption's period sits beside its heading. The sidebar is fixed (and the phone's top bar), so only the screen's bar is sticky. A row shows its title and its reason whole rather than cutting them under its meta. The plans screen scrolls as a page. A whole-page capture grows the window to the page's height, so the phone's bar of screens ends the page instead of floating mid-page.
+7. **New words**, in both catalogs: `index_groups_label`, `index_group_*` (the sessions grouped as the sidebar groups them) and `consumption_period_to`; removed: `theme_dark`, `theme_light`.
+
+**Sloplint.** Run in a real browser (Chromium through puppeteer-core in a scratch folder) on snapshots of the signed-in screens, their sheets inlined, `--scope app`: tower, sessions, inbox, session, plans, a plan and Consumption at 0 FAIL, two Reflex gates waived in the stamp (64, Geist Mono for ids; 72, the sidebar's session titles cut with an ellipsis). The sign-in page, the service map, a question to the code and the setup steps were not linted again after the last round: listed in the pull request.
+
+**Reviews.** No sub-agent was started (the brief's rule): the hero and finish reviews Hallmark asks for were done in this session, from the captures.
+
+**Resources.** No Docker, no tunnel, no listening port but the tests' and the captures' own ephemeral loopback ones. Network: `npm ci`, `git fetch`, puppeteer-core from npm and oxipng 9.1.5's release archive from its GitHub repository, both into a scratch folder outside the repository; GitHub for the issue and the pull request. No photo, no remote image, no Claude Code login read, no secret.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-ui-hallmark`.
