@@ -5,12 +5,13 @@
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import type { ContractItem, KnowledgeItem, NextInboxItem, PlanItemInbox } from '../../../../src/api/types.ts';
-import { contractItem, inboxFixture, knowledgeItem } from '../../../fixtures/inbox.ts';
+import { contractItem, dreamedItem, inboxFixture, knowledgeItem } from '../../../fixtures/inbox.ts';
+import { DREAM_TICKET as SERVICE_DREAM_TICKET } from '../../../../src/knowledge/dreaming.ts';
 import { servicePlan } from '../../../fixtures/lead.ts';
 import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
 import { loadCatalog } from '../../../src/catalog.ts';
 import { translator, type Translate } from '../../lib/i18n.ts';
-import type { InboxView, Local } from '../../screens/inbox/model.ts';
+import { DREAM_TICKET, itemLine, type InboxView, type Local } from '../../screens/inbox/model.ts';
 import { renderDetail, visibleText } from '../render.tsx';
 
 // The screen's translator: the shell's catalog under the inbox's, as the shell gives it.
@@ -48,6 +49,28 @@ test('Send back opens a field for what to change, kept by the screen, with Keep 
   const html = renderDetail(viewOf([item], { local: new Map<string, Local>([[item.id, { kind: 'change' }]]) }), en);
   assert.match(html, /<textarea[^>]*id="contract-message"[^>]*maxlength="2000"/);
   assert.deepEqual(acts(html), ['contract_keep', 'contract_send_back_send']);
+});
+
+test('a proposal of the nightly pass: the pass instead of a ticket, each source a link to its reviewer session, then Reject and Approve, in English and French', () => {
+  assert.equal(DREAM_TICKET, SERVICE_DREAM_TICKET);
+  const item = dreamedItem(FIXTURE_NOW);
+  const html = detailOf(item);
+  assert.ok(shown(html).includes(item.text));
+  assert.match(shown(html), /Past sessions/);
+  assert.doesNotMatch(shown(html), /\bdreaming\b/);
+  assert.match(shown(html), /From 2 reviews/);
+  assert.match(html, /<a class="d-link" href="\/sessions\/fixture-162-reviewer">LOCAL-162<\/a>/);
+  assert.match(html, /<a class="d-link" href="\/sessions\/fixture-151-reviewer">LOCAL-151<\/a>/);
+  assert.match(shown(html), /Reject writes nothing, and it is never proposed again\./);
+  assert.deepEqual(acts(html), ['knowledge_reject', 'knowledge_approve']);
+  assert.equal(itemLine(item, viewOf([item]), en), 'Seen in 2 reviews · for guestbook');
+  const french = detailOf(item, fr, { language: 'fr' });
+  assert.match(shown(french), /Sessions passées/);
+  assert.match(shown(french), /Tiré de 2 relectures/);
+  assert.equal(itemLine(item, viewOf([item]), fr), 'Vu dans 2 relectures · pour guestbook');
+  for (const text of [html, french]) assert.doesNotMatch(text, /«dream_|\u2014/);
+  // A handover's item keeps its ticket and its rule.
+  assert.doesNotMatch(shown(detailOf(knowledgeItem(FIXTURE_NOW))), /Past sessions|reviews/);
 });
 
 test('a knowledge item waiting: its text, its level, then Reject and Approve', () => {
