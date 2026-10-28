@@ -38,6 +38,8 @@
   --e-awaiting: 0 0 0 2px var(--awaiting);
   --halo-progress: #D5DDF8; --halo-review: #CDE7EB; --halo-waiting: #FBE6B3;
   --success-fill: #E2F2E7; --danger-fill: #FBE8EB;
+  /* the editor's code colours (lane 32), each at 4.5:1 or more on its surface */
+  --code-keyword: #6B21A8; --code-string: #0F6E32; --code-comment: #5C6575; --code-number: #8A4500; --code-function: #1F45D6; --code-definition: #0E1726; --code-property: #3A4456;
   /* the scale: six spacing steps, five text sizes, three weights, one row height, one motion */
   --space-1: 4px; --space-2: 8px; --space-3: 16px; --space-4: 24px; --space-5: 32px; --space-6: 48px;
   --text-sm: 0.8125rem; --text-md: 0.875rem; --text-lg: 1.25rem; --text-xl: 1.75rem; --text-display: 2.5rem;   /* 13, 14, 20, 28 and 40 px */
