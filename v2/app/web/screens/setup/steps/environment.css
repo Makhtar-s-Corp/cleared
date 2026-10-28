@@ -4,10 +4,10 @@
    only sign. Tokens of styles/app.css only. */
 .setup-step .setup-env-summary { font-weight: var(--weight-strong); }
 .setup-env { list-style: none; margin: var(--space-2) 0 var(--space-3); padding: 0; display: flex; flex-direction: column; gap: var(--space-2); max-width: 820px; }
-.setup-env-item { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: var(--space-1) var(--space-3); padding: 12px 12px; border-radius: 0; box-shadow: inset 6px 0 0 var(--hairline); }
-.setup-env-item[data-state="ready"] { box-shadow: inset 6px 0 0 var(--success); }
-.setup-env-item[data-state="failed"] { background: var(--sunken); box-shadow: inset 6px 0 0 var(--danger-text); }
-.setup-env-item[data-state="building"], .setup-env-item[data-state="stale"] { box-shadow: inset 6px 0 0 var(--awaiting); }
+.setup-env-item { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: var(--space-1) var(--space-3); padding: 12px 12px; border-radius: var(--radius); box-shadow: inset 2px 0 0 var(--line); }
+.setup-env-item[data-state="ready"] { box-shadow: inset 2px 0 0 var(--success); }
+.setup-env-item[data-state="failed"] { background: var(--danger-fill); box-shadow: inset 2px 0 0 var(--danger); }
+.setup-env-item[data-state="building"], .setup-env-item[data-state="stale"] { box-shadow: inset 2px 0 0 var(--awaiting); }
 .setup-env-state { font-size: var(--text-sm); font-weight: var(--weight-strong); color: var(--text-secondary); line-height: 1.5; }
 .setup-env-item[data-state="failed"] .setup-env-state { color: var(--danger-text); }
 .setup-env-body { min-width: 0; }
@@ -21,7 +21,7 @@
 }
 
 /* The declared check's output, and the setup session's proposal (lane v2-j5-env-setup, C4). */
-.setup-step .setup-env-output { margin: var(--space-2) 0 0; padding: var(--space-2) 12px; max-width: 72ch; max-height: 16em; overflow: auto; background: var(--sunken); border-radius: 0; font-family: var(--mono); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
+.setup-step .setup-env-output { margin: var(--space-2) 0 0; padding: var(--space-2) 12px; max-width: 72ch; max-height: 16em; overflow: auto; background: var(--sunken); border-radius: var(--radius); font-family: var(--mono); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
 .setup-step .setup-env-session { margin: var(--space-2) 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) 12px; }
 .setup-step .setup-env-session > .setup-env-text { margin: 0; flex: 1 1 32ch; }
 .setup-step p.setup-env-session { display: block; color: var(--text-secondary); font-size: var(--text-sm); max-width: 72ch; }

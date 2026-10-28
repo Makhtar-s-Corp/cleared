@@ -68,7 +68,7 @@ const THEME = {
   '.cm-textfield': { backgroundColor: 'var(--surface)', color: 'var(--text)', border: '0', borderRadius: '6px', boxShadow: 'var(--e-control)' },
   '.cm-button': { backgroundImage: 'none', backgroundColor: 'var(--surface)', color: 'var(--text)', border: '0', borderRadius: '6px', boxShadow: 'var(--e-control)' },
   '.cm-tooltip': { backgroundColor: 'var(--surface)', color: 'var(--text)', border: '0', borderRadius: '8px', boxShadow: 'var(--e-card)' },
-  '.cm-tooltip-autocomplete ul li[aria-selected]': { backgroundColor: 'var(--ink)', color: 'var(--on-ink)' },
+  '.cm-tooltip-autocomplete ul li[aria-selected]': { backgroundColor: 'var(--selected)', color: 'var(--text)' },
 };
 
 // The code's colours, by the sheet's tokens (session.css), in both themes.

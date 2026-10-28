@@ -1,6 +1,6 @@
-// shadcn/ui's Button, copied in and restyled to the kit (Signal, lane
-// j6-ui-hallmark): cobalt for the one gesture a screen waits for, a square
-// surface in a 2px ink frame for the others, the chip
+// shadcn/ui's Button, copied in and restyled to the kit (Workbench, lane
+// j6-ui-pro): indigo for the one gesture a screen waits for, a white
+// surface with a 1px line and a 6 px radius for the others, the chip
 // of the tower bar, a ghost for the header's icons, a link. Sizes stay with
 // the screens' sheets (32, 36, 42 or 44 px, by place and width), which set
 // them on the class each button keeps (btn, plain, chip-button, icon...),
