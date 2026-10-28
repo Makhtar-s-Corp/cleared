@@ -90,3 +90,26 @@ test('a reader\'s session is never the flow\'s to release, at a tick or at the r
   assert.equal(fake.networks.length, 2);
   assert.deepEqual(fake.calls.filter((c) => c.args[0] === 'rm' || c.args[1] === 'rm'), []);
 });
+
+// Issue 265's third point: the proof's step 8 waited for its delay while
+// Docker's pools were spent. A session that cannot get a network puts its
+// ticket back at once, and the note says why and what to run.
+test('a start that finds Docker\'s address pools spent puts the ticket back in Todo at once, with a note that names the pools and cleared doctor', async () => {
+  const t = await setup();
+  const fake = new FakeDocker();
+  fake.intercept = (args) => (args[0] === 'network' && args[1] === 'create' ? { code: 1, stdout: '', stderr: 'Error response from daemon: all predefined address pools have been fully subnetted' } : undefined);
+  const adapter = t.registry.sessionAdapters['claude-code']!;
+  adapter.start = async () => {
+    const session = '00000000-0000-4000-8000-0000000000cc';
+    await new Docker(fake.runner).createNetwork({ name: sessionNames(session).network, session, internal: true });
+    throw new Error('unreachable: the network was made');
+  };
+  await assert.rejects(t.engine.start(t.ticket.id, 'u1'));
+  assert.equal((await t.tickets.get(t.ticket.id))?.status, t.tickets.states.todo);
+  const back = t.flowEvents.find((e) => e.type === 'ticket_put_back');
+  const note = back?.type === 'ticket_put_back' ? back.note : '';
+  assert.match(note, /^The flow could not start: /);
+  assert.match(note, /address pools/);
+  assert.match(note, /cleared doctor/);
+  assert.ok((await t.tickets.comments(t.ticket.id)).some((c) => c.body === note), 'the same note on the ticket');
+});

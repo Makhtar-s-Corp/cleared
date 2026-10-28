@@ -117,7 +117,7 @@ import type { InboxStore } from '../inbox/store.ts';
 import type { Registry } from '../modules/registry.ts';
 import { CONTAINER_LOST, HostToolRefused, type Answer, type Briefing, type Decision, type Harness, type HostTool, type Role, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserId } from '../session/contract.ts';
 import { handoverNote, refuseTarget } from '../session/handover.ts';
-import { readToolInput, readToolOutput, type AgUiEvent, type Question, type SessionEvent, type SessionPhase, type StepName } from '../session/events.ts';
+import { LIVE_PHASES, readToolInput, readToolOutput, type AgUiEvent, type Question, type SessionEvent, type SessionPhase, type StepName } from '../session/events.ts';
 import { skillTicketService } from '../knowledge/store.ts';
 import { skillPath } from '../knowledge/skill.ts';
 import { DEFAULT_SAFE_COMMANDS, type Policy } from '../session/policy.ts';
@@ -367,7 +367,6 @@ type Candidate = {
 
 // A ticket's steps at once when no plan says otherwise: the plans' default (lead/plans/runner.ts).
 const STEP_PARALLEL = 2;
-const LIVE_PHASES: ReadonlySet<string> = new Set(['starting', 'working', 'waiting_human', 'reviewing']);
 // How long after its stop a session's containers and networks are still looked for at each tick.
 const RELEASE_WINDOW_MS = 10 * 60_000;
 const CHECKS_MS = 60_000;                                           // the forge is asked for a release's checks at most this often
