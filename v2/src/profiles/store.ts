@@ -57,7 +57,7 @@ export class ProfileError extends Error {
 
 // The forges' and the clouds' token shapes the guard's list leaves to the
 // private-term check, a bearer token, and credentials before a host with no scheme.
-const TOKEN_PATTERNS: readonly (readonly [string, RegExp])[] = [
+export const TOKEN_PATTERNS: readonly (readonly [string, RegExp])[] = [
   ['GitHub token', /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/],
   ['GitLab token', /\bglpat-[A-Za-z0-9_-]{20,}/],
   ['Slack token', /\bxox[abposr]-[A-Za-z0-9-]{10,}/],

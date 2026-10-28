@@ -204,6 +204,11 @@ test('a rejected proposal is never made again, the same words or the same rule w
   const passes = await dreaming.tick();
   assert.equal(passes[0]?.proposed, 0);
   assert.equal(dreams(inbox).length, 0);
+  // The rejection is kept apart from the inbox: an inbox that no longer had the item would not bring the rule back.
+  store.db.exec("DELETE FROM flow_inbox WHERE kind = 'knowledge'");
+  clock.at = new Date(2026, 9, 30, DREAM_HOUR, 30, 0);
+  assert.equal((await dreaming.tick())[0]?.proposed, 0);
+  assert.equal(dreams(inbox).length, 0);
 });
 
 test('a handover\'s knowledge rejected counts too, and nothing already proposed, approved or waiting is proposed again', async () => {
