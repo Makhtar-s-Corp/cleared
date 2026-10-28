@@ -7623,11 +7623,11 @@ The first tries found two defects, fixed here with a test each: the check's cont
 - `test/lead/config.test.ts` failed: `loadLeadConfig` said off with a workspace file and no project.
 - `app/web/test/tower-workspace.test.tsx`, its new case, failed: `ticketProject is not a function`.
 - `test/notify/module.test.ts`, "with a workspace file the dispatcher starts too", was written with the module's change and run on the old module, where it failed.
-Changed with the code, each for what the first full run of the end-to-end test showed: its workspace is two repositories and the train approvals' assertion is gone (decision 3); the mirror is seen by its first pass's rows, since that pass asks the tracker nothing; the ticket route answers 200.
+Changed with the code, each for what the first full run of the end-to-end test showed: its workspace is two repositories and the train approvals' assertion is gone (decision 3); the mirror is seen by its first pass's rows, since that pass asks the tracker nothing; the ticket route answers 200. A last case came from a review of the lane's own diff: `GET /api/lead` builds the lead by itself, so the test now first waits for the lead's session row and the service map's rows, which only the lead module's start makes; with the old `modules/lead.ts` (and the new switch) it failed with "waited 10000 ms for the lead's first generation".
 
 **The end-to-end test** runs main.ts's twelve modules in one process, their settings set before they are imported, as the settings file is applied before anything reads one: a state folder of the temporary folder, no workspace and no project, a fake `gh` over bare copies of the two examples, the fake harness with the proof's first-ticket script (`scripts/proof-j5.ts`), a token file for the GitHub mirror whose address is a recorder on loopback, and a `docker` stand-in first on `PATH`. It makes the owner from the setup code the start printed, as the app does, connects both repositories through the workspace step's routes, then checks that the workspace's rows, the knowledge, the dispatcher, the mirror's two trackers and the lead are there; it creates the first ticket from the first-ticket step and one as the Tower sends it, both with the workspace's id, and waits for the author's session plan in the inbox. The stand-in got no call and the recorder no request.
 
-**Files outside the issues' own.** `src/setup/steps/environment.ts` and `src/container/types.ts` (comments only, the restart named), `docs/install.md` and `docs/troubleshooting.md` (the known gaps: #437's line removed, #420's replaced by a link to the new section), the matrix and this log.
+**Files outside the issues' own.** `src/setup/steps/environment.ts` and `src/container/types.ts` (comments only, the restart named), `scripts/proof-j5.ts` (one comment: the lead now starts in the rehearsal and plays no act; the rehearsal was not run again), `docs/notifications.md` and `v2/README.md` (the dispatcher's and the flow's start), `docs/install.md` and `docs/troubleshooting.md` (the known gaps: #437's line removed, #420's replaced by a link to the new section), the matrix and this log.
 
 **Not done here.**
 - No Compose run and no rehearsal: the end-to-end test is in one Node process with fakes. `scripts/proof-j5.ts` is unchanged.
@@ -7638,7 +7638,7 @@ Changed with the code, each for what the first full run of the end-to-end test s
 **Checks**, on this branch at `origin/v2` `0e49cbde`:
 - `npm run typecheck` in `v2/`: clean.
 - `npm test` in `v2/`: 2874 Node tests, 2739 pass, 135 skipped, 0 fail; 416 Vitest tests pass.
-- `node --test test/setup/no-restart.test.ts`: passes in about 3 s, the stand-in `docker` called by nobody.
+- `node --test test/setup/no-restart.test.ts`: passes in about 3 s, the stand-in `docker` called by nobody; run again with the lead's case, with `test/docs.test.ts` and `test/scripts/proof-j5.test.ts`: all pass.
 - The browser tests were not run: nothing a screen draws changed, and the Tower's change is in its model, tested by Vitest.
 - `npm run guard -- --base origin/v2`: nothing refused. The guard does not read `docs/v2/` and ran without the private-term list, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
 

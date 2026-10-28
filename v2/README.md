@@ -86,7 +86,7 @@ Run from `v2/`:
 
 ## The flow
 
-The service runs tickets once it knows its project (`src/flow/config.ts`, `src/workspace/config.ts`). Without `CLEARED_V2_WORKSPACE` or `CLEARED_V2_PROJECT` it still answers `/health`, and the ticket routes answer `503` "the flow is not configured". A setting that is named but wrong stops the service at start.
+The service runs tickets once it knows its project (`src/flow/config.ts`, `src/workspace/config.ts`). Without `CLEARED_V2_WORKSPACE` or `CLEARED_V2_PROJECT` it still answers `/health`, and the ticket routes answer `503` "the flow is not configured", until the setup assistant writes a workspace: the flow and every module that needs it then start on it with no restart ([docs/install.md](../docs/install.md#what-needs-a-restart) says what still needs one). A setting that is named but wrong stops the service at start.
 
 | Variable | Default | Notes |
 | --- | --- | --- |

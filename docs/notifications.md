@@ -141,7 +141,7 @@ The dispatcher keeps its own queue and cursor in two tables of the ledger's data
 
 Cleared v2 ([milestone 2 plan](v2/milestone-2-plan.md), section 6) keeps the adapters, the private directory, the catalog and the rules above. What changed, on 2026-10-22:
 
-- **The dispatcher runs in the v2 service**, not at the end of a wake. `v2/src/notify/dispatcher.ts` ticks when the service starts and every 30 seconds after, as soon as a project is set (`CLEARED_V2_PROJECT`). It needs no browser open and no request to the service's API.
+- **The dispatcher runs in the v2 service**, not at the end of a wake. `v2/src/notify/dispatcher.ts` ticks when the service starts and every 30 seconds after, as soon as a workspace is set (`CLEARED_V2_WORKSPACE` or `CLEARED_V2_PROJECT`), or from the moment the setup assistant connects one, with no restart. It needs no browser open and no request to the service's API.
 - **Where it looks.** The inbox (`flow_inbox`), for what waits for a person now, and v1's `events` table, for what the release watch wrote since the last tick (`rollback_pushed`, `prod_revert`, and the watch's failures listed under `health` above). The board snapshot and the `blocked` kind are v1's only.
 - **Two new kinds**, `permission` and `plan`. The order of urgency is rollback, health, approval, plan, question, permission (`URGENCY` in `lib/notify/contract.ts`).
 

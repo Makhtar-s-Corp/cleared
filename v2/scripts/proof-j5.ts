@@ -199,7 +199,8 @@ const REVIEW = 'I read the change and ran the tests.\n\nVerdict: “no blocking 
 // The fake harness's script: any author start proposes its session plan
 // (decision 22 of milestone 2: the flow holds an author until its plan has
 // a Go), then, at the Go, adds the line after the README's last one; the
-// reviewer passes it. No lead: Compose starts none without a project.
+// reviewer passes it. The lead plays no act: it starts once the workspace
+// is connected (issue #420), and has nothing to do here.
 export function firstTicketScript(readme: string, line: string): RehearsalScript {
   const last = readme.split('\n').map((l) => l.trim()).filter(Boolean).at(-1) ?? '';
   const model = 'claude-opus-5-5';

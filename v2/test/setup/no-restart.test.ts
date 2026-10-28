@@ -174,6 +174,9 @@ test('the assistant, then a first ticket and a Tower ticket, with no restart: ea
       return rows.length === 2 ? rows : undefined;
     }, 'the mirror\'s first pass');
     assert.deepEqual(trackers.map((name) => /guestbook|filter-api/.exec(name)?.[0]), ['filter-api', 'guestbook']);
+    // The lead module starts its lead and refreshes the service map with no request to a lead route.
+    await until(() => (store.db.prepare("SELECT COUNT(*) AS n FROM sessions WHERE role = 'lead'").get()!.n === 1 ? true : undefined), 'the lead\'s first generation');
+    await until(() => (Number(store.db.prepare('SELECT COUNT(*) AS n FROM service_maps WHERE project = ?').get(project)!.n) > 0 ? true : undefined), 'the service map\'s first refresh');
     assert.equal((await call('/api/lead')).status, 200, 'the lead runs');
 
     // The first ticket, from the assistant's step.
