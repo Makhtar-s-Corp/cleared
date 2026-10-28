@@ -7639,10 +7639,10 @@ Changed with the code, each for what the first full run of the end-to-end test s
 - `npm run typecheck` in `v2/`: clean.
 - `npm test` in `v2/`: 2874 Node tests, 2739 pass, 135 skipped, 0 fail; 416 Vitest tests pass.
 - `node --test test/setup/no-restart.test.ts`: passes in about 3 s, the stand-in `docker` called by nobody.
-- The browser tests were not run: no screen changed, and the Tower's change is in its model, tested by Vitest.
+- The browser tests were not run: nothing a screen draws changed, and the Tower's change is in its model, tested by Vitest.
 - `npm run guard -- --base origin/v2`: nothing refused. The guard does not read `docs/v2/` and ran without the private-term list, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
 
 **Resources.** No Docker object (the test's stand-in refuses every call and got none), no real GitHub, GitLab, Slack, Cursor or Codex account, no Claude Code login read. Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issues and the pull request. Ports: only the tests' own ephemeral loopback ones. No tunnel, no secret.
 
-- Pull request: PR_NUMBER, against `v2`.
+- Pull request: 456, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-workspace-reload`.
