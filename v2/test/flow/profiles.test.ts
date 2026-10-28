@@ -40,7 +40,7 @@ test('an edited profile and environment reach the author and the reviewer, and e
   const versions = profileVersions(t.store.db);
   versions.profile.save({
     authorModel: 'claude-opus-5-1', reviewerModel: 'claude-haiku-5-5',
-    rolePrompts: { author: 'Write the changelog line too.', reviewer: 'Check the changelog line.' }, allowedTools: ['make check', 'npm run lint *'],
+    rolePrompts: { author: 'Write the changelog line too.', reviewer: 'Check the changelog line.' }, allowedTools: ['make check', 'npm run lint'],
   }, 'u1');
   versions.environment.save({ image: 'cleared-v2-session:custom', allowedHosts: ['api.example.com'], cpus: '1', memory: '2g' }, 'u1');
   await reviewed(t);
@@ -52,7 +52,7 @@ test('an edited profile and environment reach the author and the reviewer, and e
   assert.ok(author.input.prompt.endsWith('\n\nWrite the changelog line too.'), author.input.prompt);
   assert.ok(reviewer.input.prompt.endsWith('\n\nCheck the changelog line.'), reviewer.input.prompt);
   for (const s of [author, reviewer]) {
-    assert.deepEqual(s.input.policy.safeCommands.slice(-3), ['npm ci', 'make check', 'npm run lint *']);
+    assert.deepEqual(s.input.policy.safeCommands.slice(-3), ['npm ci', 'make check', 'npm run lint']);
     assert.deepEqual(s.input.policy.allowedHosts, ['registry.npmjs.org', 'api.example.com']);
     assert.equal(s.input.image, 'cleared-v2-session:custom');
     assert.deepEqual(s.input.limits, { cpus: '1', memory: '2g' });

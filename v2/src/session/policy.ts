@@ -745,6 +745,11 @@ const READ_OPTIONS: Readonly<Record<string, OptionSpec>> = {
   },
 };
 
+// The programs whose every option the policy reads before it allows them
+// (READ_OPTIONS): a pattern may end with a wildcard after one of them, as
+// an agent profile's allowed command (profiles/store.ts).
+export const OPTION_READ_PROGRAMS: ReadonlySet<string> = new Set(Object.keys(READ_OPTIONS).filter((name) => !name.includes(' ')));
+
 // The operands of a command under its spec, and the options that named a
 // value; undefined when a word is an option the spec does not have.
 function readOptions(args: readonly string[], spec: OptionSpec): { operands: string[]; named: string[] } | undefined {

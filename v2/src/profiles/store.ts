@@ -14,6 +14,7 @@
 // a connection, are refused whatever they hold.
 import type { DatabaseSync } from 'node:sqlite';
 import { GUARD_PATTERNS } from '../session/clean.ts';
+import { OPTION_READ_PROGRAMS } from '../session/policy.ts';
 import type { Role, SessionId, UserId } from '../session/contract.ts';
 import {
   DEFAULT_ENVIRONMENT, DEFAULT_PROFILE, NETWORKS, PROFILE_HARNESSES,
@@ -129,15 +130,19 @@ const model = (value: unknown, which: string): string | null => {
 //     the policy's questions, or a project's own [session] safe_commands,
 //     which its review reads;
 //   - a program with subcommands names one of its safe ones, literally
-//     (SUBCOMMANDS: reads, the tests, a commit), never one that installs,
-//     pushes, resets or reconfigures;
+//     (SUBCOMMANDS), never one that installs, pushes, resets, reconfigures
+//     or opens a pager (git grep -O);
 //   - an interpreter runs a script named literally, or one of the test and
 //     check modules after python -m, never code given on its command line
 //     (-e, -c, --eval...) nor pip;
-//   - a wildcard comes only after that head, or in the arguments of a tool
-//     that reads or checks files and runs nothing (ARGUMENTS); any other
-//     command is allowed exactly as written, as an "Always in this project"
-//     answer allows one.
+//   - a wildcard only where the policy reads every option it can stand
+//     for: after a program of OPTION_READ_PROGRAMS (cat, grep, rg...), and
+//     after one of GIT_WILDCARD, the git subcommands Cleared's own safe
+//     commands already allow with one, whose options the policy checks.
+//     A test runner's or a linter's options load code (--config,
+//     --require, --plugin) and the policy does not read them, so any other
+//     command is allowed exactly as written, as an "Always in this
+//     project" answer allows one.
 const WRAPPERS = new Set([
   'rm', 'rmdir', 'shred', 'curl', 'wget', 'ssh', 'scp', 'sftp', 'rsync', 'nc', 'ncat', 'netcat', 'socat', 'telnet', 'ftp',
   'npx', 'pnpx', 'bunx', 'sudo', 'su', 'doas', 'env', 'eval', 'exec', 'xargs', 'parallel', 'timeout', 'nohup', 'time', 'command', 'builtin',
@@ -148,21 +153,18 @@ const WRAPPERS = new Set([
   'bun', 'deno', 'uv', 'uvx', 'pipx', 'poetry', 'conda', 'gem', 'cargo', 'go',
 ]);
 const SUBCOMMANDS: Readonly<Record<string, ReadonlySet<string>>> = {
-  git: new Set(['status', 'diff', 'log', 'show', 'blame', 'grep', 'ls-files', 'rev-parse', 'describe', 'shortlog', 'add', 'commit']),
+  git: new Set(['status', 'diff', 'log', 'show', 'blame', 'ls-files', 'rev-parse', 'describe', 'shortlog', 'add', 'commit']),
   npm: new Set(['run', 'run-script', 'test', 't', 'ls', 'list', 'outdated', 'why']),
   pnpm: new Set(['run', 'test', 't', 'ls', 'list', 'outdated', 'why']),
   yarn: new Set(['run', 'test', 'list', 'outdated', 'why']),
   pip: new Set(['list', 'show', 'freeze', 'check']),
   pip3: new Set(['list', 'show', 'freeze', 'check']),
 };
+const GIT_WILDCARD = new Set(['status', 'diff', 'log', 'add', 'commit']);
 const INTERPRETERS = new Set(['node', 'nodejs', 'python', 'python2', 'python3', 'perl', 'ruby', 'php', 'lua', 'Rscript', 'tsx', 'ts-node']);
 const PYTHONS = new Set(['python', 'python2', 'python3']);
 // The modules `python -m` may run: tests and checks, never pip or a server.
 const PYTHON_MODULES = new Set(['pytest', 'unittest', 'doctest', 'mypy', 'ruff', 'black', 'flake8', 'pylint', 'isort', 'compileall']);
-const ARGUMENTS = new Set([
-  'tsc', 'eslint', 'prettier', 'biome', 'jest', 'vitest', 'mocha', 'pytest', 'ruff', 'mypy', 'black', 'flake8', 'pylint', 'shellcheck',
-  'cat', 'head', 'tail', 'wc', 'ls', 'grep', 'rg', 'diff', 'stat', 'file', 'du', 'tree', 'jq',
-]);
 const LITERAL = /^[A-Za-z0-9_@%+=:,./-]+$/;                // a word with no wildcard nor shell character
 const PATTERN = /^[A-Za-z0-9_@%+=:,./*-]+$/;               // the same, or with the policy's wildcard
 
@@ -173,22 +175,15 @@ function tool(item: string): boolean {
   if (!LITERAL.test(first)) return false;
   const program = first.split('/').at(-1) as string;
   if (WRAPPERS.has(program)) return false;
-  // The words that must be literal: the head; after it, the policy's wildcard is allowed.
-  let head = words.length;
   const subcommands = SUBCOMMANDS[program];
-  if (subcommands) {
-    if (second === undefined || !subcommands.has(second)) return false;
-    head = 2;
-  } else if (INTERPRETERS.has(program)) {
+  if (subcommands && (second === undefined || !subcommands.has(second))) return false;
+  if (INTERPRETERS.has(program)) {
     if (second === undefined) return false;
-    if (PYTHONS.has(program) && second === '-m') {
-      if (third === undefined || !PYTHON_MODULES.has(third)) return false;
-      head = 3;
-    } else {
-      if (!LITERAL.test(second) || second.startsWith('-')) return false;
-      head = 2;
-    }
-  } else if (ARGUMENTS.has(program)) head = 1;
+    if (PYTHONS.has(program) && second === '-m') { if (third === undefined || !PYTHON_MODULES.has(third)) return false; }
+    else if (!LITERAL.test(second) || second.startsWith('-')) return false;
+  }
+  // The words that must be literal; after them, the policy's wildcard is allowed.
+  const head = OPTION_READ_PROGRAMS.has(first) ? 1 : program === 'git' && GIT_WILDCARD.has(second ?? '') && first === 'git' ? 2 : words.length;
   return words.every((word, index) => (index < head ? LITERAL : PATTERN).test(word));
 }
 

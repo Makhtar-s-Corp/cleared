@@ -140,10 +140,12 @@ test('what a profile refuses, each with its code, and nothing written', () => {
     'node -e *', 'node --eval *', 'node *', 'python -c *', 'python3 *', 'python -m pip install *', 'python -m http.server', 'perl -e *', 'ruby -e *', 'bun install', 'deno run *',
     // A wildcard in the arguments of a tool that can run commands: exact commands only.
     'awk *', 'make *', 'find *', 'tar *', 'sed *', 'make check *',
+    // A pager behind git grep -O, and a wildcard where the policy does not read the options (a runner's --config, a linter's --plugin).
+    'git grep *', 'git grep foo', 'git show *', 'npm run lint *', 'npm test *', 'node scripts/check.js *', 'python -m pytest *', 'jest *', 'mocha *', 'eslint *', 'prettier *', 'tsc *', 'tree *', 'jq *',
     // A deploy tool takes no wildcard either (never-deploys.test.ts keeps their names out of the code, so they are built here).
     ...[['kube', 'ctl'], ['hel', 'm'], ['ter', 'raform'], ['fly', 'ctl']].map((parts) => `${parts.join('')} *`),
   ]) refused(() => versions.profile.save({ allowedTools: [tool] }, 'u1'), 'tools');
-  const accepted = ['make check', 'npm run lint', 'npm run lint *', 'npm test *', 'git status', 'git log *', 'node scripts/check.js *', 'python -m pytest *', 'eslint *', 'cat *', './scripts/lint.sh'];
+  const accepted = ['make check', 'npm run lint', 'npm test', 'git status', 'git log *', 'git diff --stat *', 'git show HEAD', 'node scripts/check.js', 'python -m pytest', 'eslint src', 'cat *', 'grep -rn *', 'rg *', './scripts/lint.sh'];
   assert.deepEqual(versions.profile.save({ allowedTools: accepted }, 'u1').body.allowedTools, accepted);
   versions.profile.restore(1, 'u1');
   refused(() => versions.profile.save({ allowedTools: 'make check' }, 'u1'), 'tools');

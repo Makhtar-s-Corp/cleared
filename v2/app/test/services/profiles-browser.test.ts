@@ -3,7 +3,7 @@
 // service's own store in memory: both histories under the test secrets;
 // Restore on an old version, by the keyboard, makes a new current version
 // that says where it came from, and the old one stays listed; axe finds
-// nothing, in English and in French, light and dark; on a phone the page
+// nothing, in English and in French, in the app's one light theme (P265); on a phone the page
 // does not scroll sideways. With CLEARED_V2_CAPTURES set to a folder it
 // writes the panel's captures there.
 //
@@ -100,17 +100,17 @@ test('the panel lists both histories; Restore on an old version makes a new curr
   });
 });
 
-test('in French, dark, every word of the panel is French', { skip }, async () => {
-  await withBrowser({ language: 'fr', theme: 'dark' }, async (page) => {
+test('in French, every word of the panel is French', { skip }, async () => {
+  await withBrowser({ language: 'fr' }, async (page) => {
     const text: string = await page.locator('[data-profiles]').innerText();
     assert.match(text, /Profil d.agent/);
     assert.doesNotMatch(text, /\d{4}-\d{2}-\d{2}T/, 'no ISO time');
-    await axeClean(page, 'fr dark');
-    await shot(page, 'profiles-fr-1440-dark');
+    await axeClean(page, 'fr');
+    await shot(page, 'profiles-fr-1440-light');
   });
 });
 
-for (const [width, theme] of [[1280, 'light'], [768, 'light'], [390, 'light'], [1280, 'dark'], [768, 'dark'], [390, 'dark'], [1440, 'dark']] as const) {
+for (const [width, theme] of [[1280, 'light'], [768, 'light'], [390, 'light']] as const) {
   test(`at ${width} px, ${theme}, the panel does not make the page scroll sideways`, { skip }, async () => {
     await withBrowser({ language: 'en', width, theme }, async (page) => {
       assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth), `no horizontal scroll at ${width} px`);
