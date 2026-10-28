@@ -49,12 +49,13 @@ test('each file after the first starts at an entry heading', () => {
   for (const file of files.slice(1)) assert.match(readFileSync(join(docs, file), 'utf8'), /^## \d{4}-\d{2}-\d{2}: /, file);
 });
 
-// GitHub's anchor for a heading: lower case, punctuation dropped, each space
-// a hyphen, and -1, -2 after a repeated one.
+// GitHub's anchor for a heading: lower case, punctuation dropped (a code
+// span's backticks, not its text), each space a hyphen, and -1, -2 after a
+// repeated one.
 const anchors = (markdown: string): Set<string> => {
   const seen = new Map<string, number>();
   const found = new Set<string>();
-  for (const [, title] of withoutCode(markdown).matchAll(/^#{1,6} (.+?)#*$/gm)) {
+  for (const [, title] of withoutFences(markdown).matchAll(/^#{1,6} (.+?)#*$/gm)) {
     const slug = title!.trim().toLowerCase().replace(/[^\p{L}\p{N}\s_-]/gu, '').replace(/\s/g, '-');
     const count = seen.get(slug) ?? 0;
     found.add(count === 0 ? slug : `${slug}-${count}`);
@@ -63,9 +64,9 @@ const anchors = (markdown: string): Set<string> => {
   return found;
 };
 
-// Fenced blocks and code spans are text, not links.
-const withoutCode = (markdown: string): string =>
-  markdown.replace(/^```[\s\S]*?^```/gm, '').replace(/`[^`\n]*`/g, '');
+// Fenced blocks and code spans are text, not links or headings.
+const withoutFences = (markdown: string): string => markdown.replace(/^```[\s\S]*?^```/gm, '');
+const withoutCode = (markdown: string): string => withoutFences(markdown).replace(/`[^`\n]*`/g, '');
 
 const links = (markdown: string): string[] =>
   [...withoutCode(markdown).matchAll(/\]\(([^)\s]+)(?:\s+"[^"]*")?\)/g)].map(([, target]) => target!)
