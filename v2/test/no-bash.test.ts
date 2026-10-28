@@ -5,7 +5,8 @@
 // no shell on the host. What runs inside a session's container is the
 // project's image, not the core: the launchers, the terminal's wrapper and
 // the doctor's probes keep their `sh -c`, and the human's shell is bash
-// (docs/v2/decisions-log.md, 2026-10-25). v1's scripts go in milestone 4.
+// (docs/v2/decisions-log-milestone-3.md, 2026-10-25). v1's scripts go in
+// milestone 4.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';

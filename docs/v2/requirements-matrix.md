@@ -1,6 +1,6 @@
 # Cleared v2: requirements matrix
 
-Every requirement of the brief (the orchestrator's prompt and the owner's decisions of 2026-10-21) and of the two complements of 2026-10-22 ([complement-devin.md](complement-devin.md), [complement-multi-depots.md](complement-multi-depots.md)), with its milestone, the pull request that delivers it, the test that proves it, and its status. Created on 2026-10-22 by the milestone 2 replan (logged in [decisions-log.md](decisions-log.md)); the merged lines were filled from pull requests 118 to 181 and the tests under `v2/test/` and `v2/app/test/` at commit `f86c147`.
+Every requirement of the brief (the orchestrator's prompt and the owner's decisions of 2026-10-21) and of the two complements of 2026-10-22 ([complement-devin.md](complement-devin.md), [complement-multi-depots.md](complement-multi-depots.md)), with its milestone, the pull request that delivers it, the test that proves it, and its status. Created on 2026-10-22 by the milestone 2 replan (logged in [decisions-log-milestone-2.md](decisions-log-milestone-2.md)); the merged lines were filled from pull requests 118 to 181 and the tests under `v2/test/` and `v2/app/test/` at commit `f86c147`.
 
 ## The rules of this file
 

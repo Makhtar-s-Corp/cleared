@@ -1,6 +1,6 @@
 # Cleared v2: keep and drop
 
-This is the verdict on every top-level and second-level path that `git ls-files` lists on the `v2` branch at commit `bd496f1` (297 tracked files, 169 paths at those two levels), plus the `docs/v2/` directory this change adds. The decisions behind it are in [decisions-log.md](decisions-log.md).
+This is the verdict on every top-level and second-level path that `git ls-files` lists on the `v2` branch at commit `bd496f1` (297 tracked files, 169 paths at those two levels), plus the `docs/v2/` directory this change adds. The decisions behind it are in [decisions-log-milestone-1.md](decisions-log-milestone-1.md).
 
 ## How to read the tables
 

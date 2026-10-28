@@ -2,7 +2,7 @@
 
 Milestone 1 takes one ticket from Todo to live, entirely in sessions. This page splits it into ten lanes, orders them in waves of at most three, fixes the session contract, the event subset, the policy rules and the way Claude Code is driven, and lists what the owner still has to decide. It contains no code: every lane writes its own, tests first.
 
-Written on 2026-10-21 by a Fable 5.1 planning session (logged in [decisions-log.md](decisions-log.md)). Inputs: the brief (sections 3 to 6), the owner's decisions of 2026-10-21, the harness design note, [keep-and-drop.md](keep-and-drop.md), [decisions-log.md](decisions-log.md), [adapters.md](../adapters.md) and the `v2/` skeleton at commit `88226e1`. Every version, port, line number and command below was read or run on this server on 2026-10-21; "unknown" marks what was not verified.
+Written on 2026-10-21 by a Fable 5.1 planning session (logged in [decisions-log-milestone-1.md](decisions-log-milestone-1.md)). Inputs: the brief (sections 3 to 6), the owner's decisions of 2026-10-21, the harness design note, [keep-and-drop.md](keep-and-drop.md), [decisions-log.md](decisions-log.md), [adapters.md](../adapters.md) and the `v2/` skeleton at commit `88226e1`. Every version, port, line number and command below was read or run on this server on 2026-10-21; "unknown" marks what was not verified.
 
 ## 1. The proof, as measured steps
 
@@ -25,7 +25,7 @@ The durations come from `STEP_STARTED` and `STEP_FINISHED` events (section 4) wi
 
 ## 2. Decisions this plan takes
 
-Each decision below is taken here so that lanes do not re-decide it. The orchestrator copies each one into [decisions-log.md](decisions-log.md), with its consequences, when the lane that implements it lands.
+Each decision below is taken here so that lanes do not re-decide it. The orchestrator copies each one into the decisions log ([decisions-log.md](decisions-log.md) lists its files), with its consequences, when the lane that implements it lands.
 
 1. **Claude Code is driven through the Agent SDK in streaming input mode, not ACP.** Section 6 gives the reasons, from [adapters.md](../adapters.md).
 2. **The SDK runs inside the session container**, in a small runner process. The host side of the adapter talks to the runner over the container's stdin and stdout, one JSON object per line. Section 6.

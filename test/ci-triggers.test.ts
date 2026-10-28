@@ -1,4 +1,4 @@
-// The workflows run on pushes to the v2 branch as well as on pull requests (docs/v2/decisions-log.md, 2026-10-21).
+// The workflows run on pushes to the v2 branch as well as on pull requests (docs/v2/decisions-log-milestone-1.md, 2026-10-21).
 // Before this change the v2 workflow only ran on pull requests to v2, and checks.yml only on pushes to main.
 import test from 'node:test';
 import assert from 'node:assert/strict';

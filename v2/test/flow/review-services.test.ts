@@ -1,6 +1,6 @@
 // The reviewer of a ticket of several services sees the change of every
 // service, and the contract's, and judges the criteria on the whole (owner
-// decision of 2026-10-22 20:33, docs/v2/decisions-log.md). The real
+// decision of 2026-10-22 20:33, docs/v2/decisions-log-milestone-2.md). The real
 // multi-service proof's ticket was refused twice because the guestbook's
 // reviewer saw the guestbook's diff only and found the filter API's criteria
 // unmet. The prompt's text first, then the flow on the fake adapter, on a

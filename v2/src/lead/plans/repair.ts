@@ -1,6 +1,6 @@
 // The repair of the tickets that name a service the workspace no longer has
-// (docs/v2/decisions-log.md, 2026-10-23, single-service mode): a workspace
-// that changed under the same id, from several services to one, kept the
+// (docs/v2/decisions-log-milestone-2.md, 2026-10-23, single-service mode): a
+// workspace that changed under the same id, from several services to one, kept the
 // old services' rows in the ledger, and plans approved before the fix named
 // them on their tickets, which the flow refuses ("guestbook is not a
 // service of workspace ..."). npm run repair-services
