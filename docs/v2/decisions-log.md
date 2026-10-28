@@ -7999,9 +7999,15 @@ Tests first: `test/flow/takeover.test.ts` (the journal ends on `done`) and `app/
 **Open.**
 - #468: a session survives a restart of the service, a taken-over one included.
 - The script's permission rule is the proofs' (`proof-inbox.ts`): it refused a few of the sessions' compound read-only commands (a `git diff` after a `;`), which the sessions worked around. Said, not changed.
+- #471 (opened here): a full `npm test` failed once in `test/flow/one-service.test.ts`, which passed three times alone. The fake adapter's random session id ended with a French phone number's shape, which the cleaner redacts in a message id. Not this lane's change; the issue has the cause and the check.
 - No progress dashboard: the owner's rules ask a sub-agent to keep one for a long task, and the brief forbids starting any sub-agent.
 
-**Resources.** Docker: the two images built with the label; the run's session, egress and postgres containers, networks and volumes, each made by the service with the label and removed by it (none left at the end); other labelled objects of this server, the `cleared-v2-e2e` install and other lanes' sessions, never touched. Ports: only the runs' own, from 9700 to 9799 on `127.0.0.1`, checked free with `ss -ltn`, closed at the end. No tunnel. The login mounted read only, never opened, copied or printed. Network: `npm ci` in the session containers through their egress proxy (the npm registry), the model API, `git fetch` and GitHub for the issues and the pull request.
+**Checks**, on this branch after merging `origin/v2` at `cb393e8a` (13:59):
+- `npm test` in `v2/`: 2960 Node tests, 2819 pass, 141 skipped, 0 fail; 434 Vitest tests pass.
+- `npm run typecheck` in `v2/`: clean.
+- `npm run guard -- --base origin/v2`: nothing refused, once the redaction test built its token's shape from parts. The guard ran without the private-term list, so the lane's diff was also searched for the owner's name and the first piloted project's: none.
+
+**Resources.** Docker: the two images built with the label, left on the server: their tags were set again at 12:33 by another lane, whose prepared images were built since, so removing them could break that lane; the run's session, egress and postgres containers, networks and volumes, each made by the service with the label and removed by it (none left at the end); other labelled objects of this server, the `cleared-v2-e2e` install and other lanes' sessions, never touched. Ports: only the runs' own, from 9700 to 9799 on `127.0.0.1`, checked free with `ss -ltn`, closed at the end. No tunnel. The login mounted read only, never opened, copied or printed. Network: `npm ci` in the session containers through their egress proxy (the npm registry), the model API, `git fetch` and GitHub for the issues and the pull request.
 
 - Pull request: 466, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-live-takeover`.
