@@ -8120,5 +8120,8 @@ Each ticket went back to Todo after its publish with "The release could not be r
 
 **Checks**, on this branch: the 135 issues read back after the closes, each in the state its row says (112 closed as duplicates of their umbrella, 14 "not planned", 4 "completed", the 5 security ones open). In `v2/`: `npm run typecheck` clean; `npm test` runs 2964 Node tests, 2823 pass, 141 skipped (the browser tests), 0 fail, and 434 Vitest tests pass; `npm run guard -- --base origin/v2`: nothing refused.
 
+
+**The merge of 486** (lane `v2-j6-docker-hygiene`, at `origin/v2` `e37d8363`). The log keeps that lane's entry, then this one. #133 stays grouped into #481: `rm --force --volumes` is still in `v2/src/container/docker.ts` (line 562 after the merge). After the merge: `npm run typecheck` clean; `npm test` runs 2975 Node tests, 2834 pass, 141 skipped, 0 fail, and 434 Vitest tests pass; `npm run guard -- --base origin/v2`: nothing refused.
+
 - Pull request: against `v2`, closes #476.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-review-triage`.
