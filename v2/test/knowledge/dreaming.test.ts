@@ -360,3 +360,12 @@ test('the switch through the API: GET /api/dreaming reads each service, POST /ap
   assert.equal((await call('POST', '/api/dreaming/:service', OWNER.id, { service: 'guestbook' }, { enabled: false })).status, 200);
   assert.deepEqual(dreaming.view().services.map((row) => [row.service, row.enabled]), [['guestbook', false], ['filter-api', true]]);
 });
+
+test('every source is cited, however many tickets the defect came back on', async () => {
+  const { store, inbox, dreaming } = setup();
+  for (let n = 1; n <= 14; n++) rejected(store, { ticket: `LOCAL-${n}`, at: `2026-10-${String(n + 10).padStart(2, '0')}T10:00:00.000Z`, text: report(SWALLOWED(`src/file${n}.ts`)) });
+  await dreaming.tick();
+  const [item] = dreams(inbox);
+  assert.equal(item?.sources?.length, 14);
+  assert.deepEqual(item?.sources?.map((source) => source.ticket), Array.from({ length: 14 }, (_, i) => `LOCAL-${14 - i}`));
+});

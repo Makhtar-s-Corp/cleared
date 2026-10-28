@@ -49,8 +49,6 @@ export const DREAM_DAYS = 30;
 export const MAX_REPORTS = 500;
 export const MIN_SOURCES = 2;
 export const MAX_PROPOSALS = 5;
-// The most sources a proposal cites, the newest.
-export const MAX_SOURCES = 10;
 // A defect with fewer words says too little to be a rule.
 const MIN_WORDS = 4;
 
@@ -223,7 +221,7 @@ export class Dreaming {
       const text = group.rule.text;
       // Read again as it would be stored: nothing that looks like a secret leaves.
       if (looksSensitive(text, this.#deps.clean)) continue;
-      items.push(this.#deps.inbox.addDreamed({ ticket: DREAM_TICKET, project: this.#deps.workspace.id, service, text, sources: sources.slice(0, MAX_SOURCES) }));
+      items.push(this.#deps.inbox.addDreamed({ ticket: DREAM_TICKET, project: this.#deps.workspace.id, service, text, sources }));
       known.push(group.rule.words);
     }
     return items;
