@@ -47,5 +47,7 @@ test('a refusal in words: the owner\'s switch, or the general one', () => {
   assert.equal(dreamingRefusal(fr, 500), 'La passe n\'a pas pu être modifiée. Réessayez dans un instant.');
   const markup = html(<DreamingPanel t={en} view={VIEW} error={dreamingRefusal(en, 403)} busy />);
   assert.match(markup, /role="alert"[^>]*>Only the workspace/);
-  assert.equal([...markup.matchAll(/<input[^>]*disabled/g)].length, 3);
+  // Busy, the boxes stay focusable: the section says it is busy.
+  assert.match(markup, /<section[^>]*aria-busy="true"/);
+  assert.equal([...markup.matchAll(/<input[^>]*disabled/g)].length, 0);
 });

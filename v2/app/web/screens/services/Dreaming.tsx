@@ -21,7 +21,8 @@ export function DreamingPanel({ t, view, busy = false, error = '', onSet }: {
       <ul className="dreaming-services">
         {view.services.map((row, i) => (
           <li key={row.service} data-dreaming-service={row.service}>
-            <input type="checkbox" id={`dreaming-${i}`} checked={row.enabled} disabled={busy} onChange={(event) => onSet?.(row.service, event.currentTarget.checked)} />
+            {/* Never disabled while a change is sent: a disabled box would lose the keyboard's focus. */}
+            <input type="checkbox" id={`dreaming-${i}`} checked={row.enabled} onChange={(event) => { if (!busy) onSet?.(row.service, event.currentTarget.checked); }} />
             <label htmlFor={`dreaming-${i}`}>
               <span className="dreaming-name">{row.service}</span>
               <span className="dreaming-last">{row.enabled ? lastPassLine(row.last, t) : t('dreaming_off')}</span>
