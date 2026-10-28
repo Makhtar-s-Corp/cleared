@@ -232,7 +232,9 @@ async function main(): Promise<void> {
       const value = (JSON.parse(row.event) as { value: { window: string; usedPercent: number } }).value;
       if (value.window !== 'seven_day') continue;
       latest = value.usedPercent;
-      if (quota.at(-1)?.percent !== latest) quota.push({ at: row.at, percent: latest });
+      // Each figure once, when it changes: the rows are read again at each call.
+      const last = quota.at(-1);
+      if ((!last || row.at > last.at) && last?.percent !== latest) quota.push({ at: row.at, percent: latest });
     }
     return latest;
   };
@@ -374,6 +376,7 @@ async function main(): Promise<void> {
   // Take over, a line to the harness, and, for an author, the Shell and the Editor; then Give back.
   async function takeOver(session: SessionSummary, options: { readonly shell: boolean; readonly editor: boolean; readonly giveBack: boolean }): Promise<string> {
     const notes: string[] = [];
+    const taken = eventsOf(session.id).at(-1)?.seq ?? 0;
     await page.goto(`${APP}/sessions/${encodeURIComponent(session.id)}`);
     await page.locator('#takeover').click();
     gesture(`took over the ${session.role} ${session.id.slice(0, 8)} of ${session.ticket}`);
@@ -448,7 +451,8 @@ async function main(): Promise<void> {
       return after.some((e) => e.event.type === 'TEXT_MESSAGE_CONTENT' && /gave the session back/.test(e.event.delta ?? '')) && after.some((e) => e.event.type === 'RUN_STARTED');
     }, 180_000, 1_000);
     const after = eventsOf(session.id).filter((e) => e.seq > mark);
-    const edits = after.filter((e) => e.event.type === 'CUSTOM' && e.event.name === 'cleared.human_edit').length;
+    // The editor's save journals its edit when it is saved; Give back, the terminal's.
+    const edits = eventsOf(session.id).filter((e) => e.seq > taken && e.event.type === 'CUSTOM' && e.event.name === 'cleared.human_edit').length;
     const notice = after.some((e) => e.event.type === 'TEXT_MESSAGE_CONTENT' && /src\/page\.ts/.test(e.event.delta ?? ''));
     notes.push(`given back: the notice's turn began; ${edits} human edit(s) journaled; the notice ${notice ? 'names' : 'does not name'} src/page.ts`);
     return notes.join('; ');
@@ -500,7 +504,17 @@ async function main(): Promise<void> {
     }, 15 * 60_000).catch((error: unknown) => `no end seen: ${(error as Error).message}`);
     await api(`/tickets/${encodeURIComponent(ticket)}/set-aside`, 'POST');
     gesture(`set ${ticket} aside (nothing approved)`);
-    return `${card}; set aside; ${costOf(ticket)} USD`;
+    // Issue #233: with nothing of the ticket live, the page heads with the
+    // author's own state, which read "Working" after a Give back.
+    const verdict = ledger((db) => (db.prepare("SELECT event FROM session_events WHERE ticket = ? AND event LIKE '%cleared.review_verdict%' ORDER BY seq").all(ticket) as { event: string }[])
+      .map((row) => (JSON.parse(row.event) as { value: { verdict: string } }).value.verdict)).at(-1);
+    let shown = 'no author';
+    if (authorA) {
+      await sleep(2_000);
+      await page.goto(`${APP}/sessions/${encodeURIComponent(authorA.id)}`);
+      shown = (await page.locator('.phrase-title').first().innerText().catch(() => '?')).trim();
+    }
+    return `${card}; the review's verdict: ${verdict ?? 'none'}; set aside; the author's screen then reads "${shown}"; ${costOf(ticket)} USD`;
   });
 
   // ---- 3. ticket B: taken over, then the service restarted ----
@@ -559,7 +573,8 @@ async function main(): Promise<void> {
   await Promise.all(children.map((child) => (child.exitCode !== null ? undefined : new Promise((r) => child.once('exit', r)))));
   const released = await docker.releaseStopped(ours).catch(() => ({ containers: [], networks: [] }));
   for (const id of ours) await docker.removeVolumes(id).catch(() => undefined);
-  const left = (await docker.containers()).filter((c) => !before.has(c.name)).map((c) => c.name);
+  // Other processes of this server run sessions too: only this run's are its own.
+  const left = (await docker.containers()).filter((c) => !before.has(c.name) && ours.includes(c.labels['cleared.session'] ?? '')).map((c) => c.name);
   const result = {
     mode: 'real', model, budgetUsd, ports: { service: servicePort, app: appPort, preview: previewPort },
     tickets, costs: Object.fromEntries(Object.entries(tickets).map(([k, id]) => [k, costOf(id)])), quota, stopped: stopped ?? null,
