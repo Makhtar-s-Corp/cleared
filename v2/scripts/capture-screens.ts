@@ -96,6 +96,7 @@ const ACCOUNT = 'owner';
 const { chromium } = createRequire(import.meta.url)('playwright-core') as { chromium: any };
 declare const document: any;
 declare const requestAnimationFrame: (run: () => void) => number;
+declare const window: any;
 
 const list = (value: string | undefined, all: readonly string[]): string[] => (value ? value.split(',').map((v) => v.trim()).filter(Boolean) : [...all]);
 
@@ -252,7 +253,8 @@ export async function capture(options: { readonly out: string; readonly screens?
             await page.waitForTimeout(300);
           }
           const file = join(options.out, `${screen}-${w}-${theme}.png`);
-          await page.screenshot({ path: file, animations: 'disabled', caret: 'hide', fullPage: WHOLE.has(screen) });
+          if (WHOLE.has(screen)) await wholePage(page, file, WIDTHS[w]!);
+          else await page.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
           files.push(file);
           if (screen === 'review-editor') await page.locator('[role="tab"][aria-controls="tab-terminal"]').click();
           if (screen === 'review-takeover') {
@@ -280,6 +282,22 @@ export async function capture(options: { readonly out: string; readonly screens?
     await new Promise<void>((done) => preview.close(() => done()));
   }
   return { files, errors, away };
+}
+
+// The whole page, as a window as tall as the page sees it (lane j6-ui-hallmark): a screenshot of the full page
+// keeps the window's height, so a bar fixed to the window's foot (the phone's bar of screens) and a sidebar 100vh tall
+// were drawn where the window ended, mid-page. The window grows to the page's height, then goes back.
+export async function wholePage(page: any, file: string, size: { readonly width: number; readonly height: number }): Promise<void> {
+  for (let round = 0; round < 4; round += 1) {
+    const height = await page.evaluate(() => Math.max(document.documentElement.scrollHeight, document.body.scrollHeight));
+    const current = page.viewportSize().height;
+    if (height <= current) break;
+    await page.setViewportSize({ width: size.width, height });
+    await page.evaluate(async () => { await new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))); });
+  }
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await page.screenshot({ path: file, animations: 'disabled', caret: 'hide' });
+  await page.setViewportSize(size);
 }
 
 // The screen has drawn its data: no element busy, the fonts loaded, then

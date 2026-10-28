@@ -3,7 +3,8 @@
 // app/test/setup/setup-browser.test.ts, on its fakes (a fake GitHub on
 // loopback, a fake `docker` and a fake `gh` on PATH, a scratch ledger, a
 // container whose terminal echoes), so nothing real is read or written.
-// Each step is captured as the whole page at each width, then the walk goes
+// Each step is captured as the whole page at each width (a window as tall as
+// the page, capture-screens.ts's wholePage), then the walk goes
 // on: the owner's code, the owner done, the forge, the model with its
 // terminal, then workspace, environment, secrets, checks and first ticket
 // (each says it has no workspace yet) and the end.
@@ -30,7 +31,7 @@ import { FakeForge } from '../test/setup/fakes/github.ts';
 import { fakeGh } from '../test/forge/fake-gh.ts';
 import { FAST, PASSWORD, startSetup } from '../test/setup/support.ts';
 import { startApp } from '../app/test/support.ts';
-import { WIDTHS } from './capture-screens.ts';
+import { WIDTHS, wholePage } from './capture-screens.ts';
 
 const { chromium } = createRequire(import.meta.url)('playwright-core') as { chromium: any };
 declare const document: any;
@@ -81,7 +82,7 @@ export async function captureSetup(options: { readonly out: string; readonly wid
         });
         await page.waitForTimeout(200);
         const file = join(options.out, `setup-${step}-${w}.png`);
-        await page.screenshot({ path: file, fullPage: true, animations: 'disabled', caret: 'hide' });
+        await wholePage(page, file, WIDTHS[w]!);
         files.push(file);
       }
       await page.setViewportSize(WIDTHS['1440']);

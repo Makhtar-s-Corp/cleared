@@ -132,7 +132,7 @@ export const Sidebar = memo(function Sidebar(props: SidebarProps) {
           <p className="side-title" id="side-sessions-title">{t('side_sessions')}</p>
           {props.groups.map((group) => (
             <div className="side-group" key={group.key} data-group={group.key}>
-              <p className="side-group-title" id={`side-group-${group.key}`}><span className="state-dot" data-state={group.key} aria-hidden="true" />{t(`side_group_${group.key}`)}</p>
+              <p className="side-group-title" id={`side-group-${group.key}`}><span className="state-dot" data-state={group.key} aria-hidden="true" />{t(`side_group_${group.key}`)}<span className="side-group-count" aria-hidden="true">{group.rows.length}</span></p>
               <ul aria-labelledby={`side-group-${group.key}`}>
                 {group.rows.slice(0, GROUP_MAX).map((row) => (
                   <li key={row.id}>

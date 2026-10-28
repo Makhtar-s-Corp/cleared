@@ -1,5 +1,6 @@
-// shadcn/ui's Button, copied in and restyled to the kit: ink for the one
-// gesture a screen waits for, an outlined surface for the others, the chip
+// shadcn/ui's Button, copied in and restyled to the kit (Signal, lane
+// j6-ui-hallmark): cobalt for the one gesture a screen waits for, a square
+// surface in a 2px ink frame for the others, the chip
 // of the tower bar, a ghost for the header's icons, a link. Sizes stay with
 // the screens' sheets (32, 36, 42 or 44 px, by place and width), which set
 // them on the class each button keeps (btn, plain, chip-button, icon...),
@@ -15,10 +16,10 @@ export const buttonVariants = cva(
   {
     variants: {
       variant: {
-        ink: 'rounded-md bg-primary text-primary-foreground font-[var(--weight-strong)] hover:opacity-88 disabled:opacity-50',
-        outline: 'rounded-md bg-card shadow-control hover:bg-accent disabled:opacity-45',
-        chip: 'rounded-full bg-transparent shadow-control text-xs hover:bg-accent',
-        ghost: 'rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground',
+        ink: 'rounded-none bg-primary text-primary-foreground font-[var(--weight-strong)] hover:bg-[var(--accent-hover)] active:bg-[var(--accent-press)] disabled:bg-[var(--surface-muted)] disabled:text-[var(--text-faint)]',
+        outline: 'rounded-none bg-card shadow-control hover:bg-accent active:bg-[var(--selected)] disabled:text-[var(--text-faint)] disabled:shadow-outline',
+        chip: 'rounded-none bg-card shadow-control text-xs hover:bg-accent active:bg-[var(--selected)]',
+        ghost: 'rounded-none bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground active:bg-[var(--selected)]',
         link: 'bg-transparent p-0 text-link hover:underline',
       },
     },
