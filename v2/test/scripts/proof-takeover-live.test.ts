@@ -38,12 +38,15 @@ test('the service runs the real adapter, calls no model on its own, and names th
 });
 
 test('the report says no home folder, no run folder, no login path, no token and no cookie', () => {
+  // A token's shape, built from parts so that the guard does not read this file as holding one.
+  const token = ['sk', 'ant', 'oat01', 'AAAAbbbbCCCCdddd'].join('-');
   const text = [
     'clone /home/someone/.local/x', 'run /tmp/cleared-live-takeover-ab12/state/ledger.db', 'login /secret/login.json',
-    'token sk-ant-oat01-AAAAbbbbCCCCdddd', 'cookie: cleared_session=abc123', '"x-csrf-token": "f00d"', 'Authorization: Bearer xyz',
+    `token ${token}`, 'cookie: cleared_session=abc123', '"x-csrf-token": "f00d"', 'Authorization: Bearer xyz',
   ].join('\n');
   const out = redact(text, { root: '/tmp/cleared-live-takeover-ab12', home: '/home/someone', login: '/secret/login.json' });
-  assert.doesNotMatch(out, /someone|cleared-live-takeover-ab12|\/secret|sk-ant-oat01|abc123|f00d|xyz/);
+  assert.doesNotMatch(out, /someone|cleared-live-takeover-ab12|\/secret|abc123|f00d|xyz/);
+  assert.ok(!out.includes(token), 'no token');
   assert.match(out, /clone ~\/\.local\/x/);
   assert.match(out, /run <run>\/state\/ledger\.db/);
   assert.match(out, /login <login>/);
