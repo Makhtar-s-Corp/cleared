@@ -14,8 +14,8 @@
 //      map: only the run's own sessions call the model.
 //   2. Ticket A: Take over its author, one line typed to the harness and its
 //      answer, the Shell with git status, npm ci and npm test
-//      (proof-terminal.ts), one line of a file the author changed (src/page.ts first) changed in the Editor and
-//      saved, Give back; the notice's turn. Then Take over its reviewer, one
+//      (proof-terminal.ts), one line of a file the author changed (src/page.ts
+//      first) changed in the Editor and saved, Give back; the notice's turn. Then Take over its reviewer, one
 //      line to the harness, Give back (O19). The ticket is set aside once its
 //      review ended or its release card waits: nothing is approved.
 //   3. Ticket B: Take over its author, then the service is restarted. What
