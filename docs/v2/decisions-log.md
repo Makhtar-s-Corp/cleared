@@ -8066,7 +8066,7 @@ Each ticket went back to Todo after its publish with "The release could not be r
 - Pull request: 470, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-receipt-citations`.
 
-## 2026-10-28: the 135 open review follow-ups triaged against `v2`: 19 closed with their proof, 111 grouped into five umbrellas, 5 security issues left open (the author's choices, lane `v2-j6-review-triage`, B4.4, issue #476)
+## 2026-10-28: the 135 open review follow-ups triaged against `v2`: 18 closed with their proof, 112 grouped into five umbrellas, 5 security issues left open (the author's choices, lane `v2-j6-review-triage`, B4.4, issue #476)
 
 **The need.** Issue #476: check every open issue labelled `review-followup` (135) against `origin/v2`, close the obsolete ones with a proof (commit, file and line, or test), group the rest into three to five umbrella issues, never touch an issue labelled `security`, change no code, and record the triage in [review-triage.md](review-triage.md). The brief names a milestone 6 plan; none is in the repository, so the lane follows the issue and the brief, as the other lanes of the wave did.
 
@@ -8076,15 +8076,17 @@ Each ticket went back to Todo after its publish with "The release could not be r
 - **#229** lists no follow-up: its body is its heading only. Closed with that said.
 
 **What was done.**
-1. Five umbrella issues, each labelled `review-followup` and `v2` so the query matrix line B4.4 cites still finds the work, each with a checklist that links its originals and says what the check found: #479 (the v1 modules kept on `v2`, 42), #480 (the v2 service: flow, sessions, lead and workspace, 24), #481 (hardening: session policy, isolation and the app's gates, 13), #482 (the web app's screens, i18n and accessibility, 16), #483 (proofs, CI, tests and docs, 16). #481 holds the unlabelled issues that touch isolation or secrets (#132, #133, #137, #138, #142, #144, #147, #185, #188, #191, #219, #243, #246), so they are read as a set and not lost among the screens.
-2. Each grouped original closed as a duplicate of its umbrella, with a comment naming it and what the check found; each obsolete one closed with its proof in a comment ("completed" for the 4 fixed, "not planned" for the 15 whose code was removed). Before each close the state and labels were read again, since other lanes run in parallel.
+1. Five umbrella issues, each labelled `review-followup` and `v2` so the query matrix line B4.4 cites still finds the work, each with a checklist that links its originals and says what the check found: #479 (the v1 modules kept on `v2`, 42), #480 (the v2 service: flow, sessions, lead and workspace, 24), #481 (hardening: session policy, isolation and the app's gates, 14), #482 (the web app's screens, i18n and accessibility, 16), #483 (proofs, CI, tests and docs, 16). #481 holds the unlabelled issues that touch isolation or secrets (#62, #132, #133, #137, #138, #142, #144, #147, #185, #188, #191, #219, #243, #246), so they are read as a set and not lost among the screens.
+2. Each grouped original closed as a duplicate of its umbrella, with a comment naming it and what the check found; each obsolete one closed with its proof in a comment ("completed" for the 4 fixed, "not planned" for the 14 whose code was removed). Before each close the state and labels were read again, since other lanes run in parallel. #62 was first closed as obsolete (the installer's sudo probe and bubblewrap left), then reopened and grouped into #481: `[security] agent_user` still holds the release lock (`lib/release.ts:516-517`) and the broker's peer-UID check (`serve/release-broker.ts:18-27`), so its broker check still applies.
 3. Left open, untouched (no comment, no label, no regrouping): #4, #9, #12, #31, #46, labelled `security`. #4's variable is still read at `serve/install.ts:73`, written here for the owner only.
 
 **Seen during the triage**, put on #479: `docs/security.md:138` still describes `serve/check-harness.sh`, and `docs/configuration.md:256-271` still name `when-free.sh`, both removed in `c267af34`.
 
+**For the parallel lanes.** #133 (lane `v2-j6-docker-hygiene`) and the decisions log wording items #195, #215, #260 and #262 (lane `v2-j6-decisions-log-split`) are now closed under #481 and #483: a lane that fixes one ticks its line on the umbrella.
+
 **Not done here.** No code changed, no issue fixed. No progress dashboard: the owner's rules ask a sub-agent to keep one for a long task, and the brief forbids starting any sub-agent. The quota was not measured: the lane started no Cleared session and no model call besides its own.
 
-**Checks**, on this branch: the 135 issues read back after the closes, each in the state its row says (111 closed as duplicates of their umbrella, 15 "not planned", 4 "completed", the 5 security ones open). In `v2/`: `npm run typecheck` clean; `npm test` runs 2964 Node tests, 2823 pass, 141 skipped (the browser tests), 0 fail, and 434 Vitest tests pass; `npm run guard -- --base origin/v2`: nothing refused.
+**Checks**, on this branch: the 135 issues read back after the closes, each in the state its row says (112 closed as duplicates of their umbrella, 14 "not planned", 4 "completed", the 5 security ones open). In `v2/`: `npm run typecheck` clean; `npm test` runs 2964 Node tests, 2823 pass, 141 skipped (the browser tests), 0 fail, and 434 Vitest tests pass; `npm run guard -- --base origin/v2`: nothing refused.
 
 - Pull request: against `v2`, closes #476.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-review-triage`.

@@ -8,7 +8,7 @@ Lane `v2-j6-review-triage`, issue #476, 2026-10-28. Every open issue labelled `r
 - **Grouped**: every other issue, including those where the check could not prove the fix ("not shown fixed; kept"). Each umbrella issue has a checklist linking the originals, and each original is closed as a duplicate of its umbrella, with a comment naming it. The umbrellas carry the `review-followup` label, so the query that matrix line B4.4 cites still finds the work.
 - **Kept (security)**: an issue labelled `security` is left open, untouched: no comment, no label, no regrouping.
 
-In all: 19 closed obsolete (15 whose code was removed, 4 fixed), 111 grouped into 5 umbrellas, 5 kept open as security.
+In all: 18 closed obsolete (14 whose code was removed, 4 fixed), 112 grouped into 5 umbrellas, 5 kept open as security.
 
 ## The umbrellas
 
@@ -16,7 +16,7 @@ In all: 19 closed obsolete (15 whose code was removed, 4 fixed), 111 grouped int
 | --- | --- | --- |
 | #479: v1 modules kept on v2 | The guard, the trackers, memory, release and rollback, `cleared status`, the release broker, the board snapshot and the root app (`lib/`, `serve/`, `app/`, `docs/`, `.github/workflows/checks.yml`). | 42 |
 | #480: v2 service: flow, sessions, lead and workspace | `v2/src/` and the session runner: the flow engine, approval and release, the lead and its plans, knowledge, schedules, the reader, the terminal service, the workspace store and runtime. | 24 |
-| #481: v2 hardening: session policy, isolation and the app's gates | The session policy and hooks, publish, the container runtime, the app's sign-in and proxy gates, the access token, the example services' limits. None is labelled security; they are kept together so they are read as a set. | 13 |
+| #481: v2 hardening: session policy, isolation and the app's gates | The session policy and hooks, publish, the container runtime, the app's sign-in and proxy gates, the access token, the example services' limits. None is labelled security; they are kept together so they are read as a set. | 14 |
 | #482: v2 web app: screens, i18n and accessibility | `v2/app/web/`: the tower, inbox, session, lead and ask screens, the shell, the stylesheets and the catalogs. | 16 |
 | #483: v2 proofs, CI, tests and docs | The proof scripts, the workflows, flaky tests, and wording in `docs/v2/`. | 16 |
 
@@ -80,7 +80,7 @@ In all: 19 closed obsolete (15 whose code was removed, 4 fixed), 111 grouped int
 | #59 | Harden release broker availability and restart behavior | grouped into #479 | `serve/release-broker.ts:62-66` still starts `python3` for each connection. |
 | #60 | Limit approval-request and lead actions to the lead role | grouped into #479 | The lead-actions bridge left in `c267af34793d4a053c4e073ac3cf51b97188af72`, but any agent can still call `release-request.ts --ask` (`:23`). |
 | #61 | Clean up broker queue fixture path, audit fields and client portability | grouped into #479 | `lib/queues.ts:78` still has the `ORCH_BROKER_SECRET` branch. |
-| #62 | Verify broker and both harnesses under separate Unix accounts on the server | closed obsolete (code removed) | `serve/install.ts:12-14`: the Node installer drops the three system accounts mode (no sudo probe, no bubblewrap); the host Claude Code and Codex adapters it would verify left in `c267af34793d4a053c4e073ac3cf51b97188af72`. |
+| #62 | Verify broker and both harnesses under separate Unix accounts on the server | grouped into #481 | The harness probes and bubblewrap left (`serve/install.ts:12-14`, `c267af34`), but the separate agent account is still live: `serve/install.ts:114` reads `[security] agent_user`, `lib/release.ts:516-517` holds the release lock to it, `serve/release-broker.ts:18-27` checks the peer UID; the broker check under that account (item 3) still applies. |
 | #64 | app: design leftovers (progress rail partial fill, key-figure tiles, label, chevron, scale values) | grouped into #479 | The root app's design leftovers are not shown fixed (`lib/i18n/en.json:31` "Fuel" exists, the other items are not checked); kept. |
 | #65 | app: design tests judge lines, not rules, and tokens by value | grouped into #479 | `test/app.test.ts:27` still judges amber with one line pattern. |
 | #66 | app: question text is cut at 160 characters and appears nowhere else | grouped into #479 | Not shown fixed; kept. |
