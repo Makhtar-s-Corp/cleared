@@ -1,6 +1,8 @@
 // The flow's side of the proof receipt (issue #326, P210): the captures are
-// taken when the author is done, while its session and its trial
-// environment still run, and journaled on it; the publish is handed the
+// taken when a review passes, while the reviewer's session and its trial
+// environment still run, and journaled on it (the author's trial environment
+// is built from the base when the author starts, so it never shows the
+// change: the real run of 2026-10-28, issue #469); the publish is handed the
 // receipt's facts, read from the ledger (the reviewers' test runs, every
 // session's tokens and cost, the time since the first session started),
 // never from what a report says. A capture that fails loses the captures,
@@ -59,17 +61,20 @@ async function run(options: { capture?: (input: Seen['input']) => Promise<ProofC
   return { t, receipts, seen };
 }
 
-test('the author\'s captures are taken before its session closes, and the publish gets the receipt\'s facts', async () => {
+const capturedOn = (t: Setup, session: string) => t.store.events.after(session).flatMap((e) => (e.event.type === 'CUSTOM' && e.event.name === 'cleared.proof_captured' ? [e.event.value as CustomValue['cleared.proof_captured']] : []));
+
+test('the captures are taken when the review passes, before the reviewer\'s session closes, and the publish gets the receipt\'s facts', async () => {
   const { t, receipts, seen } = await run({ capture: async () => TAKEN });
   const author = t.startedSessions.find((s) => s.input.role === 'author')!;
+  const reviewerSession = t.startedSessions.find((s) => s.input.role === 'reviewer')!;
   assert.equal(seen.length, 1);
-  assert.equal(seen[0]?.input.session, author.id);
+  assert.equal(seen[0]?.input.session, reviewerSession.id);
   assert.equal(seen[0]?.input.service?.name, 'guestbook');
   assert.equal(seen[0]?.input.dir, `/work/.proof/${t.ticket.id}/guestbook`);
-  assert.notEqual(seen[0]?.status, 'done', 'the session still runs, so its trial environment does');
-  // Journaled on the author's session.
-  const journaled = t.store.events.after(author.id).flatMap((e) => (e.event.type === 'CUSTOM' && e.event.name === 'cleared.proof_captured' ? [e.event.value as CustomValue['cleared.proof_captured']] : []));
-  assert.deepEqual(journaled, [{ service: 'guestbook', ...TAKEN }]);
+  assert.notEqual(seen[0]?.status, 'done', 'the session still runs, so its trial environment, built after the author\'s commit, does');
+  // Journaled on the reviewer's session; the author's has none.
+  assert.deepEqual(capturedOn(t, reviewerSession.id), [{ service: 'guestbook', ...TAKEN }]);
+  assert.deepEqual(capturedOn(t, author.id), []);
 
   const [receipt] = receipts;
   assert.ok(receipt, 'the publish is handed a receipt');
@@ -87,6 +92,20 @@ test('the author\'s captures are taken before its session closes, and the publis
   assert.equal(receipt.linkBase, 'https://cleared.example.invalid');
   // Nothing of a test's output reaches the receipt.
   assert.doesNotMatch(JSON.stringify(receipt), /# pass 1/);
+});
+
+test('a round that asks for changes takes no capture; the passing round\'s is the receipt\'s', async () => {
+  let n = 0;
+  const { t, receipts, seen } = await run({
+    capture: async () => ({ ...TAKEN, videoMs: 20_000 + ++n }),
+    reviewers: [reviewer(REPORT_FIX, call('t1', 'npm test', 'not ok 1', true)), reviewer(REPORT_PASS, call('t2', 'npm test', 'ok 1', false))],
+    rounds: 3,
+  });
+  assert.equal(seen.length, 1, 'one capture, at the passing verdict');
+  const roles = seen.map((s) => t.store.sessions.get(s.input.session)?.role);
+  assert.deepEqual(roles, ['reviewer']);
+  assert.deepEqual(receipts.at(-1)?.captures, [{ service: 'guestbook', ...TAKEN, videoMs: 20_001 }]);
+  for (const author of t.startedSessions.filter((s) => s.input.role === 'author')) assert.deepEqual(capturedOn(t, author.id), []);
 });
 
 test('every review round\'s test run is listed; a reviewer that never reports a cost leaves the dollars out', async () => {

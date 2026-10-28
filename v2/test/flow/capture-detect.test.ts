@@ -1,5 +1,5 @@
 // The flow decides whether a ticket needs captures before and after (issue
-// #368, matrix P226): when the author is done, before any browser starts, it
+// #368, matrix P226): when a review passes, before any browser starts, it
 // reads the paths the ticket's branch changes and asks the rule
 // (flow/capture-need.ts). A change no person sees takes none and says why;
 // a visible one is captured as P210 does, its screens named. The human's
@@ -48,15 +48,16 @@ async function run(options: { paths?: (input: Read) => Promise<readonly string[]
   if (options.choice) await t.engine.chooseCaptures(t.ticket.id, options.choice, 'u1');
   await t.engine.start(t.ticket.id, 'u1');
   await until(() => t.inbox.list().some((i) => i.kind === 'release'), 'the release item', 5000);
-  const author = t.startedSessions.find((s) => s.input.role === 'author')!;
-  const journaled = t.store.events.after(author.id).flatMap((e) => (e.event.type === 'CUSTOM' && e.event.name === 'cleared.proof_captured' ? [e.event.value as CustomValue['cleared.proof_captured']] : []));
-  return { t, receipts, captured, reads, journaled, author };
+  // Journaled on the reviewer whose review passed (P210, issue #469).
+  const reviewer = t.startedSessions.find((s) => s.input.role === 'reviewer')!;
+  const journaled = t.store.events.after(reviewer.id).flatMap((e) => (e.event.type === 'CUSTOM' && e.event.name === 'cleared.proof_captured' ? [e.event.value as CustomValue['cleared.proof_captured']] : []));
+  return { t, receipts, captured, reads, journaled, reviewer };
 }
 
 test('a visible change is captured, its screens named on the journal and in the receipt', async () => {
-  const { t, receipts, captured, reads, journaled, author } = await run({ paths: async () => ['src/page.ts', 'src/server.ts', 'test/page.test.ts'] });
-  assert.deepEqual(reads, [{ ticket: t.ticket.id, service: 'guestbook', workdir: author.input.workdir }], 'the author\'s branch is read once, from its checkout');
-  assert.deepEqual(captured, [author.id]);
+  const { t, receipts, captured, reads, journaled, reviewer } = await run({ paths: async () => ['src/page.ts', 'src/server.ts', 'test/page.test.ts'] });
+  assert.deepEqual(reads, [{ ticket: t.ticket.id, service: 'guestbook', workdir: reviewer.input.workdir }], 'the ticket\'s branch is read once, from the checkout the reviewer read');
+  assert.deepEqual(captured, [reviewer.id]);
   const need = { take: true, reason: 'screens', screens: ['page.ts'] };
   assert.deepEqual(journaled, [{ service: 'guestbook', ...TAKEN, need }]);
   assert.deepEqual(receipts[0]?.captures, [{ service: 'guestbook', ...TAKEN, need }]);
