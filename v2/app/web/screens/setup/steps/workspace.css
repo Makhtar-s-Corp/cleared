@@ -5,17 +5,17 @@
 .ws legend { margin-bottom: var(--space-1); padding: 0; font-size: var(--text-sm); font-weight: var(--weight-strong); color: var(--text-secondary); }
 .ws-proposal { margin-top: var(--space-4); padding-top: var(--space-3); box-shadow: 0 -1px 0 var(--hairline); }
 .ws-list { list-style: none; margin: 0 0 var(--space-1); padding: 0; display: flex; flex-direction: column; gap: 2px; max-width: 760px; }
-.ws-list li { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 12px; padding: var(--space-2) 12px; border-radius: 0; }
+.ws-list li { display: grid; grid-template-columns: 20px minmax(0, 1fr); align-items: start; gap: 12px; padding: var(--space-2) 12px; border-radius: var(--radius); }
 .ws-list li:hover { background: var(--sunken); }
-.ws-list input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--ink); }
+.ws-list input { width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--theme-accent); }
 .ws-list input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .ws-list label { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px var(--space-2); min-width: 0; cursor: pointer; }
 .ws-name { font-weight: var(--weight-strong); overflow-wrap: anywhere; }
 .ws-meta { flex-basis: 100%; color: var(--text-muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .ws-filter { display: flex; flex-direction: column; max-width: 420px; margin-bottom: var(--space-2); }
 .ws-filter label { font-size: var(--text-sm); font-weight: var(--weight-strong); color: var(--text-secondary); margin-bottom: var(--space-1); }
-.ws-filter input { height: 40px; padding: 0 var(--space-2); border-radius: 0; background: var(--surface); box-shadow: var(--e-control); font-size: var(--text-input); }
-.ws-filter input:focus { outline: 2px solid transparent; box-shadow: var(--e-control), 0 0 0 5px var(--halo-progress); }
+.ws-filter input { height: 36px; padding: 0 var(--space-2); border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); font-size: var(--text-input); }
+.ws-filter input:focus { outline: 2px solid transparent; box-shadow: 0 0 0 1px var(--theme-accent), 0 0 0 3px var(--halo-progress); }
 .ws-pick .primary { margin-top: var(--space-1); }
 
 @media (max-width: 640px) {

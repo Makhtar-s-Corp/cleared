@@ -615,7 +615,7 @@ export function SessionIndex({ sessions, tickets, now, t, onNew }: { readonly se
       <h1 className="sr-only">{t('index_title')}</h1>
       {ordered.length === 0 ? <Empty block icon={Terminal} text={t('index_empty')} note={t('index_empty_note')} action={{ label: t('index_new_ticket'), onClick: () => onNew?.() }} /> : (
         <>
-          {/* The groups as a board of figures (Signal, lane j6-ui-hallmark): how many wait, work, are in review, ended. */}
+          {/* The groups as a row of figures (lane j6-ui-hallmark, quiet since j6-ui-pro): how many wait, work, are in review, ended. */}
           <ul className="figure-row index-figures" aria-label={t('index_groups_label')}>
             {groups.map((group) => <li key={group.key} data-group={group.key}><b>{group.rows.length}</b><span>{t(`index_group_${group.key}`)}</span></li>)}
           </ul>

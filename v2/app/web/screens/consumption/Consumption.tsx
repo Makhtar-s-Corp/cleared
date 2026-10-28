@@ -236,8 +236,8 @@ export function ConsumptionView({ data, t, language, now, busy = false, note = '
   const levers = leverViews(data.levers, t);
   return (
     <section className="consumption" aria-labelledby="consumption-title" data-screen="consumption">
-      {/* The heading first; the period it covers on an ink plate beside it (Signal, lane j6-ui-hallmark: no label over
-          a heading), its two dates parted by a word. */}
+      {/* The heading first; the period it covers in a quiet tag beside it (lane j6-ui-hallmark, kept by j6-ui-pro: no
+          label over a heading), its two dates parted by a word. */}
       <header className="consumption-head">
         <div>
           <h1 id="consumption-title">{t('consumption_title')}</h1>
