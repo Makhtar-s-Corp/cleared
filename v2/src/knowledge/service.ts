@@ -27,6 +27,7 @@ import type { Actor, TicketId, TicketStore } from '../tickets/contract.ts';
 import { ensureLevel, levelContext, type MemoryContext, type MemoryLevel } from '../workspace/briefing.ts';
 import type { ServiceConfig, WorkspaceConfig } from '../workspace/config.ts';
 import type { CapturedHandover } from '../workspace/handover.ts';
+import { fingerprint } from './fingerprint.ts';
 import { writeApproved, type MemoryWrite } from './memory.ts';
 import { proposalsOf } from './proposals.ts';
 import { skillTicket } from './skill.ts';
@@ -197,10 +198,12 @@ export class Knowledge {
     }
   }
 
+  // Reject keeps the item's words, so the nightly pass never proposes the same rule again (dreaming.ts).
   async reject(id: string, user: User): Promise<void> {
     this.#owner(user);
-    this.#waiting(id);
+    const item = this.#waiting(id);
     if (!this.#deps.inbox.handleKnowledge(id, user.id, 'reject')) throw new KnowledgeError('conflict', `knowledge item ${id} is already answered`);
+    this.#store.rejected(id, fingerprint(item.text), this.#now().toISOString());
   }
 
   // ---- landed in the skill ---------------------------------------------------

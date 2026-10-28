@@ -32,6 +32,7 @@
   "need_plan": "Plan · {age}",
   "need_goal": "Objectif",
   "need_lead": "Lead",
+  "need_dreaming": "Sessions passées",
   "release_reviewed_green": "Relu par {model}, tous les contrôles au vert. Votre accord le met en ligne.",
   "release_reviewed_running": "Relu par {model}, contrôles en cours.",
   "release_reviewed_red": "Relu par {model}, un contrôle a échoué.",

@@ -33,7 +33,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { KEEPALIVE_MS } from '../../src/api/events.ts';
-import { changeFrame, leadFrame, sseFrame, type Ask, type CaptureChoice, type ChangeKind, type ContractItem, type CreateTicketBody, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
+import { changeFrame, leadFrame, sseFrame, type Ask, type CaptureChoice, type ChangeKind, type ContractItem, type CreateTicketBody, type DreamingView, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
 import { ticketCost } from '../../src/consumption/ticket-cost.ts';
 import { productionChecksOf } from '../../src/flow/production.ts';
 import { BatchError, BatchRunner } from '../../src/flow/batch.ts';
@@ -130,6 +130,12 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
   const testValues = new Map<string, Map<string, { readonly setAt: string; readonly setBy: string }>>(serviceMap.services.map((service, index) => [
     service.name, new Map(index === 0 ? [['PAYMENT_SANDBOX_KEY', { setAt: new Date(now().getTime() - 2 * 86_400_000).toISOString(), setBy: 'owner' }]] : []),
   ]));
+  // The nightly pass (issue #455): the map's services, the first with a pass that proposed two rules last night, the second off.
+  const dreaming = serviceMap.services.map((service, index) => ({
+    service: service.name, enabled: index !== 1,
+    last: index === 0 ? { at: new Date(now().getTime() - 8 * 3_600_000).toISOString(), outcome: 'done' as const, proposed: 2 } : null,
+  }));
+  const dreamingView = (): DreamingView => ({ services: dreaming.map((row) => ({ ...row })) });
   const testValuesView = (): TestValuesView => ({
     workspace: true, key: 'ready',
     services: [...testValues].map(([name, values]) => ({ name, inWorkspace: true, values: [...values].map(([value, saved]) => ({ service: name, name: value, ...saved, readable: true })) })),
@@ -258,6 +264,18 @@ export async function fixtureSource(options: { readonly now?: () => Date; readon
         const saved = { setAt: now().toISOString(), setBy: user };
         values.set(body.name, saved);
         return sendJson(response, 200, { value: { service: body.service, name: body.name, ...saved, readable: true }, replaced });
+      }
+    }
+    // The nightly pass of each service (issue #455): on or off, its last run; a body other than { enabled } refused.
+    if (collection === 'dreaming') {
+      if (method === 'GET' && parts.length === 1) return sendJson(response, 200, dreamingView());
+      const row = dreaming.find((candidate) => candidate.service === decodeURIComponent(id ?? ''));
+      if (method === 'POST' && parts.length === 2) {
+        if (!row) return sendJson(response, 404, { error: 'not_found' });
+        const body = (await readJson(request)) as { enabled?: unknown } | null;
+        if (typeof body?.enabled !== 'boolean') return sendJson(response, 400, { error: 'body' });
+        row.enabled = body.enabled;
+        return sendJson(response, 200, dreamingView());
       }
     }
     // The agent profile and the environment (issue #452): the service's refusals, by code.

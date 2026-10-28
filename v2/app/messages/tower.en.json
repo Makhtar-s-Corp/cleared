@@ -32,6 +32,7 @@
   "need_plan": "Plan · {age}",
   "need_goal": "Goal",
   "need_lead": "Lead",
+  "need_dreaming": "Past sessions",
   "release_reviewed_green": "Reviewed by {model}, all checks green. Your approval ships it.",
   "release_reviewed_running": "Reviewed by {model}, checks still running.",
   "release_reviewed_red": "Reviewed by {model}, a check failed.",

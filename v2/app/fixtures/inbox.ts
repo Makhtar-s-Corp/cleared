@@ -218,6 +218,20 @@ export function knowledgeItem(now: Date = FIXTURE_NOW): KnowledgeItem {
   };
 }
 
+// A proposal of the nightly pass (issue #455): a defect two reviewers asked
+// for on two tickets, citing each reviewer's session.
+export function dreamedItem(now: Date = FIXTURE_NOW): KnowledgeItem {
+  return {
+    kind: 'knowledge', id: 'knowledge:dream:guestbook:1', ticket: 'dreaming', project: FIXTURE_PROJECT, since: ago(now, 30), state: 'waiting',
+    sessionId: 'fixture-162-reviewer', text: 'The exit code of the test command is swallowed, so a failing run still reports success.', level: 'service', service: 'guestbook',
+    sources: [
+      { session: 'fixture-162-reviewer', ticket: 'LOCAL-162', at: ago(now, 600) },
+      { session: 'fixture-151-reviewer', ticket: 'LOCAL-151', at: ago(now, 2000) },
+    ],
+    outcome: null,
+  };
+}
+
 // Three variants of one ticket (issue #271): the first two done, each with
 // its diff, the third failed; the owner chooses one to review.
 export const VARIANTS_TICKET = 'LOCAL-175';

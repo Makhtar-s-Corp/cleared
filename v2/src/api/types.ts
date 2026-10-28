@@ -300,13 +300,29 @@ export type ContractItem = InboxBase & {
 // that provides it). Approve writes it into the memory at once and queues it
 // for the service's skill; Reject writes nothing.
 export type KnowledgeLevel = 'workspace' | 'service' | 'contract';
+// A session a proposal of the nightly pass learned from (issue #455): a
+// reviewer's session that asked for the change, with its ticket.
+export type KnowledgeSource = { readonly session: SessionId; readonly ticket: TicketId; readonly at: string };
+
+// The nightly pass of each service (issue #455): on or off, and its last
+// run, done or skipped at the week stop, with how many proposals it made.
+export type DreamOutcome = 'done' | 'quota';
+export type DreamingView = {
+  readonly services: readonly {
+    readonly service: string;
+    readonly enabled: boolean;
+    readonly last: { readonly at: string; readonly outcome: DreamOutcome; readonly proposed: number } | null;
+  }[];
+};
+
 export type KnowledgeItem = InboxBase & {
   readonly kind: 'knowledge';
-  readonly sessionId: SessionId;                            // the session whose handover proposed it
+  readonly sessionId: SessionId;                            // the session whose handover proposed it; the pass's newest source
   readonly text: string;
   readonly level: KnowledgeLevel;
   readonly service: string | null;                          // null at the workspace's level
   readonly outcome: { readonly decision: 'approve' | 'reject'; readonly by: UserId; readonly at: string } | null;
+  readonly sources?: readonly KnowledgeSource[];            // the pass's proposals only (ticket DREAM_TICKET), newest first, two at least
 };
 
 // The variants of one ticket (issue #271): 2 to 4 authors work the same
@@ -803,6 +819,8 @@ export type ApiRoutes = {
   'POST /api/knowledge/:id/approve': { readonly body: null; readonly response: { readonly accepted: true } };
   'POST /api/knowledge/:id/reject': { readonly body: null; readonly response: { readonly accepted: true } };
   'POST /api/services/:name/skill': { readonly body: null; readonly response: { readonly accepted: true; readonly ticket: TicketId | null } };   // null: nothing was queued
+  'GET /api/dreaming': { readonly body: null; readonly response: DreamingView };
+  'POST /api/dreaming/:service': { readonly body: { readonly enabled: boolean }; readonly response: DreamingView };
   'POST /api/asks': { readonly body: AskBody; readonly response: Ask };
   'GET /api/asks/:id': { readonly body: null; readonly response: Ask };
   'POST /api/asks/:id/follow': { readonly body: AskFollowBody; readonly response: Ask };
@@ -890,6 +908,8 @@ const routes = {
   'POST /api/knowledge/:id/approve': true,
   'POST /api/knowledge/:id/reject': true,
   'POST /api/services/:name/skill': true,
+  'GET /api/dreaming': true,
+  'POST /api/dreaming/:service': true,
   'POST /api/asks': true,
   'GET /api/asks/:id': true,
   'POST /api/asks/:id/follow': true,
@@ -944,7 +964,7 @@ export const SESSION_TABS_ROUTES: readonly ApiRoute[] = ['GET /api/sessions/:id/
 export const STEP_ROUTES: readonly ApiRoute[] = ['GET /api/tickets/:id/steps', 'POST /api/contracts/:id/approve', 'POST /api/contracts/:id/sendback'];   // lane 23, flow/
 export const VARIANT_ROUTES: readonly ApiRoute[] = ['GET /api/tickets/:id/variants', 'POST /api/variants/:id/choose'];   // issue #271, flow/variants.ts
 export const BATCH_ROUTES: readonly ApiRoute[] = ['POST /api/batches', 'GET /api/batches', 'GET /api/batches/:id'];   // requirement C6, flow/batch.ts
-export const KNOWLEDGE_ROUTES: readonly ApiRoute[] = ['POST /api/knowledge/:id/approve', 'POST /api/knowledge/:id/reject', 'POST /api/services/:name/skill'];   // lane 24, knowledge/
+export const KNOWLEDGE_ROUTES: readonly ApiRoute[] = ['POST /api/knowledge/:id/approve', 'POST /api/knowledge/:id/reject', 'POST /api/services/:name/skill', 'GET /api/dreaming', 'POST /api/dreaming/:service'];   // lane 24 and issue #455, knowledge/
 export const ASK_ROUTES: readonly ApiRoute[] = ['POST /api/asks', 'GET /api/asks/:id', 'POST /api/asks/:id/follow'];   // lane 25, reader/
 export const RECIPE_ROUTES: readonly ApiRoute[] = ['GET /api/recipes', 'POST /api/recipes/:name/run', 'GET /api/schedules', 'POST /api/schedules', 'DELETE /api/schedules/:id'];   // lane 26, recipes/ and schedules/
 export const TERMINAL_ROUTES: readonly ApiRoute[] = [   // lane 31, terminal/ and flow/files.ts

@@ -41,6 +41,10 @@ export type TowerData = {
 // The lead's ticket (LEAD_TICKET in src/lead/contract.ts, which the browser
 // cannot import at run time): a plan or a question of the lead carries it.
 export const LEAD_TICKET = 'lead';
+// The ticket of the nightly pass's proposals (DREAM_TICKET in
+// src/knowledge/dreaming.ts, issue #455): no ticket of the tracker, so its
+// card names the pass instead.
+export const DREAM_TICKET = 'dreaming';
 
 // The longest draft the bar hands to the lead's screen, which reads as much.
 export const DRAFT_MAX = 2000;
@@ -166,8 +170,9 @@ const CHECKS = { passed: 'green', pending: 'running', failed: 'red' } as const;
 
 function need(item: NeedItem, now: Date, titles: ReadonlyMap<string, string>): NeedCard {
   const lead = item.ticket === LEAD_TICKET;
+  const dream = item.kind === 'knowledge' && item.ticket === DREAM_TICKET;
   const base = {
-    kind: item.kind, id: item.id, ticket: lead ? '' : item.ticket, owner: lead ? 'lead' : 'team', minutes: minutesSince(item.since, now),
+    kind: item.kind, id: item.id, ticket: lead || dream ? '' : item.ticket, owner: lead ? 'lead' : 'team', minutes: minutesSince(item.since, now),
     href: item.kind === 'plan' ? `/plans/${encodeURIComponent(item.planId)}` : lead ? '/lead' : `/inbox#${encodeURIComponent(item.id)}`,
   } as const;
   switch (item.kind) {
@@ -528,7 +533,7 @@ export function needSentence(card: NeedCard, t: Translate): string {
 }
 
 export function needId(card: NeedCard, t: Translate): string {
-  return card.kind === 'plan' ? t('need_goal') : card.owner === 'lead' ? t('need_lead') : card.ticket;
+  return card.kind === 'plan' ? t('need_goal') : card.owner === 'lead' ? t('need_lead') : card.kind === 'knowledge' && card.ticket === '' ? t('need_dreaming') : card.ticket;
 }
 
 export const harnessSquare = (harness: Harness): 'claude' | 'codex' | 'other' => (harness === 'claude-code' ? 'claude' : harness === 'codex' ? 'codex' : 'other');

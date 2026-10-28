@@ -58,6 +58,9 @@ test('the API lists every route the app lanes build against, once', () => {
     'POST /api/knowledge/:id/approve',
     'POST /api/knowledge/:id/reject',
     'POST /api/services/:name/skill',
+    // Issue #455: the nightly pass of each service, read and turned on or off.
+    'GET /api/dreaming',
+    'POST /api/dreaming/:service',
     'POST /api/asks',
     'GET /api/asks/:id',
     'POST /api/asks/:id/follow',
@@ -90,7 +93,7 @@ test('the API lists every route the app lanes build against, once', () => {
   assert.equal(new Set(API_ROUTES).size, API_ROUTES.length);
   // A route of the type map is a route of the list, and the reverse (checked by tsc).
   const keys: readonly (keyof ApiRoutes)[] = API_ROUTES;
-  assert.equal(keys.length, 71);
+  assert.equal(keys.length, 73);
   const ahead = [...SESSION_PLAN_ROUTES, ...SESSION_TABS_ROUTES, ...STEP_ROUTES, ...VARIANT_ROUTES, ...BATCH_ROUTES, ...KNOWLEDGE_ROUTES, ...ASK_ROUTES, ...RECIPE_ROUTES, ...TERMINAL_ROUTES, ...CONSUMPTION_ROUTES, ...MAP_ROUTES];
   assert.deepEqual(ahead.filter((route) => !API_ROUTES.includes(route)), []);
   assert.equal(new Set(ahead).size, ahead.length, 'each route of a later lane is in one list');
