@@ -7766,5 +7766,5 @@ Changed with the code: the label gate's case (decision 10), the adapter test's f
 
 **Resources.** No Docker object made or touched: the tests use the fake docker CLI; `docker images` and `docker ps` were run once each, filtered on `cleared.dev=v2`, to look for a session image (none). No real GitHub, GitLab, Slack, Cursor or Codex account, no Claude Code login read. Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issue and the pull request. Ports: only the tests' own ephemeral loopback ones. No tunnel, no secret.
 
-- Pull request: PR_PLACEHOLDER, against `v2`.
+- Pull request: 458, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-session-survives`.
