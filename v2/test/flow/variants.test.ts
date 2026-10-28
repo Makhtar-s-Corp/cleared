@@ -13,6 +13,7 @@ import { sessionNames } from '../../src/container/session-runtime.ts';
 import { FlowEngine, FlowError, type FlowEffects } from '../../src/flow/engine.ts';
 import { diffLines, variantFolder, variantPrompt, type VariantKey } from '../../src/flow/variants.ts';
 import type { FakeStep } from '../../src/session/adapters/fake.ts';
+import type { ReceiptData } from '../../src/flow/receipt.ts';
 import { FakeDocker } from '../container/fake-docker.ts';
 import { CONFIG, finished, setup, started, text, until, type Setup } from './support.ts';
 
@@ -248,4 +249,29 @@ test('the lines of a diff leave its file headers out', () => {
   assert.deepEqual(diffLines(''), { added: 0, removed: 0 });
   assert.equal(variantFolder('T-9', { round: 2, position: 4 }), 'T-9.variant-2-4');
   assert.throws(() => variantFolder('T-9', { round: 1, position: 5 }), FlowError);
+});
+
+// The kept variant is reviewed as any ticket, so its review takes the
+// receipt's captures on the reviewer's trial environment (P210, issue #469).
+test('the chosen variant\'s pull request carries the captures its reviewer took', async () => {
+  const prepared: Prepared[] = [];
+  const published: string[] = [];
+  const receipts: (ReceiptData | undefined)[] = [];
+  const captured: string[] = [];
+  const effects = variantEffects(prepared, published);
+  const t = await setup({
+    scripts: { authors: [done('a1', 'Sorted with a query.'), done('a2', 'Sorted in memory.')] },
+    effects: {
+      ...effects,
+      async publish(input) { receipts.push(input.receipt); return effects.publish!(input); },
+      async captureProof(input) { captured.push(input.session); return { before: 'before.png', after: 'after.png', video: 'flow.webm', videoMs: 20_000, missing: [] }; },
+    },
+  });
+  await t.engine.start(t.ticket.id, 'u1', undefined, 2);
+  await until(() => { const shown = item(t)?.variants ?? []; return shown.length === 2 && shown.every((v) => v.state === 'done'); }, 'both variants to end');
+  await t.engine.chooseVariant((item(t) as VariantsItem).id, 1, 'u1');
+  await until(() => t.inbox.list().some((i) => i.kind === 'release' && i.state === 'waiting'), 'the release item', 5000);
+  const reviewer = t.startedSessions.find((s) => s.input.role === 'reviewer');
+  assert.deepEqual(captured, [reviewer?.id]);
+  assert.deepEqual(receipts[0]?.captures.map((c) => [c.service, c.after]), [['guestbook', 'after.png']]);
 });
