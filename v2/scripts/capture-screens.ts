@@ -10,7 +10,8 @@
 //     [--via load|click] [--language fr|en]
 //
 // The language is the app's default, French, unless --language en asks for
-// English (the owner's decision of 2026-10-23).
+// English (the owner's decision of 2026-10-23). The sample data is in the
+// same language (fixtures/french.ts, lane j6-ui-pro).
 //
 // More captures, named only (lane 35): palette and sheet (the tower with
 // the command palette or the shortcut sheet open, by their keys), the same
@@ -49,6 +50,9 @@
 // panel open, from the account menu; from 768 px, where the person's menu
 // holds it) and plan (the lead screen at the fixtures' first plan).
 //
+// Lane j6-ui-pro's, named only: groups (the sessions screen as the whole
+// page: every session group, the sidebar's beside them).
+//
 // --via load (the default) opens each screen's address as a page; --via
 // click opens the tower, then reaches each screen by a click on a link of
 // the page, which the app answers without a document load (lane 34): the
@@ -80,9 +84,9 @@ export const WIDTHS: Readonly<Record<string, { readonly width: number; readonly 
   390: { width: 390, height: 844 },
 };
 export const SCREENS = ['tower', 'inbox', 'sessions', 'session', 'lead'] as const;
-export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox', 'palette-inbox-permission', 'login', 'account', 'consumption', 'tower-template', 'resolved', 'plan-ask', 'inbox-release', 'services', 'ask', 'access', 'plan'] as const;
+export const EXTRAS = ['palette', 'sheet', 'palette-inbox', 'palette-session', 'sheet-session', 'rail-tooltip', 'tower-empty', 'lead-empty', 'review', 'review-editor', 'review-takeover', 'inbox-permission', 'inbox-handled', 'sheet-inbox', 'palette-inbox-permission', 'login', 'account', 'consumption', 'tower-template', 'resolved', 'plan-ask', 'inbox-release', 'services', 'ask', 'access', 'plan', 'groups'] as const;
 // The extras captured as the whole page, not the window.
-const WHOLE = new Set<string>(['consumption', 'resolved']);
+const WHOLE = new Set<string>(['consumption', 'resolved', 'groups']);
 export type CaptureScreen = typeof SCREENS[number] | typeof EXTRAS[number];
 // What an empty capture answers empty, in the page.
 const EMPTY = /\/api\/service\/(?:inbox|sessions|tickets|plans|lead\/messages|lead\/stream)(?:\?.*)?$/;
@@ -115,7 +119,7 @@ export async function capture(options: { readonly out: string; readonly screens?
 
   const preview = createServer();
   const previewBase = await listen(preview);
-  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW, resolved: screens.includes('resolved') }), extra: { previewOrigin: previewBase, language: options.language ?? 'fr' } });
+  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW, resolved: screens.includes('resolved'), language: options.language ?? 'fr' }), extra: { previewOrigin: previewBase, language: options.language ?? 'fr' } });
   preview.on('request', createPreviewHandler({ upstream: fixturePreview(), origin: previewBase, appOrigins: [app.origin] }));
   const errors: string[] = [];
   const away: string[] = [];
@@ -162,7 +166,7 @@ export async function capture(options: { readonly out: string; readonly screens?
           'inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`, 'inbox-handled': '/inbox', 'sheet-inbox': '/inbox', 'palette-inbox-permission': `/inbox#${encodeURIComponent(permission?.id ?? '')}`,
           consumption: '/consumption', 'tower-template': '/', resolved: `/sessions/${RESOLVED_AUTHOR_ID}`, 'plan-ask': `/sessions/${author?.id ?? ''}#plan`,
           'inbox-release': `/inbox#${encodeURIComponent(release?.id ?? '')}`,
-          services: '/services', ask: `/ask/${ASK_ID}`, access: '/', plan: '/plans/plan-1',
+          services: '/services', ask: `/ask/${ASK_ID}`, access: '/', plan: '/plans/plan-1', groups: '/sessions',
         };
         let documents = 0;
         page.on('load', () => { documents += 1; });

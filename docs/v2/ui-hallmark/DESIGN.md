@@ -1,5 +1,7 @@
 # Cleared v2: Signal, the Hallmark redesign of the web app
 
+**Superseded** by [docs/v2/ui-pro/DESIGN.md](../ui-pro/DESIGN.md) (lane `v2-j6-ui-pro`, issue #461): the owner turned Signal down as not professional. This file is kept as the record of #460.
+
 Lane `v2-j6-ui-hallmark`, issue #451. This file is the locked system of the v2 web app (`v2/app/web`): every sheet reads its tokens from `styles/app.css`, and every rule below is checked by a test where a test can check it.
 
 ## The theme and why

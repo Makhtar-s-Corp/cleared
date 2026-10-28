@@ -22,10 +22,10 @@ test('a one-service workspace offers one author or 2 to 4 variants, the choice p
   assert.match(markup, /<div class="ask-variants" role="group" aria-label="How many authors work this ticket at once">/);
   assert.deepEqual(pressed(markup), ['1:false', '2:false', '3:true', '4:false']);
   assert.match(markup, /aria-label="3 variants, compared in the inbox"/);
-  assert.match(markup, /aria-label="One author"/);
+  assert.match(markup, /aria-label="1 author"/);
   assert.match(html(<Bar t={fr} title="x" body="" />), /aria-label="Combien d&#39;auteurs travaillent ce ticket en même temps"/);
   assert.deepEqual(pressed(html(<Bar t={en} title="" body="" />)), ['1:true', '2:false', '3:false', '4:false'], 'one author by default');
-  for (const text of visibleText(html(<Bar t={sentinel} title="x" body="" />))) assert.ok(!/Authors|One author|compared in/.test(text), `"${text}" is not from the catalog`);
+  for (const text of visibleText(html(<Bar t={sentinel} title="x" body="" />))) assert.ok(!/Authors|1 author|One author|compared in/.test(text), `"${text}" is not from the catalog`);
 });
 
 test('a workspace of several services has no variants: the services are its choice', () => {

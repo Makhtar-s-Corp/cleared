@@ -33,7 +33,7 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import { KEEPALIVE_MS } from '../../src/api/events.ts';
-import { changeFrame, leadFrame, sseFrame, type Ask, type CaptureChoice, type ChangeKind, type ContractItem, type CreateTicketBody, type DreamingView, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
+import { changeFrame, leadFrame as leadFrameOf, sseFrame as sseFrameOf, type Ask, type CaptureChoice, type ChangeKind, type ContractItem, type CreateTicketBody, type DreamingView, type KnowledgeItem, type NextInboxItem, type QuestionItem, type SessionDetail, type TakenOver } from '../../src/api/types.ts';
 import { ticketCost } from '../../src/consumption/ticket-cost.ts';
 import { productionChecksOf } from '../../src/flow/production.ts';
 import { BatchError, BatchRunner } from '../../src/flow/batch.ts';
@@ -42,7 +42,8 @@ import type { SessionState } from '../../src/session/events.ts';
 import { MemoryTicketStore, type Ticket } from '../../src/tickets/contract.ts';
 import { typeLabelProblem } from '../../src/tickets/templates.ts';
 import { applyAll, emptyModel } from '../web/screens/session/model.ts';
-import { sendJson, type DataSource } from '../src/proxy.ts';
+import { sendJson as sendJsonOf, type DataSource } from '../src/proxy.ts';
+import { inFrench } from './french.ts';
 import { leadFixture } from './lead.ts';
 import { ENVELOPE_BODY, ENVELOPE_RESUMED, ENVELOPE_TICKET, PREVIEW_KEY, envelopeStory, fixtureFile, fixtureHuman, workspaceFixture } from './session.ts';
 import { askFixture, startedAsk } from './ask.ts';
@@ -97,8 +98,14 @@ export type FixtureSource = DataSource & {
 
 const PIXEL = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 
-export async function fixtureSource(options: { readonly now?: () => Date; readonly project?: string; readonly resolved?: boolean; readonly week?: boolean } = {}): Promise<FixtureSource> {
+// `language: 'fr'` answers the sample data in French (fixtures/french.ts, the project lead's review of #462); the
+// tests read the English one, the default.
+export async function fixtureSource(options: { readonly now?: () => Date; readonly project?: string; readonly resolved?: boolean; readonly week?: boolean; readonly language?: 'en' | 'fr' } = {}): Promise<FixtureSource> {
   const now = options.now ?? (() => new Date());
+  const said = <T,>(value: T): T => (options.language === 'fr' ? inFrench(value) : value);
+  const sendJson = (response: ServerResponse, status: number, body: unknown) => sendJsonOf(response, status, said(body));
+  const sseFrame = (event: Parameters<typeof sseFrameOf>[0]) => sseFrameOf(said(event));
+  const leadFrame = (frame: Parameters<typeof leadFrameOf>[0]) => leadFrameOf(said(frame));
   const fixture = await towerFixture(now(), options.project === undefined ? {} : { project: options.project });
   const lead = await leadFixture(now(), options.project === undefined ? {} : { project: options.project });
   const project = fixture.sessions[0]?.project ?? 'guestbook';

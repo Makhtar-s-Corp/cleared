@@ -20,7 +20,7 @@ import { keyLabel } from './keys.ts';
 import { Logo } from './Logo.tsx';
 import { inboxBadge, NAV, type LeadDot, type SessionGroup, type SidebarMode } from './model.ts';
 import { NotifyButton } from './NotifyButton.tsx';
-import type { WeeklyQuota } from './quota.ts';
+import { quotaLevel, type WeeklyQuota } from './quota.ts';
 import { weekdayClock } from '@/lib/time.ts';
 
 const LANGUAGES: readonly Language[] = ['fr', 'en'];
@@ -61,7 +61,7 @@ export function QuotaGauge({ t, quota, zone, current, onPick }: { readonly t: Tr
   const when = quota.kind === 'measured' ? weekdayClock(quota.resetsAt, zone, t) : '';
   const name = quota.kind === 'measured' ? t('quota_name', { percent: quota.percent, when }) : t('quota_name_none');
   return (
-    <a className="quota-gauge" id="quota-gauge" href="/consumption" data-verdict={quota.kind === 'measured' ? quota.verdict : 'none'} aria-label={name} data-tip={name}
+    <a className="quota-gauge" id="quota-gauge" href="/consumption" data-verdict={quota.kind === 'measured' ? quota.verdict : 'none'} data-level={quota.kind === 'measured' ? quotaLevel(quota.percent) : undefined} aria-label={name} data-tip={name}
       aria-current={current ? 'page' : undefined} onClick={() => onPick?.('/consumption')}>
       {/* Its words are its name's own, in the same order (WCAG 2.5.3, label in name). */}
       <span className="quota-gauge-head" aria-hidden="true">

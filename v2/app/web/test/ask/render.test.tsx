@@ -30,7 +30,9 @@ test('an answered ask: the question, what it is about, both turns with their ans
   assert.equal(markup.match(/<li class="turn"/g)?.length, 2);
   assert.ok(answerText(markup, 0) === ASK_ANSWER, 'the answer is whole, its citations linked inside it');
   assert.ok(visibleText(markup).includes(FOLLOW_QUESTION));
-  assert.match(markup, /data-ask-total=""[^>]*>[^<]*week used at 29%/);
+  // The total is drawn as facts since lane j6-ui-pro (cells parted by a short line, no middle dots): its words read the same.
+  const total = /<p class="ask-total" data-ask-total=""[^>]*>([^]*?)<\/p>/.exec(markup)?.[1] ?? '';
+  assert.match(visibleText(`<p>${total.replace(/<[^>]*>/g, '')}</p>`).join(''), /week used at 29%/);
   assert.match(markup, /<textarea[^>]*id="follow-input"[^>]*maxlength="4000"/);
   assert.equal(QUESTION_MAX, 4000);
   assert.match(markup, /<button[^>]*data-act="follow"[^>]*>Ask<\/button>/);

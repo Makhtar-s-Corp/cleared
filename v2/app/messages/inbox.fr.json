@@ -40,7 +40,7 @@
   "after": "Après",
   "alt_before": "L'écran avant la mise en production",
   "alt_after": "L'écran après la mise en production",
-  "shot_none": "Pas d'image de cet écran.",
+  "shot_none": "Aucune capture d'écran pour ce changement.",
   "facts_sessions": "Sessions",
   "facts_change": "Changement",
   "wrote": "{model} l'a écrit en {time}",

@@ -20,3 +20,8 @@ export function weeklyQuota(data: Pick<Consumption, 'harnesses'> | null): Weekly
   if (!shown) return { kind: 'none' };
   return { kind: 'measured', percent: shown.usedPercent, verdict: verdictOf(shown.projection), resetsAt: shown.resetsAt };
 }
+
+// The colour of a quota's bar and figure (the project lead's review of #462, lane j6-ui-pro): the accent up to 80 %,
+// amber past 80 %, red only past 90 %. The verdict (will it be reached before its reset) stays in the words.
+export type QuotaLevel = 'ok' | 'high' | 'over';
+export const quotaLevel = (percent: number): QuotaLevel => (percent > 90 ? 'over' : percent > 80 ? 'high' : 'ok');

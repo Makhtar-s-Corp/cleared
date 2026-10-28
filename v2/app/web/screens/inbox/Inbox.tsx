@@ -6,7 +6,7 @@
 // (model.ts says what each gesture calls). A release of several services is
 // a train (TrainBody).
 import { CLOSE_REASON_MAX, closeReason, closeTicket } from '@/lib/close.ts';
-import { ArrowCircleRight, ArrowCounterClockwise, ArrowLeft, CaretRight, CheckCircle, Circle, CircleNotch, LockSimple, Tray, WarningCircle } from '@phosphor-icons/react';
+import { ArrowCircleRight, ArrowCounterClockwise, ArrowLeft, CaretRight, CheckCircle, Circle, CircleNotch, ImageSquare, LockSimple, Tray, WarningCircle } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type Ref } from 'react';
 import type { ContractItem, KnowledgeItem, PermissionItem, Plan, PlanItemInbox, QuestionItem, ReleaseItem, SessionPlanItem, SessionSummary, TicketVariant, TrainState, TrainStop, VariantsItem } from '../../../../src/api/types.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
@@ -261,7 +261,7 @@ function ReleaseBody({ item, view, t, onFrame }: { readonly item: ReleaseItem; r
 function Shots({ item, view, t, onFrame }: { readonly item: ReleaseItem; readonly view: InboxView; readonly t: Translate; readonly onFrame?: (frame: InboxView['frame']) => void }) {
   // No picture on either side at either size: one line says so, not two empty frames and a switch (P222).
   const none = (['before', 'after'] as const).every((side) => !sameOrigin(item.captures[side].desktop) && !sameOrigin(item.captures[side].phone));
-  if (none) return <><div className="shots-head"><h3>{t('shots_title')}</h3></div><p className="shot-none">{t('shot_none')}</p></>;
+  if (none) return <><div className="shots-head"><h3>{t('shots_title')}</h3></div><p className="shot-none"><ImageSquare size={16} aria-hidden="true" />{t('shot_none')}</p></>;
   return (
     <>
       <div className="shots-head">

@@ -21,7 +21,7 @@
 // changed file for editing (decision 33). Both packages load by a dynamic
 // import (lane 32).
 import {
-  ArrowCounterClockwise, ArrowRight, ArrowsClockwise, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, Terminal, WarningCircle, X, type Icon,
+  ArrowCounterClockwise, ArrowRight, ArrowsClockwise, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ImageSquare, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, Terminal, WarningCircle, X, type Icon,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import type { CaptureChoice, ConfirmableRule, EditorLinks, ProductionCheck, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketCost, TicketStep, Workspace } from '../../../../src/api/types.ts';
@@ -43,7 +43,7 @@ import { Empty } from '@/shell/Empty.tsx';
 import { stateOf, type SessionState } from '@/shell/model.ts';
 import { commandParts, intentSentence, looksLikeCommand } from '@/lib/intent.ts';
 import { sessionStatus } from '@/lib/status.ts';
-import { since } from '@/lib/time.ts';
+import { ago, since } from '@/lib/time.ts';
 import { requestAsk, requestFold, requestFoldOpen, requestReason } from '@/lib/request.ts';
 import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
@@ -479,6 +479,13 @@ export function LeftCards({ view, t, onPlan, close, onCaptures, capturesBusy, ca
         <p className="eyebrow">{t('ticket_label')} <span className="id">{view.summary.ticket}</span>{service ? <> · <span className="service">{service}</span></> : null}</p>
         <h2 id="ticket-title" className="card-title">{view.ticket?.title ?? view.summary.ticket}</h2>
         {parsed.description.map((p, index) => <p key={index} className="desc">{p}</p>)}
+        {/* The session that works it, in facts (the project lead's review of #462): its role, its agent and model, since when. */}
+        <dl className="ticket-facts" data-session-facts="">
+          <dt>{t('facts_role')}</dt><dd>{t(`role_${view.summary.role}`)}</dd>
+          <dt>{t('facts_agent')}</dt><dd><span className={`sq ${harnessSquare(view.summary.harness)}`} aria-hidden="true" /><span className="id">{view.summary.harness}</span></dd>
+          <dt>{t('facts_model')}</dt><dd className="id">{view.summary.model}</dd>
+          <dt>{t('facts_started')}</dt><dd>{ago(view.summary.startedAt, view.now, t)}</dd>
+        </dl>
         {versions ? <p className="session-versions faint small" data-session-versions="">{versions}</p> : null}
         {cost.length > 0 ? <p className="ticket-cost faint small" data-ticket-cost="">{cost.map((fact) => <span key={fact} className="fact">{fact}</span>)}</p> : null}
         {production.length > 0 ? (
@@ -565,7 +572,7 @@ export function RightCards({ view, t, onFile }: { readonly view: SessionView; re
           </>
         )}
       </section>
-      {done ? null : <section className="card" aria-labelledby="screen-title"><h3 id="screen-title" className="card-label">{t('screen_title')}</h3><p className="faint small">{t('screen_empty')}</p></section>}
+      {done ? null : <section className="card" aria-labelledby="screen-title"><h3 id="screen-title" className="card-label">{t('screen_title')}</h3><p className="screen-waiting"><ImageSquare size={20} aria-hidden="true" /><span>{t('screen_waiting')}</span></p></section>}
     </>
   );
 }
@@ -622,7 +629,7 @@ export function SessionIndex({ sessions, tickets, now, t, onNew }: { readonly se
       <h1 className="sr-only">{t('index_title')}</h1>
       {ordered.length === 0 ? <Empty block icon={Terminal} text={t('index_empty')} note={t('index_empty_note')} action={{ label: t('index_new_ticket'), onClick: () => onNew?.() }} /> : (
         <>
-          {/* The groups as a board of figures (Signal, lane j6-ui-hallmark): how many wait, work, are in review, ended. */}
+          {/* The groups as a row of figures (lane j6-ui-hallmark, quiet since j6-ui-pro): how many wait, work, are in review, ended. */}
           <ul className="figure-row index-figures" aria-label={t('index_groups_label')}>
             {groups.map((group) => <li key={group.key} data-group={group.key}><b>{group.rows.length}</b><span>{t(`index_group_${group.key}`)}</span></li>)}
           </ul>

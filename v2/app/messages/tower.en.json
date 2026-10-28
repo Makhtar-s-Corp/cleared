@@ -1,7 +1,7 @@
 {
-  "bar_placeholder": "A goal, a question or a ticket…",
+  "bar_placeholder": "E.g. add a CSV export",
   "bar_label": "A ticket title, a goal or a question for the Lead",
-  "bar_new_ticket": "New ticket",
+  "bar_new_ticket": "Start",
   "bar_new_goal": "New goal",
   "bar_ask_lead": "Ask the Lead",
   "bar_body_placeholder": "Description and acceptance criteria (optional)",
@@ -140,7 +140,7 @@
   "all_sessions": "All sessions",
   "bar_variants": "Authors",
   "bar_variants_label": "How many authors work this ticket at once",
-  "bar_variants_one": "One author",
+  "bar_variants_one": "1 author",
   "bar_variants_other": "{n} variants, compared in the inbox",
   "ticket_created_variants": "{id} created, in {status}, with {n} variants.",
   "bar_batch": "Batch",
@@ -183,5 +183,17 @@
   "template_question_body": "## The question\n\n## Where to look\nservice:path:line, or the files concerned.\n\n## Expected\nThe answer written where the next reader will look for it (the README, a doc or a comment beside the code), citing the code it reads.",
   "template_environment": "Environment",
   "template_environment_title": "The service whose environment to prepare",
-  "template_environment_body": "## The service\nIts name, and what its tests need that Cleared's session image lacks: a system library, a database client, another runtime.\n\n## What to write\n- `.devcontainer/devcontainer.json` with `image`, or `build.dockerfile` and a Dockerfile that starts from Cleared's session image (cleared-v2-session): a session needs Node 24, Claude Code and Cleared's runner.\n- The dependencies install with `[session] install_command` in `.cleared/agents.conf`, one simple command.\n- Devcontainer features and lifecycle commands are not read.\n\n## Acceptance criteria\n- The branch's image builds and the service's declared check passes in it. Cleared runs both before the review.\n- With no declared check, the image builds, and the ticket says so."
+  "template_environment_body": "## The service\nIts name, and what its tests need that Cleared's session image lacks: a system library, a database client, another runtime.\n\n## What to write\n- `.devcontainer/devcontainer.json` with `image`, or `build.dockerfile` and a Dockerfile that starts from Cleared's session image (cleared-v2-session): a session needs Node 24, Claude Code and Cleared's runner.\n- The dependencies install with `[session] install_command` in `.cleared/agents.conf`, one simple command.\n- Devcontainer features and lifecycle commands are not read.\n\n## Acceptance criteria\n- The branch's image builds and the service's declared check passes in it. Cleared runs both before the review.\n- With no declared check, the image builds, and the ticket says so.",
+  "bar_model_label": "The next authors' model",
+  "bar_model_note": "The model the next authors start on, as in Consumption: it holds for every ticket that starts next.",
+  "bar_model_default": "Default ({model})",
+  "bar_model_set": "The next authors start on {model}.",
+  "bar_model_failed": "The model could not be changed. Try again in a moment.",
+  "bar_more": "More actions",
+  "bar_suggest": "Start from",
+  "bar_suggest_label": "Start from a ready-made ticket",
+  "bar_agent": "Agent: {harness}",
+  "bar_agent_auto": "Auto",
+  "bar_agent_claude": "Claude Code",
+  "bar_agent_note": "The agent profile in force, version {version}: the next tickets start on it. It is changed on the service map."
 }
