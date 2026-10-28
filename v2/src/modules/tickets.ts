@@ -9,7 +9,8 @@
 // token file, and stopped with it; each ticket it writes is said on the
 // app's change stream (issue #386, P237). A delegation on a tracker (C3,
 // P244) is handed to the lead module's plans, which propose its ticket to
-// the owner.
+// the owner. A workspace the assistant writes while the service runs (issue
+// #420) gets its rows and its mirror once the flow runs on it.
 import type { DatabaseSync } from 'node:sqlite';
 import { changeHub } from '../api/events.ts';
 import { approvalEnvironment } from '../approval/service.ts';
@@ -32,6 +33,11 @@ export function recordWorkspaceOf(db: DatabaseSync, env: NodeJS.ProcessEnv, now:
   if (workspace) recordWorkspace(db, workspace, now());
 }
 
+// Whether the settings name a workspace now; a badly set up one stopped the service at provide.
+function workspaceNamed(env: NodeJS.ProcessEnv): boolean {
+  try { return loadFlowConfig(env) !== undefined; } catch { return false; }
+}
+
 // A ticket the mirror wrote, said on the engine's change stream, so that an
 // open page refetches it (api/events.ts); nothing without an engine.
 export function sayTicketChange(engine: () => FlowEngine | undefined): (ticket: TicketId) => void {
@@ -51,6 +57,7 @@ export function delegationOf(registry: Registry): MirrorDelegate {
 
 let ledger: DatabaseSync | undefined;
 let mirror: Mirror | undefined;
+let starts = 0;
 
 // The mirror the settings ask for, on the registry's ticket store and the
 // flow's engine; none without settings or a project, and a bad setting is
@@ -96,11 +103,25 @@ const tickets: Module = {
     ledger = store.db;
     return { ticketStore: approvalEnvironment(store.db).ticketStore };
   },
+  // With no workspace yet, its rows and the mirror wait for the flow's
+  // engine, unless the module stopped meanwhile.
   start: (registry) => {
-    if (!mirror && ledger) mirror = startMirror(registry, ledger);
+    const started = ++starts;
+    const db = ledger;
+    if (!db || mirror) return;
+    if (workspaceNamed(process.env)) {
+      mirror = startMirror(registry, db);
+      return;
+    }
+    runtime.whenEngine(() => {
+      if (started !== starts || mirror) return;
+      recordWorkspaceOf(db, process.env);
+      mirror = startMirror(registry, db);
+    });
   },
   // The pass that runs is awaited, so that the store does not close under it.
   stop: async () => {
+    starts += 1;
     const ending = mirror;
     mirror = undefined;
     await ending?.close();

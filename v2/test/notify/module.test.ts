@@ -59,6 +59,22 @@ test('with a project the dispatcher ticks from the start of the service, with no
   }
 });
 
+// Issue #420: a workspace file and no CLEARED_V2_PROJECT, as the assistant
+// leaves the settings, starts the dispatcher too.
+test('with a workspace file the dispatcher starts too', async () => {
+  const module = createNotifyModule({ env: { CLEARED_V2_WORKSPACE: '/state/workspace.conf' }, sender: () => fakeSender(), intervalMs: 5 });
+  const store = openStore(':memory:');
+  applyTables(store.db, [INBOX_TABLE, ...RUNS_TABLES, ...module.tables]);
+  module.provide({ store });
+  const dispatcher = module.dispatcher();
+  try {
+    assert.ok(dispatcher);
+  } finally {
+    await dispatcher?.close();
+    store.close();
+  }
+});
+
 // The heartbeat (docs/v2/milestone-4-plan.md, section 8): its tables are the
 // module's, and its beat starts with the service, a project set or not, and
 // stops with it.

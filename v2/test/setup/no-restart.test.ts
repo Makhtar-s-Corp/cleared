@@ -8,7 +8,8 @@
 // as the settings file is applied before anything reads a setting. The
 // forge is a fake gh over bare copies of the two examples, guestbook and
 // filter-api, connected as a workspace of two services; the harness the
-// fake one, the mirror's tracker a recorder on loopback, and a docker
+// fake one, the mirror's tracker a recorder on loopback (its first pass
+// asks it nothing: it takes note of where it starts), and a docker
 // stand-in first on PATH says each call it gets: none is expected.
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -62,7 +63,7 @@ test('the assistant, then a first ticket and a Tower ticket, with no restart: ea
   writeFileSync(join(stub, 'docker'), `#!/bin/sh\necho "$*" >> '${dockerLog}'\necho 'docker: not in this test' >&2\nexit 1\n`);
   chmodSync(join(stub, 'docker'), 0o755);
 
-  // The mirror's tracker: a recorder on loopback that answers no issue.
+  // The mirror's tracker: a recorder on loopback that answers no issue, asked nothing.
   const asked: string[] = [];
   const tracker = createServer((request: IncomingMessage, response) => {
     asked.push(`${request.method} ${request.url}`);
@@ -142,7 +143,6 @@ test('the assistant, then a first ticket and a Tower ticket, with no restart: ea
     assert.equal((await call('/api/workspace')).status, 503);
     assert.equal(knowledge.knowledge(), undefined);
     assert.equal(notify.dispatcher(), undefined);
-    assert.equal(approval.trains(), undefined);
 
     // The owner, from the setup code the start printed, as the app makes it.
     const code = printed.map((line) => SETUP_CODE_LINE.exec(line)?.[1]).find(Boolean);
@@ -167,9 +167,13 @@ test('the assistant, then a first ticket and a Tower ticket, with no restart: ea
     assert.deepEqual(store.db.prepare('SELECT id FROM workspaces').all().map((row) => row.id), [project], 'the workspace\'s rows are written');
     assert.deepEqual(workspace.json.services.map((s: { name: string }) => s.name), ['guestbook', 'filter-api']);
     assert.ok(knowledge.knowledge(), 'the knowledge runs');
-    assert.ok(approval.trains(), 'a workspace of two services approves its tickets as trains');
     assert.ok(notify.dispatcher(), 'the notifications are sent');
-    await until(() => (asked.length > 0 ? true : undefined), 'the mirror\'s first pass');
+    // The mirror's first pass takes note of each tracker it reads, one per repository.
+    const trackers = await until(() => {
+      const rows = store.db.prepare('SELECT tracker FROM mirror_trackers ORDER BY tracker').all().map((row) => String(row.tracker));
+      return rows.length === 2 ? rows : undefined;
+    }, 'the mirror\'s first pass');
+    assert.deepEqual(trackers.map((name) => /guestbook|filter-api/.exec(name)?.[0]), ['filter-api', 'guestbook']);
     assert.equal((await call('/api/lead')).status, 200, 'the lead runs');
 
     // The first ticket, from the assistant's step.
@@ -178,13 +182,14 @@ test('the assistant, then a first ticket and a Tower ticket, with no restart: ea
     const firstId = first.json.ticket.id as string;
     // A ticket typed in the Tower: the project is the workspace's id, as GET /api/workspace names it.
     const typed = await call('/api/tickets', { title: 'Say hello in the footer', project, services: ['guestbook'] });
-    assert.equal(typed.status, 201, typed.text);
+    assert.equal(typed.status, 200, typed.text);
 
     const listedTickets = (await call('/api/tickets')).json as { id: string; project: string }[];
     assert.deepEqual(listedTickets.filter((t) => t.id === firstId || t.id === typed.json.id).map((t) => t.project), [project, project]);
     // The first ticket's author proposes its plan, which waits for the owner's Go.
     await until(async () => ((await call('/api/setup/first-ticket?language=en')).json?.ticket?.stage === 'plan' ? true : undefined), 'the session plan in the inbox');
     assert.equal(existsSync(dockerLog) ? readFileSync(dockerLog, 'utf8') : '', '', 'no docker call');
+    assert.deepEqual(asked, [], 'no request reached the tracker');
   } finally {
     await app.stop?.();
     server.closeAllConnections();

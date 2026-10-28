@@ -145,6 +145,23 @@ ssh -L 8792:127.0.0.1:8792 -L 8794:127.0.0.1:8794 <you>@<this machine>
 
 The second forward is for the Browser tab's previews, which the browser loads from their own port; the app works without it. With other ports set at install, forward those. Cleared opens no tunnel and serves nothing to a network.
 
+## What needs a restart
+
+The workspace the Repositories step writes is used at once, with no restart: the first ticket, the tickets and batches typed in the Tower, the lead with its plans, schedules and service map, the quota reading, the lessons proposed from handovers, the notifications, the tracker mirrors, `cleared run` and the workspace's record all start on it. The checks, the test secrets and the environment step read it at each use.
+
+A restart of the service is needed for:
+
+- A workspace changed once Cleared runs on one: a repository connected later from the Services screen, or one removed. The environment step says so for a new repository, and proposes no setup session for it until the restart.
+- The heartbeat's quota line, when the service started before any repository was connected.
+- The release trains of a workspace of several repositories. They also need a release lock per repository, each with its own state folder, which the Compose file does not run yet: until then the service's log says the trains' approvals are refused.
+- The service's own settings: its port, and what the flow is built with (the models, the idle limit, the review rounds, the budget).
+
+```sh
+docker compose -f v2/compose.yaml restart service
+```
+
+The restart stops the sessions that run, then puts their tickets back in Todo.
+
 ## Updating
 
 From the clone, with the variables the install was given:

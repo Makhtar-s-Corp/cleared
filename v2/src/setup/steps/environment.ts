@@ -209,7 +209,7 @@ export function environmentStep(
             if (!list.some((source) => source.service === service)) throw new HttpError(400, 'unknown_service');
             const flow = flowOf(context.registry);
             if (!flow) throw new HttpError(409, 'no_flow');
-            // The flow read its workspace at start (issue #420): a service connected since is not its yet.
+            // The flow runs on the workspace it was built with (issue #420): a service connected since is its after a restart.
             if (!flow.services.includes(service)) throw new HttpError(409, 'restart');
             const open = (await openSessions(flow)).get(service);
             if (open) return answer(context, 200, { ticket: open, created: false } satisfies SetupSessionAnswer);
