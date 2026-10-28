@@ -1,6 +1,7 @@
 // The knowledge routes (decision 27, lane 24): Approve and Reject of a
 // knowledge item, named by its inbox id, and "Update the skill now" for a
-// service, which the tower's lead card calls. Each has the checks of every
+// service, which the tower's lead card calls; the nightly pass of each
+// service, read and turned on or off (issue #455, dreaming.ts). Each has the checks of every
 // write of the service's API (api/routes.ts): the app's proof first, then the
 // knowledge being set up, then a user the service knows; the owner check is
 // the knowledge's own (service.ts).
@@ -10,10 +11,13 @@ import type { Registry, Route, RouteContext, User } from '../modules/registry.ts
 import { sameProof } from '../modules/users.ts';
 import type { UserId } from '../session/contract.ts';
 import type { TicketId } from '../tickets/contract.ts';
+import { readBody } from '../terminal/routes.ts';
+import type { Dreaming } from './dreaming.ts';
 import { KnowledgeError, type Knowledge } from './service.ts';
 
 export type KnowledgeRouteDeps = {
   readonly knowledge: () => Knowledge | undefined;
+  readonly dreaming?: () => Dreaming | undefined;
   readonly proof: () => string;
   // Starts the skill ticket the owner asked for (the flow's start, as a person's).
   readonly start: (registry: Registry, ticket: TicketId, by: UserId) => Promise<void>;
@@ -56,6 +60,11 @@ export function knowledgeRoutes(deps: KnowledgeRouteDeps): Route[] {
       else throw error;
     }
   };
+  const dreaming = (run: (dreaming: Dreaming, user: User, context: RouteContext) => Promise<void>) => write(async (_knowledge, user, context) => {
+    const pass = deps.dreaming?.();
+    if (!pass) throw new HttpError(503, 'the nightly pass is not set up');
+    await run(pass, user, context);
+  });
   const item = (context: RouteContext): string => context.params.id as string;
   return [
     {
@@ -79,6 +88,19 @@ export function knowledgeRoutes(deps: KnowledgeRouteDeps): Route[] {
         // The ticket exists whatever its start says: it waits in Todo when the flow cannot start it.
         if (ticket) await deps.start(context.registry, ticket, user.id).catch((error) => console.error(`cleared-v2: the skill ticket ${ticket} could not be started (${error instanceof Error ? error.name : typeof error})`));
         answer(context, 200, { accepted: true, ticket });
+      }),
+    },
+    {
+      method: 'GET', path: '/api/dreaming',
+      handle: dreaming(async (pass, _user, context) => { answer(context, 200, pass.view()); }),
+    },
+    {
+      method: 'POST', path: '/api/dreaming/:service',
+      handle: dreaming(async (pass, user, context) => {
+        const body = await readBody(context.request, 1024).catch(() => undefined);
+        if (!body || Object.keys(body).join() !== 'enabled' || typeof body.enabled !== 'boolean') throw new HttpError(400, 'the body is { enabled: true or false }');
+        pass.set(context.params.service as string, body.enabled, user);
+        answer(context, 200, pass.view());
       }),
     },
   ];
