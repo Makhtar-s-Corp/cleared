@@ -8,7 +8,10 @@
 //                        skill it goes into, with the skill ticket that took
 //                        it (null while it waits: the queue);
 //   knowledge_skill_tickets  the skill tickets, per service and day, so the
-//                        daily one is made once.
+//                        daily one is made once;
+//   knowledge_rejected   the words of every item the owner rejected
+//                        (fingerprint.ts), so the nightly pass never
+//                        proposes the same rule again (issue #455).
 import type { DatabaseSync } from 'node:sqlite';
 import type { KnowledgeLevel } from '../api/types.ts';
 import type { UserId } from '../session/contract.ts';
@@ -26,6 +29,9 @@ export const KNOWLEDGE_TABLES: readonly string[] = [
 )`,
   `CREATE TABLE IF NOT EXISTS knowledge_skill_tickets (
   ticket TEXT PRIMARY KEY, service TEXT NOT NULL, day TEXT NOT NULL, asked_by TEXT, at TEXT NOT NULL
+)`,
+  `CREATE TABLE IF NOT EXISTS knowledge_rejected (
+  item TEXT PRIMARY KEY, fingerprint TEXT NOT NULL, at TEXT NOT NULL
 )`,
 ];
 
@@ -89,6 +95,19 @@ export class KnowledgeStore {
   // Every entry of the service's skill, in the order it was approved.
   approved(service: string): SkillRow[] {
     return (this.#db.prepare('SELECT * FROM knowledge_skill WHERE service = ? ORDER BY approved_at, rowid').all(service) as Row[]).map(skillRow);
+  }
+
+  // Every approved entry's text, whatever its service: what the memory holds from the inbox.
+  approvedTexts(): string[] {
+    return (this.#db.prepare('SELECT DISTINCT text FROM knowledge_skill').all() as Row[]).map((row) => String(row.text));
+  }
+
+  rejected(item: string, fingerprint: string, at: string): void {
+    this.#db.prepare('INSERT OR IGNORE INTO knowledge_rejected (item, fingerprint, at) VALUES (?, ?, ?)').run(item, fingerprint, at);
+  }
+
+  rejectedFingerprints(): string[] {
+    return (this.#db.prepare('SELECT DISTINCT fingerprint FROM knowledge_rejected').all() as Row[]).map((row) => String(row.fingerprint));
   }
 
   // The services with something queued.

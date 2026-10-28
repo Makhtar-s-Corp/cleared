@@ -4,7 +4,9 @@ import assert from 'node:assert/strict';
 import { FIXTURE_NOW, towerFixture } from '../../fixtures/tower.ts';
 import { loadCatalog } from '../../src/catalog.ts';
 import { translator, type Translate } from '../lib/i18n.ts';
-import { formatModel, needTitle, newTicket, towerModel, type TowerData } from '../screens/tower/model.ts';
+import { DREAM_TICKET, formatModel, needId, needTitle, newTicket, towerModel, type TowerData } from '../screens/tower/model.ts';
+import { DREAM_TICKET as SERVICE_DREAM_TICKET } from '../../../src/knowledge/dreaming.ts';
+import { dreamedItem } from '../../fixtures/inbox.ts';
 
 const sentinel: Translate = (key) => `«${key}»`;
 
@@ -51,6 +53,18 @@ test('the fixture is the capture\'s data: three waiting items, the plan last, fo
     ['Stale figures no longer survive two crossing reads', 52],
     ['The envelope list reads one section at a time', 38],
   ]);
+});
+
+test('a proposal of the nightly pass waits in Needs you, named by the pass, never by its ticket (issue #455)', async () => {
+  assert.equal(DREAM_TICKET, SERVICE_DREAM_TICKET);
+  const data = await towerFixture(FIXTURE_NOW);
+  const item = dreamedItem(FIXTURE_NOW);
+  const card = towerModel({ ...data, inbox: [...data.inbox, item] }, FIXTURE_NOW).needs.find((n) => n.id === item.id);
+  assert.ok(card);
+  assert.equal(card.ticket, '');
+  assert.equal(card.href, `/inbox#${encodeURIComponent(item.id)}`);
+  assert.equal(needId(card, translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') })), 'Past sessions');
+  assert.equal(needId(card, translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('tower', 'fr') })), 'Sessions passées');
 });
 
 test('every word on the tower comes from the catalog or from the data', async () => {

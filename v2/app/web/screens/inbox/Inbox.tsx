@@ -29,7 +29,7 @@ import { focusOf } from '@/shell/Shortcuts.tsx';
 import {
   ROW_ANSWERS_MIN, closesOnEscape, foldOf, foldOpen, inboxKey, permissionAsk, permissionTitle, reasonOf, rowAnswers, type Answer,
   CHANGE_MAX, CHECKS, GRACE_MS, SEND_BACK_MAX, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approveContract, approveKnowledge, approvePlan,
-  changeMessage, chooseVariant, chosen, chosenLine, clock, deadlineLine, decisionFor, detailKey, doneLine, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
+  changeMessage, chooseVariant, chosen, chosenLine, clock, deadlineLine, decisionFor, detailKey, doneLine, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isDream, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
   kept, known, laneLine, ordered, outcomeLine, pausedLine, planChange, planGo, planOf, readPlan, rejectKnowledge, releaseSession, sameOrigin, sendBack, sendBackContract, sendBackMessage,
   repairLine, sessionLink, sessionOf, sessionsLine, shareLine, short, variantFacts, variantHarness, variantTests,
   ticketTitle, trainLine, stopState, undoApproval, type Gesture, type InboxView, type Item, type Local,
@@ -116,7 +116,7 @@ function Eyebrow({ item, kind, open, openKey, t }: { readonly item: Item; readon
   return (
     <p className="d-eyebrow">
       <span className={item.state === 'waiting' ? 'd-kind waits' : 'd-kind'}>{kind}</span>
-      <span className="id">{isLead(item) ? t('lead_label') : item.ticket}</span>
+      <span className="id">{isLead(item) ? t('lead_label') : isDream(item) ? t('dream_label') : item.ticket}</span>
       {open ? <a className="d-link" href={open}>{t(openKey)}</a> : null}
     </p>
   );
@@ -516,8 +516,15 @@ function KnowledgeBody({ item, t }: { readonly item: KnowledgeItem; readonly t: 
       <Eyebrow item={item} kind={t(item.state === 'waiting' ? 'eyebrow_knowledge' : 'kind_knowledge')} open={sessionLink(item.sessionId)} openKey="open_session" t={t} />
       <h2 className="sr-only">{t('kind_knowledge')}</h2>
       <p className="announce knowledge-text">{item.text}</p>
-      <dl className="facts"><Fact label={t('facts_level')}>{level}</Fact></dl>
-      {item.state === 'waiting' ? <p className="decide-rule">{t('knowledge_rule')}</p> : null}
+      <dl className="facts">
+        <Fact label={t('facts_level')}>{level}</Fact>
+        {item.sources && item.sources.length > 0 ? (
+          <Fact label={t('dream_sources', { n: item.sources.length })}>
+            <ul className="dream-sources">{item.sources.map((source) => <li key={source.session}><a className="d-link" href={sessionLink(source.session)}>{source.ticket}</a></li>)}</ul>
+          </Fact>
+        ) : null}
+      </dl>
+      {item.state === 'waiting' ? <p className="decide-rule">{t(isDream(item) ? 'dream_rule' : 'knowledge_rule')}</p> : null}
     </>
   );
 }

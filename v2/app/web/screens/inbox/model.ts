@@ -60,6 +60,10 @@ export const TODO_STATE = 'Todo';
 // cannot import; a test keeps the two equal): a plan and a question of the
 // lead carry it, and the screen never shows it.
 export const LEAD_TICKET = 'lead';
+// The ticket of the nightly pass's proposals (DREAM_TICKET in
+// src/knowledge/dreaming.ts, which the browser cannot import; a test keeps
+// the two equal): the screen names the pass instead.
+export const DREAM_TICKET = 'dreaming';
 // The grace lane 8's service holds before it writes an approval, used only
 // when its answer gives no `dueAt`.
 export const GRACE_MS = 60_000;
@@ -188,6 +192,7 @@ export function readPlan(value: unknown): Plan | undefined {
 
 export const planOf = (view: InboxView, item: PlanItemInbox): Plan | undefined => view.plans?.get(item.planId);
 export const isLead = (item: Item) => item.ticket === LEAD_TICKET;
+export const isDream = (item: Item) => item.kind === 'knowledge' && item.ticket === DREAM_TICKET;
 
 export function itemFromHash(hash: string): string | undefined {
   const raw = hash.replace(/^#/, '');
@@ -631,6 +636,7 @@ export function itemLine(item: Item, view: InboxView, t: Translate): string {
     case 'contract':
       return t('contract_line', { ticket: item.ticket, service: item.service });
     case 'knowledge':
+      if (isDream(item) && item.service) return t('dream_line', { n: item.sources?.length ?? 0, service: item.service });
       return item.level === 'workspace' || !item.service ? t('knowledge_line_workspace', { ticket: item.ticket })
         : t(`knowledge_line_${item.level}`, { ticket: item.ticket, service: item.service });
     case 'variants':

@@ -107,6 +107,8 @@
 .facts .sep { margin: 0 var(--space-2); color: var(--text-faint); }
 /* A link in a line of text is underlined: its colour alone does not tell it from the words around it (WCAG 1.4.1). */
 .facts dd a[href], a.stop-pr { text-decoration: underline; }
+/* the nightly pass's sources (issue #455): one ticket per reviewer session, on one line while they fit */
+.dream-sources { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin: 0; padding: 0; list-style: none; }
 
 /* a permission (lane 37): the question, then its answers at the top of the detail, at every width; the command
    folded under, one part per line after its operator */

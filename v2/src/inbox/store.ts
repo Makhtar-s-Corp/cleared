@@ -3,7 +3,7 @@
 // are the API's (api/types.ts); this file stores them, it does not decide
 // what is asked: the flow does.
 import type { DatabaseSync } from 'node:sqlite';
-import type { CiRepair, ContractItem, InboxItem, KnowledgeItem, KnowledgeLevel, NextInboxItem, PermissionItem, PlanItemInbox, QuestionItem, QuestionTimeout, ReleaseItem, SessionPlan, SessionPlanItem, TicketVariant, TrainState, VariantsItem } from '../api/types.ts';
+import type { CiRepair, ContractItem, InboxItem, KnowledgeItem, KnowledgeLevel, KnowledgeSource, NextInboxItem, PermissionItem, PlanItemInbox, QuestionItem, QuestionTimeout, ReleaseItem, SessionPlan, SessionPlanItem, TicketVariant, TrainState, VariantsItem } from '../api/types.ts';
 import { LEAD_TICKET } from '../lead/contract.ts';
 import type { SessionId, UserId } from '../session/contract.ts';
 
@@ -208,6 +208,19 @@ export class InboxStore {
     const id = `knowledge:${input.sessionId}:${n}`;
     this.#insert(id, 'knowledge', input, input.sessionId, String(n), this.#now().toISOString(),
       { sessionId: input.sessionId, text: input.text, level: input.level, service: input.level === 'workspace' ? null : input.service, outcome: null });
+    return this.#get(id) as KnowledgeItem;
+  }
+
+  // A proposal of the nightly pass (issue #455): its ticket is DREAM_TICKET,
+  // its session the newest of its sources, its id the service's own count.
+  addDreamed(input: Base & { readonly service: string; readonly text: string; readonly sources: readonly KnowledgeSource[] }): KnowledgeItem {
+    const newest = input.sources[0];
+    if (!newest || input.text.trim() === '') throw new Error('a proposal of the nightly pass has a text and its sources');
+    const prefix = `knowledge:dream:${input.service}:`;
+    const n = Number((this.#db.prepare("SELECT COUNT(*) AS n FROM flow_inbox WHERE kind = 'knowledge' AND substr(id, 1, ?) = ?").get(prefix.length, prefix) as Row).n) + 1;
+    const id = `${prefix}${n}`;
+    this.#insert(id, 'knowledge', input, newest.session, String(n), this.#now().toISOString(),
+      { sessionId: newest.session, text: input.text, level: 'service', service: input.service, sources: input.sources, outcome: null });
     return this.#get(id) as KnowledgeItem;
   }
 

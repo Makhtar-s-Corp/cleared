@@ -6,15 +6,18 @@
 // once the flow runs on the one the assistant writes later (issue #420): it
 // listens to the stored handovers (workspace/handover.ts) and ticks for the
 // daily skill tickets, with no request to the API, as the notify module
-// does. Its tickets are written in
+// does; its nightly pass proposes what the reviewers asked for again and
+// again (issue #455, knowledge/dreaming.ts). Its tickets are written in
 // the tickets module's store, which approval/service.ts keeps one of per
 // ledger.
 import { approvalEnvironment } from '../approval/service.ts';
 import { FlowConfigError, loadFlowConfig, workspaceOf } from '../flow/config.ts';
 import { runtime as flowRuntime } from '../flow/runtime.ts';
 import { InboxStore } from '../inbox/store.ts';
+import { loadPlanConfig } from '../lead/plans/runner.ts';
+import { DREAMING_TABLES, Dreaming } from '../knowledge/dreaming.ts';
 import { knowledgeRoutes } from '../knowledge/routes.ts';
-import { Knowledge } from '../knowledge/service.ts';
+import { Knowledge, TICK_MS } from '../knowledge/service.ts';
 import { KNOWLEDGE_TABLES } from '../knowledge/store.ts';
 import { cleanText, secretValues } from '../session/clean.ts';
 import type { Store } from '../store/db.ts';
@@ -26,11 +29,12 @@ export type KnowledgeModuleOptions = {
   readonly intervalMs?: number;
 };
 
-export type KnowledgeModule = Module & { knowledge(): Knowledge | undefined };
+export type KnowledgeModule = Module & { knowledge(): Knowledge | undefined; dreaming(): Dreaming | undefined };
 
 export function createKnowledgeModule(options: KnowledgeModuleOptions): KnowledgeModule {
   const { env } = options;
   let knowledge: Knowledge | undefined;
+  let dreaming: Dreaming | undefined;
   // Made and started when the settings name a workspace; false while they name none.
   function build(store: Store): boolean {
     let config;
@@ -45,21 +49,28 @@ export function createKnowledgeModule(options: KnowledgeModuleOptions): Knowledg
     const workspace = workspaceOf(config);
     const servicePaths = [...new Set([env.CLEARED_V2_STATE_DIR, env.HOME, config.projectDir, config.workdirRoot].filter((p): p is string => !!p && p !== '/'))];
     const approval = approvalEnvironment(store.db, env);
+    const inbox = new InboxStore(store.db);
+    const clean = (text: string) => cleanText(text, { secrets: secretValues(env), servicePaths });
     knowledge = new Knowledge({
-      db: store.db, inbox: new InboxStore(store.db), tickets: approval.ticketStore, workspace,
-      memory: { project: config.projectDir, env }, ownerId: approval.conf.ownerId,
-      clean: (text) => cleanText(text, { secrets: secretValues(env), servicePaths }),
+      db: store.db, inbox, tickets: approval.ticketStore, workspace,
+      memory: { project: config.projectDir, env }, ownerId: approval.conf.ownerId, clean,
       serviceOf: (session) => store.sessions.get(session)?.service,
+    });
+    dreaming = new Dreaming({
+      db: store.db, inbox, workspace, project: config.project, ownerId: approval.conf.ownerId, clean,
+      weekStopPercent: () => loadPlanConfig(env).weekStopPercent,
     });
     const listening = knowledge;
     setHandoverSink((handover) => { listening.propose(handover); });
     knowledge.startTimer(options.intervalMs);
+    dreaming.startTimer(options.intervalMs ?? TICK_MS);
     return true;
   }
   return {
-    tables: KNOWLEDGE_TABLES,
+    tables: [...KNOWLEDGE_TABLES, ...DREAMING_TABLES],
     routes: knowledgeRoutes({
       knowledge: () => knowledge,
+      dreaming: () => dreaming,
       proof: () => flowRuntime.proof(),
       start: async (registry, ticket, by) => { await flowRuntime.engine(registry)?.start(ticket, by); },
     }),
@@ -69,6 +80,7 @@ export function createKnowledgeModule(options: KnowledgeModuleOptions): Knowledg
       return {};
     },
     knowledge: () => knowledge,
+    dreaming: () => dreaming,
   };
 }
 
