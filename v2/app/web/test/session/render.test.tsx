@@ -265,3 +265,30 @@ test('the review channel\'s messages read in English and in French, the wait as 
   for (const expected of ['Du relecteur à l\'auteur : changements demandés, tour 2 sur 3', 'De l\'auteur au relecteur : réponse, tour 2 sur 3', 'répondu en 1 h 12'])
     assert.ok(french.some((line) => line.includes(expected)), `manque : ${expected}`);
 });
+
+test('a container lost then recreated reads in English and in French, from the catalog, never the service\'s English (issue #453)', () => {
+  const model = emptyModel();
+  const at = new Date(2026, 9, 21, 9, 5).toISOString();
+  const event = (seq: number, value: Parameters<typeof applyAll>[1][number]['event']) => ({ seq, at, sessionId: AUTHOR_ID, ticket: 'LOCAL-161', project: 'guestbook', event: value });
+  applyAll(model, [
+    event(1, { type: 'RUN_ERROR', message: 'the session\'s container stopped (exit code 137)', code: 'container_lost' }),
+    event(2, { type: 'CUSTOM', name: 'cleared.container_recreated', value: { attempt: 1, limit: 3, waitedMs: 5000 } }),
+    event(3, { type: 'RUN_ERROR', message: 'The session\'s container stopped 4 times: it was not recreated again.', code: 'container_failed' }),
+  ]);
+  const html = renderSession(on(model), en);
+  assert.equal(count(html, /data-row="recreated"/g), 1);
+  const text = visibleText(html);
+  for (const expected of [
+    'The session\'s container stopped.',
+    'Container recreated on the same checkout after 5s, attempt 1 of 3: the session carries on, its uncommitted work kept.',
+    'The session\'s container could not be kept running: the session stopped, and its ticket is back in Todo.',
+  ]) assert.ok(text.some((line) => line.includes(expected)), `missing: ${expected}`);
+  assert.ok(!text.some((line) => line.includes('exit code 137')), 'the service\'s own words are not shown');
+  const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
+  const french = visibleText(renderSession(on(model), fr));
+  for (const expected of [
+    'Le conteneur de la session s\'est arrêté.',
+    'Conteneur recréé sur la même copie de travail après 5\u00a0s, tentative 1 sur 3\u00a0: la session continue, son travail non commité conservé.',
+    'Le conteneur de la session n\'a pas pu rester en marche\u00a0: la session s\'est arrêtée, et son ticket est revenu en Todo.',
+  ]) assert.ok(french.some((line) => line.includes(expected)), `manque : ${expected}`);
+});

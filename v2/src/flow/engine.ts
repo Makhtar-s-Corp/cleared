@@ -97,6 +97,17 @@
 // breaks, a question its team asks the owner, or several services send it
 // back to the full circuit for good: its card says why, the lead is told,
 // and its later authors run on the full model, never a resumed Haiku.
+//
+// A session whose container stops under it (issue #453; the adapter says
+// so with a RUN_ERROR container_lost) keeps what a resume needs in this
+// engine: its id, its input and checkout, its phase, its events. Its
+// container is recreated through the adapter's resume, after what the dead
+// one left is removed, after a wait that doubles each time, and the session
+// is told to carry on; at most CONTAINER_RECREATIONS times, then it fails
+// with CONTAINER_FAILED and its ticket goes back to Todo. One the owner took
+// over is never recreated by the flow (P25): it stops. One that waits for a
+// person waits on, as a session the watchdog stopped, and the answer
+// recreates it. Surviving a restart of the service itself is #58's.
 import { posix } from 'node:path';
 import { VARIANT_DIFF_MAX, VARIANTS_MAX, VARIANTS_MIN, type CiRepair, type InboxItem, type PermissionItem, type CaptureChoice, type ProductionCheck, type QuestionItem, type QuestionTimeout, type FastLane, type ReleaseItem, type SessionDetail, type SessionPlan, type SessionSummary, type TakenOver, type TicketStep, type TicketVariant } from '../api/types.ts';
 import { isSessionId } from '../container/docker.ts';
@@ -104,7 +115,7 @@ import type { SiblingSpec } from '../container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT } from '../container/session-runtime.ts';
 import type { InboxStore } from '../inbox/store.ts';
 import type { Registry } from '../modules/registry.ts';
-import { HostToolRefused, type Answer, type Briefing, type Decision, type Harness, type HostTool, type Role, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserId } from '../session/contract.ts';
+import { CONTAINER_LOST, HostToolRefused, type Answer, type Briefing, type Decision, type Harness, type HostTool, type Role, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserId } from '../session/contract.ts';
 import { handoverNote, refuseTarget } from '../session/handover.ts';
 import { readToolInput, readToolOutput, type AgUiEvent, type Question, type SessionEvent, type SessionPhase, type StepName } from '../session/events.ts';
 import { skillTicketService } from '../knowledge/store.ts';
@@ -287,6 +298,9 @@ export type FlowDeps = {
   // Releases the containers and networks of stopped sessions, by name
   // (Docker.releaseStopped): after the restart recovery (issue 265).
   readonly release?: (sessions: readonly SessionId[]) => Promise<{ readonly containers: readonly string[]; readonly networks: readonly string[] }>;
+  // Removes a session's config volume (Docker.removeVolumes), for a session
+  // that will never resume: one whose container could not be kept running.
+  readonly forget?: (session: SessionId) => Promise<unknown>;
   // The Consumption screen's levers (consumption/levers.ts): the author model
   // of the sessions that start from now on and the most steps run at once.
   // Nothing is overridden when absent.
@@ -321,6 +335,13 @@ export const CLOSE_REASON_MAX = 2000;                              // the longes
 const SERVICE: Actor = { kind: 'agents', id: 'cleared-v2' };
 const FLOW_USER = 'cleared';                                       // the author of the message that reopens a session
 const QUESTION_DEFAULT = 'question_default';                       // the rule of an answer the session declared, applied at its delay's end
+// A session whose container stopped (issue #453) has it recreated at most
+// this many times, whatever ended each attempt; the next loss, or a last
+// attempt whose resume fails, stops it for good with CONTAINER_FAILED.
+export const CONTAINER_RECREATIONS = 3;
+export const CONTAINER_FAILED = 'container_failed';
+export const RECREATE_BACKOFF_MS = 5_000;                          // the first wait; then 10 s and 20 s
+const RECREATED = 'Your container stopped and was recreated on the same checkout: what you had not committed is still there, uncommitted, and so is your transcript. The turn that was running was cut: check where you were, then carry on.';
 
 type Live = {
   readonly id: SessionId;
@@ -428,6 +449,14 @@ export class FlowEngine {
   // inbox, and the answers given since are told to them when they resume.
   #dormant = new Map<SessionId, Live>();
   #told = new Map<SessionId, string[]>();
+  // Sessions whose container stopped (issue #453): those whose container is
+  // being recreated, out of #live and closed meanwhile; the losses and the
+  // recreations tried of each; the dormant ones whose answer recreates it.
+  #recovering = new Map<SessionId, Live>();
+  #recreations = new Map<SessionId, { losses: number; attempts: number }>();
+  #lostWaiting = new Set<SessionId>();
+  #pauses = new Set<() => void>();                                  // the recreations' waits, ended by close()
+  #forget: FlowDeps['forget'];
   #repairing = new Set<TicketId>();                                 // tickets whose failed checks are being read or a repair started
   #repairs = new Map<TicketId, CiRepair>();                         // the repair a ticket's flow runs for, until its card is published
   #replays: ReplayStore;                                            // the tickets resumed from a step (issue #272)
@@ -450,6 +479,7 @@ export class FlowEngine {
     this.#workspace = workspaceOf(deps.config);
     this.#locks = deps.locks;
     this.#release = deps.release;
+    this.#forget = deps.forget;
     this.#levers = deps.levers;
     this.#weekStop = deps.weekStopPercent ?? PICK_STOP_PERCENT;
     this.#trains = new TrainStore(deps.store.db, this.#now);
@@ -538,6 +568,8 @@ export class FlowEngine {
   async close(): Promise<void> {
     if (this.#timer) clearInterval(this.#timer);
     this.#timer = undefined;
+    this.#recovering.clear();
+    for (const done of [...this.#pauses]) done();
     for (const set of this.#watchers.values()) for (const watcher of set) watcher.wake();
   }
 
@@ -1609,6 +1641,7 @@ export class FlowEngine {
       this.#endDormant(dormant, 'stopped');
       sessions++;
     }
+    sessions += this.#endRecovering(id, 'stopped');
     let items = 0;
     for (const item of this.inbox.items()) {
       if (item.ticket !== id || item.state !== 'waiting') continue;
@@ -2460,6 +2493,7 @@ export class FlowEngine {
       }
     }
     if (event.type === 'RUN_ERROR') {
+      if (event.code === CONTAINER_LOST) return this.#containerLost(live);
       await this.#stopTicket(live, undefined, undefined, `The session failed: ${event.message}`, 'failed', 'failed');
       return;
     }
@@ -2585,6 +2619,7 @@ export class FlowEngine {
   async #putBack(ticket: TicketId, note: string, reason: PutBackReason): Promise<boolean> {
     const tickets = this.registry.ticketStore;
     for (const dormant of [...this.#dormant.values()].filter((d) => d.input.ticket === ticket)) this.#endDormant(dormant, 'stopped');
+    this.#endRecovering(ticket, 'stopped');
     this.#active.delete(ticket);
     this.#origins.delete(ticket);
     this.#channels.delete(ticket);
@@ -3358,6 +3393,7 @@ export class FlowEngine {
   #liveSession(id: SessionId): Live {
     const live = this.#live.get(id);
     if (live) return live;
+    if (this.#recovering.has(id)) throw new FlowError('conflict', `session ${id} is being recreated after its container stopped: try again in a moment`);
     if (this.#store.sessions.get(id)) throw new FlowError('conflict', `session ${id} is stopped: it is not running any more`);
     throw new FlowError('not_found', `unknown session ${id}`);
   }
@@ -3508,7 +3544,7 @@ export class FlowEngine {
   // the owner took over is the human's, and one a resume starts is moving.
   // 'unknown': this engine does not run it.
   async idleStop(id: SessionId): Promise<'stopped' | 'skipped' | 'unknown'> {
-    if (this.#dormant.has(id)) return 'skipped';
+    if (this.#dormant.has(id) || this.#recovering.has(id)) return 'skipped';
     const live = this.#live.get(id);
     if (!live || live.closed) return 'unknown';
     if (this.#paused.has(id) || this.#resuming.has(id)) return 'skipped';
@@ -3611,6 +3647,13 @@ export class FlowEngine {
       await this.#stopTicket(dormant, undefined, undefined, `The session stopped while it waited could not be resumed: ${name(error)}`, 'failed', 'failed');
       return;
     }
+    // A container that stopped while the session waited is recreated by this resume (issue #453).
+    if (this.#lostWaiting.delete(dormant.id)) {
+      const count = this.#recreations.get(dormant.id) ?? { losses: 1, attempts: 0 };
+      count.attempts += 1;
+      this.#recreations.set(dormant.id, count);
+      this.#journal(session, { type: 'CUSTOM', name: 'cleared.container_recreated', value: { attempt: count.attempts, limit: CONTAINER_RECREATIONS, waitedMs: 0 } });
+    }
     const live: Live = { ...dormant, handle, closed: false, lastActivity: this.#now().getTime() };
     this.#live.set(live.id, live);
     this.#waitEnds(live);
@@ -3628,6 +3671,7 @@ export class FlowEngine {
   #endDormant(dormant: Live, phase: 'stopped' | 'failed'): void {
     if (!this.#dormant.delete(dormant.id)) return;
     this.#told.delete(dormant.id);
+    this.#lostWaiting.delete(dormant.id);
     const session = { id: dormant.id, ticket: dormant.input.ticket, project: dormant.input.project };
     if (dormant.waitOpen) {
       dormant.waitOpen = false;
@@ -3639,6 +3683,162 @@ export class FlowEngine {
     this.#setPhase(dormant, phase);
     this.inbox.handleSession(dormant.id, 'system');
     this.#snapshot(dormant.id, dormant.input.ticket);
+  }
+
+
+  // ---- a container that stopped under its session (issue #453) ------------
+
+  // The adapter said the session's container stopped before its work was
+  // done. The session is closed here, before any wait, so that the end of
+  // its stream is not taken for a failure. One the owner took over is the
+  // owner's: it stops (P25). One that waits for a person, or whose plan
+  // waits for its Go, waits on with its containers removed, as a session the
+  // watchdog stopped: the answer or the Go recreates it (#wake), and no turn
+  // runs before. Any other is recreated at once (#recreate).
+  #containerLost(live: Live): void {
+    if (live.closed) return;
+    if (this.#paused.has(live.id)) {
+      void this.#track(this.#stopTicket(live, undefined, undefined,
+        'The session\'s container stopped while the session was taken over: the flow never recreates a session taken over. Move the ticket to Todo to start it again.', 'failed', 'container_lost'));
+      return;
+    }
+    const count = this.#recreations.get(live.id) ?? { losses: 0, attempts: 0 };
+    count.losses += 1;
+    this.#recreations.set(live.id, count);
+    live.closed = true;
+    this.#live.delete(live.id);
+    this.#recovering.set(live.id, live);
+    this.#resuming.add(live.id);
+    if (count.attempts >= CONTAINER_RECREATIONS) {
+      void this.#track(this.#containerFailed(live, `stopped ${count.losses} times`));
+      return;
+    }
+    if (this.inbox.waitingFor(live.id) > 0 || this.#holds(live.id)) {
+      void this.#track(this.#lostWhileWaiting(live));
+      return;
+    }
+    void this.#track(this.#recreate(live).catch(async (error: unknown) => {
+      await this.#containerFailed(live, `stopped, and the flow failed to recreate it: ${name(error)}`);
+    }));
+  }
+
+  // What waits for the person stays in the inbox; what the dead container
+  // left goes, its volume stays.
+  async #lostWhileWaiting(live: Live): Promise<void> {
+    if (this.#recovering.get(live.id) !== live) return;
+    this.#recovering.delete(live.id);
+    this.#lostWaiting.add(live.id);
+    this.#dormant.set(live.id, live);
+    this.#setPhase(live, 'stopped');
+    this.#snapshot(live.id, live.input.ticket);
+    await live.handle.stop().catch(() => undefined);
+    this.#resuming.delete(live.id);
+    this.#notify(live.id);
+  }
+
+  // A recreation tried after a wait that doubles each time: what the dead
+  // container left removed first (its egress, its test services, its
+  // networks, which a resume would collide with; the config volume, which
+  // holds the transcript, stays), then the adapter's resume on the same
+  // session and the same checkout, then the session told. A resume that
+  // fails is tried again while attempts are left. Each wait ends early when
+  // the ticket stops meanwhile (#endRecovering) or the engine closes.
+  async #recreate(live: Live): Promise<void> {
+    const { id } = live;
+    const session = { id, ticket: live.input.ticket, project: live.input.project };
+    const adapter = this.registry.sessionAdapters[this.#harnessOf(id)];
+    const count = this.#recreations.get(id) ?? { losses: 1, attempts: 0 };
+    let failure = '';
+    for (;;) {
+      if (count.attempts >= CONTAINER_RECREATIONS) return this.#containerFailed(live, `stopped, and could not be recreated: ${failure}`);
+      count.attempts += 1;
+      const attempt = count.attempts;
+      const waitedMs = (this.config.recreateBackoffMs ?? RECREATE_BACKOFF_MS) * 2 ** (attempt - 1);
+      await this.#pause(waitedMs);
+      if (this.#recovering.get(id) !== live) return;
+      await live.handle.stop().catch(() => undefined);
+      let handle: SessionHandle;
+      try {
+        if (!adapter) throw new Error('no session adapter is configured');
+        handle = await adapter.resume(id);
+      } catch (error) {
+        failure = name(error);
+        continue;
+      }
+      if (this.#recovering.get(id) !== live) {
+        await handle.stop().catch(() => undefined);
+        return;
+      }
+      this.#recovering.delete(id);
+      this.#resuming.delete(id);
+      this.#journal(session, { type: 'CUSTOM', name: 'cleared.container_recreated', value: { attempt, limit: CONTAINER_RECREATIONS, waitedMs } });
+      const next: Live = { ...live, handle, closed: false, lastActivity: this.#now().getTime() };
+      this.#live.set(id, next);
+      this.#setPhase(next, next.input.role === 'reviewer' ? 'reviewing' : 'working');
+      this.#snapshot(id, next.input.ticket);
+      this.#supervise(next, this.#store.events.after(id).at(-1)?.seq ?? 0);
+      try {
+        await handle.send({ text: RECREATED, by: FLOW_USER });
+      } catch (error) {
+        await this.#stopTicket(next, 'error', `The recreated session could not be told: ${name(error)}`, `The session's container was recreated, but the session could not be told: ${name(error)}`, 'failed', 'container_lost');
+      }
+      return;
+    }
+  }
+
+  // No recreation is left: the session fails with the reason on its thread,
+  // its containers, networks and volume go (nothing will resume it), and its
+  // ticket goes back to Todo with the same reason.
+  async #containerFailed(live: Live, why: string): Promise<void> {
+    if (this.#recovering.get(live.id) !== live) return;
+    this.#recovering.delete(live.id);
+    const session = { id: live.id, ticket: live.input.ticket, project: live.input.project };
+    const reason = this.#clean(`The session's container ${why}: it was not recreated again.`);
+    this.#journal(session, { type: 'RUN_ERROR', message: reason, code: CONTAINER_FAILED });
+    if (live.waitOpen) {
+      live.waitOpen = false;
+      this.#step(session, 'STEP_FINISHED', 'waiting_human');
+    }
+    this.#setPhase(live, 'failed');
+    this.inbox.handleSession(live.id, 'system');
+    this.#snapshot(live.id, live.input.ticket);
+    await live.handle.stop().catch(() => undefined);
+    this.#resuming.delete(live.id);
+    if (this.#forget) {
+      await this.#forget(live.id).catch((error: unknown) => console.error(`cleared-v2: the volume of session ${live.id} was not removed (${error instanceof Error ? error.name : typeof error})`));
+    }
+    this.#notify(live.id);
+    this.#emit({ type: 'session_stopped', at: this.#at(), project: live.input.project, ticket: live.input.ticket, session: live.id, role: live.input.role, phase: 'failed', reason });
+    await this.#stopTicket(live, undefined, undefined,
+      `${reason} Cleared recreates a session's container at most ${CONTAINER_RECREATIONS} times. Move the ticket to Todo to start it again.`, 'failed', 'container_lost');
+  }
+
+  // A ticket that stops while a session's container is being recreated:
+  // the recreation stops with it, and nothing of the session waits.
+  #endRecovering(ticket: TicketId, phase: 'stopped' | 'failed'): number {
+    let ended = 0;
+    for (const live of [...this.#recovering.values()].filter((l) => l.input.ticket === ticket)) {
+      this.#recovering.delete(live.id);
+      this.#setPhase(live, phase);
+      this.inbox.handleSession(live.id, 'system');
+      this.#snapshot(live.id, ticket);
+      void this.#track(live.handle.stop().catch(() => undefined).finally(() => this.#resuming.delete(live.id)));
+      ended++;
+    }
+    return ended;
+  }
+
+  #pause(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const done = () => {
+        clearTimeout(timer);
+        this.#pauses.delete(done);
+        resolve();
+      };
+      const timer = setTimeout(done, ms);
+      timer.unref();
+      this.#pauses.add(done);
+    });
   }
 
 

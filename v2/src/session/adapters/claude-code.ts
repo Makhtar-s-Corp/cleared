@@ -20,6 +20,10 @@
 //   - stop() asks the runner to stop, then removes the containers and the
 //     networks; the config volume stays, so resume() can start a new
 //     container on the same Claude Code session;
+//   - a runner that ends with no exit line while no stop() runs is a
+//     container that stopped under the session (killed, out of memory, the
+//     daemon gone): RUN_ERROR container_lost, which the flow answers by
+//     stop() (what the container left) then resume() (issue #453);
 //   - interactive() (Take over, owner request of 2026-10-22 17:26) asks the
 //     runner to release its harness, waits until it says so, and gives
 //     Claude Code resumed on the same session for the human's terminal in
@@ -100,6 +104,7 @@ type Session = {
   child: ChildProcessWithoutNullStreams | undefined;
   closed: boolean;
   exitSeen: boolean;                              // the runner printed its exit line
+  stopping: boolean;                              // stop() runs: an end with no exit line is its own
   exited: Promise<void>;
   handle: SessionHandle | undefined;
   // The runner's harness and a human: 'sent' once release is written (resume()
@@ -255,12 +260,13 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
     session.child = child;
     session.closed = false;
     session.exitSeen = false;
+    session.stopping = false;
     session.release = 'none';
     session.exited = new Promise<void>((done) => {
       child.on('close', (code: number | null) => {
         if (session.child === child) {
-          // A runner that ends without its exit line died.
-          if (!session.exitSeen) emit(session, session.mapper.line({ type: 'exit', code: code ?? 1 }));
+          // A runner that ends without its exit line died: with its container, unless stop() removed it.
+          if (!session.exitSeen) emit(session, session.stopping ? session.mapper.line({ type: 'exit', code: code ?? 1 }) : session.mapper.containerLost(code ?? 1));
           session.child = undefined;
           session.pending.clear();
           close(session);
@@ -334,6 +340,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
       },
       async stop() {
         const child = session.child;
+        session.stopping = true;
         if (child) {
           write(session, { type: 'stop' });
           child.stdin.end();
@@ -365,7 +372,7 @@ export function createClaudeCodeAdapter(options: ClaudeCodeOptions): SessionAdap
       const id = newId();
       const session: Session = {
         id, input, cleaner: options.cleaner(), mapper: createMapper({ sessionId: id }), wake: new Set(), pending: new Map(),
-        child: undefined, closed: true, exitSeen: false, exited: Promise.resolve(), handle: undefined, release: 'none', onReleased: new Set(),
+        child: undefined, closed: true, exitSeen: false, stopping: false, exited: Promise.resolve(), handle: undefined, release: 'none', onReleased: new Set(),
       };
       sessions.set(id, session);
       await launch(session, false);

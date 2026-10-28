@@ -42,6 +42,7 @@ export type PutBackReason =
   | 'step_failed'           // a step of the ticket failed; its done steps are kept (lane 23)
   | 'variants_failed'       // every variant of the ticket failed (issue #271)
   | 'restart'               // the service restarted while the ticket ran
+  | 'container_lost'        // a session's container stopped and could not be kept running (issue #453)
   | 'set_aside'             // the owner set the ticket aside (FlowEngine.setAside)
   | 'closed'                // the owner closed the ticket with a reason (FlowEngine.closeTicket, issue #249)
   | 'parked'                // its question waited past its delay and the lead's, with no declared answer (issue #290)
