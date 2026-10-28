@@ -409,8 +409,8 @@ test('releaseStopped run twice at once for the same session: both succeed and no
   const docker = new Docker(fake.runner);
   const [one, two] = await Promise.all([docker.releaseStopped([SESSION]), docker.releaseStopped([SESSION])]);
   assert.deepEqual(one.containers, two.containers);
-  assert.deepEqual(fake.containers, []);
-  assert.deepEqual(fake.networks, []);
+  assert.equal(fake.containers.length, 0);
+  assert.equal(fake.networks.length, 0);
 
   fake.containers.push({ id: 'c3', name: `cleared-v2-${SESSION}-session`, labels, state: 'running' });
   fake.intercept = (args) => (args[0] === 'rm' ? { code: 1, stdout: '', stderr: 'Error: cannot remove container: device busy\n' } : undefined);
