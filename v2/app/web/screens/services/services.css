@@ -7,18 +7,18 @@
 
 .services { max-width: 1200px; margin: 0 auto; padding: var(--space-5) var(--space-5) var(--space-6); }
 
-.services-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: var(--space-4); }
+.services-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-4); }
 .services-eyebrow { margin: 0 0 var(--space-2); color: var(--text); font-size: var(--text-sm); font-weight: var(--weight-strong); }
 .services-head h1 { margin: 0; font-size: var(--text-display); font-weight: var(--weight-heavy); letter-spacing: -0.035em; line-height: 1.02; text-wrap: balance; }
 @media (max-width: 767px) { .services-head h1 { font-size: var(--text-xl); } }
-.services-sub { margin: 4px 0 0; color: var(--text-muted); font-size: var(--text-md); text-wrap: pretty; }
+.services-sub { margin: var(--space-1) 0 0; color: var(--text-muted); font-size: var(--text-md); text-wrap: pretty; }
 .services-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .services-built { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
-#services-refresh { display: inline-flex; align-items: center; gap: 6px; min-height: 36px; }
+#services-refresh { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 36px; }
 /* Connect (lane v2-j5-connect): the assistant's workspace step, a link drawn as the outlined button beside Refresh. */
-.services-connect { display: inline-flex; align-items: center; min-height: 36px; padding: 0 14px; color: var(--text); text-decoration: none; white-space: nowrap; }
+.services-connect { display: inline-flex; align-items: center; min-height: 36px; padding: 0 var(--space-3); color: var(--text); text-decoration: none; white-space: nowrap; }
 .services-connect:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.services-connect-line { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin: 12px 0 0; color: var(--text-secondary); }
+.services-connect-line { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) 12px; margin: 12px 0 0; color: var(--text-secondary); }
 .services-note { margin: 0 0 var(--space-3); color: var(--danger-text); }
 
 .services-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
@@ -40,13 +40,13 @@
 .map-edge[data-undeclared="yes"] { stroke: var(--awaiting-text); }
 .map-arrow { fill: var(--text-muted); }
 
-.map-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin: 10px 2px 0; padding: 0; list-style: none; color: var(--text-secondary); font-size: var(--text-sm); }
-.map-legend li { display: inline-flex; align-items: center; gap: 6px; }
+.map-legend { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); margin: 12px 2px 0; padding: 0; list-style: none; color: var(--text-secondary); font-size: var(--text-sm); }
+.map-legend li { display: inline-flex; align-items: center; gap: var(--space-2); }
 .map-legend-line { display: block; }
 
-.map-links h2, .services-side h2 { margin: 0 0 10px; font-size: var(--text-md); font-weight: var(--weight-strong); }
+.map-links h2, .services-side h2 { margin: 0 0 12px; font-size: var(--text-md); font-weight: var(--weight-strong); }
 .map-links ul { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
-.map-links li { padding: 10px 0; border-top: 1px solid var(--hairline); }
+.map-links li { padding: 12px 0; border-top: 1px solid var(--hairline); }
 .map-links li:first-child { border-top: 0; padding-top: 0; }
 .link-text { margin: 0; color: var(--text); overflow-wrap: anywhere; }
 .link-meta { margin: 2px 0 0; color: var(--text-muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
@@ -54,8 +54,8 @@
 .map-empty, .map-hint { margin: 0; color: var(--text-muted); }
 
 .services-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
-.map-services { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.map-service { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 0;
+.map-services { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 0; list-style: none; }
+.map-service { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 44px; padding: var(--space-2) 12px; border: 0; border-radius: 0;
   background: transparent; box-shadow: var(--e-outline); color: var(--text); text-align: left; font: inherit; cursor: pointer; }
 .map-service:hover { background: var(--sunken); }
 .map-service:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -65,17 +65,17 @@
 .map-service-problem { color: var(--danger-text); font-size: var(--text-sm); }
 
 .services-impact { padding-top: var(--space-3); border-top: 1px solid var(--hairline); }
-.services-impact h3 { margin: 0 0 8px; font-size: var(--text-md); font-weight: var(--weight-strong); }
-.services-impact ul { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0 0 0 18px; color: var(--text-secondary); line-height: 1.45; }
+.services-impact h3 { margin: 0 0 var(--space-2); font-size: var(--text-md); font-weight: var(--weight-strong); }
+.services-impact ul { display: flex; flex-direction: column; gap: var(--space-2); margin: 0; padding: 0 0 0 var(--space-3); color: var(--text-secondary); line-height: 1.45; }
 .services-impact li[data-impact="must"], .services-impact li[data-impact="undeclared"] { color: var(--awaiting-text); }
-.services-impact li[data-impact="order"] { list-style: none; margin: 4px 0 0 -18px; color: var(--text); }
+.services-impact li[data-impact="order"] { list-style: none; margin: var(--space-1) 0 0 calc(-1 * var(--space-3)); color: var(--text); }
 
 @media (max-width: 1000px) {
   .services-grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 767px) {
-  .services { padding: 16px 16px 40px; }
-  .services-head { flex-direction: column; align-items: flex-start; gap: 10px; }
+  .services { padding: var(--space-3) var(--space-3) 40px; }
+  .services-head { flex-direction: column; align-items: flex-start; gap: 12px; }
   .services-actions { flex-wrap: wrap; }
   #services-refresh, .services-connect { min-height: 44px; }
 }

@@ -7,7 +7,7 @@
 .setup-step .first-ticket-card p:last-child { margin-bottom: 0; }
 .setup-step .first-ticket-card .first-ticket-card-title { font-weight: var(--weight-strong); }
 .first-ticket-ref { font-family: var(--mono); font-size: var(--text-sm); color: var(--text-secondary); }
-.first-ticket-stages { list-style: none; margin: var(--space-2) 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 16px; }
+.first-ticket-stages { list-style: none; margin: var(--space-2) 0; padding: 0; display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-3); }
 .first-ticket-stages li { display: flex; align-items: center; gap: var(--space-1); color: var(--text-muted); font-size: var(--text-sm); }
 .first-ticket-stages li[data-state="done"] { color: var(--text-secondary); }
 .first-ticket-stages li[aria-current="step"] { color: var(--text); font-weight: var(--weight-strong); }
@@ -17,11 +17,11 @@
 .setup-summary { margin-top: var(--space-3); }
 .setup-summary-table { border-collapse: collapse; font-size: var(--text-sm); min-width: min(100%, 420px); }
 .setup-summary-table caption { text-align: left; font-weight: var(--weight-strong); padding-bottom: var(--space-1); }
-.setup-summary-table th, .setup-summary-table td { text-align: left; padding: 6px 16px 6px 0; border-bottom: 1px solid var(--hairline); font-weight: var(--weight-regular); }
+.setup-summary-table th, .setup-summary-table td { text-align: left; padding: var(--space-2) var(--space-3) var(--space-2) 0; border-bottom: 1px solid var(--hairline); font-weight: var(--weight-regular); }
 .setup-summary-table thead th { border-bottom: var(--frame) solid var(--ink); }
 .setup-summary-table thead th, .setup-summary-table tfoot th, .setup-summary-table tfoot td { font-weight: var(--weight-strong); }
 .setup-summary-table td { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .setup-summary-state { margin-left: var(--space-1); color: var(--text-muted); }
 .first-ticket-field { display: flex; flex-direction: column; gap: var(--space-1); margin-bottom: var(--space-2); max-width: 320px; }
 .first-ticket-field label { font-size: var(--text-sm); font-weight: var(--weight-strong); color: var(--text-secondary); }
-.first-ticket-field select { font: inherit; color: var(--text); background: var(--surface); border: 0; border-radius: 0; box-shadow: var(--e-outline); padding: 6px 8px; }
+.first-ticket-field select { font: inherit; color: var(--text); background: var(--surface); border: 0; border-radius: 0; box-shadow: var(--e-outline); padding: var(--space-2) var(--space-2); }

@@ -27,7 +27,7 @@ import type { NotifyView } from '../shell/notify.ts';
 // The markup with what shadcn/ui's components add for Tailwind left out:
 // their data-slot, and the utility classes of their variants, so a test
 // reads the kit's classes (btn primary, plain, option...) as the sheets do.
-const UTILITY = /^(?:[a-z-]+:.*|border-0|cursor-pointer|rounded-(?:md|full)|bg-(?:primary|card|transparent)|text-(?:primary-foreground|muted-foreground|link|xs)|font-\[var\(--weight-strong\)\]|shadow-control|p-0|min-w-0|outline-none)$/;
+const UTILITY = /^(?:[a-z-]+:.*|border-0|cursor-pointer|rounded-(?:md|full)|bg-(?:primary|card|transparent)|text-(?:primary-foreground|muted-foreground|link|xs)|font-\[var\(--weight-strong\)\]|shadow-control|\[box-shadow:var\(--e-[a-z]+\)\]|p-0|min-w-0|outline-none)$/;
 
 // Also: attribute names in lower case and &#39; for an apostrophe, as HTML
 // writes them and as the renderers did.

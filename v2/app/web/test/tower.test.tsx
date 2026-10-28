@@ -14,7 +14,14 @@ function visibleText(html: string): string[] {
   const out: string[] = [];
   for (const match of html.matchAll(/\s(?:aria-label|title|placeholder|alt)="([^"]*)"/g)) out.push(match[1] ?? '');
   for (const run of html.replace(/<[^>]*>/g, '\n').split('\n')) out.push(run);
-  return out.map((text) => text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim()).filter(Boolean);
+  const runs = out.map((text) => text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#39;/g, "'").trim()).filter(Boolean);
+  // A line of facts (components/facts/Facts.tsx, lane j6-ui-hallmark), read back as the line the model joined.
+  const joined: string[] = [];
+  for (let i = 0; i < runs.length; i += 1) {
+    if (runs[i] === ',' && joined.length > 0 && i + 1 < runs.length) joined.push(`${joined.pop()} · ${runs[++i]}`);
+    else joined.push(runs[i]!);
+  }
+  return joined;
 }
 
 function strings(value: unknown, into: Set<string> = new Set()): Set<string> {
@@ -64,7 +71,7 @@ test('the English tower reads as the capture', async () => {
   const t = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('tower', 'en') });
   const html = renderTower(towerModel(await towerFixture(FIXTURE_NOW), FIXTURE_NOW), t);
   // The summary's facts are each kept whole (lane 38): read them back as the line they make.
-  const text = visibleText(html).join('\n').replace(/\n,\n/g, ' · ');
+  const text = visibleText(html).join('\n');
   for (const expected of [
     'Three things need you.', '4 sessions running · 1 plan in progress · 2 landed today', 'Open inbox', 'Release', '12\u00a0min', 'Permission', '3\u00a0min', 'Plan', '25\u00a0min', 'Goal',
     'The Lead proposes 5 tickets, about 2h of work and 4% of the week.', 'Always on · context 31% · refreshed 10\u00a0min ago',

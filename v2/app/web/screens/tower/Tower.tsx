@@ -237,12 +237,12 @@ export function LiveSession({ card, t }: { readonly card: LiveCard; readonly t: 
         <span className="row-kind session-head" id={`${id}-kind`}><span className={liveDot(card.phase, card.role, card.takenOver)} aria-hidden="true" /><span className="role">{t(`role_${card.role}`)}</span></span>
         <span className="row-main">
           <span className="session-title" id={`${id}-title`}>{card.title}</span>
-          {card.takenOver ? <span className="phrase taken-line" id={`${id}-phrase`}><HandGrabbing size={14} aria-hidden="true" />{takenOverText(card.takenOver, t)}</span> : <span className="phrase" id={`${id}-phrase`}>{sessionStatus(card, t)}</span>}
+          {card.takenOver ? <span className="phrase taken-line" id={`${id}-phrase`}><HandGrabbing size={14} aria-hidden="true" />{takenOverText(card.takenOver, t)}</span> : <span className="phrase" id={`${id}-phrase`}><Facts text={sessionStatus(card, t)} /></span>}
         </span>
         <span className="row-meta session-foot" id={`${id}-meta`}>
           {card.step ? <span className="svc-tag" data-step={card.step.position}>{stepTag(card.step, t)}</span>
             : card.service ? <span className="svc-tag">{card.service}</span> : null}
-          <span className="model"><span className={`sq ${harnessSquare(card.harness)}`} aria-hidden="true" />{formatModel(card.harness, card.model)}</span>
+          <span className="model"><span className={`sq ${harnessSquare(card.harness)}`} aria-hidden="true" /><Facts text={formatModel(card.harness, card.model)} /></span>
           <span className="id">{card.ticket}</span>
           <span className="elapsed">{duration(card.minutes, t)}</span>
         </span>

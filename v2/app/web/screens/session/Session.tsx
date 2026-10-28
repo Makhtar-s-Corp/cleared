@@ -38,6 +38,7 @@ import { harnessName, terminalChoice } from '@/components/terminal/model.ts';
 import { WebTerminal } from '@/components/terminal/Terminal.tsx';
 import { CopilotThreads, useThread } from '@/copilot/provider.tsx';
 import { useGo, useScreen } from '@/lib/context.tsx';
+import { Facts } from '@/components/facts/Facts.tsx';
 import { Empty } from '@/shell/Empty.tsx';
 import { stateOf, type SessionState } from '@/shell/model.ts';
 import { commandParts, intentSentence, looksLikeCommand } from '@/lib/intent.ts';
@@ -627,10 +628,10 @@ export function SessionIndex({ sessions, tickets, now, t, onNew }: { readonly se
                       <span className="index-kind session-head" id={`${id}-kind`}><span className={liveDot(s.phase, s.role)} aria-hidden="true" /><span className="role">{t(`role_${s.role}`)}</span></span>
                       <span className="index-main">
                         <span className="session-title" id={`${id}-title`}>{reader ? t('reader_title') : titles.get(s.ticket) ?? s.ticket}</span>
-                        <span className="phrase" id={`${id}-phrase`}>{sessionStatus(s, t)}</span>
+                        <span className="phrase" id={`${id}-phrase`}><Facts text={sessionStatus(s, t)} /></span>
                       </span>
                       <span className="index-meta session-foot" id={`${id}-meta`}>
-                        <span className="model"><span className={`sq ${harnessSquare(s.harness)}`} aria-hidden="true" />{formatModel(s.harness, s.model)}</span>
+                        <span className="model"><span className={`sq ${harnessSquare(s.harness)}`} aria-hidden="true" /><Facts text={formatModel(s.harness, s.model)} /></span>
                         {reader ? null : <span className="id">{s.ticket}</span>}
                         <span className="elapsed">{since(s.startedAt, now, t)}</span>
                       </span>

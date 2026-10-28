@@ -7,19 +7,19 @@
 .test-values-intro, .test-values-warning, .test-values-hint, .test-values-none, .test-values-gone, .test-values-empty, .test-value-meta {
   color: var(--text-muted); font-size: var(--text-sm); text-wrap: pretty;
 }
-.test-values-intro { margin: 4px 0 0; max-width: 72ch; }
+.test-values-intro { margin: var(--space-1) 0 0; max-width: 72ch; }
 .test-values-warning { margin: var(--space-2) 0; max-width: 72ch; }
 .test-values-services { list-style: none; margin: var(--space-2) 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); max-width: 640px; }
-.test-values-service { padding: 10px 12px; border-radius: 0; box-shadow: inset 6px 0 0 var(--hairline); }
+.test-values-service { padding: 12px 12px; border-radius: 0; box-shadow: inset 6px 0 0 var(--hairline); }
 .test-values .test-values-service-name { margin: 0; font-size: var(--text-sm); font-weight: var(--weight-strong); overflow-wrap: anywhere; }
 .test-values .test-values-none, .test-values .test-values-gone { margin: 2px 0 0; }
-.test-values .test-values-list { list-style: none; margin: 6px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
-.test-value { display: flex; align-items: center; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
+.test-values .test-values-list { list-style: none; margin: var(--space-2) 0 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-1); }
+.test-value { display: flex; align-items: center; justify-content: space-between; gap: var(--space-1) 12px; flex-wrap: wrap; }
 .test-value-body { display: flex; flex-direction: column; min-width: 0; }
 .test-value-name { font-family: var(--font-mono); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .test-value-unreadable { color: var(--danger-text); font-size: var(--text-sm); }
-.test-value-actions { display: flex; gap: 4px; flex-shrink: 0; }
-.test-value-actions button { min-height: 36px; padding: 0 10px; }
+.test-value-actions { display: flex; gap: var(--space-1); flex-shrink: 0; }
+.test-value-actions button { min-height: 36px; padding: 0 12px; }
 .test-values-form { display: flex; flex-direction: column; max-width: 420px; margin-top: var(--space-3); }
 .test-values .test-values-form h3 { margin: 0 0 var(--space-2); font-size: var(--text-sm); font-weight: var(--weight-strong); }
 .test-values-field { display: flex; flex-direction: column; }
@@ -30,7 +30,7 @@
 }
 .test-values-field input:focus, .test-values-field select:focus { outline: 2px solid transparent; box-shadow: 0 0 0 2px var(--link); }
 .test-values-field select { margin-bottom: var(--space-3); }
-.test-values-hint { margin: 4px 0 var(--space-3); }
+.test-values-hint { margin: var(--space-1) 0 var(--space-3); }
 .test-values-error { margin: 0 0 var(--space-3); padding: var(--space-2); border-radius: 0; background: var(--sunken); color: var(--danger-text); }
 .test-values-note { margin: 0 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-sm); }
 .test-values-form button[type="submit"] { align-self: flex-start; min-height: 44px; padding: 0 var(--space-3); }

@@ -9,7 +9,7 @@
    joined edge to edge under it, New ticket the one cobalt action. */
 .ask { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); padding: var(--space-3); border-radius: 0; background: var(--surface); box-shadow: var(--e-bar); }
 .ask:focus-within { box-shadow: var(--e-bar), 0 0 0 5px var(--halo-progress); }
-.ask input { flex: 1 1 280px; min-width: 0; height: 40px; border: 0; background: transparent; font-size: var(--text-lg); font-weight: var(--weight-strong); text-overflow: ellipsis; outline: 2px solid transparent; }
+.ask input { flex: 1 1 280px; min-width: 0; height: 44px; border: 0; border-bottom: var(--frame) solid var(--ink); background: transparent; font-size: var(--text-lg); font-weight: var(--weight-strong); text-overflow: ellipsis; outline: 2px solid transparent; }
 .ask input::placeholder { color: var(--placeholder); font-weight: var(--weight-regular); }
 .ask-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0; flex: 1 1 auto; min-width: 0; }
 .ask-actions .chip-button { min-height: 40px; margin-left: calc(-1 * var(--frame)); }
@@ -48,7 +48,7 @@
 .block-head { display: flex; align-items: baseline; gap: var(--space-3); padding-bottom: var(--space-2); border-bottom: var(--frame) solid var(--ink); }
 .block-head h2 { font-size: var(--text-lg); font-weight: var(--weight-heavy); letter-spacing: -0.02em; }
 .side-card h2 { font-size: var(--text-md); font-weight: var(--weight-heavy); }
-.block-head .n { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 6px; background: var(--ink); color: var(--on-ink); font-size: var(--text-sm); font-weight: var(--weight-heavy); }
+.block-head .n { display: inline-flex; align-items: center; justify-content: center; min-width: 24px; height: 24px; padding: 0 var(--space-2); background: var(--ink); color: var(--on-ink); font-size: var(--text-sm); font-weight: var(--weight-heavy); }
 .block-head .n:empty { display: none; }
 .block-head .more { margin-left: auto; font-size: var(--text-md); font-weight: var(--weight-strong); }
 
@@ -77,7 +77,7 @@ a.row:focus-visible { outline: 3px solid var(--ring); outline-offset: -3px; back
 /* Amber says it waits, once: a square of amber, the kind in its text colour. */
 .need .row-kind { color: var(--awaiting-text); }
 .need .row-kind::before { content: ""; width: 10px; height: 10px; flex: none; background: var(--awaiting); pointer-events: none; }
-.row-main { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; }
+.row-main { display: flex; align-items: baseline; gap: var(--space-3); min-width: 0; overflow: hidden; }
 /* The title keeps at most 70 % of the line, so the reason after it is never erased. */
 .row-main > :first-child { flex: 0 1 auto; max-width: 70%; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: var(--weight-strong); }
 .row-main > :last-child:not(:first-child) { flex: 1 1 0; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-secondary); }
@@ -229,7 +229,7 @@ a.row:focus-visible { outline: 3px solid var(--ring); outline-offset: -3px; back
 }
 /* Touch: the heads' links and the lead's name are 44 px tall, the heads kept tight (lane 38's art director). */
 @media (pointer: coarse) {
-  .tower .more, #lead-title a { display: inline-flex; align-items: center; min-height: 44px; margin-block: -14px; }
+  .tower .more, #lead-title a { display: inline-flex; align-items: center; min-height: 44px; margin-block: calc(-1 * var(--space-3)); }
 }
 /* The number of authors of a new ticket (issue #271), on a workspace of one service. */
 .ask-variants { display: none; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--hairline); }
