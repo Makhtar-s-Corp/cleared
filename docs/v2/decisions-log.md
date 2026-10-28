@@ -7591,3 +7591,30 @@ The first tries found two defects, fixed here with a test each: the check's cont
 
 - Pull request: 448, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-proof-fixes`.
+
+## 2026-10-28: the heavy captures compressed, and no PNG over 500 KB under docs/ (the author's choices, lane `v2-j6-png-compress`, the promise to the owner of 2026-10-27)
+
+**The need.** The promise to the owner of 2026-10-27: `docs/v2/ui-overhaul/before/proofmulti-inbox-full-page.png` (1,179,969 bytes) under 400 KB at the same size in pixels, then every PNG over 200 KB made smaller, losslessly or without visible loss, with oxipng or pngquant run on this machine (no online service), the Markdown links unchanged, and a check that refuses any new PNG over 500 KB under `docs/`. No issue was opened for it.
+
+**Decision.**
+1. **The full-page capture is quantized, not only recompressed.** Lossless oxipng (`-o max --strip safe`) reached 946,308 bytes, and the capture is 1440 by 11,353 pixels of text. It has 695 colors. A palette of 256 colors without dithering is nearly exact (PSNR 69.9 dB) but weighs 456,489 bytes even with zopfli, so the palette had to shrink. pngquant's 64 colors without dithering, with zopfli, gave 392,364 bytes, and a crop at twice the size showed the project's orange status dot turned tan: pngquant weighs colors by area, and the saturated accents are small. So the palette kept is pngquant's 64 colors plus the 16 colors of the source it mapped worst, chosen one by one by pixel count times squared distance (the status dot, the link blue, the labels' orange and their edges), each source color mapped to its nearest entry, no dithering, then `oxipng -o max -Z --strip safe`. The result is 398,678 bytes, 80 colors, still 1440 by 11,353: PSNR 61.2 dB against the source, 0.01 % of the pixels off by more than 8 levels. The status dot, the link and the labels compared at twice the size show no difference.
+2. **"Over 200 KB" is read as over 200,000 bytes.** The tracked PNGs over that, besides the capture, are four of `app/screenshots/` (`tower-light-1440`, `tower-dark-1440`, `tower-dark-768`, `tower-light-768`, 204,287 to 211,862 bytes), outside `docs/` but covered by the same promise. Lossless oxipng was enough for them: 155,421 to 161,519 bytes, each pixel the same, the dimensions unchanged. `--strip safe` dropped nothing: the files had no chunk beyond the image's own.
+3. **The check is a test, not a guard rule.** `v2/test/docs-png-size.test.ts` lists the PNGs git tracks under `docs/` and fails on any over 500,000 bytes, naming each with its size. It runs in the `v2` workflow's `npm test`, on every pull request to `v2`. Reading every tracked file rather than a diff refuses a new capture and an existing one that grows alike, and needs no base. 500 KB is counted as 500,000 bytes, the stricter reading.
+4. **Same paths.** Each file was replaced in place, so no Markdown link changed. `docs/v2/ui-overhaul/before/README.md` says the capture is 11,353 pixels tall, which stays true.
+
+**Tests first.** `a649f7cf` committed the test alone; on it, the test failed with `docs/v2/ui-overhaul/before/proofmulti-inbox-full-page.png: 1179969 bytes`. It passes from the next commit, which compresses that capture.
+
+**Not done here.**
+- **No matrix line.** None names this promise, and a new `P` id could meet a parallel milestone 6 lane's; the orchestrator gives it one at the merge if the matrix should carry it.
+- PNGs under 200,000 bytes were left as they are, and PNGs outside `docs/` are not checked by the test.
+- The test runs in the `v2` workflow, on pull requests and pushes to `v2`. `checks.yml` runs only the root `test/`, so a pull request straight to `main` is not checked by it.
+
+**Checks**, on this branch at `origin/v2` `0e49cbde`:
+- `npm run typecheck` in `v2/`: clean.
+- `npm test` in `v2/`: 2872 Node tests, 2737 pass, 135 skipped, 0 fail; 415 Vitest tests pass.
+- `npm run guard -- --base origin/v2`: nothing refused. The guard does not read `docs/v2/`, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
+
+**Resources.** No Docker object, no port, no tunnel, no secret, no Claude Code login read. Network: `git fetch`, `npm ci` of the lock file, the Debian packages of pngquant 2.18.0 and libimagequant (`apt-get download`, unpacked without installing), oxipng 9.1.5's release archive from its GitHub repository, and Pillow and NumPy from PyPI into a scratch folder to compare the pixels; all of these outside the repository. GitHub for the pull request.
+
+- Pull request: 457, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-png-compress`.
