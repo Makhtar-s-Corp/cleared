@@ -7921,4 +7921,6 @@ Changed with the code: the label gate's case (decision 10), the adapter test's f
 
 **Second round's checks**, on the merge with `origin/v2` at `ed91b3d5`: `npm run typecheck` clean; Vitest 432 pass; `npm test` with the browser tests: 2953 Node tests, 2949 pass, 2 skipped, 2 fail, the same two as above (the switch budget under the full run's load, alone 32.0 ms at p95 and green; the proof capture's video, failing on `origin/v2` on this server too). New: `app/web/test/tower-composer.test.tsx`, `app/test/tower-composer-browser.test.ts`, the quota thresholds in `app/test/shell/quota.test.ts`.
 
+**Reviews.** Five independent read-only reviews of pull request 462 (a1115, b1115, a1215, b1215, a1228), started outside this lane: all PASS, none blocking. Taken: the composer's menu closes on a click or the focus elsewhere (a browser test added), the editor's picked completion a grey selection, the pull request's handoff line made exact. Left on purpose: the model lever and the profile read once per page, since a read on each visit to the Tour would break the switch budget's one request; a change made elsewhere shows after a reload.
+
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-ui-pro`.
