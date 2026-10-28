@@ -17,6 +17,7 @@ import {
   REFRESH_MS, averagePerDay, browserZone, chartOf, costView, dayInitial, dayLong, harnessMaker, harnessName, headline, leverFailure, leverViews, measuredAt, percentText,
   periodText, projectionLines, quotaOf, readConsumption, readingLines, readFailure, readWeek, resetIn, setLevers, tokensText, verdictOf, weekView, winRows, type LeverId, type LeverView,
 } from './model.ts';
+import { quotaLevel } from '@/shell/quota.ts';
 import './consumption.css';
 
 type Language = 'en' | 'fr';
@@ -82,7 +83,7 @@ function QuotaRow({ h, quota, data, now, t, language }: { readonly h: HarnessCon
   const lines = projectionLines(quota, h, data.timeZone, language, t);
   const used = percentText(quota.usedPercent, language);
   return (
-    <div className="quota" data-quota={h.harness} data-verdict={verdict}>
+    <div className="quota" data-quota={h.harness} data-verdict={verdict} data-level={quotaLevel(quota.usedPercent)}>
       <p className="quota-head"><span className="quota-name">{name}</span><span className="quota-used">{t('consumption_quota_used', { percent: used })}</span></p>
       <progress className="quota-bar" max={100} value={Math.min(100, quota.usedPercent)} aria-label={`${name}, ${t(`consumption_window_${quota.window}`)}: ${t('consumption_quota_used', { percent: used })}`} />
       <p className="quota-reset"><span>{t(`consumption_window_${quota.window}`)}</span><span className="sep" aria-hidden="true">·</span><span>{resetIn(quota, now, t)}</span></p>

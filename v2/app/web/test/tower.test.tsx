@@ -76,7 +76,7 @@ test('the English tower reads as the capture', async () => {
     'Three things need you.', '4 sessions running · 1 plan in progress · 2 landed today', 'Open inbox', 'Release', '12\u00a0min', 'Permission', '3\u00a0min', 'Plan', '25\u00a0min', 'Goal',
     'The Lead proposes 5 tickets, about 2h of work and 4% of the week.', 'Always on · context 31% · refreshed 10\u00a0min ago',
     'Reviewed by Sonnet, all checks green. Your approval ships it.', 'Install date-fns', 'The command calls the network. The author is paused until you answer.',
-    'Live sessions', 'All sessions', 'Author', 'Reviewer', '18\u00a0min', 'Lead', 'Plans', 'Landed today', 'New ticket', 'New goal', 'Ask the Lead',
+    'Live sessions', 'All sessions', 'Author', 'Reviewer', '18\u00a0min', 'Lead', 'Plans', 'Landed today', 'Start', 'New goal', 'Ask the Lead',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
   assert.doesNotMatch(html, /\sstyle=/, 'no inline style: the page runs under default-src \'self\'');
 });

@@ -5,32 +5,65 @@
    container queries: .tower-screen for the columns, the main column (rows) for the rows. */
 .tower-screen { container: tower / inline-size; padding: var(--space-4) var(--space-5) var(--space-5); }
 
-/* the bar: a ticket, a goal, a question for the lead or the code, a recipe. A field in a panel with a 1px line, its
-   actions quiet buttons beside it, New ticket the one indigo action. */
-.ask { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--e-field); }
+/* the composer (the owner's request of 2026-10-28): the screen's centre piece. A panel with a 1px line: the title on
+   a 16 px line, the description under it on three lines, suggestions while it is empty, then a toolbar of real
+   controls on a light band: pills with an icon and a word, the menu of the other gestures behind one icon, the keys
+   and Start, the one indigo action. */
+/* Its line as soft as every panel's (the project lead's review of #462): the panel is the field, told by its place,
+   its placeholder and its toolbar; the focus draws the indigo ring. */
+.ask { display: flex; flex-direction: column; padding: 0; border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--e-card); }
 .ask:focus-within { box-shadow: 0 0 0 1px var(--theme-accent), 0 0 0 3px var(--halo-progress); }
-.ask input { flex: 1 1 280px; min-width: 0; height: 36px; border: 0; background: transparent; font-size: var(--text-lg); text-overflow: ellipsis; outline: 2px solid transparent; }
+.ask input { width: 100%; min-width: 0; height: 44px; padding: 12px var(--space-3) 0; border: 0; background: transparent; font-size: var(--text-xl); font-weight: var(--weight-strong); text-overflow: ellipsis; outline: 2px solid transparent; }
 .ask input::placeholder { color: var(--placeholder); font-weight: var(--weight-regular); }
-.ask-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-1); flex: 1 1 auto; min-width: 0; }
-.ask-actions .chip-button { min-height: 32px; box-shadow: none; color: var(--text-secondary); }
-.ask-actions .chip-button:hover { background: var(--tab-fill); color: var(--text); }
-.ask-actions .chip-button.primary { margin-left: var(--space-1); padding: 0 var(--space-3); color: var(--on-ink); }
-.ask-actions .chip-button.primary:hover { background: var(--accent-hover); color: var(--on-ink); }
-/* The description shows once a title is written: the bar stays one line until then. */
-.ask textarea { display: none; flex-basis: 100%; min-height: 96px; resize: vertical; padding: var(--space-2) 0 2px; border: 0; border-top: 1px solid var(--hairline); background: transparent; color: inherit; font: inherit; outline: 2px solid transparent; }
+.ask textarea { display: block; width: 100%; min-height: 72px; max-height: 320px; resize: none; field-sizing: content; padding: var(--space-1) var(--space-3) var(--space-2); border: 0; background: transparent; color: inherit; font: inherit; line-height: 1.5; outline: 2px solid transparent; }
 .ask textarea::placeholder { color: var(--placeholder); }
-.ask:has(#ask-input:not(:placeholder-shown)) textarea, .ask textarea:not(:placeholder-shown) { display: block; }
 .ask-note { margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: var(--text-md); font-weight: var(--weight-strong); }
 .ask-note:empty { display: none; }
 .ask-note[data-kind="error"] { color: var(--danger-text); }
-.ask-services { display: none; flex-basis: 100%; flex-wrap: wrap; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--hairline); }
-.ask:has(#ask-input:not(:placeholder-shown)) .ask-services { display: flex; }
-.ask textarea + .ask-services { border-top: 0; padding-top: 2px; }
-.svc-toggle { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 32px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); color: var(--text); font-size: var(--text-sm); font-weight: var(--weight-strong); cursor: pointer; }
-.svc-toggle:hover { background: var(--tab-fill); }
-.svc-toggle:active { background: var(--selected); }
-/* picked: the grey of a selection, its line in the text's colour */
-.svc-toggle[aria-pressed="true"] { background: var(--selected); box-shadow: 0 0 0 1px var(--outline); color: var(--text); }
+/* suggestions: the ready-made tickets, each its kind and what to write, while the bar is empty */
+.ask-suggest { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); padding: 0 var(--space-3) 12px; }
+.ask-suggest-label { color: var(--text-muted); font-size: var(--text-sm); }
+.suggest { display: inline-flex; align-items: center; gap: 6px; min-height: 28px; padding: 0 10px; border: 0; border-radius: 999px; background: var(--surface-muted); box-shadow: inset 0 0 0 1px var(--line); color: var(--text); font-size: var(--text-sm); cursor: pointer; }
+.suggest:hover { background: var(--tab-fill); }
+.suggest:active { background: var(--selected); }
+.suggest-kind { font-weight: var(--weight-strong); }
+.suggest-hint { color: var(--text-muted); }
+.ask-templates { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); padding: 0 var(--space-3) 12px; }
+/* the toolbar */
+.ask-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-2); padding: var(--space-2) var(--space-2) var(--space-2) 12px; border-top: 1px solid var(--line); border-radius: 0 0 var(--radius-panel) var(--radius-panel); background: var(--surface-muted); }
+.ask-options { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; }
+.ask-go { display: flex; align-items: center; gap: var(--space-2); margin-left: auto; }
+.ask-icon { flex: none; color: var(--text-muted); pointer-events: none; }
+/* a pill: its icon inside the button's left padding, drawn over it, the button the whole pill */
+.ask-pill { position: relative; display: inline-flex; align-items: center; }
+.ask-pill > .ask-icon { position: absolute; left: 10px; z-index: 1; }
+.ask-pill .chip-button { min-height: 30px; padding: 0 12px 0 30px; border-radius: 999px; font-size: var(--text-md); }
+.ask-pill .chip-button[aria-expanded="true"] { background: var(--selected); box-shadow: 0 0 0 1px var(--outline); }
+/* the model: a native menu in a pill, its caret drawn over the right padding */
+.ask-model select { appearance: none; -webkit-appearance: none; min-height: 30px; padding: 0 28px 0 30px; border: 0; border-radius: 999px; background: var(--surface); box-shadow: var(--e-control); color: var(--text); font-size: var(--text-md); font-weight: var(--weight-strong); cursor: pointer; }
+.ask-model select:hover { background: var(--surface-muted); }
+.ask-model .ask-caret { position: absolute; right: 10px; color: var(--text-muted); pointer-events: none; }
+/* the authors and the services: one pill holding a set of choices */
+.ask-variants, .ask-services { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 2px; min-height: 30px; padding: 2px 3px 2px 10px; border-radius: 999px; background: var(--surface); box-shadow: var(--e-control); }
+.ask-variants-label { margin: 0 var(--space-1) 0 6px; color: var(--text-secondary); font-size: var(--text-md); font-weight: var(--weight-strong); }
+.ask-services .ask-icon { margin-right: var(--space-1); }
+.ask-variants .svc-toggle { justify-content: center; min-width: 24px; min-height: 24px; padding: 0 var(--space-2); border-radius: 999px; box-shadow: none; }
+.ask-services .svc-toggle { min-height: 24px; padding: 0 var(--space-2); border-radius: 999px; box-shadow: none; }
+.svc-toggle { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 28px; padding: 0 12px; border: 0; border-radius: 999px; background: var(--surface); box-shadow: var(--e-control); color: var(--text); font-size: var(--text-sm); font-weight: var(--weight-strong); cursor: pointer; }
+.svc-toggle:hover { background: var(--surface-muted); }
+.svc-toggle:active { background: var(--tab-fill); }
+/* picked: the grey of a selection, the text's colour */
+.svc-toggle[aria-pressed="true"] { background: var(--selected); color: var(--text); }
+/* the other gestures: a menu that hangs under its icon, each gesture a row */
+.ask-more { position: relative; }
+.ask-more .icon[aria-expanded="true"] { background: var(--selected); color: var(--text); }
+.ask-more-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 240px; padding: var(--space-1); gap: 2px; }
+.ask-more-menu[hidden] { display: none; }
+.ask-more-menu .ask-pill { display: flex; }
+.ask-more-menu .chip-button { width: 100%; min-height: 32px; padding: 0 var(--space-2) 0 32px; border-radius: var(--radius); background: transparent; box-shadow: none; font-size: var(--text-md); font-weight: var(--weight-regular); }
+.ask-more-menu .chip-button:hover { background: var(--tab-fill); }
+.ask-keys { color: var(--text-muted); }
+.ask-go .chip-button.primary { min-height: 32px; padding: 0 var(--space-4); font-size: var(--text-md); }
 
 /* the two columns: what needs the person leads, the column supports it */
 .tower { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--space-5); align-items: start; margin-top: var(--space-4); }
@@ -174,25 +207,12 @@ a.row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
   .tower { grid-template-columns: minmax(0, 1fr); }
   .tower-side { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: var(--space-4); }
   .tower-side > :first-child { grid-column: 1 / -1; }
-  /* Once the actions no longer fit beside the field (P214's Template chip made it sooner), the field and New
-     ticket keep the first row, the other actions take the lines under it, and what the bar opens comes after.
-     The empty full-width item ends the first row, so no chip climbs beside New ticket; its negative margin
-     takes back the gap of the line it makes. */
-  .ask { flex-wrap: wrap; }
-  .ask input { flex: 1 1 160px; }
-  .ask-actions { display: contents; }
-  .ask-actions .primary { order: 1; }
-  .ask::after { content: ""; order: 1; flex-basis: 100%; height: 0; margin-top: calc(-1 * var(--space-2)); }
-  .ask-actions [data-bar], .ask-actions [data-lead] { order: 2; }
-  .ask-templates, .ask textarea, .ask-services, .ask-variants { order: 3; }
 }
 @container tower (max-width: 560px) {
   .tower-side { grid-template-columns: minmax(0, 1fr); }
-  /* Ask about the code and Run a recipe stay in the palette (Ctrl-K or the top bar's search). */
-  .ask-actions [data-bar="ask"], .ask-actions [data-bar="recipe"] { display: none; }
-  /* A phone keeps the field and New ticket on one row (lane 38): a goal and the lead are the next block down and
-     in the palette. */
-  .ask-actions [data-lead] { display: none; }
+  /* A phone: the controls on their lines, then the menu and Start on the last one, Start at its right. */
+  .ask-go { width: 100%; }
+  .ask-go .chip-button.primary { margin-left: auto; }
 }
 /* the rows, by the width of their own column */
 @container rows (max-width: 720px) {
@@ -209,9 +229,11 @@ a.row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 }
 @media (max-width: 767px) {
   .tower-screen { padding: var(--space-3); }
-  .ask { padding: var(--space-2); }
   .hello h1 { font-size: var(--text-xl); }
-  .ask-actions .chip-button, .ask-actions .chip-button.primary { margin-left: 0; }
+  .ask-keys, .suggest-hint { display: none; }
+  .ask-model select, .ask-pill .chip-button, .ask-go .chip-button.primary { min-height: 44px; }
+  .ask-variants .svc-toggle, .ask-services .svc-toggle { min-width: 44px; min-height: 44px; }
+  .ask-more-menu .chip-button { min-height: 44px; }
   .ask input { height: 44px; font-size: var(--text-input); }
   .svc-toggle, .recipe-toggle { min-height: 44px; padding: 0 var(--space-3); }
   .recipe-param input, .lead-ask input { min-height: 44px; font-size: var(--text-input); }
@@ -226,16 +248,10 @@ a.row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 }
 /* Touch: the heads' links and the lead's name are 44 px tall, the heads kept tight (lane 38's art director). */
 @media (pointer: coarse) {
+  .ask-model select, .ask-pill .chip-button, .ask-go .chip-button.primary, .ask-variants .svc-toggle, .ask-services .svc-toggle, .suggest { min-height: 44px; }
   .tower .more, #lead-title a { display: inline-flex; align-items: center; min-height: 44px; margin-block: calc(-1 * var(--space-3)); }
 }
 /* The number of authors of a new ticket (issue #271), on a workspace of one service. */
-.ask-variants { display: none; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--hairline); }
-.ask:has(#ask-input:not(:placeholder-shown)) .ask-variants { display: flex; }
-.ask textarea + .ask-variants { border-top: 0; padding-top: 2px; }
-.ask-variants-label { color: var(--text-secondary); font-size: var(--text-sm); margin-right: var(--space-1); }
 /* The ready-made tickets (P214): a row under the field while the chip has it open or one is picked; the
    description it fills follows with no rule of its own, as the authors follow the description. */
-.ask-templates + textarea { border-top: 0; padding-top: 2px; }
 /* A chip whose row or form is open says so, in the selection's grey, never the indigo of New ticket. */
-.ask-actions .chip-button[aria-expanded="true"] { background: var(--selected); color: var(--text); }
-.ask-templates { display: flex; flex-basis: 100%; flex-wrap: wrap; align-items: center; gap: var(--space-1); padding-top: var(--space-2); border-top: 1px solid var(--hairline); }

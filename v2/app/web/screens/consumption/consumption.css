@@ -67,8 +67,14 @@
 .quota-bar::-webkit-progress-bar { background: var(--selected); border-radius: 3px; }
 .quota-bar::-webkit-progress-value { background: var(--stage-progress); border-radius: 3px; }
 .quota-bar::-moz-progress-bar { background: var(--stage-progress); }
-.quota[data-verdict="hit"] .quota-bar::-webkit-progress-value { background: var(--danger); }
-.quota[data-verdict="hit"] .quota-bar::-moz-progress-bar { background: var(--danger); }
+/* The bar's colour by how much is used (the project lead's review of #462): the accent up to 80 %, amber past 80 %,
+   red only past 90 %; whether it will be reached before its reset is said in words under it. */
+.quota[data-level="high"] .quota-bar::-webkit-progress-value { background: var(--awaiting); }
+.quota[data-level="high"] .quota-bar::-moz-progress-bar { background: var(--awaiting); }
+.quota[data-level="high"] .quota-used { color: var(--awaiting-text); }
+.quota[data-level="over"] .quota-bar::-webkit-progress-value { background: var(--danger); }
+.quota[data-level="over"] .quota-bar::-moz-progress-bar { background: var(--danger); }
+.quota[data-level="over"] .quota-used { color: var(--danger-text); }
 .quota-reset { display: flex; gap: var(--space-2); margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
 .quota-line { margin: 0; font-size: var(--text-sm); line-height: 1.45; color: var(--text-secondary); text-wrap: pretty; }
 .quota[data-verdict="hit"] .quota-line[data-projection="before"] { color: var(--danger-text); }

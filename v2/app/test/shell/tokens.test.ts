@@ -80,7 +80,7 @@ const PAIRS: readonly (readonly [string, readonly string[]])[] = [
   ['--text', GROUNDS], ['--text-secondary', GROUNDS], ['--text-muted', GROUNDS], ['--text-faint', GROUNDS],
   ['--placeholder', ['--canvas', '--surface', '--sunken', '--popover']],
   ['--link', ['--canvas', '--surface', '--sidebar', '--sunken', '--awaiting-surface', '--popover']],
-  ['--awaiting-text', ['--canvas', '--surface', '--sidebar', '--awaiting-pill', '--awaiting-surface', '--selected']],   // --selected: the inbox's shown row (lane 37)
+  ['--awaiting-text', ['--canvas', '--surface', '--sidebar', '--awaiting-pill', '--awaiting-surface', '--selected', '--tab-fill']],   // --tab-fill: the gauge's percent past 80 % under the pointer (j6-ui-pro)   // --selected: the inbox's shown row (lane 37)
   ['--danger-text', ['--canvas', '--surface', '--sunken', '--sidebar', '--tab-fill']],   // --sidebar, --tab-fill: the quota gauge's percent (P227)
   ['--on-ink', ['--ink']], ['--count-ink', ['--awaiting']],
 ];

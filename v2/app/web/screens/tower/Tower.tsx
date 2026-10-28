@@ -13,9 +13,9 @@
 // the one thing to do about it. Requirement C6: "Batch" in the bar opens a
 // form of one ticket per line, and the batches under way are a side card.
 // P214: "Template" in the bar shows the ready-made tickets (templates.ts).
-import { Check, HandGrabbing, ListChecks, Package, TerminalWindow, X } from '@phosphor-icons/react';
-import { useCallback, useEffect, useId, useRef, useState, type FormEvent } from 'react';
-import type { Recipe } from '../../../../src/api/types.ts';
+import { CaretDown, ChatCircle, Check, Cpu, DotsThree, Files, HandGrabbing, ListChecks, MagnifyingGlass, Package, Play, Rows, Stack, Target, TerminalWindow, UsersThree, X } from '@phosphor-icons/react';
+import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+import type { Consumption, Recipe } from '../../../../src/api/types.ts';
 import { TICKET_TEMPLATES, type TicketTemplate } from '../../../../src/tickets/templates.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
@@ -37,40 +37,56 @@ import {
 } from './model.ts';
 import { pickTemplate, templateLabels } from './templates.ts';
 import { Facts } from '@/components/facts/Facts.tsx';
+import { Keys } from '@/shell/Kbd.tsx';
+import { modelName, setLevers } from '@/screens/consumption/model.ts';
 import './tower.css';
 
 
-// The services a new ticket names: a chip per service of a workspace of
-// several, shown with the description once a title is typed.
-// "Ask about the code" asks the title (and the description) as a question
-// to the code; "Run a recipe" opens the recipes' form, once the service has some.
-// On a workspace of one service, the number of authors: one, or 2 to 4
-// variants compared in the inbox (issue #271). "Batch" opens the form of
-// several tickets at once (requirement C6). "Template" shows the ready-made
-// tickets (P214), a row that stays while one is picked; the picked one says
-// in the title's placeholder what to write.
-export function Bar({ t, title, body, services = [], picked = [], variants = 1, recipes = [], recipeOpen = false, batchOpen = false, template = null, templatesOpen = false, busy = false, onTitle, onBody, onPick, onVariants, onLead, onAsk, onRecipe, onBatch, onTemplates, onTemplate, onSubmit }: {
+// The composer (the owner's request of 2026-10-28, lane j6-ui-pro): the title, the description under it on several
+// lines, then a row of real controls, each one a thing the service does: the services a new ticket names (a chip per
+// service of a workspace of several), or on a workspace of one service the number of authors (one, or 2 to 4
+// variants compared in the inbox, issue #271); the model the next authors start on (Consumption's lever, read and
+// set through /api/consumption); "Template" for the ready-made tickets (P214), a row that stays while one is
+// picked, the picked one saying in the title's placeholder what to write; "Batch" for several tickets at once
+// (requirement C6). The other gestures (a goal or a question for the lead, a question to the code, a recipe once
+// the service has some) are in a menu behind one button. Then Start, with Ctrl+Enter (Cmd+Enter on a Mac) from
+// either field. While the bar is empty, the ready-made tickets are offered as suggestions under it.
+export type ModelLever = { readonly current: string; readonly choice: string | null; readonly options: readonly string[] };
+
+export function Bar({ t, title, body, services = [], picked = [], variants = 1, recipes = [], recipeOpen = false, batchOpen = false, template = null, templatesOpen = false, busy = false, model = null, onTitle, onBody, onPick, onVariants, onLead, onAsk, onRecipe, onBatch, onTemplates, onTemplate, onModel, onSubmit }: {
   readonly t: Translate; readonly title: string; readonly body: string;
   readonly services?: readonly string[]; readonly picked?: readonly string[]; readonly variants?: number; readonly onVariants?: (n: number) => void;
   readonly recipes?: readonly Recipe[]; readonly recipeOpen?: boolean; readonly batchOpen?: boolean; readonly busy?: boolean;
-  readonly template?: TicketTemplate | null; readonly templatesOpen?: boolean;
+  readonly template?: TicketTemplate | null; readonly templatesOpen?: boolean; readonly model?: ModelLever | null;
   readonly onTitle?: (value: string) => void; readonly onBody?: (value: string) => void; readonly onPick?: (service: string) => void;
   readonly onLead?: (kind: 'goal' | 'lead') => void; readonly onAsk?: () => void; readonly onRecipe?: () => void; readonly onBatch?: () => void;
-  readonly onTemplates?: () => void; readonly onTemplate?: (template: TicketTemplate) => void; readonly onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
+  readonly onTemplates?: () => void; readonly onTemplate?: (template: TicketTemplate) => void; readonly onModel?: (choice: string | null) => void;
+  readonly onSubmit?: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const templates = templatesOpen || template !== null;
+  const [more, setMore] = useState(false);
+  const empty = !title.trim() && !body.trim() && !templates;
+  // Ctrl+Enter (Cmd+Enter on a Mac) starts the ticket from the description too; Enter alone writes a new line there.
+  const keys = (event: KeyboardEvent<HTMLFormElement>) => {
+    if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.altKey) { event.preventDefault(); event.currentTarget.requestSubmit(); }
+    if (event.key === 'Escape' && more) { setMore(false); document.getElementById('ask-more-button')?.focus(); }
+  };
+  // A gesture of the menu closes it once done.
+  const then = (run?: () => void) => () => { setMore(false); run?.(); };
   return (
-    <form className="ask" id="ask" autoComplete="off" onSubmit={onSubmit}>
+    <form className="ask" id="ask" autoComplete="off" onSubmit={onSubmit} onKeyDown={keys}>
       <Input id="ask-input" name="title" maxLength={200} placeholder={t(template ? `template_${template}_title` : 'bar_placeholder')} aria-label={t('bar_label')} value={title} onChange={(event) => onTitle?.(event.target.value)} />
-      <div className="ask-actions">
-        <Button variant="chip" className="chip-button" data-lead="goal" onClick={() => onLead?.('goal')}>{t('bar_new_goal')}</Button>
-        <Button variant="chip" className="chip-button" data-lead="lead" onClick={() => onLead?.('lead')}>{t('bar_ask_lead')}</Button>
-        <Button variant="chip" className="chip-button" data-bar="ask" disabled={busy} title={t('bar_ask_code_note')} onClick={onAsk}>{t('bar_ask_code')}</Button>
-        {recipes.length > 0 ? <Button variant="chip" className="chip-button" data-bar="recipe" aria-expanded={recipeOpen} aria-controls="recipe-form" onClick={onRecipe}>{t('bar_recipe')}</Button> : null}
-        <Button variant="chip" className="chip-button" data-bar="template" aria-expanded={templates} aria-controls="ask-templates" onClick={onTemplates}>{t('bar_template')}</Button>
-        <Button variant="chip" className="chip-button" data-bar="batch" aria-expanded={batchOpen} aria-controls="batch-form" onClick={onBatch}>{t('bar_batch')}</Button>
-        <Button variant="ink" className="chip-button primary" type="submit">{t('bar_new_ticket')}</Button>
-      </div>
+      <Textarea id="ask-body" name="body" maxLength={20000} rows={3} placeholder={t('bar_body_placeholder')} aria-label={t('bar_body_label')} value={body} onChange={(event) => onBody?.(event.target.value)} />
+      {empty ? (
+        <div className="ask-suggest" id="ask-suggest" role="group" aria-label={t('bar_suggest_label')}>
+          <span className="ask-suggest-label" aria-hidden="true">{t('bar_suggest')}</span>
+          {TICKET_TEMPLATES.map((id) => (
+            <button key={id} type="button" className="suggest" data-suggest={id} onClick={() => onTemplate?.(id)}>
+              <span className="suggest-kind">{t(`template_${id}`)}</span><span className="suggest-hint">{t(`template_${id}_title`)}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
       {templates ? (
         <div className="ask-templates" id="ask-templates" role="group" aria-label={t('bar_templates_label')}>
           {TICKET_TEMPLATES.map((id) => (
@@ -80,25 +96,57 @@ export function Bar({ t, title, body, services = [], picked = [], variants = 1, 
           ))}
         </div>
       ) : null}
-      <Textarea id="ask-body" name="body" maxLength={20000} rows={5} placeholder={t('bar_body_placeholder')} aria-label={t('bar_body_label')} value={body} onChange={(event) => onBody?.(event.target.value)} />
-      {services.length >= 2 ? (
-        <div className="ask-services" role="group" aria-label={t('bar_services_label')}>
-          {services.map((name) => (
-            <Toggle key={name} className="svc-toggle" pressed={picked.includes(name)} onPressedChange={() => onPick?.(name)} data-service={name}>
-              {picked.includes(name) ? <Check size={12} aria-hidden="true" /> : null}{name}
-            </Toggle>
-          ))}
+      <div className="ask-actions">
+        <div className="ask-options">
+          {services.length >= 2 ? (
+            <div className="ask-services" role="group" aria-label={t('bar_services_label')}>
+              <Stack size={14} className="ask-icon" aria-hidden="true" />
+              {services.map((name) => (
+                <Toggle key={name} className="svc-toggle" pressed={picked.includes(name)} onPressedChange={() => onPick?.(name)} data-service={name}>
+                  {picked.includes(name) ? <Check size={12} aria-hidden="true" /> : null}{name}
+                </Toggle>
+              ))}
+            </div>
+          ) : (
+            <div className="ask-variants" role="group" aria-label={t('bar_variants_label')}>
+              <UsersThree size={14} className="ask-icon" aria-hidden="true" />
+              <span className="ask-variants-label" aria-hidden="true">{t('bar_variants')}</span>
+              {VARIANT_CHOICES.map((n) => (
+                <Toggle key={n} className="svc-toggle" pressed={variants === n} onPressedChange={() => onVariants?.(n)} data-variants={n} aria-label={t(n === 1 ? 'bar_variants_one' : 'bar_variants_other', { n })}>
+                  {n}
+                </Toggle>
+              ))}
+            </div>
+          )}
+          {model ? (
+            <span className="ask-pill ask-model" title={t('bar_model_note')}>
+              <Cpu size={14} className="ask-icon" aria-hidden="true" />
+              <select id="ask-model" aria-label={t('bar_model_label')} value={model.choice ?? ''} onChange={(event) => onModel?.(event.target.value || null)}>
+                <option value="">{t('bar_model_default', { model: modelName(model.current) })}</option>
+                {model.options.map((option) => <option key={option} value={option}>{modelName(option)}</option>)}
+              </select>
+              <CaretDown size={12} className="ask-caret" aria-hidden="true" />
+            </span>
+          ) : null}
+          <span className="ask-pill"><Files size={14} className="ask-icon" aria-hidden="true" /><Button variant="chip" className="chip-button" data-bar="template" aria-expanded={templates} aria-controls="ask-templates" onClick={onTemplates}>{t('bar_template')}</Button></span>
+          <span className="ask-pill"><Rows size={14} className="ask-icon" aria-hidden="true" /><Button variant="chip" className="chip-button" data-bar="batch" aria-expanded={batchOpen} aria-controls="batch-form" onClick={onBatch}>{t('bar_batch')}</Button></span>
         </div>
-      ) : (
-        <div className="ask-variants" role="group" aria-label={t('bar_variants_label')}>
-          <span className="ask-variants-label" aria-hidden="true">{t('bar_variants')}</span>
-          {VARIANT_CHOICES.map((n) => (
-            <Toggle key={n} className="svc-toggle" pressed={variants === n} onPressedChange={() => onVariants?.(n)} data-variants={n} aria-label={t(n === 1 ? 'bar_variants_one' : 'bar_variants_other', { n })}>
-              {variants === n ? <Check size={12} aria-hidden="true" /> : null}{n}
-            </Toggle>
-          ))}
+        <div className="ask-go">
+          <div className="ask-more" data-open={more ? 'true' : undefined}>
+            <Button variant="ghost" className="icon" id="ask-more-button" aria-label={t('bar_more')} data-tip={t('bar_more')} title={t('bar_more')} aria-expanded={more} aria-controls="ask-more-menu" onClick={() => setMore((open) => !open)}>
+              <DotsThree size={18} weight="bold" aria-hidden="true" />
+            </Button>
+            <div className="menu ask-more-menu" id="ask-more-menu" hidden={!more}>
+              <span className="ask-pill"><Target size={14} className="ask-icon" aria-hidden="true" /><Button variant="chip" className="chip-button" data-lead="goal" onClick={then(() => onLead?.('goal'))}>{t('bar_new_goal')}</Button></span>
+              <span className="ask-pill"><ChatCircle size={14} className="ask-icon" aria-hidden="true" /><Button variant="chip" className="chip-button" data-lead="lead" onClick={then(() => onLead?.('lead'))}>{t('bar_ask_lead')}</Button></span>
+              <span className="ask-pill"><MagnifyingGlass size={14} className="ask-icon" aria-hidden="true" /><Button variant="chip" className="chip-button" data-bar="ask" disabled={busy} title={t('bar_ask_code_note')} onClick={then(onAsk)}>{t('bar_ask_code')}</Button></span>
+              {recipes.length > 0 ? <span className="ask-pill"><Play size={14} className="ask-icon" aria-hidden="true" /><Button variant="chip" className="chip-button" data-bar="recipe" aria-expanded={recipeOpen} aria-controls="recipe-form" onClick={then(onRecipe)}>{t('bar_recipe')}</Button></span> : null}
+            </div>
+          </div>
+          <Keys keys={['Mod+Enter']} t={t} className="keys ask-keys" />
+          <Button variant="ink" className="chip-button primary" type="submit" aria-keyshortcuts="Control+Enter Meta+Enter">{t('bar_new_ticket')}</Button>
         </div>
-      )}
+      </div>
     </form>
   );
 }
@@ -370,6 +418,9 @@ export function TowerBody({ model, t, language = 'en', leadDraft = '', onLeadDra
 // The failure that is no error: the setup is not finished (issue #431).
 const PENDING = 'setup_pending';
 
+// The lever as last read, kept while the page lives, so a switch back to the tower asks nothing again.
+let modelLever: ModelLever | null = null;
+
 export default function Tower() {
   const context = useScreen();
   const { t } = context;
@@ -395,6 +446,25 @@ export default function Tower() {
   const [template, setTemplate] = useState<TicketTemplate | null>(null);
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const thread = useRef<LeadThread>({ after: 0, line: null });
+  // The model the next authors start on: Consumption's lever, read once for the page's life (the shell's gauge reads
+  // the same resource each minute), set from the composer as from Consumption.
+  const [lever, setLever] = useState<ModelLever | null>(modelLever);
+  useEffect(() => {
+    if (modelLever) return;
+    let live = true;
+    context.api<Consumption>('/consumption').then((data) => { modelLever = data.levers.model; if (live) setLever(modelLever); }).catch(() => undefined);
+    return () => { live = false; };
+  }, [context]);
+  const pickModel = async (choice: string | null) => {
+    try {
+      const levers = await setLevers(context.api, { model: choice });
+      modelLever = levers.model;
+      setLever(modelLever);
+      setNote({ text: t('bar_model_set', { model: modelName(choice ?? levers.model.current) }), kind: 'ok' });
+    } catch {
+      setNote({ text: t('bar_model_failed'), kind: 'error' });
+    }
+  };
 
   const refresh = useCallback(async (live: () => boolean = () => true) => {
     try {
@@ -531,7 +601,8 @@ export default function Tower() {
         onTitle={(value) => { setTitle(value); if (!value.trim()) { setPicked([]); setVariants(1); } }} onBody={setBody} onSubmit={(event) => void submit(event)}
         onPick={(name) => setPicked((current) => (current.includes(name) ? current.filter((n) => n !== name) : [...current, name]))}
         onLead={(kind) => go(leadHref(kind, title, body))} onAsk={() => void ask()} onRecipe={() => setRecipeOpen((open) => !open)}
-        onBatch={() => setBatchOpen((open) => !open)} template={template} templatesOpen={templatesOpen} onTemplates={toggleTemplates} onTemplate={choose} />
+        onBatch={() => setBatchOpen((open) => !open)} template={template} templatesOpen={templatesOpen} onTemplates={toggleTemplates} onTemplate={choose}
+        model={lever} onModel={(choice) => void pickModel(choice)} />
       <p className="ask-note" id="ask-note" role="status" data-kind={note?.kind}>{note?.text ?? ''}</p>
       {recipeOpen && model && model.recipes.length > 0 ? (
         <RecipeForm t={t} recipes={model.recipes} picked={recipe} values={values} note={recipeNote.text} link={recipeNote.link} busy={running}
