@@ -7889,3 +7889,13 @@ Changed with the code: the label gate's case (decision 10), the adapter test's f
 
 - Pull request: 464, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-dreaming`.
+
+## 2026-10-28: Take over played for real on a real Claude Code session, then after a restart of the service (the author's choices, lane `v2-j6-live-takeover`, B5.10f, D4, C1, O9, O10, O16, O18, O19, P47, issues #463 and #233)
+
+**The need.** Issue #463: play step 11 of the multi-service proof for real (Take over, the web terminal, the editor, Give back) on a real Claude Code session, on an install of this server, with the example repository and the server's Claude Code connection, no fork and no Linear; then restart the service and play it again. Also #233: the session screen read "Working" after Give back while the review ran. No milestone 6 plan is in the repository, so the lane follows the issue and the brief, as the other milestone 6 lanes did.
+
+**Quota estimate, written before the real run** (13:05 Europe/Paris).
+- **What runs.** The gated real-adapter test (`test/terminal/real-harness.test.ts`, P47): an author and a reviewer, four short Haiku 5.5 turns, at most 0.5 USD per session. Then `scripts/proof-takeover-live.ts`: two tickets of one visible line on the guestbook, author and reviewer on Haiku 5.5, one review round, at most 2 USD per ticket (`CLEARED_V2_BUDGET_USD`, the engine stops a ticket past it). Ticket A: the author's turn, one line typed to the harness, the notice's turn after Give back, the reviewer's turn and one line typed to it. Ticket B: the author's first turn, stopped by the restart, then a new author's turn, a line to the harness and the notice's turn. Nothing is approved, so no merge, no deploy and no release watch.
+- **The ceiling in money:** 1 USD for the test and 4 USD for the run, 5 USD in all. The expected spend is nearer 1.5 to 3 USD.
+- **In points of the week.** In the milestone 2 proof's ledger (read only), the seven-day window rose 19 points (33 % to 52 %) between 22 October 17:52 and 24 October 06:16 while its sessions reported 37 USD. The quota is shared with every other session on the login, so that is a floor: 1 point is worth 2 USD at least, and 7.6 USD over the stretch where only the proof ran. **Estimate: 0.5 to 1.5 points of the week, 2.5 at the ceiling.**
+- **The stops.** The run reads the seven-day window from its own sessions' reports (`cleared.rate_limit`); it stops and sets its tickets aside once it has spent 5 points since its first figure, or once the window is at 90 %. The service reads no quota on the host (`CLEARED_V2_QUOTA_MINUTES=0`), runs no lead and no service map, so only the run's sessions call the model.
