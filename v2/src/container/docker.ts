@@ -93,7 +93,7 @@ const LISTS = new Set(['ps', 'network ls', 'volume ls', 'image ls']);
 // Commands that act on objects, with how many of the words after `--` are
 // targets: all of them, or only the first (exec: the rest is the command).
 const TARGETED = new Map<string, 'all' | 'first'>([
-  ['start', 'all'], ['stop', 'all'], ['rm', 'all'], ['inspect', 'all'], ['logs', 'all'], ['exec', 'first'],
+  ['start', 'all'], ['stop', 'all'], ['kill', 'all'], ['rm', 'all'], ['inspect', 'all'], ['logs', 'all'], ['exec', 'first'],
   ['network rm', 'all'], ['network inspect', 'all'], ['volume rm', 'all'], ['image inspect', 'all'], ['image rm', 'all'],
 ]);
 const META = new Set(['version']);
@@ -441,6 +441,13 @@ export class Docker {
   async start(session: string, name: string): Promise<void> {
     const { id, owned } = await this.owned(session, name);
     await this.must(['start', '--', id], owned);
+  }
+
+  // Kills a session's container (a crash, for the tests of issue #453 and
+  // the doctor's): by the id a labelled list returned, as every targeted command.
+  async kill(session: string, name: string): Promise<void> {
+    const { id, owned } = await this.owned(session, name);
+    await this.must(['kill', '--', id], owned);
   }
 
   // Runs a command in a running container and returns its result, whatever

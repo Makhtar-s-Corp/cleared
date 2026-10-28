@@ -79,6 +79,9 @@ export const CUSTOM_NAMES = [
   // Milestone 5 (C15, issue #422): the session waits for its service's
   // prepared image, built because what it holds changed.
   'cleared.prepared_image',
+  // Milestone 6 (issue #453): the flow recreated the session's container
+  // after it stopped, and resumed the session in it.
+  'cleared.container_recreated',
 ] as const;
 export type CustomName = (typeof CUSTOM_NAMES)[number];
 
@@ -227,6 +230,10 @@ export type CustomValue = {
   // there is none.
   'cleared.production_checked': ProductionCheck;
   'cleared.prepared_image': { readonly service: string; readonly state: 'waiting' };
+  // Which recreation of the session it was, of how many the flow makes, and
+  // how long the flow waited before it. A new process of the harness starts
+  // here: its running cost starts again from zero (consumption/ticket-cost.ts).
+  'cleared.container_recreated': { readonly attempt: number; readonly limit: number; readonly waitedMs: number };
 };
 
 type Base = { readonly timestamp?: number };

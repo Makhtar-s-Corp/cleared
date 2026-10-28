@@ -19,7 +19,10 @@
 //            lane 25), so a session's dollars are its last total, not the sum
 //            of its turns; a turn with no total (a cancelled one) is skipped;
 //            a total lower than the one before is a new process of the
-//            session (a resume), whose totals add to what was spent. null
+//            session (a resume), whose totals add to what was spent; so
+//            does every total after cleared.container_recreated, which the
+//            flow journals where a new process starts (issue #453), even
+//            one higher than the last total before it. null
 //            when a session that finished a turn reported no total (Codex,
 //            Cursor): a partial sum is not the cost
 //
@@ -64,6 +67,7 @@ export function sessionsCost(sessions: readonly (readonly Pick<SessionEvent, 'at
     let spent = 0;
     let open: number | null = null;
     for (const { at, event } of events) {
+      if (event.type === 'CUSTOM' && event.name === 'cleared.container_recreated') last = 0;
       if (event.type === 'RUN_STARTED') open = Date.parse(at);
       if (event.type !== 'RUN_FINISHED' && event.type !== 'RUN_ERROR') continue;
       const end = Date.parse(at);
@@ -97,11 +101,13 @@ type Row = { session_id: string; at: string; event: string };
 // The ticket's sessions are found through the sessions table, indexed by
 // ticket; their events through session_events' key.
 const OF_TICKET = 'session_id IN (SELECT id FROM sessions WHERE project = ? AND ticket = ?) AND project = ? AND ticket = ?';
+// The events sessionsCost reads: the turns, and where a new process of a session starts.
+export const COST_EVENTS = "(type IN ('RUN_STARTED', 'RUN_FINISHED', 'RUN_ERROR') OR (type = 'CUSTOM' AND json_extract(event, '$.name') = 'cleared.container_recreated'))";
 
 export function ticketCost(db: DatabaseSync, input: { readonly project: string; readonly ticket: string }): TicketCost {
   const keys = [input.project, input.ticket, input.project, input.ticket];
   const rows = db.prepare(`SELECT session_id, at, event FROM session_events
-    WHERE ${OF_TICKET} AND type IN ('RUN_STARTED', 'RUN_FINISHED', 'RUN_ERROR') ORDER BY session_id, seq`).all(...keys) as Row[];
+    WHERE ${OF_TICKET} AND ${COST_EVENTS} ORDER BY session_id, seq`).all(...keys) as Row[];
   const bySession = new Map<string, { at: string; event: AgUiEvent }[]>();
   for (const row of rows) {
     let event: AgUiEvent;

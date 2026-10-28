@@ -90,6 +90,9 @@ async function setup() {
   fake.onKill = () => { runners.at(-1)?.exit(137); };
   const docker = new Docker(fake.runner, (args) => {
     fake.calls.push({ args: [...args], options: {}, result: { code: 0, stdout: '', stderr: '' } });
+    // `docker start --attach` runs the container it names.
+    const attached = fake.containers.find((c) => c.id === args.at(-1));
+    if (attached) attached.state = 'running';
     const runner = new FakeRunner();
     runners.push(runner);
     return runner.process;

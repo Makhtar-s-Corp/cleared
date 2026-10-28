@@ -212,6 +212,7 @@ These are open issues, not mistakes in the install. The doctor does not check th
 
 - The release lock reads the owner's public key from the project's `.cleared/agents.conf` only (`[tracker] human_public_key`), so on a Compose install an approved first ticket is not merged until that line is there. The `broker` container gets its project from the workspace the assistant writes; until a repository is connected, its log says it waits.
 - A repository connected after the first ones is used after a restart of the service, and the release trains of several repositories need a release lock each, which the Compose file does not run: [What needs a restart](install.md#what-needs-a-restart) lists both, with the command.
+- A session's container that stops is recreated for Claude Code sessions only, at most three times; a Codex or Cursor session's ticket goes back to Todo, and a restart of the service stops every session (issue #58). [adapters.md](adapters.md#a-sessions-container-that-stops-issue-453) says how.
 - With no GitHub App, the release lock's own git (the `broker` container) has no credential helper for `GH_TOKEN`, so its fetches and pushes of a private repository are refused; the service's git has one (issue #421).
 
 When the install command itself stops before Cleared starts, it says why and that nothing was written: [install.md](install.md#when-the-command-stops) lists its refusals.

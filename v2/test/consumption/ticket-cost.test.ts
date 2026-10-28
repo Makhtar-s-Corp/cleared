@@ -157,6 +157,17 @@ test('the ledger\'s cost of a ticket counts every session it holds for the ticke
   store.close();
 });
 
+test('the ledger\'s cost of a ticket reads the recreation of a session\'s container, so the second process is counted whole (issue #453)', () => {
+  const store = openStore(':memory:');
+  put(store, 'a1', 'author', 'claude-code');
+  append(store, [
+    started('a1', 0, 'r1'), finished('a1', 5, 'r1', { inputTokens: 10 }, 0.3),
+    started('a1', 6, 'r2'), lost('a1', 7), recreated('a1', 8),
+    started('a1', 9, 'r3'), finished('a1', 10, 'r3', { inputTokens: 10 }, 0.4),
+  ]);
+  assert.equal(ticketCost(store.db, { project: PROJECT, ticket: 'LOCAL-7' }).costUsd, 0.7);
+});
+
 test('the ledger\'s cost of a ticket with no session is empty, and another project\'s events are not read', () => {
   const store = openStore(':memory:');
   put(store, 'a1', 'author', 'claude-code');

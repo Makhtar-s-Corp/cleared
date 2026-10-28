@@ -63,6 +63,8 @@ async function crashing(first: readonly FakeStep[], resumes: (readonly FakeStep[
 const run = (t: Crash): Promise<void> => t.engine.start(t.ticket.id, 'u1');
 
 const of = (t: Setup, id: SessionId): SessionEvent[] => t.store.events.after(id);
+// The flow reads the loss from the session's stream, a moment after the adapter journals it.
+const read = () => new Promise((resolve) => setTimeout(resolve, 20));
 const codes = (events: readonly SessionEvent[]) => events.flatMap(({ event }) => (event.type === 'RUN_ERROR' ? [event.code] : []));
 const recreated = (events: readonly SessionEvent[]) => events.flatMap(({ event }) => (event.type === 'CUSTOM' && event.name === 'cleared.container_recreated' ? [event.value] : []));
 const said = (events: readonly SessionEvent[]) => events.flatMap(({ event }) => (event.type === 'TEXT_MESSAGE_CONTENT' ? [event.delta] : []));
@@ -126,7 +128,8 @@ test('a recreation that fails is tried again after a longer wait; one that succe
   await t.engine.settled();
   const id = t.authors[0] as SessionId;
   assert.deepEqual(recreated(of(t, id)).map((r) => [r.attempt, r.waitedMs]), [[2, 2]]);
-  assert.deepEqual(t.order, [`stop:${id}`, `resume:${id}`, `stop:${id}`, `resume:${id}`]);
+  assert.deepEqual(t.order.slice(0, 4), [`stop:${id}`, `resume:${id}`, `stop:${id}`, `resume:${id}`]);
+  assert.equal(t.order.filter((c) => c.startsWith('resume:')).length, 2);
   assert.equal(t.flowEvents.some((e) => e.type === 'ticket_put_back'), false);
 });
 
@@ -165,8 +168,10 @@ test('a session that waits for a person when its container stops keeps its reque
   await until(() => t.inbox.list().length === 1, 'the permission item');
   const id = t.authors[0] as SessionId;
   (t.fakes[0] as FakeAdapter).lose(id, 137);
+  await until(() => t.store.sessions.get(id)?.status === 'stopped', 'the session waiting with no container');
   await t.engine.settled();
   assert.deepEqual(t.order.filter((c) => c.startsWith('resume:')), [], 'nothing is recreated while the person has not answered');
+  assert.deepEqual(t.order, [`stop:${id}`], 'what the dead container left is removed');
   assert.equal(t.inbox.list()[0]?.state, 'waiting', 'the request still waits');
   assert.equal(t.flowEvents.some((e) => e.type === 'ticket_put_back'), false);
   await t.engine.answer(id, 'request-1', { kind: 'allow_once' }, 'u1');
@@ -180,6 +185,7 @@ test('a ticket set aside while its session\'s container is being recreated stays
   const t = await crashing([started, lose], [carriesOn], { config: { recreateBackoffMs: 200 } });
   await run(t);
   await until(() => codes(of(t, t.authors[0] as SessionId)).includes(CONTAINER_LOST), 'the loss');
+  await read();
   await t.engine.setAside(t.ticket.id, 'u1');
   await t.engine.settled();
   const id = t.authors[0] as SessionId;
@@ -193,6 +199,7 @@ test('a message to a session being recreated is refused with a reason, not lost'
   await run(t);
   const id = t.authors[0] as SessionId;
   await until(() => codes(of(t, id)).includes(CONTAINER_LOST), 'the loss');
+  await read();
   await assert.rejects(t.engine.send(id, 'Are you there?', 'u1'), /being recreated/);
   await t.engine.settled();
   assert.deepEqual(recreated(of(t, id)).map((r) => r.attempt), [1]);
