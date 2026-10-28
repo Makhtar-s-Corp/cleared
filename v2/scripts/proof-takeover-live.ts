@@ -14,7 +14,7 @@
 //      map: only the run's own sessions call the model.
 //   2. Ticket A: Take over its author, one line typed to the harness and its
 //      answer, the Shell with git status, npm ci and npm test
-//      (proof-terminal.ts), one line of src/page.ts changed in the Editor and
+//      (proof-terminal.ts), one line of a file the author changed (src/page.ts first) changed in the Editor and
 //      saved, Give back; the notice's turn. Then Take over its reviewer, one
 //      line to the harness, Give back (O19). The ticket is set aside once its
 //      review ended or its release card waits: nothing is approved.
@@ -124,6 +124,9 @@ export function redact(text: string, paths: { readonly root?: string; readonly h
 }
 
 // ---- the run ------------------------------------------------------------------------
+
+// A wait that cannot end any more: said at once, not after its timeout.
+class Ended extends Error {}
 
 type Phase = { readonly name: string; readonly status: 'ok' | 'failed' | 'skipped'; readonly at: string; readonly note: string };
 
@@ -327,7 +330,7 @@ async function main(): Promise<void> {
     for (;;) {
       checkQuota();
       if (tending) await tend().catch((error: unknown) => say(`tend: ${(error as Error).message.split('\n')[0]}`));
-      const value = await check().catch(() => undefined);
+      const value = await check().catch((error: unknown) => { if (error instanceof Ended) throw error; return undefined; });
       if (value) return value;
       if (Date.now() > end) throw new Error(`timed out waiting for ${what}`);
       await sleep(every);
@@ -363,14 +366,22 @@ async function main(): Promise<void> {
     gesture(`created ${made.id} from the tower bar: ${t.title}`);
     return made.id;
   }
+  // The file the Editor changes, per session: one the author changed itself.
+  const editorFile = new Map<string, string>();
   // A live session of the ticket. With `changed`, an author that has changed
-  // that file already, as step 11 waits for: the Editor tab lists the
-  // session's changed files only.
-  const live = (ticket: string, role: 'author' | 'reviewer', changed?: string) => until(`the ${role} of ${ticket} to work${changed ? ` on ${changed}` : ''}`, async () => {
-    const found = (await sessions()).find((s) => s.ticket === ticket && s.role === role && (s.phase === (role === 'author' ? 'working' : 'reviewing')) && !s.takenOver);
+  // a file already, as step 11 waits for src/page.ts: the Editor tab lists the
+  // session's changed files only. Its own handover is not one; src/page.ts is
+  // preferred. An author that ended with none is said at once.
+  const live = (ticket: string, role: 'author' | 'reviewer', changed = false) => until(`the ${role} of ${ticket} to work${changed ? ' on a file' : ''}`, async () => {
+    const all = (await sessions()).filter((s) => s.ticket === ticket);
+    const found = all.find((s) => s.role === role && (s.phase === (role === 'author' ? 'working' : 'reviewing')) && !s.takenOver);
+    if (changed && !found && all.some((s) => s.role === 'reviewer')) throw new Ended(`the author of ${ticket} ended before changing a file the Editor could open`);
     if (!found || !changed) return found;
-    const files = await api<{ files: { path: string }[] }>(`/sessions/${encodeURIComponent(found.id)}/files`);
-    return files.files.some((f) => f.path === changed) ? found : undefined;
+    const paths = (await api<{ files: { path: string }[] }>(`/sessions/${encodeURIComponent(found.id)}/files`)).files.map((f) => f.path).filter((path) => path !== 'HANDOVER.md');
+    const path = paths.includes('src/page.ts') ? 'src/page.ts' : paths[0];
+    if (!path) return undefined;
+    editorFile.set(found.id, path);
+    return found;
   }, stepMs, 1_000);
 
   // Take over, a line to the harness, and, for an author, the Shell and the Editor; then Give back.
@@ -429,7 +440,8 @@ async function main(): Promise<void> {
       const listener = (response: any) => { if (response.request().method() === 'PUT' && /\/files\//.test(response.url())) saves.push(response.status()); };
       page.on('response', listener);
       await page.locator('#tab-editor-button').click();
-      await page.locator('[data-file="src/page.ts"]').click();
+      const file = editorFile.get(session.id) ?? 'src/page.ts';
+      await page.locator(`[data-file="${file}"]`).click();
       await page.locator('[data-act="editor_edit"]').click();
       await page.locator('[data-editor-state]').first().waitFor();
       await page.locator('.cm-content').first().click();
@@ -438,8 +450,8 @@ async function main(): Promise<void> {
       await page.locator('[data-act="editor_save"]').click();
       await page.locator('[data-editor-state="saved"]').first().waitFor({ timeout: 60_000 });
       page.off('response', listener);
-      gesture('changed one line of src/page.ts in the Editor tab and saved it');
-      notes.push(`editor save: ${saves.join(', ') || 'no PUT seen'}`);
+      gesture(`changed one line of ${file} in the Editor tab and saved it`);
+      notes.push(`editor save of ${file}: ${saves.join(', ') || 'no PUT seen'}`);
       await capture('editor-saved');
     }
     if (!options.giveBack) return notes.join('; ');
@@ -453,8 +465,9 @@ async function main(): Promise<void> {
     const after = eventsOf(session.id).filter((e) => e.seq > mark);
     // The editor's save journals its edit when it is saved; Give back, the terminal's.
     const edits = eventsOf(session.id).filter((e) => e.seq > taken && e.event.type === 'CUSTOM' && e.event.name === 'cleared.human_edit').length;
-    const notice = after.some((e) => e.event.type === 'TEXT_MESSAGE_CONTENT' && /src\/page\.ts/.test(e.event.delta ?? ''));
-    notes.push(`given back: the notice's turn began; ${edits} human edit(s) journaled; the notice ${notice ? 'names' : 'does not name'} src/page.ts`);
+    const file = editorFile.get(session.id);
+    const notice = file !== undefined && after.some((e) => e.event.type === 'TEXT_MESSAGE_CONTENT' && (e.event.delta ?? '').includes(file));
+    notes.push(`given back: the notice's turn began; ${edits} human edit(s) journaled; ${file ? `the notice ${notice ? 'names' : 'does not name'} ${file}` : 'no file edited'}`);
     return notes.join('; ');
   }
 
@@ -473,7 +486,7 @@ async function main(): Promise<void> {
   // ---- 1. ticket A: the author taken over, the Shell, the Editor, Give back ----
   const ranA = signedIn && await phase('A-author', async () => {
     const ticket = await createTicket(0);
-    authorA = await live(ticket, 'author', 'src/page.ts');
+    authorA = await live(ticket, 'author', true);
     const note = await takeOver(authorA, { shell: true, editor: true, giveBack: true });
     return `${authorA.id.slice(0, 8)} of ${ticket}: ${note}`;
   });
@@ -551,7 +564,7 @@ async function main(): Promise<void> {
         await api(`/tickets/${encodeURIComponent(first.ticket)}/move`, 'POST', { status: 'Todo' });
         gesture(`moved ${first.ticket} to Todo to start it again`);
         await until('a new author', async () => (await sessions()).find((s) => s.ticket === first.ticket && s.role === 'author' && s.id !== first.id));
-        session = await live(first.ticket, 'author', 'src/page.ts');
+        session = await live(first.ticket, 'author', true);
       }
       const note = await takeOver(session, { shell: true, editor: true, giveBack: true });
       return `${session.id === first.id ? 'the same session' : `a new session ${session.id.slice(0, 8)}`}: ${note}`;
