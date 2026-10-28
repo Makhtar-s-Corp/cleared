@@ -190,5 +190,9 @@
   "bar_model_failed": "Le modèle n'a pas pu être changé. Réessayez dans un instant.",
   "bar_more": "Plus d'actions",
   "bar_suggest": "Partir de",
-  "bar_suggest_label": "Partir d'un ticket prêt à l'emploi"
+  "bar_suggest_label": "Partir d'un ticket prêt à l'emploi",
+  "bar_agent": "Agent\u00a0: {harness}",
+  "bar_agent_auto": "Auto",
+  "bar_agent_claude": "Claude Code",
+  "bar_agent_note": "Le profil d'agent en cours, version {version}\u00a0: les prochains tickets démarrent dessus. Il se change sur la carte des services."
 }

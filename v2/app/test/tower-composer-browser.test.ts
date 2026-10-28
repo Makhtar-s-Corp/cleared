@@ -80,6 +80,17 @@ test('Ctrl+Enter from the description starts the ticket; a suggestion fills the 
   });
 });
 
+test('the agent profile in force is read and opens the service map', { skip }, async () => {
+  await withApp('en', { width: 1440, height: 900 }, async (page) => {
+    const agent = page.locator('#ask .ask-agent');
+    await agent.waitFor();
+    assert.equal((await agent.innerText()).trim(), 'Agent: Auto', 'the fixtures\' profile in force asks for the harness pick');
+    await agent.click();
+    await page.waitForURL(/\/services$/);
+    await page.locator('[data-profiles]').waitFor();
+  });
+});
+
 test('the model menu sets Consumption\'s lever for the next authors, and says so', { skip }, async () => {
   await withApp('en', { width: 1440, height: 900 }, async (page) => {
     await page.locator('#ask-model').waitFor();
@@ -98,7 +109,7 @@ test('the model menu sets Consumption\'s lever for the next authors, and says so
 test('on a 390-pixel phone, in French: every control of the composer is a 44 px target, nothing scrolls sideways', { skip }, async () => {
   await withApp('fr', { width: 390, height: 844 }, async (page) => {
     await page.locator('#ask-model').waitFor();
-    const small = await page.evaluate(() => [...document.querySelectorAll('#ask .ask-actions button, #ask .ask-actions select')]
+    const small = await page.evaluate(() => [...document.querySelectorAll('#ask .ask-actions button, #ask .ask-actions select, #ask .ask-actions a')]
       .filter((el: any) => el.offsetParent !== null)
       .map((el: any) => ({ name: el.getAttribute('aria-label') ?? el.textContent.trim(), height: el.getBoundingClientRect().height }))
       .filter((target: any) => target.height < 44));

@@ -39,6 +39,10 @@
 .ask-pill > .ask-icon { position: absolute; left: 10px; z-index: 1; }
 .ask-pill .chip-button { min-height: 30px; padding: 0 12px 0 30px; border-radius: 999px; font-size: var(--text-md); }
 .ask-pill .chip-button[aria-expanded="true"] { background: var(--selected); box-shadow: 0 0 0 1px var(--outline); }
+/* the agent profile in force: a pill that opens the service map, where the profile is changed */
+.ask-agent { gap: 6px; min-height: 30px; padding: 0 12px 0 30px; border-radius: 999px; background: var(--surface); box-shadow: var(--e-control); color: var(--text); font-size: var(--text-md); font-weight: var(--weight-strong); white-space: nowrap; }
+.ask-agent:hover { background: var(--surface-muted); text-decoration: none; }
+.ask-agent:active { background: var(--tab-fill); }
 /* the model: a native menu in a pill, its caret drawn over the right padding */
 .ask-model select { appearance: none; -webkit-appearance: none; min-height: 30px; padding: 0 28px 0 30px; border: 0; border-radius: 999px; background: var(--surface); box-shadow: var(--e-control); color: var(--text); font-size: var(--text-md); font-weight: var(--weight-strong); cursor: pointer; }
 .ask-model select:hover { background: var(--surface-muted); }
@@ -231,7 +235,7 @@ a.row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
   .tower-screen { padding: var(--space-3); }
   .hello h1 { font-size: var(--text-xl); }
   .ask-keys, .suggest-hint { display: none; }
-  .ask-model select, .ask-pill .chip-button, .ask-go .chip-button.primary { min-height: 44px; }
+  .ask-model select, .ask-pill .chip-button, .ask-go .chip-button.primary, .ask-agent { min-height: 44px; }
   .ask-variants .svc-toggle, .ask-services .svc-toggle { min-width: 44px; min-height: 44px; }
   .ask-more-menu .chip-button { min-height: 44px; }
   .ask input { height: 44px; font-size: var(--text-input); }
@@ -248,6 +252,6 @@ a.row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 }
 /* Touch: the heads' links and the lead's name are 44 px tall, the heads kept tight (lane 38's art director). */
 @media (pointer: coarse) {
-  .ask-model select, .ask-pill .chip-button, .ask-go .chip-button.primary, .ask-variants .svc-toggle, .ask-services .svc-toggle, .suggest { min-height: 44px; }
+  .ask-model select, .ask-pill .chip-button, .ask-go .chip-button.primary, .ask-agent, .ask-variants .svc-toggle, .ask-services .svc-toggle, .suggest { min-height: 44px; }
   .tower .more, #lead-title a { display: inline-flex; align-items: center; min-height: 44px; margin-block: calc(-1 * var(--space-3)); }
 }

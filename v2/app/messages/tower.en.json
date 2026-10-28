@@ -190,5 +190,9 @@
   "bar_model_failed": "The model could not be changed. Try again in a moment.",
   "bar_more": "More actions",
   "bar_suggest": "Start from",
-  "bar_suggest_label": "Start from a ready-made ticket"
+  "bar_suggest_label": "Start from a ready-made ticket",
+  "bar_agent": "Agent: {harness}",
+  "bar_agent_auto": "Auto",
+  "bar_agent_claude": "Claude Code",
+  "bar_agent_note": "The agent profile in force, version {version}: the next tickets start on it. It is changed on the service map."
 }

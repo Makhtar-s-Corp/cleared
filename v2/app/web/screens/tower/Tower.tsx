@@ -13,9 +13,10 @@
 // the one thing to do about it. Requirement C6: "Batch" in the bar opens a
 // form of one ticket per line, and the batches under way are a side card.
 // P214: "Template" in the bar shows the ready-made tickets (templates.ts).
-import { CaretDown, ChatCircle, Check, Cpu, DotsThree, Files, HandGrabbing, ListChecks, MagnifyingGlass, Package, Play, Rows, Stack, Target, TerminalWindow, UsersThree, X } from '@phosphor-icons/react';
+import { CaretDown, ChatCircle, Check, Cpu, DotsThree, Files, HandGrabbing, ListChecks, MagnifyingGlass, Package, Play, Robot, Rows, Stack, Target, TerminalWindow, UsersThree, X } from '@phosphor-icons/react';
 import { useCallback, useEffect, useId, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
 import type { Consumption, Recipe } from '../../../../src/api/types.ts';
+import type { ProfilesView } from '../../../../src/profiles/types.ts';
 import { TICKET_TEMPLATES, type TicketTemplate } from '../../../../src/tickets/templates.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
@@ -45,19 +46,22 @@ import './tower.css';
 // The composer (the owner's request of 2026-10-28, lane j6-ui-pro): the title, the description under it on several
 // lines, then a row of real controls, each one a thing the service does: the services a new ticket names (a chip per
 // service of a workspace of several), or on a workspace of one service the number of authors (one, or 2 to 4
-// variants compared in the inbox, issue #271); the model the next authors start on (Consumption's lever, read and
-// set through /api/consumption); "Template" for the ready-made tickets (P214), a row that stays while one is
+// variants compared in the inbox, issue #271); the agent profile in force (issue #452: Claude Code, or Auto for the
+// harness pick), read here and changed on the Services screen, which the pill opens; the model the next authors start
+// on (Consumption's lever, read and set through /api/consumption), unless the profile names its own; "Template" for the ready-made tickets (P214), a row that stays while one is
 // picked, the picked one saying in the title's placeholder what to write; "Batch" for several tickets at once
 // (requirement C6). The other gestures (a goal or a question for the lead, a question to the code, a recipe once
 // the service has some) are in a menu behind one button. Then Start, with Ctrl+Enter (Cmd+Enter on a Mac) from
 // either field. While the bar is empty, the ready-made tickets are offered as suggestions under it.
 export type ModelLever = { readonly current: string; readonly choice: string | null; readonly options: readonly string[] };
+// The agent profile in force (issue #452): its harness and its version. Read here, changed on the Services screen.
+export type AgentInForce = { readonly harness: 'claude-code' | 'auto'; readonly version: number };
 
-export function Bar({ t, title, body, services = [], picked = [], variants = 1, recipes = [], recipeOpen = false, batchOpen = false, template = null, templatesOpen = false, busy = false, model = null, onTitle, onBody, onPick, onVariants, onLead, onAsk, onRecipe, onBatch, onTemplates, onTemplate, onModel, onSubmit }: {
+export function Bar({ t, title, body, services = [], picked = [], variants = 1, recipes = [], recipeOpen = false, batchOpen = false, template = null, templatesOpen = false, busy = false, model = null, agent = null, onTitle, onBody, onPick, onVariants, onLead, onAsk, onRecipe, onBatch, onTemplates, onTemplate, onModel, onSubmit }: {
   readonly t: Translate; readonly title: string; readonly body: string;
   readonly services?: readonly string[]; readonly picked?: readonly string[]; readonly variants?: number; readonly onVariants?: (n: number) => void;
   readonly recipes?: readonly Recipe[]; readonly recipeOpen?: boolean; readonly batchOpen?: boolean; readonly busy?: boolean;
-  readonly template?: TicketTemplate | null; readonly templatesOpen?: boolean; readonly model?: ModelLever | null;
+  readonly template?: TicketTemplate | null; readonly templatesOpen?: boolean; readonly model?: ModelLever | null; readonly agent?: AgentInForce | null;
   readonly onTitle?: (value: string) => void; readonly onBody?: (value: string) => void; readonly onPick?: (service: string) => void;
   readonly onLead?: (kind: 'goal' | 'lead') => void; readonly onAsk?: () => void; readonly onRecipe?: () => void; readonly onBatch?: () => void;
   readonly onTemplates?: () => void; readonly onTemplate?: (template: TicketTemplate) => void; readonly onModel?: (choice: string | null) => void;
@@ -118,6 +122,12 @@ export function Bar({ t, title, body, services = [], picked = [], variants = 1, 
               ))}
             </div>
           )}
+          {agent ? (
+            <a className="ask-pill ask-agent" href="/services" title={t('bar_agent_note', { version: agent.version })} data-agent={agent.harness}>
+              <Robot size={14} className="ask-icon" aria-hidden="true" />
+              <span>{t('bar_agent', { harness: t(agent.harness === 'auto' ? 'bar_agent_auto' : 'bar_agent_claude') })}</span>
+            </a>
+          ) : null}
           {model ? (
             <span className="ask-pill ask-model" title={t('bar_model_note')}>
               <Cpu size={14} className="ask-icon" aria-hidden="true" />
@@ -418,8 +428,14 @@ export function TowerBody({ model, t, language = 'en', leadDraft = '', onLeadDra
 // The failure that is no error: the setup is not finished (issue #431).
 const PENDING = 'setup_pending';
 
-// The lever as last read, kept while the page lives, so a switch back to the tower asks nothing again.
+// The lever and the profile as last read, kept while the page lives, so a switch back to the tower asks nothing again.
 let modelLever: ModelLever | null = null;
+type ProfileInForce = { readonly agent: AgentInForce; readonly authorModel: string | null };
+let profileInForce: ProfileInForce | null = null;
+function inForce(data: ProfilesView): ProfileInForce | null {
+  const current = data.profile.versions.find((v) => v.version === data.profile.current);
+  return current ? { agent: { harness: current.body.harness, version: current.version }, authorModel: current.body.authorModel } : null;
+}
 
 export default function Tower() {
   const context = useScreen();
@@ -447,12 +463,14 @@ export default function Tower() {
   const [templatesOpen, setTemplatesOpen] = useState(false);
   const thread = useRef<LeadThread>({ after: 0, line: null });
   // The model the next authors start on: Consumption's lever, read once for the page's life (the shell's gauge reads
-  // the same resource each minute), set from the composer as from Consumption.
+  // the same resource each minute), set from the composer as from Consumption. The agent profile in force (issue #452)
+  // is read once too; a profile that names its own author model makes the lever moot, so the model is not offered then.
   const [lever, setLever] = useState<ModelLever | null>(modelLever);
+  const [profile, setProfile] = useState<ProfileInForce | null>(profileInForce);
   useEffect(() => {
-    if (modelLever) return;
     let live = true;
-    context.api<Consumption>('/consumption').then((data) => { modelLever = data.levers.model; if (live) setLever(modelLever); }).catch(() => undefined);
+    if (!modelLever) context.api<Consumption>('/consumption').then((data) => { modelLever = data.levers.model; if (live) setLever(modelLever); }).catch(() => undefined);
+    if (!profileInForce) context.api<ProfilesView>('/profiles').then((data) => { profileInForce = inForce(data); if (live) setProfile(profileInForce); }).catch(() => undefined);
     return () => { live = false; };
   }, [context]);
   const pickModel = async (choice: string | null) => {
@@ -602,7 +620,7 @@ export default function Tower() {
         onPick={(name) => setPicked((current) => (current.includes(name) ? current.filter((n) => n !== name) : [...current, name]))}
         onLead={(kind) => go(leadHref(kind, title, body))} onAsk={() => void ask()} onRecipe={() => setRecipeOpen((open) => !open)}
         onBatch={() => setBatchOpen((open) => !open)} template={template} templatesOpen={templatesOpen} onTemplates={toggleTemplates} onTemplate={choose}
-        model={lever} onModel={(choice) => void pickModel(choice)} />
+        model={profile?.authorModel ? null : lever} agent={profile?.agent ?? null} onModel={(choice) => void pickModel(choice)} />
       <p className="ask-note" id="ask-note" role="status" data-kind={note?.kind}>{note?.text ?? ''}</p>
       {recipeOpen && model && model.recipes.length > 0 ? (
         <RecipeForm t={t} recipes={model.recipes} picked={recipe} values={values} note={recipeNote.text} link={recipeNote.link} busy={running}

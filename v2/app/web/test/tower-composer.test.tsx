@@ -1,10 +1,12 @@
 // The tower's composer (the owner's request of 2026-10-28, lane j6-ui-pro):
 // the title, the description on several lines, a row of real controls, each
 // one a thing the service does (the authors or the services, the next
-// authors' model from Consumption's lever, Template, Batch), the other
-// gestures behind one button, Start with its keys; the ready-made tickets as
-// suggestions while the bar is empty. Nothing the service cannot do is drawn:
-// no harness, no agent profile, no attachment. French and English.
+// authors' model from Consumption's lever, the agent profile in force,
+// Template, Batch), the other gestures behind one button, Start with its keys;
+// the ready-made tickets as suggestions while the bar is empty. Nothing the
+// service cannot do is drawn: no harness pick per ticket, no attachment; the
+// agent profile is shown and opens the service map, where it is changed.
+// French and English.
 import { test } from 'vitest';
 import assert from 'node:assert/strict';
 import { TICKET_TEMPLATES } from '../../../src/tickets/templates.ts';
@@ -30,7 +32,7 @@ test('the composer: the title, the description on three lines, the controls, the
   assert.match(markup, /<span class="keys ask-keys" aria-hidden="true"><kbd>Ctrl<\/kbd><kbd>Enter<\/kbd><\/span>/);
 });
 
-test('only what the service does: no harness, no agent profile, no attachment; the model only once the lever is read', () => {
+test('only what the service does: no harness pick per ticket, no attachment, no profile until one is read; the model only once the lever is read', () => {
   const markup = html(<Bar t={en} title="" body="" model={LEVER} recipes={[]} />);
   assert.doesNotMatch(markup, /harness|profile|attach|type="file"/i);
   assert.doesNotMatch(html(<Bar t={en} title="" body="" />), /id="ask-model"/, 'no lever read: no model control');
@@ -61,4 +63,13 @@ test('while the bar is empty, the ready-made tickets are suggestions: each its k
   assert.doesNotMatch(html(<Bar t={en} title="" body="Words" />), /ask-suggest/);
   assert.doesNotMatch(html(<Bar t={en} title="" body="" template="bug" />), /ask-suggest/);
   assert.doesNotMatch(html(<Bar t={en} title="" body="" templatesOpen />), /ask-suggest/);
+});
+
+test('the agent profile in force: Claude Code or Auto, a pill that opens the service map, where the profile is changed', () => {
+  const auto = html(<Bar t={en} title="" body="" agent={{ harness: 'auto', version: 2 }} />);
+  assert.match(auto, /<a class="ask-pill ask-agent" href="\/services" title="The agent profile in force, version 2: the next tickets start on it\. It is changed on the service map\." data-agent="auto">/);
+  assert.ok(visibleText(auto).includes('Agent: Auto'));
+  assert.ok(visibleText(html(<Bar t={fr} title="" body="" agent={{ harness: 'claude-code', version: 1 }} />)).includes('Agent\u00a0: Claude Code'));
+  const at = order(html(<Bar t={en} title="" body="" agent={{ harness: 'auto', version: 2 }} model={LEVER} />), 'data-variants="1"', 'class="ask-pill ask-agent"', 'id="ask-model"', 'data-bar="template"');
+  assert.deepEqual([...at].sort((a, b) => a - b), at, 'the authors, the agent, the model, then Template');
 });
