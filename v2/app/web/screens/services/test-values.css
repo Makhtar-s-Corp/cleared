@@ -26,7 +26,7 @@
 .test-values-field label { font-size: var(--text-sm); font-weight: var(--weight-strong); color: var(--text-secondary); margin-bottom: var(--space-1); }
 .test-values-field input, .test-values-field select {
   height: 44px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); color: var(--text);
-  box-shadow: var(--e-control); font-size: var(--text-input);
+  box-shadow: var(--e-field); font-size: var(--text-input);
 }
 .test-values-field input:focus, .test-values-field select:focus { outline: 2px solid transparent; box-shadow: 0 0 0 1px var(--theme-accent), 0 0 0 3px var(--halo-progress); }
 .test-values-field select { margin-bottom: var(--space-3); }

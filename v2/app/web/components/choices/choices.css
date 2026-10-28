@@ -3,7 +3,7 @@
    answer (DESIGN.md, 4), the recommendation over the awaiting highlight,
    amber only while the question waits. Each screen sets the size of its
    question text; the rest is here. */
-.choices { --choice-highlight: var(--awaiting-pill); --choice-field-ring: var(--e-control); display: grid; gap: 12px; min-width: 0; white-space: normal; font-size: var(--text-md); }
+.choices { --choice-highlight: var(--awaiting-pill); --choice-field-ring: var(--e-field); display: grid; gap: 12px; min-width: 0; white-space: normal; font-size: var(--text-md); }
 .choice-q { display: grid; gap: 12px; min-width: 0; margin: 0; padding: 0; border: 0; }
 .choice-text { display: grid; gap: var(--space-2); width: 100%; margin-bottom: 12px; padding: 0; font-weight: var(--weight-strong); line-height: 1.4; overflow-wrap: anywhere; text-wrap: pretty; }
 .choice-question { white-space: pre-wrap; }

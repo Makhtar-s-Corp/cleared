@@ -20,7 +20,8 @@ Every colour is a token on `:root` in `styles/app.css`. The greys are mixed from
 | Hover | `--tab-fill` | 5.5 % (`#F2F2F3`) | a row or a button under the pointer |
 | Selected | `--selected` | 8 % (`#EDEDEE`) | the current place, the pressed state, a picked row |
 | Line | `--line` (`--hairline`) | 11 % (`#E6E6E7`) | every border and divider |
-| Field line | `--input` | 22 % (`#CCCDCE`) | a field's and a secondary button's border |
+| Field line | `--input` | 50 % (`#8D8E90`) | a field's border, 3:1 against its ground (WCAG 1.4.11) |
+| Button line | `--outline` | 20 % (`#D1D2D3`) | a secondary button's border |
 | Secondary text | `--text-secondary` | 80 % | body copy under a title |
 | Muted text | `--text-muted` | 70 % | meta, counts, labels |
 | Faint text | `--text-faint` | 66 % | disabled text; 4.6:1 on the darkest grey |

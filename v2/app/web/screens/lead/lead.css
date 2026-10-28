@@ -68,7 +68,7 @@
 .lead-screen .thread-empty { padding: var(--space-3) var(--space-3); border-radius: var(--radius-panel); border: 1px dashed var(--outline); color: var(--text-faint); font-size: var(--text-md); }
 
 .lead-screen .reply { display: flex; flex-wrap: wrap; align-items: flex-end; gap: var(--space-2); padding: 12px var(--space-3); border-top: 1px solid var(--line); border-radius: 0 0 var(--radius-panel) var(--radius-panel); background: var(--surface); }
-.lead-screen .reply textarea { flex: 1; min-width: 0; min-height: 36px; max-height: 160px; padding: var(--space-2) 12px; border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); line-height: 1.45; resize: none; field-sizing: content; outline: 2px solid transparent; }
+.lead-screen .reply textarea { flex: 1; min-width: 0; min-height: 36px; max-height: 160px; padding: var(--space-2) 12px; border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); line-height: 1.45; resize: none; field-sizing: content; outline: 2px solid transparent; }
 .lead-screen .reply textarea::placeholder { color: var(--placeholder); }
 .lead-screen .reply textarea:focus { box-shadow: 0 0 0 1px var(--theme-accent), 0 0 0 3px var(--halo-progress); }
 .lead-screen .goal-toggle { min-height: 36px; padding: 0 12px; border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); color: var(--text); font-size: var(--text-md); font-weight: var(--weight-strong); cursor: pointer; }

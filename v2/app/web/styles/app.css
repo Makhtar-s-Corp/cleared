@@ -1,10 +1,10 @@
-/*! Hallmark · shape: app screen · genre: modern-minimal · theme: custom (Workbench, from the owner's direction of issue #461) · redesign: full · deal: manual
+/* Hallmark · shape: app screen · genre: modern-minimal · theme: custom (Workbench, from the owner's direction of issue #461) · redesign: full · deal: manual
  * paper: #FFFFFF white, the sidebar a step greyer · accent: #4C5BD4 indigo, alone · display: none, headings Geist 600 at 20 px at most · body: Geist 13 px, Geist Mono for ids
  * nav: the sidebar kept, its current place a grey fill · signature: the session groups, read as a dense list · states: loading, empty, error, full
  * axes: light/grotesk-sans/neutral · posture: quiet · contrast: pass · v2.0.0 */
-/*! Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V4 · weakest: E, a calm tool has few surprises by design; the session groups and the figures carry the screens */
-/*! Hallmark · waive 64 · Geist Mono for ids, branches, hashes and commands only, the project's rule (matrix B3.8) */
-/*! Hallmark · waive 72 · the sidebar's session titles, cut with an ellipsis inside its padding · the whole title is the link's title and the sessions screen's row */
+/* Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V4 · weakest: E, a calm tool has few surprises by design; the session groups and the figures carry the screens */
+/* Hallmark · waive 64 · Geist Mono is set only on ids, branches, hashes, paths and commands · the project's rule (matrix B3.8): code reads as code */
+/* Hallmark · waive 72 · the sidebar's session titles, cut with an ellipsis inside its padding · the whole title is the link's title and the sessions screen's row */
 /* Cleared v2 app (docs/v2/ui-pro/DESIGN.md, lane j6-ui-pro, issue #461): the tokens, the shell (sidebar, top bar,
    palette, shortcut sheet, menus, empty states, skeletons) and the parts every screen shares. The screens' own sheets
    hold the rest. One light theme, never the system's scheme: a base (white), a contrast (a neutral near-black) and one
@@ -28,7 +28,7 @@
   /* the one theme: white, a neutral near-black, indigo */
   --theme-base: #FFFFFF; --theme-contrast: #1A1C21; --theme-accent: #4C5BD4;
   --mix-canvas: 0%; --mix-sidebar: 3.5%; --mix-surface: 0%; --mix-popover: 0%; --mix-sunken: 4%; --mix-surface-muted: 2%;
-  --mix-tab-fill: 5.5%; --mix-selected: 8%; --mix-hairline: 11%; --mix-outline: 20%; --mix-input: 22%; --mix-dashed: 30%;
+  --mix-tab-fill: 5.5%; --mix-selected: 8%; --mix-hairline: 11%; --mix-outline: 20%; --mix-input: 50%; --mix-dashed: 30%;
   --mix-placeholder: 64%; --mix-faint: 66%; --mix-muted: 70%; --mix-secondary: 80%;
   /* the discreet states, each a small mark or a word, never a block: amber for what waits, green, red, teal, the accent's tint */
   --awaiting: #E8A33D; --awaiting-text: #8A4500; --awaiting-surface: #FDF6E8; --awaiting-pill: #FAEACB; --count-ink: #1A1C21;
@@ -80,7 +80,8 @@
   --link: var(--theme-accent); --stage-progress: var(--theme-accent);
   --select: var(--halo-progress);
   --e-outline: 0 0 0 1px var(--outline);
-  --e-control: 0 0 0 var(--frame) var(--input);
+  --e-control: 0 0 0 var(--frame) var(--outline);   /* a secondary button's line */
+  --e-field: 0 0 0 var(--frame) var(--input);   /* a field's line, 3:1 against its ground (WCAG 1.4.11) */
   --e-header: 0 var(--frame) 0 var(--line);
   /* shadcn/ui's variables, for the components under components/ui */
   --background: var(--canvas); --foreground: var(--text);
@@ -191,7 +192,7 @@ kbd { display: inline-flex; align-items: center; justify-content: center; min-wi
 .side-group-title { display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; align-items: center; column-gap: var(--space-2); min-height: 28px; margin: 0; padding: 0 var(--space-2); color: var(--text-secondary); font-size: var(--text-sm); font-weight: var(--weight-strong); }
 .side-group-title .state-dot { justify-self: center; }
 .side-group-count { color: var(--text-muted); font-weight: var(--weight-regular); }
-.side-session { display: flex; align-items: center; gap: var(--space-2); min-height: 28px; padding: 0 var(--space-2) 0 calc(var(--space-2) + 16px + var(--space-2)); border-radius: var(--radius); color: var(--text-secondary); font-size: var(--text-md); }
+.side-session { display: flex; align-items: center; gap: var(--space-2); min-height: 28px; padding: 0 var(--space-2) 0 var(--space-5); border-radius: var(--radius); color: var(--text-secondary); font-size: var(--text-md); }
 .side-session:hover { background: var(--tab-fill); color: var(--text); text-decoration: none; }
 .side-session:active { background: var(--selected); }
 .side-session[aria-current="page"] { background: var(--selected); color: var(--text); font-weight: var(--weight-strong); }
@@ -341,7 +342,7 @@ a.crumb:hover { color: var(--text); }
 .access-fresh { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-3); border-radius: var(--radius-panel); background: var(--awaiting-surface); box-shadow: inset 0 0 0 1px var(--awaiting-pill); }
 .access-fresh h3, .access-form label { color: var(--text); font-size: var(--text-md); font-weight: var(--weight-heavy); }
 .access-value-row { display: flex; gap: var(--space-2); }
-.access-value-row input { flex: 1; min-height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); color: var(--text); font-size: var(--text-md); }
+.access-value-row input { flex: 1; min-height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); color: var(--text); font-size: var(--text-md); }
 #access-value { font-family: var(--mono); font-size: var(--text-sm); }
 .access-command { margin: 0; padding: var(--space-2) var(--space-3); border-radius: var(--radius); background: var(--sunken); box-shadow: inset 0 0 0 1px var(--line); color: var(--text); overflow-x: auto; font-family: var(--mono); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
 .access .sheet-body li.access-row { display: grid; grid-template-columns: 1fr auto; column-gap: var(--space-3); padding: var(--space-2) 0; }
@@ -431,7 +432,7 @@ a.crumb:hover { color: var(--text); }
 .login-card { display: flex; flex-direction: column; padding: var(--space-4); border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--e-card); }
 .login-card h1 { font-size: var(--text-xl); font-weight: var(--weight-heavy); margin-bottom: var(--space-3); }
 .login-card label { font-size: var(--text-md); font-weight: var(--weight-strong); color: var(--text); margin-bottom: var(--space-1); }
-.login-card input { height: 36px; margin-bottom: var(--space-3); padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); font-size: var(--text-md); }
+.login-card input { height: 36px; margin-bottom: var(--space-3); padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); font-size: var(--text-md); }
 .login-card input:focus { outline: 2px solid transparent; box-shadow: 0 0 0 1px var(--theme-accent), 0 0 0 3px var(--halo-progress); }
 .login-card .primary { min-height: 36px; margin-top: var(--space-1); border: 0; border-radius: var(--radius); background: var(--theme-accent); color: var(--on-ink); font-weight: var(--weight-strong); cursor: pointer; }
 .login-card .primary:hover { background: var(--accent-hover); }

@@ -7,6 +7,7 @@
 import { ArrowLeft } from '@phosphor-icons/react';
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import type { Ask, AskAnswer } from '../../../../src/api/types.ts';
+import { Facts } from '@/components/facts/Facts.tsx';
 import { Button } from '@/components/ui/button.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
 import { useScreen } from '@/lib/context.tsx';
@@ -60,7 +61,7 @@ export function AskScreen({ ask, t, language, draft = '', note = '', busy = fals
               {kind === 'answered' ? <div className="answer"><span className="who">{t('ask_reader')}</span><Answer turn={turn} t={t} /></div>
                 : kind === 'waiting' ? <p className="answer waiting" aria-live="polite">{t('ask_waiting_answer')}</p>
                 : <p className="answer lost">{t('ask_no_answer')}</p>}
-              <p className="turn-meta"><time dateTime={turn.at}>{clock(turn.at)}</time>{usage ? <><span className="sep" aria-hidden="true">·</span><span>{usage}</span></> : null}</p>
+              <p className="turn-meta"><time dateTime={turn.at}>{clock(turn.at)}</time>{usage ? <><span className="fact-sep"><span className="sr-only">, </span></span><Facts text={usage} /></> : null}</p>
             </li>
           );
         })}

@@ -8,7 +8,7 @@
 .services { max-width: 1200px; margin: 0 auto; padding: var(--space-5) var(--space-5) var(--space-6); }
 
 .services-head { display: flex; align-items: flex-end; justify-content: space-between; gap: var(--space-3); margin-bottom: var(--space-4); }
-.services-eyebrow { margin: 0 0 var(--space-2); color: var(--text); font-size: var(--text-sm); font-weight: var(--weight-strong); }
+.services-eyebrow { margin: 2px 0 0; color: var(--text-muted); font-size: var(--text-sm); }
 .services-head h1 { margin: 0; font-size: var(--text-display); font-weight: var(--weight-heavy); line-height: 1.3; text-wrap: balance; }
 @media (max-width: 767px) { .services-head h1 { font-size: var(--text-xl); } }
 .services-sub { margin: var(--space-1) 0 0; color: var(--text-muted); font-size: var(--text-md); text-wrap: pretty; }

@@ -14,7 +14,7 @@
 .ws-meta { flex-basis: 100%; color: var(--text-muted); font-size: var(--text-sm); overflow-wrap: anywhere; }
 .ws-filter { display: flex; flex-direction: column; max-width: 420px; margin-bottom: var(--space-2); }
 .ws-filter label { font-size: var(--text-sm); font-weight: var(--weight-strong); color: var(--text-secondary); margin-bottom: var(--space-1); }
-.ws-filter input { height: 36px; padding: 0 var(--space-2); border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); font-size: var(--text-input); }
+.ws-filter input { height: 36px; padding: 0 var(--space-2); border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); font-size: var(--text-input); }
 .ws-filter input:focus { outline: 2px solid transparent; box-shadow: 0 0 0 1px var(--theme-accent), 0 0 0 3px var(--halo-progress); }
 .ws-pick .primary { margin-top: var(--space-1); }
 

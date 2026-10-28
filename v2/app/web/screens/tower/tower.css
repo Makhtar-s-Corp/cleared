@@ -7,7 +7,7 @@
 
 /* the bar: a ticket, a goal, a question for the lead or the code, a recipe. A field in a panel with a 1px line, its
    actions quiet buttons beside it, New ticket the one indigo action. */
-.ask { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--e-bar); }
+.ask { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); padding: var(--space-2) var(--space-2) var(--space-2) var(--space-3); border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--e-field); }
 .ask:focus-within { box-shadow: 0 0 0 1px var(--theme-accent), 0 0 0 3px var(--halo-progress); }
 .ask input { flex: 1 1 280px; min-width: 0; height: 36px; border: 0; background: transparent; font-size: var(--text-lg); text-overflow: ellipsis; outline: 2px solid transparent; }
 .ask input::placeholder { color: var(--placeholder); font-weight: var(--weight-regular); }
@@ -108,7 +108,7 @@ a.row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 :lang(fr) .lead-line q { quotes: "«\00A0" "\00A0»"; }
 .lead-line q { display: block; }
 .lead-ask { margin-top: var(--space-2); }
-.lead-ask input { width: 100%; height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); font-size: var(--text-md); }
+.lead-ask input { width: 100%; height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); font-size: var(--text-md); }
 .lead-ask input::placeholder { color: var(--placeholder); }
 .plans { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 .plan-row { display: flex; flex-direction: column; color: var(--text); font-size: var(--text-md); font-weight: var(--weight-strong); }
@@ -149,7 +149,7 @@ a.row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .recipe-param { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; font-size: var(--text-md); }
 .param-name { display: flex; align-items: baseline; gap: var(--space-2); color: var(--text); font-weight: var(--weight-strong); }
 .param-required, .param-description { color: var(--text-secondary); font-size: var(--text-sm); font-weight: var(--weight-regular); }
-.recipe-param input { min-height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); }
+.recipe-param input { min-height: 32px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); }
 .recipe-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); margin-top: var(--space-3); }
 .recipe-note { margin: 0; min-width: 0; color: var(--text-secondary); font-size: var(--text-md); }
 /* A link in a line of text is underlined (WCAG 1.4.1). */
@@ -157,7 +157,7 @@ a.row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .recipe-bar .chip-button { flex: none; }
 
 /* a batch (requirement C6): one ticket per line, then a card per batch under way */
-.batch-form textarea { width: 100%; margin-top: var(--space-2); padding: var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); font-size: var(--text-md); }
+.batch-form textarea { width: 100%; margin-top: var(--space-2); padding: var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); font-size: var(--text-md); }
 .batches { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-3); }
 .batch-head { display: flex; align-items: baseline; gap: var(--space-2); margin: 0; font-size: var(--text-md); }
 .batch-line { color: var(--text); }

@@ -168,10 +168,10 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .btn[aria-disabled="true"]:hover { background: var(--surface); }
 .panel-foot { padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); background: var(--sunken); flex: none; }
 .composer { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
-.composer input { flex: 1 1 100%; min-width: 0; height: 44px; padding: 0 12px; border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); }
+.composer input { flex: 1 1 100%; min-width: 0; height: 44px; padding: 0 12px; border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); }
 #send { margin-left: auto; }
 .composer input::placeholder { color: var(--placeholder); }   /* 4.5:1 at least (lane 36's audit) */
-.composer input:focus { outline: 2px solid transparent; box-shadow: var(--e-control), 0 0 0 3px var(--halo-progress); }
+.composer input:focus { outline: 2px solid transparent; box-shadow: var(--e-field), 0 0 0 3px var(--halo-progress); }
 .composer input:disabled { background: var(--sunken); }
 .composer .btn { min-height: 32px; }
 /* Interrupt is a word on a computer and an icon on a phone, its word read out (lane 38, the critique). */
@@ -215,12 +215,12 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .plan-waiting .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--awaiting); }
 .plan-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: 12px; }
 .plan-change { display: grid; gap: var(--space-2); margin-top: 12px; }
-.plan-change textarea { min-height: 76px; padding: var(--space-2) 12px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); resize: vertical; }
+.plan-change textarea { min-height: 76px; padding: var(--space-2) 12px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); resize: vertical; }
 .plan-change textarea:focus { outline: 2px solid transparent; box-shadow: 0 0 0 1px var(--theme-accent), 0 0 0 3px var(--halo-progress); }
 .plan-note { margin-top: var(--space-2); font-size: var(--text-sm); color: var(--text-secondary); }
 /* The question to the code (decision 28): the Change's field, its Ask with the note of where the answer opens. */
 .plan-ask form { display: grid; gap: var(--space-2); max-width: 640px; }
-.plan-ask textarea { min-height: 76px; padding: var(--space-2) 12px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); resize: vertical; }
+.plan-ask textarea { min-height: 76px; padding: var(--space-2) 12px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); resize: vertical; }
 .plan-ask textarea:focus { outline: 2px solid transparent; box-shadow: 0 0 0 1px var(--theme-accent), 0 0 0 3px var(--halo-progress); }
 .plan-ask .plan-actions { align-items: center; margin-top: var(--space-1); }
 .plan-ask-note { font-size: var(--text-sm); color: var(--text-secondary); }
@@ -228,7 +228,7 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 /* Resume from here (issue #272): under a step's detail, its corrected instruction as a plan's change. */
 .resume-open { display: inline-flex; align-items: center; gap: var(--space-2); min-height: 24px; }
 .resume-form { display: grid; gap: var(--space-2); margin-top: var(--space-1); max-width: 640px; }
-.resume-form textarea { min-height: 76px; padding: var(--space-2) 12px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); resize: vertical; }
+.resume-form textarea { min-height: 76px; padding: var(--space-2) 12px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); resize: vertical; }
 .resume-form textarea:focus { outline: 2px solid transparent; box-shadow: 0 0 0 1px var(--theme-accent), 0 0 0 3px var(--halo-progress); }
 .resume-form .plan-actions { margin-top: var(--space-1); }
 .go-line { display: flex; align-items: center; gap: var(--space-2); margin-top: var(--space-3); color: var(--ok-text); font-size: var(--text-md); }

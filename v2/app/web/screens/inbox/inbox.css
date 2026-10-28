@@ -3,7 +3,7 @@
    the detail beside it, a panel with a 1px line whose title is the screen's heading and whose bar holds the one
    indigo answer. Below 1024 px: the list, and the detail as a page of
    its own with a back link and its buttons at the bottom (DESIGN.md, 4). */
-.inbox { --ok-text: var(--success-text); --after-ring: var(--success); --device-ring: var(--outline); --awaiting-highlight: var(--awaiting); --field-ring: var(--e-control); --option-ring: var(--e-control); }
+.inbox { --ok-text: var(--success-text); --after-ring: var(--success); --device-ring: var(--outline); --awaiting-highlight: var(--awaiting); --field-ring: var(--e-field); --option-ring: var(--e-control); }
 
 .inbox { display: grid; grid-template-columns: 400px minmax(0, 1fr); gap: var(--space-4); align-items: start; padding: var(--space-4) var(--space-5) var(--space-5); }
 .inbox.empty-inbox { grid-template-columns: minmax(0, 560px); }

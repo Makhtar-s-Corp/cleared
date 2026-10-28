@@ -88,8 +88,9 @@ export function ServicesView({ map, t, now, picked, busy = false, note = '', onP
     <section className="services" aria-labelledby="services-title" data-screen="services">
       <header className="services-head">
         <div>
-          <p className="services-eyebrow">{t('map_eyebrow')}</p>
+          {/* The heading first, the workspace it maps under it (lane j6-ui-pro: no label over a heading). */}
           <h1 id="services-title">{t('map_title')}</h1>
+          <p className="services-eyebrow">{t('map_eyebrow')}</p>
           <p className="services-sub">{t('map_subtitle')}</p>
         </div>
         <div className="services-actions">
