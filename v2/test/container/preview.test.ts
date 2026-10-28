@@ -78,14 +78,14 @@ test('the receipt\'s after page, the root with its trailing slash, reaches the s
   const { routes, urls } = setup();
   const url = new URL(previewAddress({ host: '127.0.0.1', port: 8791 }, { session: SESSION, key: KEY, alias: 'guestbook', port: 8793 }, PROOF).url);
   const match = matchRoute(routes, 'GET', url.pathname);
-  assert.ok(match, `no route for ${url.pathname}`);
+  assert.ok(match && 'route' in match, `no route for ${url.pathname}`);
   const answer = await call(match.route, match.params, { proof: PROOF, url: url.pathname });
   assert.equal(answer.status, 200);
   assert.equal(answer.body.toString(), '<p>hi</p>');
   assert.deepEqual(urls, ['http://172.30.0.3:8793/']);
   // Without the slash, the same root.
   const bare = matchRoute(routes, 'GET', url.pathname.slice(0, -1));
-  assert.ok(bare);
+  assert.ok(bare && 'route' in bare);
   await call(bare.route, bare.params, { proof: PROOF });
   assert.deepEqual(urls, ['http://172.30.0.3:8793/', 'http://172.30.0.3:8793/']);
 });
