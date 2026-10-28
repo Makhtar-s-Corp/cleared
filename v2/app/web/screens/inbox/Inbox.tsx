@@ -35,6 +35,7 @@ import {
   ticketTitle, trainLine, stopState, undoApproval, type Gesture, type InboxView, type Item, type Local,
 } from './model.ts';
 import './inbox.css';
+import { Facts } from '@/components/facts/Facts.tsx';
 
 // One row: the kind, the age, the title and one line. A request that waits
 // carries its three answers beside the link from ROW_ANSWERS_MIN (lane 37).
@@ -51,7 +52,7 @@ function Card({ item, current, view, t, onAnswer }: {
           <span className="since">{since(item.since, view.now, t)}</span>
         </span>
         <span className="item-title">{itemTitle(item, view, t)}</span>
-        <span className="item-line">{itemLine(item, view, t)}</span>
+        <span className="item-line"><Facts text={itemLine(item, view, t)} /></span>
       </a>
       {answers.length > 0 ? (
         <div className="row-answers" role="group" aria-label={t('answers_label', { title: itemTitle(item, view, t) })}>
@@ -492,7 +493,7 @@ function VariantColumn({ variant, view, t, pick, choosable, busy, onAct }: { rea
       {variant.session ? <a className="d-link" href={sessionLink(variant.session)}>{t('open_session')}</a> : null}
       {variant.state === 'done' || variant.state === 'chosen' || (variant.state === 'dropped' && variant.diff !== '') ? (
         <>
-          <p className="variant-facts">{variantFacts(variant, view, t).join(' · ')}</p>
+          <p className="variant-facts"><Facts text={variantFacts(variant, view, t).join(' · ')} /></p>
           {variant.files.length > 0 ? <ul className="variant-files">{variant.files.map((file) => <li key={file}><code>{file}</code></li>)}</ul> : null}
           {variant.diff !== '' ? <Diff diff={variant.diff} label={t('variant_diff_label', { n: variant.position })} /> : <p className="variant-note">{t('variant_no_diff')}</p>}
           {variant.cut ? <p className="variant-note">{t('variant_cut')}</p> : null}

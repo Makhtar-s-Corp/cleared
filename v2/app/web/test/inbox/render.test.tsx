@@ -13,6 +13,10 @@ import { translator, type Translate } from '../../lib/i18n.ts';
 import { type InboxView, type Local } from '../../screens/inbox/model.ts';
 import { strings, visibleText } from '../render.tsx';
 
+// A line of facts (components/facts/Facts.tsx, lane j6-ui-hallmark) read back as the line the model joined.
+const ITEM_LINE = '<span class="item-line">((?:<span class="fact">[^<]*</span>|<span class="fact-sep"><span class="sr-only">, </span></span>)*)</span>';
+const factsOf = (markup: string) => [...markup.matchAll(/<span class="fact">([^<]*)<\/span>/g)].map((m) => m[1]).join(' · ');
+
 const sentinel: Translate = (key) => `«${key}»`;
 // The screen's translator: the shell's catalog under the inbox's, as the shell gives it.
 const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('inbox', 'en') });
@@ -61,7 +65,7 @@ test('two releases with the same title, from two tickets, are told apart in the 
   const release = fixture.items.find((i): i is ReleaseItem => i.kind === 'release' && i.state === 'waiting') as ReleaseItem;
   const again: ReleaseItem = { ...release, id: `${release.id}-again`, ticket: 'LOCAL-999' };
   const html = renderInbox(viewOf({ items: [release, again] }), en);
-  const lines = [...html.matchAll(/<span class="item-line">([^<]*)<\/span>/g)].map((m) => m[1]);
+  const lines = [...html.matchAll(new RegExp(ITEM_LINE, 'g'))].map((m) => factsOf(m[1]!));
   assert.equal(lines.length, 2);
   assert.ok(lines[0]?.startsWith(`${RELEASE_TICKET} · `), lines[0]);
   assert.ok(lines[1]?.startsWith('LOCAL-999 · '), lines[1]);

@@ -45,7 +45,15 @@ export function visibleText(markup: string): string[] {
   const out: string[] = [];
   for (const match of markup.matchAll(/\s(?:aria-label|title|placeholder|alt)="([^"]*)"/g)) out.push(match[1] ?? '');
   for (const run of markup.replace(/<[^>]*>/g, '\n').split('\n')) out.push(run);
-  return out.map((text) => text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").trim()).filter(Boolean);
+  const runs = out.map((text) => text.replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&quot;/g, '"').replace(/&#x27;|&#39;/g, "'").trim()).filter(Boolean);
+  // A line of facts (components/facts/Facts.tsx, lane j6-ui-hallmark) is drawn as cells, its separator a rule that
+  // says a comma to a screen reader: read back as the line the model joined, "a · b".
+  const joined: string[] = [];
+  for (let i = 0; i < runs.length; i += 1) {
+    if (runs[i] === ',' && joined.length > 0 && i + 1 < runs.length) joined.push(`${joined.pop()} · ${runs[++i]}`);
+    else joined.push(runs[i]!);
+  }
+  return joined;
 }
 
 export function strings(value: unknown, into: Set<string> = new Set()): Set<string> {

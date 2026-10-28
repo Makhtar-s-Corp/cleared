@@ -37,6 +37,7 @@
   --e-menu: 0 0 0 2px var(--ink);
   --e-awaiting: 0 0 0 2px var(--awaiting);
   --halo-progress: #D5DDF8; --halo-review: #CDE7EB; --halo-waiting: #FBE6B3;
+  --success-fill: #E2F2E7; --danger-fill: #FBE8EB;
   /* the scale: six spacing steps, five text sizes, three weights, one row height, one motion */
   --space-1: 4px; --space-2: 8px; --space-3: 16px; --space-4: 24px; --space-5: 32px; --space-6: 48px;
   --text-sm: 0.8125rem; --text-md: 0.875rem; --text-lg: 1.25rem; --text-xl: 1.75rem; --text-display: 2.5rem;   /* 13, 14, 20, 28 and 40 px */
