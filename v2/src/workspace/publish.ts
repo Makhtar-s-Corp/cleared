@@ -32,6 +32,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import { CheckoutError, checkBranchName, git, gitPath } from './checkout.ts';
+import { cloneEnvironment } from './connect.ts';
 import { renderReceipt, withReceipt, type ReceiptData } from '../flow/receipt.ts';
 import { ForgeError, type Forge } from '../forge/contract.ts';
 import { forgeFor } from '../forge/index.ts';
@@ -147,14 +148,16 @@ export function addedLines(diff: string): string {
 // reads the project's settings at import): the one git pushes with, which
 // carries the credential helper and never the token, and the one gh runs
 // with, which carries the token. With no app configured, both are the
-// ambient environment.
+// ambient environment, and git's names gh as GitHub's helper when GH_TOKEN
+// is set, as the workspace step's clones do: nothing else gives git that
+// credential on a Compose install (issue #421).
 export function forgeEnvironments(project: string, env: NodeJS.ProcessEnv = process.env): Promise<{ git: NodeJS.ProcessEnv; gh: NodeJS.ProcessEnv }> {
   const program = `
 const { loadConf } = await import(${JSON.stringify(new URL('lib/conf.ts', CLEARED_URL).href)});
-const { forgeEnv, forgeGhEnv } = await import(${JSON.stringify(new URL('lib/forge.ts', CLEARED_URL).href)});
+const { forgeEnv, forgeGhEnv, forgeMode } = await import(${JSON.stringify(new URL('lib/forge.ts', CLEARED_URL).href)});
 try {
   const conf = loadConf();
-  process.stdout.write(JSON.stringify({ git: forgeEnv(conf), gh: forgeGhEnv(conf) }));
+  process.stdout.write(JSON.stringify({ git: forgeEnv(conf), gh: forgeGhEnv(conf), ambient: forgeMode(conf).mode === 'ambient' }));
 } catch (error) { process.stderr.write(String(error && error.message || error)); process.exitCode = 1; }
 `;
   return new Promise((resolve, reject) => {
@@ -166,8 +169,10 @@ try {
     child.on('error', reject);
     child.on('close', (code) => {
       if (code !== 0) return reject(new PublishError(`forge: ${stderr.trim() || `exit ${code}`}`));
-      try { resolve(JSON.parse(stdout)); }
-      catch { reject(new PublishError('forge: the answer is not JSON')); }
+      let answer: { git: NodeJS.ProcessEnv; gh: NodeJS.ProcessEnv; ambient: boolean };
+      try { answer = JSON.parse(stdout); }
+      catch { return reject(new PublishError('forge: the answer is not JSON')); }
+      resolve({ git: answer.ambient ? cloneEnvironment(answer.git) : answer.git, gh: answer.gh });
     });
   });
 }

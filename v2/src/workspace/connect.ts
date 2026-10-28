@@ -71,12 +71,20 @@ export function repositoryDir(stateDir: string, repo: string): string {
   return join(stateDir, 'repositories', owner, name);
 }
 
-// git's environment for a clone: no prompt, and for GitHub, gh as the
-// credential helper (`gh auth setup-git` writes the same line), which reads
-// GH_TOKEN itself; the value is never in a URL or a git setting.
+// The debug switches of git that print a request's headers, Authorization
+// included, which a failed git's last lines would carry into the log (the
+// list of lib/forge.ts, DEBUG_VARIABLES).
+const GIT_DEBUG = ['GIT_TRACE', 'GIT_TRACE_CURL', 'GIT_CURL_VERBOSE', 'GIT_TRACE_REDACT'];
+
+// git's environment for a clone, and for the flow's fetches and pushes on an
+// install with no GitHub App (forgeEnvironments, issue #421): no prompt, and
+// for GitHub, gh as the credential helper (`gh auth setup-git` writes the
+// same line), which reads GH_TOKEN itself; the value is never in a URL or a
+// git setting, and no debug switch reaches git.
 export function cloneEnvironment(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   const out: NodeJS.ProcessEnv = { ...env, GIT_TERMINAL_PROMPT: '0' };
   if (!env.GH_TOKEN && !env.GITHUB_TOKEN) return out;
+  for (const name of GIT_DEBUG) delete out[name];
   let count = Number(env.GIT_CONFIG_COUNT) || 0;
   for (const [key, value] of [['credential.https://github.com.helper', ''], ['credential.https://github.com.helper', '!gh auth git-credential']]) {
     out[`GIT_CONFIG_KEY_${count}`] = key;

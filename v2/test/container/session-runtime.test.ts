@@ -780,6 +780,34 @@ test('an author\'s session gets its service\'s test secrets by name on the comma
   for (const call of fake.calls) for (const value of [1, 2, 3].map(secretValue)) assert.ok(!call.args.some((arg) => arg.includes(value)), 'no command line carries a value');
 });
 
+// The forge's credential is the service's (issue #421, see #147): the Docker
+// client runs with the service's environment, so a bare `--env GH_TOKEN`
+// would hand it to a container. No session's container, and no environment
+// check's, is given it, by name or by value.
+test('the service\'s GH_TOKEN reaches no session\'s container nor an environment check\'s, by name or by value', async () => {
+  const token = ['forge', 'credential', 'of', 'the', 'test'].join('-');
+  const kept = { GH_TOKEN: process.env.GH_TOKEN, GITHUB_TOKEN: process.env.GITHUB_TOKEN };
+  process.env.GH_TOKEN = token;
+  process.env.GITHUB_TOKEN = token;
+  try {
+    withTestValues();
+    const files = workspaceFiles();
+    const fake = new FakeDocker();
+    await startSession(new Docker(fake.runner), runtimeSpec({ service: 'guestbook', role: 'author', siblings: [files.guestbook, files.filter] }));
+    const { checkImage } = await import('../../src/flow/env-setup.ts');
+    await checkImage({ docker: new Docker(fake.runner), session: '00000000-0000-4000-8000-0000000000dd', image: 'cleared-v2-check-guestbook:1', tree: scratch(), workdir: WORKDIR_MOUNT, command: ['npm', 'test'], services: parseServices('postgres:16') });
+    const creates = fake.calls.filter((call) => call.args[0] === 'create');
+    assert.ok(creates.some((call) => call.args.includes('cleared.role=env-check')), 'the check\'s container is among them');
+    for (const call of creates) {
+      assert.ok(!call.args.some((arg) => arg.includes(token)), 'no value on a command line');
+      assert.ok(!call.args.some((arg) => /^(GH_TOKEN|GITHUB_TOKEN)(=|$)/.test(arg)), 'no name the client would fill from its own environment');
+      assert.equal(call.options.env?.GH_TOKEN ?? call.options.env?.GITHUB_TOKEN, undefined, 'none in the private environment');
+    }
+  } finally {
+    for (const [name, value] of Object.entries(kept)) if (value === undefined) delete process.env[name]; else process.env[name] = value;
+  }
+});
+
 test('a reviewer gets them too; a reader, the lead or a session with no service gets none', async () => {
   withTestValues();
   for (const [role, given] of [['reviewer', true], ['reader', false], ['lead', false], [undefined, false]] as const) {

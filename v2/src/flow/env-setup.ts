@@ -20,18 +20,21 @@
 //
 // What the check makes carries cleared.dev=v2 and a session label of its own,
 // never a prepared image's labels or name, and is removed by that label when
-// it ends, whatever happened. The branch's own Dockerfile is built with
+// it ends, whatever happened. Its folder under <state>/env-check, made
+// before any of it, names that label: a check the service's restart
+// interrupted is released by it at the next start (releaseInterruptedChecks,
+// issue #436). The branch's own Dockerfile is built with
 // Docker's default network, as a prepared image's is: installing a system
 // package is what it is for. Nothing of the service's is mounted into it.
 //
 // After the merge, environmentAfterMerge builds the service's prepared image
 // when it has none yet; one it has is built again by preparedAfterMerge.
 import { randomUUID } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, posix } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
-import { DockerError, type Docker } from '../container/docker.ts';
+import { DockerError, isSessionId, type Docker } from '../container/docker.ts';
 import { DevcontainerError } from '../container/devcontainer.ts';
 import { PreparedError, buildPrepared, readInputs, readRecord, type PreparedImages, type PreparedSource } from '../container/prepared.ts';
 import { DEFAULT_LIMITS, SERVICE_LIMITS, SESSION_IMAGE, sessionNames } from '../container/session-runtime.ts';
@@ -71,6 +74,44 @@ export function cut(text: string): string {
 }
 
 const firstLine = (error: unknown): string => (error instanceof Error ? error.message : String(error)).split('\n')[0]?.slice(0, LINE_MAX) ?? '';
+
+// The checks this process runs, by session id: the release at start leaves them alone.
+const RUNNING = new Set<string>();
+const checksDir = (stateDir: string): string => join(stateDir, 'env-check');
+
+// What a check ends with: its objects removed by its session id, then its
+// folder. A removal that fails is said, and the folder kept, so that the
+// next start tries again.
+async function release(docker: Docker, stateDir: string, session: string, said: string): Promise<boolean> {
+  try {
+    await docker.removeSession(session, { stopTimeoutSeconds: 1 });
+  } catch (error) {
+    console.error(`cleared-v2: ${said} left objects labelled ${session} (${firstLine(error)})`);
+    return false;
+  }
+  rmSync(join(checksDir(stateDir), session), { recursive: true, force: true });
+  return true;
+}
+
+// What the checks a restart interrupted left (issue #436): their finally
+// never ran, so their containers, network, images and tree stayed. Each
+// folder of <state>/env-check named by a session id that no check of this
+// process runs is released by that id, as the check would have done. Only
+// this state folder's checks are named, never another instance's. The
+// number released; never throws.
+export async function releaseInterruptedChecks(input: { readonly docker: Docker; readonly stateDir: string; readonly running?: ReadonlySet<string> }): Promise<number> {
+  const running = input.running ?? RUNNING;
+  let left: string[];
+  try {
+    left = readdirSync(checksDir(input.stateDir)).filter((name) => isSessionId(name) && !running.has(name));
+  } catch {
+    return 0;
+  }
+  let released = 0;
+  for (const session of left) if (await release(input.docker, input.stateDir, session, 'an environment check a restart interrupted')) released += 1;
+  if (released > 0) console.error(`cleared-v2: released what ${released} environment check(s) a restart interrupted left`);
+  return released;
+}
 
 // --------------------------------------------------------------- the check
 
@@ -140,18 +181,20 @@ export async function checkBranch(input: {
   const work = mkdtempSync(join(tmpdir(), 'cleared-v2-check-'));
   // The branch's tree, mounted into the check's container: under the state
   // folder, which a Compose install mounts at the same path as the host's.
-  const trees = join(input.stateDir, 'env-check', session);
+  // Made first: it is the check's record until its objects are removed.
+  const trees = join(checksDir(input.stateDir), session);
   const started = Date.now();
   let devcontainer: EnvCheck['devcontainer'] = null;
   const failedBuild = (tail: string): EnvCheck => ({ outcome: 'build_failed', command: commandText, tail: cut(tail), buildMs: Date.now() - started, checkMs: null, devcontainer });
+  RUNNING.add(session);
   try {
+    mkdirSync(trees, { recursive: true, mode: 0o700 });
     let tree: string;
     let tag: string;
     try {
       const inputs = await readInputs(source, { baseImage, at: input.ref });
       if (!inputs) return failedBuild(`the branch ${input.ref} is not in the checkout of ${source.service}`);
       devcontainer = inputs.devcontainer;
-      mkdirSync(trees, { recursive: true, mode: 0o700 });
       const exported = await exportBase({ project: source.dir, base: source.base, root: trees, commit: inputs.commit });
       if (!exported) return failedBuild(`the branch of ${source.service} could not be exported`);
       tree = exported.dir;
@@ -168,8 +211,8 @@ export async function checkBranch(input: {
     const ran = await checkImage({ docker, session, image: tag, tree, workdir, command, services: input.declared?.services ?? [], ...(input.checkTimeoutMs === undefined ? {} : { timeoutMs: input.checkTimeoutMs }) });
     return { outcome: ran.passed ? 'passed' : 'failed', command: commandText, tail: ran.tail, buildMs, checkMs: ran.ms, devcontainer };
   } finally {
-    await docker.removeSession(session, { stopTimeoutSeconds: 1 }).catch((error) => console.error(`cleared-v2: the environment check of ${source.service} left objects labelled ${session} (${firstLine(error)})`));
-    rmSync(trees, { recursive: true, force: true });
+    await release(docker, input.stateDir, session, `the environment check of ${source.service}`);
+    RUNNING.delete(session);
     rmSync(work, { recursive: true, force: true });
   }
 }
@@ -247,7 +290,8 @@ export async function checkPrepared(input: {
   const { docker, source, declared } = input;
   if (!declared || declared.command.length === 0) return undefined;
   const session = randomUUID();
-  const trees = join(input.stateDir, 'env-check', session);
+  const trees = join(checksDir(input.stateDir), session);
+  RUNNING.add(session);
   try {
     mkdirSync(trees, { recursive: true, mode: 0o700 });
     const exported = await exportBase({ project: source.dir, base: source.base, root: trees });
@@ -258,8 +302,8 @@ export async function checkPrepared(input: {
     writePreparedCheck(input.stateDir, source.service, check);
     return check;
   } finally {
-    await docker.removeSession(session, { stopTimeoutSeconds: 1 }).catch((error) => console.error(`cleared-v2: the check of ${source.service}'s image left objects labelled ${session} (${firstLine(error)})`));
-    rmSync(trees, { recursive: true, force: true });
+    await release(docker, input.stateDir, session, `the check of ${source.service}'s image`);
+    RUNNING.delete(session);
   }
 }
 
