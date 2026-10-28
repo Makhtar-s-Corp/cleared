@@ -161,6 +161,28 @@ test('the result of a turn: interrupted, out of turns, over budget, failed, refu
   assert.deepEqual(stop(finish({ subtype: 'success', is_error: true, result: 'API Error: 500' })), ['error/api_error/API Error: 500']);
 });
 
+// The live Take over run of 2026-10-28 (issue #463): the take over asked the
+// interrupt 0.4 s before the runner opened the author's first turn. The SDK
+// then ended that turn at once with error_during_execution, and the session
+// failed instead of pausing.
+test('an interrupt asked before the turn opens ends that turn as cancelled, not failed; a turn that succeeds still succeeds', () => {
+  const base = { type: 'result', total_cost_usd: 0, usage: { input_tokens: 0, output_tokens: 0 }, modelUsage: {} };
+  const EDE = '[ede_diagnostic] result_type=user last_content_type=n/a stop_reason=null';
+  const turn = (result: Record<string, unknown>): AgUiEvent[] => {
+    const mapper = createMapper({ sessionId: SESSION });
+    mapper.start('claude-haiku-5-5');
+    mapper.interrupting();
+    mapper.line({ type: 'sdk', message: { type: 'command_lifecycle', command_uuid: id(1), state: 'started' } });
+    return mapper.line({ type: 'sdk', message: { ...base, ...result } });
+  };
+  const aborted = turn({ subtype: 'error_during_execution', is_error: true, errors: [EDE] });
+  assert.ok(!aborted.some((event) => event.type === 'RUN_ERROR'), 'no RUN_ERROR');
+  const finished = aborted.find((event) => event.type === 'RUN_FINISHED');
+  assert.equal(finished?.type === 'RUN_FINISHED' ? `${finished.outcome.type}/${finished.result.stopReason}` : undefined, 'cancelled/cancelled');
+  const done = turn({ subtype: 'success', is_error: false, stop_reason: 'end_turn' }).find((event) => event.type === 'RUN_FINISHED');
+  assert.equal(done?.type === 'RUN_FINISHED' ? done.outcome.type : undefined, 'success', 'an interrupt that found no turn does not cancel the next one that ends well');
+});
+
 test('a question, a cancelled request, a runner error and a runner that dies', () => {
   const mapper = createMapper({ sessionId: SESSION });
   mapper.start('claude-haiku-5-5');

@@ -2578,6 +2578,9 @@ export class FlowEngine {
     }
     if (gate && gate.phase !== 'working') this.#gates.delete(live.id);
     this.#setPhase(live, phase);
+    // The screen reads the phase from the journal's last state: without this
+    // snapshot an author ended after a Give back still read "Working" (#233).
+    this.#snapshot(live.id, live.input.ticket);
     this.inbox.handleSession(live.id, 'system');
     await live.handle.stop().catch(() => undefined);
     this.#notify(live.id);
