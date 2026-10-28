@@ -7594,7 +7594,7 @@ The first tries found two defects, fixed here with a test each: the check's cont
 
 ## 2026-10-28: the heavy captures compressed, and no PNG over 500 KB under docs/ (the author's choices, lane `v2-j6-png-compress`, the promise to the owner of 2026-10-27)
 
-**The need.** On 2026-10-27 the owner was promised that the repository's captures would stop growing it: `docs/v2/ui-overhaul/before/proofmulti-inbox-full-page.png` (1,179,969 bytes) under 400 KB at the same size in pixels, then every PNG over 200 KB made smaller, losslessly or without visible loss, with oxipng or pngquant run on this machine (no online service), the Markdown links unchanged, and a check that refuses any new PNG over 500 KB under `docs/`. No issue was opened for it.
+**The need.** The promise to the owner of 2026-10-27: `docs/v2/ui-overhaul/before/proofmulti-inbox-full-page.png` (1,179,969 bytes) under 400 KB at the same size in pixels, then every PNG over 200 KB made smaller, losslessly or without visible loss, with oxipng or pngquant run on this machine (no online service), the Markdown links unchanged, and a check that refuses any new PNG over 500 KB under `docs/`. No issue was opened for it.
 
 **Decision.**
 1. **The full-page capture is quantized, not only recompressed.** Lossless oxipng (`-o max --strip safe`) reached 946,308 bytes, and the capture is 1440 by 11,353 pixels of text. It has 695 colors. A palette of 256 colors without dithering is nearly exact (PSNR 69.9 dB) but weighs 456,489 bytes even with zopfli, so the palette had to shrink. pngquant's 64 colors without dithering, with zopfli, gave 392,364 bytes, and a crop at twice the size showed the project's orange status dot turned tan: pngquant weighs colors by area, and the saturated accents are small. So the palette kept is pngquant's 64 colors plus the 16 colors of the source it mapped worst, chosen one by one by pixel count times squared distance (the status dot, the link blue, the labels' orange and their edges), each source color mapped to its nearest entry, no dithering, then `oxipng -o max -Z --strip safe`. The result is 398,678 bytes, 80 colors, still 1440 by 11,353: PSNR 61.2 dB against the source, 0.01 % of the pixels off by more than 8 levels. The status dot, the link and the labels compared at twice the size show no difference.
@@ -7607,6 +7607,7 @@ The first tries found two defects, fixed here with a test each: the check's cont
 **Not done here.**
 - **No matrix line.** None names this promise, and a new `P` id could meet a parallel milestone 6 lane's; the orchestrator gives it one at the merge if the matrix should carry it.
 - PNGs under 200,000 bytes were left as they are, and PNGs outside `docs/` are not checked by the test.
+- The test runs in the `v2` workflow, on pull requests and pushes to `v2`. `checks.yml` runs only the root `test/`, so a pull request straight to `main` is not checked by it.
 
 **Checks**, on this branch at `origin/v2` `0e49cbde`:
 - `npm run typecheck` in `v2/`: clean.
