@@ -6,8 +6,9 @@
 // model.ts holds the rules and the words; this file draws them, reads the
 // map again on the change stream, and refreshes it on demand. Under the map,
 // the services' test secrets (TestValues.tsx, C16), then the agent
-// profile's and the environment's versions (Profiles.tsx, issue #452), both
-// shown even when the map cannot be read.
+// profile's and the environment's versions (Profiles.tsx, issue #452), then
+// the nightly pass of each service (Dreaming.tsx, issue #455), all shown
+// even when the map cannot be read.
 import { ArrowsClockwise } from '@phosphor-icons/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ServiceMap } from '../../../../src/api/types.ts';
@@ -16,6 +17,7 @@ import { useScreen } from '@/lib/context.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { useLive } from '@/lib/query.tsx';
 import { FIT_WIDTH, builtLine, impactLines, layout, linkRows, mapFailure, problemLines, readMap, refreshMap, serviceDetail, type Drawing } from './model.ts';
+import { DreamingEditor } from './Dreaming.tsx';
 import { ProfilesEditor } from './Profiles.tsx';
 import { TestValuesEditor } from './TestValues.tsx';
 import { testValuesClient } from './test-values.ts';
@@ -187,7 +189,7 @@ export default function ServicesPage() {
     }
   };
 
-  const values = <div className="services services-values"><TestValuesEditor t={t} client={client} path="/test-values" idPrefix="services" /><ProfilesEditor t={t} client={client} /></div>;
+  const values = <div className="services services-values"><TestValuesEditor t={t} client={client} path="/test-values" idPrefix="services" /><ProfilesEditor t={t} client={client} /><DreamingEditor t={t} client={client} /></div>;
   if (!map) return failed !== null ? <><ServicesFailed t={t} message={failed} />{values}</> : <div className="services" aria-busy="true" />;
   return (
     <>

@@ -154,5 +154,15 @@
   "profiles_error_other": "The change could not be made. Try again in a moment.",
   "profiles_first": "How the service ran before profiles.",
   "profiles_prompts_none": "none",
-  "profiles_cpus_own": "Cleared's"
+  "profiles_cpus_own": "Cleared's",
+  "dreaming_title": "Learning from past sessions",
+  "dreaming_intro": "Each night, a pass per service reads the reviewers' change requests of the last 30 days. A defect asked for on two tickets or more becomes a proposal in the inbox, citing those reviews. Nothing is written before the owner approves it. The pass calls no model, and it waits while the week's quota is at its stop.",
+  "dreaming_service": "{service}",
+  "dreaming_off": "Off: no pass for this service.",
+  "dreaming_never": "On. No pass yet.",
+  "dreaming_last_one": "On. Last pass on {date}: one proposal.",
+  "dreaming_last_other": "On. Last pass on {date}: {n} proposals.",
+  "dreaming_last_quota": "On. On {date} the pass waited: the week's quota was at its stop.",
+  "dreaming_error_owner": "Only the workspace's owner turns the pass on or off.",
+  "dreaming_error_other": "The pass could not be changed. Try again in a moment."
 }
