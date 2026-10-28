@@ -318,7 +318,7 @@
   "facts_agent": "Agent",
   "facts_model": "Model",
   "facts_started": "Started",
-  "screen_waiting": "The before and after captures will show here as soon as the author changes a screen.",
+  "screen_waiting": "When the review passes, the captures before and after are taken from the reviewer's trial environment and linked in the pull request's receipt.",
   "session_versions": "Agent profile: {profile}. Environment: version {environment}.",
   "session_versions_profile": "version {version}",
   "session_versions_profile_auto": "version {version}, harness picked automatically: {harness}"

@@ -318,7 +318,7 @@
   "facts_agent": "Agent",
   "facts_model": "Modèle",
   "facts_started": "Démarrée",
-  "screen_waiting": "Les captures avant et après s'afficheront ici dès que l'auteur touchera un écran.",
+  "screen_waiting": "Quand la revue passe, les captures avant et après sont prises dans l'environnement d'essai du relecteur et liées dans le reçu de la pull request.",
   "session_versions": "Profil d'agent\u00a0: {profile}. Environnement\u00a0: version {environment}.",
   "session_versions_profile": "version {version}",
   "session_versions_profile_auto": "version {version}, harnais choisi automatiquement\u00a0: {harness}"

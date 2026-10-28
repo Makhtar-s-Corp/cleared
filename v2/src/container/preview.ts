@@ -121,11 +121,17 @@ async function handle(deps: PreviewDeps, depth: number, { request, response, par
   response.end(body);
 }
 
-// One route per depth, from the key alone (the sibling's root) to PREVIEW_DEPTH segments.
+// One route per depth, from the key alone (the sibling's root) to PREVIEW_DEPTH
+// segments, then the root again with its trailing slash: the address the
+// proof receipt's after page opens (flow/proof-capture.ts previewAddress), so
+// the page's relative links stay under its key.
 export function previewRoutes(deps: PreviewDeps): Route[] {
-  return Array.from({ length: PREVIEW_DEPTH + 1 }, (_, depth) => ({
-    method: 'GET' as const,
-    path: ['/api/sessions/:id/preview/:key', ...Array.from({ length: depth }, (_, i) => `:p${i}`)].join('/'),
-    handle: (context: RouteContext) => handle(deps, depth, context),
-  }));
+  return [
+    ...Array.from({ length: PREVIEW_DEPTH + 1 }, (_, depth) => ({
+      method: 'GET' as const,
+      path: ['/api/sessions/:id/preview/:key', ...Array.from({ length: depth }, (_, i) => `:p${i}`)].join('/'),
+      handle: (context: RouteContext) => handle(deps, depth, context),
+    })),
+    { method: 'GET' as const, path: '/api/sessions/:id/preview/:key/', handle: (context: RouteContext) => handle(deps, 0, context) },
+  ];
 }
