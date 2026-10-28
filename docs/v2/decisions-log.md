@@ -8010,7 +8010,7 @@ Each ticket went back to Todo after its publish with "The release could not be r
 
 **Checks**, on this branch after merging `origin/v2` at `cb393e8` (pull request 462, P268; the log keeps its entry before this one):
 - `npm run typecheck` in `v2/`: clean.
-- `npm test` in `v2/`: 2958 Node tests, 2817 pass, 141 skipped (the browser tests, which the browser job runs apart), 0 fail; 432 Vitest tests pass.
+- `npm test` in `v2/`: 2959 Node tests, 2818 pass, 141 skipped (the browser tests, which the browser job runs apart), 0 fail; 432 Vitest tests pass.
 - With `CLEARED_V2_PLAYWRIGHT`: `test/flow/proof-capture.test.ts` and `app/test/ask/citations-browser.test.ts`, 8 of 8.
 - `npm run guard -- --base origin/v2`: nothing refused.
 
