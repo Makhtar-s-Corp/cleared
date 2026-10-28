@@ -21,7 +21,7 @@
 .lead-screen :is(.lead-line, .system-line) .fact-sep { display: inline-block; width: 1px; height: 0.85em; margin: 0 var(--space-2); background: currentColor; vertical-align: -0.08em; }
 .lead-screen .lead-top { flex-wrap: wrap; row-gap: 2px; }
 /* What the lead remembers: a link on its own line under the lead's state, so the state keeps the card's width. */
-.lead-screen .lead-top .link-button { flex: 1 0 100%; min-height: 24px; margin: 0 0 0 40px; white-space: nowrap; font-weight: var(--weight-strong); text-align: left; }
+.lead-screen .lead-top .link-button { flex: 1 0 calc(100% - 40px); min-height: 24px; margin: 0 0 0 40px; white-space: nowrap; font-weight: var(--weight-strong); text-align: left; }
 .lead-screen .lead-line.lead-down { display: inline-flex; align-items: center; gap: var(--space-2); margin-top: var(--space-1); padding: 2px 12px; border-radius: var(--radius); background: var(--danger-fill); color: var(--danger-text); font-weight: var(--weight-strong); }
 .lead-screen .lead-line.lead-down::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: var(--danger); flex: none; }
 .lead-screen .link-button { margin-left: auto; min-height: 32px; padding: 0; border: 0; background: none; color: var(--link); font-size: var(--text-sm); text-align: right; cursor: pointer; }
@@ -180,7 +180,7 @@
   .lead-screen { gap: var(--space-3); padding: var(--space-3); }
   .plan-head h2 { font-size: var(--text-lg); }
   .lead-screen .lead-top { flex-wrap: wrap; row-gap: 0; padding: 12px var(--space-3) var(--space-1); }
-  .lead-screen .link-button, .lead-screen .lead-top .link-button { flex-basis: 100%; min-height: 44px; margin: 0 0 0 40px; text-align: left; }
+  .lead-screen .link-button, .lead-screen .lead-top .link-button { flex-basis: calc(100% - 40px); min-height: 44px; margin: 0 0 0 40px; text-align: left; }
   .lead-screen .bubble-link, .lead-screen .other-plans li { min-height: 44px; align-items: center; }
   .lead-screen .other-plans li a { padding: 12px 0; margin: -12px 0; }   /* the link itself fills the 44 px row */
   .lead-screen .bubble-link { display: inline-flex; margin-top: 0; }

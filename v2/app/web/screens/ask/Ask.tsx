@@ -66,7 +66,7 @@ export function AskScreen({ ask, t, language, draft = '', note = '', busy = fals
           );
         })}
       </ol>
-      {total ? <p className="ask-total" data-ask-total="">{t('ask_total', { text: total })}</p> : null}
+      {total ? <p className="ask-total" data-ask-total=""><Facts text={t('ask_total', { text: total })} /></p> : null}
       <form className="ask-follow" id="ask-follow" autoComplete="off" onSubmit={onFollow}>
         <label className="sr-only" htmlFor="follow-input">{t('ask_follow_label')}</label>
         <Textarea id="follow-input" name="question" maxLength={QUESTION_MAX} rows={3} placeholder={t('ask_follow_placeholder')} value={draft} disabled={busy}
