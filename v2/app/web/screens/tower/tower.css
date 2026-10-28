@@ -251,7 +251,6 @@ a.row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
   .ask-model select, .ask-pill .chip-button, .ask-go .chip-button.primary, .ask-variants .svc-toggle, .ask-services .svc-toggle, .suggest { min-height: 44px; }
   .tower .more, #lead-title a { display: inline-flex; align-items: center; min-height: 44px; margin-block: calc(-1 * var(--space-3)); }
 }
-/* The number of authors of a new ticket (issue #271), on a workspace of one service. */
 /* The ready-made tickets (P214): a row under the field while the chip has it open or one is picked; the
    description it fills follows with no rule of its own, as the authors follow the description. */
 /* A chip whose row or form is open says so, in the selection's grey, never the indigo of New ticket. */

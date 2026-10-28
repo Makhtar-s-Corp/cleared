@@ -10,7 +10,8 @@
 //     [--via load|click] [--language fr|en]
 //
 // The language is the app's default, French, unless --language en asks for
-// English (the owner's decision of 2026-10-23).
+// English (the owner's decision of 2026-10-23). The sample data is in the
+// same language (fixtures/french.ts, lane j6-ui-pro).
 //
 // More captures, named only (lane 35): palette and sheet (the tower with
 // the command palette or the shortcut sheet open, by their keys), the same
@@ -118,7 +119,7 @@ export async function capture(options: { readonly out: string; readonly screens?
 
   const preview = createServer();
   const previewBase = await listen(preview);
-  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW, resolved: screens.includes('resolved') }), extra: { previewOrigin: previewBase, language: options.language ?? 'fr' } });
+  const app = await startApp({ source: await fixtureSource({ now: () => FIXTURE_NOW, resolved: screens.includes('resolved'), language: options.language ?? 'fr' }), extra: { previewOrigin: previewBase, language: options.language ?? 'fr' } });
   preview.on('request', createPreviewHandler({ upstream: fixturePreview(), origin: previewBase, appOrigins: [app.origin] }));
   const errors: string[] = [];
   const away: string[] = [];
