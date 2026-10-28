@@ -5,11 +5,12 @@
    words, never its colour alone; a call found and not declared is drawn in
    the colour of what waits for the person, and said in words. */
 
-.services { max-width: 1180px; margin: 0 auto; padding: var(--space-4) 32px 48px; }
+.services { max-width: 1200px; margin: 0 auto; padding: var(--space-5) var(--space-5) var(--space-6); }
 
 .services-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; margin-bottom: var(--space-4); }
-.services-eyebrow { margin: 0 0 var(--space-1); color: var(--text-muted); font-size: var(--text-sm); }
-.services-head h1 { margin: 0; font-size: var(--text-lg); font-weight: var(--weight-strong); letter-spacing: -0.035em; line-height: 1.25; text-wrap: balance; }
+.services-eyebrow { margin: 0 0 var(--space-2); color: var(--text); font-size: var(--text-sm); font-weight: var(--weight-strong); }
+.services-head h1 { margin: 0; font-size: var(--text-display); font-weight: var(--weight-heavy); letter-spacing: -0.035em; line-height: 1.02; text-wrap: balance; }
+@media (max-width: 767px) { .services-head h1 { font-size: var(--text-xl); } }
 .services-sub { margin: 4px 0 0; color: var(--text-muted); font-size: var(--text-md); text-wrap: pretty; }
 .services-actions { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
 .services-built { margin: 0; color: var(--text-muted); font-size: var(--text-sm); }
@@ -23,8 +24,8 @@
 .services-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: var(--space-4); align-items: start; }
 .services-main { display: flex; flex-direction: column; gap: var(--space-4); min-width: 0; }
 
-.map-figure { margin: 0; padding: 12px; border-radius: 12px; background: var(--sunken); }
-.map-scroll { overflow-x: auto; border-radius: 8px; }
+.map-figure { margin: 0; padding: var(--space-3); border-radius: 0; background: var(--surface); box-shadow: var(--e-card); }
+.map-scroll { overflow-x: auto; border-radius: 0; }
 .map-scroll:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .map-svg { display: block; max-width: none; height: auto; }
 .map-svg[data-fit="yes"] { max-width: 100%; }
@@ -54,7 +55,7 @@
 
 .services-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .map-services { display: flex; flex-direction: column; gap: 6px; margin: 0; padding: 0; list-style: none; }
-.map-service { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 10px;
+.map-service { display: flex; flex-direction: column; align-items: flex-start; gap: 2px; width: 100%; min-height: 44px; padding: 8px 12px; border: 0; border-radius: 0;
   background: transparent; box-shadow: var(--e-outline); color: var(--text); text-align: left; font: inherit; cursor: pointer; }
 .map-service:hover { background: var(--sunken); }
 .map-service:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
