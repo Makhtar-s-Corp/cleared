@@ -1,0 +1,204 @@
+{
+  "mode": "real",
+  "model": "claude-haiku-5-5",
+  "budgetUsd": 2,
+  "ports": {
+    "service": 9788,
+    "app": 9748,
+    "preview": 9791
+  },
+  "tickets": {
+    "A": "LOCAL-1",
+    "B": "LOCAL-2"
+  },
+  "costs": {
+    "A": 0.021,
+    "B": 0.006
+  },
+  "quota": [
+    {
+      "at": "2026-10-28T12:46:13.520Z",
+      "percent": 22
+    },
+    {
+      "at": "2026-10-28T12:48:10.552Z",
+      "percent": 23
+    }
+  ],
+  "stopped": null,
+  "phases": [
+    {
+      "name": "sign-in",
+      "status": "ok",
+      "at": "2026-10-28T12:45:53.185Z",
+      "note": "signed in as owner"
+    },
+    {
+      "name": "A-author",
+      "status": "ok",
+      "at": "2026-10-28T12:47:38.916Z",
+      "note": "d86acfd8 of LOCAL-1: terminal: \"Claude Code, resumed on this session\"; the harness answered 42; git status: answered; npm ci: installed; npm test: pass 48, fail 0; editor save of src/page.ts: 200; given back: the notice's turn began; 1 human edit(s) journaled; the notice names src/page.ts"
+    },
+    {
+      "name": "A-reviewer",
+      "status": "ok",
+      "at": "2026-10-28T12:49:07.478Z",
+      "note": "1f55419b: terminal: \"Claude Code, resumed on this session\"; the harness answered 42; given back: the notice's turn began; 0 human edit(s) journaled; no file edited; the author's screen reads \"Reviewing\" (its phase done)"
+    },
+    {
+      "name": "A-end",
+      "status": "ok",
+      "at": "2026-10-28T12:49:59.973Z",
+      "note": "the ticket is back in Todo; the review's verdict: changes_requested; set aside; the author's screen then reads \"Done\"; 0.021 USD"
+    },
+    {
+      "name": "B-restart",
+      "status": "ok",
+      "at": "2026-10-28T12:50:50.999Z",
+      "note": "before the restart: taken over, 3 container(s); after it: phase stopped, taken over no, last error \"restart: The service restarted: this session was stopped.\", ticket Todo, the screen reads \"Stopped\", 0 container(s) left"
+    },
+    {
+      "name": "B-after-restart",
+      "status": "ok",
+      "at": "2026-10-28T12:52:38.763Z",
+      "note": "a new session fd0d4115: terminal: \"Claude Code, resumed on this session\"; the harness answered 42; git status: answered; npm ci: installed; npm test: pass 48, fail 0; editor save of test/page.test.ts: 200; given back: the notice's turn began; 1 human edit(s) journaled; the notice names test/page.test.ts"
+    },
+    {
+      "name": "B-end",
+      "status": "ok",
+      "at": "2026-10-28T12:52:52.235Z",
+      "note": "0.006 USD"
+    }
+  ],
+  "gestures": [
+    {
+      "at": "2026-10-28T12:45:58.425Z",
+      "what": "created LOCAL-1 from the tower bar: The page says how many entries it holds"
+    },
+    {
+      "at": "2026-10-28T12:46:31.432Z",
+      "what": "gave the Go to the session plan of LOCAL-1 (medium)"
+    },
+    {
+      "at": "2026-10-28T12:46:37.380Z",
+      "what": "took over the author d86acfd8 of LOCAL-1"
+    },
+    {
+      "at": "2026-10-28T12:46:48.701Z",
+      "what": "typed to the harness: What is 17 plus 25? Reply with the number only."
+    },
+    {
+      "at": "2026-10-28T12:46:53.688Z",
+      "what": "opened the Shell"
+    },
+    {
+      "at": "2026-10-28T12:46:57.221Z",
+      "what": "typed git status in the Shell"
+    },
+    {
+      "at": "2026-10-28T12:47:01.602Z",
+      "what": "typed npm ci in the Shell"
+    },
+    {
+      "at": "2026-10-28T12:47:10.208Z",
+      "what": "typed npm test in the Shell"
+    },
+    {
+      "at": "2026-10-28T12:47:31.454Z",
+      "what": "changed one line of src/page.ts in the Editor tab and saved it"
+    },
+    {
+      "at": "2026-10-28T12:47:34.551Z",
+      "what": "gave the author d86acfd8 back"
+    },
+    {
+      "at": "2026-10-28T12:47:58.488Z",
+      "what": "reject_once for a permission of the author (refused: git diff src/page.ts | awk 'BEGIN{skip=0} /^@@ -1,3/{skip=1} /^@@ -24/{skip=0} !)"
+    },
+    {
+      "at": "2026-10-28T12:48:08.400Z",
+      "what": "reject_once for a permission of the author (refused: git diff src/page.ts | awk 'BEGIN{skip=0} /^@@ -1,3/{skip=1} /^@@ -24/{skip=0} !)"
+    },
+    {
+      "at": "2026-10-28T12:48:41.493Z",
+      "what": "took over the reviewer 1f55419b of LOCAL-1"
+    },
+    {
+      "at": "2026-10-28T12:48:52.771Z",
+      "what": "typed to the harness: What is 17 plus 25? Reply with the number only."
+    },
+    {
+      "at": "2026-10-28T12:48:58.842Z",
+      "what": "gave the reviewer 1f55419b back"
+    },
+    {
+      "at": "2026-10-28T12:49:52.725Z",
+      "what": "set LOCAL-1 aside (nothing approved)"
+    },
+    {
+      "at": "2026-10-28T12:50:06.265Z",
+      "what": "created LOCAL-2 from the tower bar: The page's footer says the guestbook is a demo"
+    },
+    {
+      "at": "2026-10-28T12:50:20.914Z",
+      "what": "took over the author f7bb9647 of LOCAL-2"
+    },
+    {
+      "at": "2026-10-28T12:50:31.902Z",
+      "what": "typed to the harness: What is 17 plus 25? Reply with the number only."
+    },
+    {
+      "at": "2026-10-28T12:50:38.831Z",
+      "what": "restarted the service (SIGTERM, then the same command)"
+    },
+    {
+      "at": "2026-10-28T12:50:54.017Z",
+      "what": "moved LOCAL-2 to Todo to start it again"
+    },
+    {
+      "at": "2026-10-28T12:51:30.380Z",
+      "what": "gave the Go to the session plan of LOCAL-2 (low)"
+    },
+    {
+      "at": "2026-10-28T12:51:42.549Z",
+      "what": "took over the author fd0d4115 of LOCAL-2"
+    },
+    {
+      "at": "2026-10-28T12:51:52.410Z",
+      "what": "typed to the harness: What is 17 plus 25? Reply with the number only."
+    },
+    {
+      "at": "2026-10-28T12:51:58.792Z",
+      "what": "opened the Shell"
+    },
+    {
+      "at": "2026-10-28T12:52:02.451Z",
+      "what": "typed git status in the Shell"
+    },
+    {
+      "at": "2026-10-28T12:52:06.336Z",
+      "what": "typed npm ci in the Shell"
+    },
+    {
+      "at": "2026-10-28T12:52:13.988Z",
+      "what": "typed npm test in the Shell"
+    },
+    {
+      "at": "2026-10-28T12:52:32.332Z",
+      "what": "changed one line of test/page.test.ts in the Editor tab and saved it"
+    },
+    {
+      "at": "2026-10-28T12:52:35.519Z",
+      "what": "gave the author fd0d4115 back"
+    },
+    {
+      "at": "2026-10-28T12:52:52.231Z",
+      "what": "set LOCAL-2 aside (nothing approved)"
+    }
+  ],
+  "released": {
+    "containers": 0,
+    "networks": 0
+  },
+  "left": []
+}
