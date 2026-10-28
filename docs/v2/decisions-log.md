@@ -7592,11 +7592,74 @@ The first tries found two defects, fixed here with a test each: the check's cont
 - Pull request: 448, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-proof-fixes`.
 
-## 2026-10-28: the workspace the assistant writes, used by every module with no restart, and the Tower's tickets named by its id (the author's choices, lane `v2-j6-workspace-reload`, B6.5, M10, P262, issues #420, #437)
+## 2026-10-28: the heavy captures compressed, and no PNG over 500 KB under docs/ (the author's choices, lane `v2-j6-png-compress`, the promise to the owner of 2026-10-27)
+
+**The need.** The promise to the owner of 2026-10-27: `docs/v2/ui-overhaul/before/proofmulti-inbox-full-page.png` (1,179,969 bytes) under 400 KB at the same size in pixels, then every PNG over 200 KB made smaller, losslessly or without visible loss, with oxipng or pngquant run on this machine (no online service), the Markdown links unchanged, and a check that refuses any new PNG over 500 KB under `docs/`. No issue was opened for it.
+
+**Decision.**
+1. **The full-page capture is quantized, not only recompressed.** Lossless oxipng (`-o max --strip safe`) reached 946,308 bytes, and the capture is 1440 by 11,353 pixels of text. It has 695 colors. A palette of 256 colors without dithering is nearly exact (PSNR 69.9 dB) but weighs 456,489 bytes even with zopfli, so the palette had to shrink. pngquant's 64 colors without dithering, with zopfli, gave 392,364 bytes, and a crop at twice the size showed the project's orange status dot turned tan: pngquant weighs colors by area, and the saturated accents are small. So the palette kept is pngquant's 64 colors plus the 16 colors of the source it mapped worst, chosen one by one by pixel count times squared distance (the status dot, the link blue, the labels' orange and their edges), each source color mapped to its nearest entry, no dithering, then `oxipng -o max -Z --strip safe`. The result is 398,678 bytes, 80 colors, still 1440 by 11,353: PSNR 61.2 dB against the source, 0.01 % of the pixels off by more than 8 levels. The status dot, the link and the labels compared at twice the size show no difference.
+2. **"Over 200 KB" is read as over 200,000 bytes.** The tracked PNGs over that, besides the capture, are four of `app/screenshots/` (`tower-light-1440`, `tower-dark-1440`, `tower-dark-768`, `tower-light-768`, 204,287 to 211,862 bytes), outside `docs/` but covered by the same promise. Lossless oxipng was enough for them: 155,421 to 161,519 bytes, each pixel the same, the dimensions unchanged. `--strip safe` dropped nothing: the files had no chunk beyond the image's own.
+3. **The check is a test, not a guard rule.** `v2/test/docs-png-size.test.ts` lists the PNGs git tracks under `docs/` and fails on any over 500,000 bytes, naming each with its size. It runs in the `v2` workflow's `npm test`, on every pull request to `v2`. Reading every tracked file rather than a diff refuses a new capture and an existing one that grows alike, and needs no base. 500 KB is counted as 500,000 bytes, the stricter reading.
+4. **Same paths.** Each file was replaced in place, so no Markdown link changed. `docs/v2/ui-overhaul/before/README.md` says the capture is 11,353 pixels tall, which stays true.
+
+**Tests first.** `a649f7cf` committed the test alone; on it, the test failed with `docs/v2/ui-overhaul/before/proofmulti-inbox-full-page.png: 1179969 bytes`. It passes from the next commit, which compresses that capture.
+
+**Not done here.**
+- **No matrix line.** None names this promise, and a new `P` id could meet a parallel milestone 6 lane's; the orchestrator gives it one at the merge if the matrix should carry it.
+- PNGs under 200,000 bytes were left as they are, and PNGs outside `docs/` are not checked by the test.
+- The test runs in the `v2` workflow, on pull requests and pushes to `v2`. `checks.yml` runs only the root `test/`, so a pull request straight to `main` is not checked by it.
+
+**Checks**, on this branch at `origin/v2` `0e49cbde`:
+- `npm run typecheck` in `v2/`: clean.
+- `npm test` in `v2/`: 2872 Node tests, 2737 pass, 135 skipped, 0 fail; 415 Vitest tests pass.
+- `npm run guard -- --base origin/v2`: nothing refused. The guard does not read `docs/v2/`, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
+
+**Resources.** No Docker object, no port, no tunnel, no secret, no Claude Code login read. Network: `git fetch`, `npm ci` of the lock file, the Debian packages of pngquant 2.18.0 and libimagequant (`apt-get download`, unpacked without installing), oxipng 9.1.5's release archive from its GitHub repository, and Pillow and NumPy from PyPI into a scratch folder to compare the pixels; all of these outside the repository. GitHub for the pull request.
+
+- Pull request: 457, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-png-compress`.
+
+## 2026-10-28: a setup check a restart interrupts is released at the next start, and the flow's git asks gh for GitHub's credential with no app (the author's choices, lane `v2-j6-setup-robustness`, C4, P258, B6.5, P262, issues #436 and #421)
+
+**The need.** Two gaps the milestone 5 lanes left open. #436: a setup session's check (`checkBranch`, `checkPrepared`) removes what it made in a `finally`, which a stop of the service never runs, so its containers, network, images and tree stay, under a session id no ledger row knows. #421: on a Compose install with no GitHub App, the flow's fetches and pushes take git's environment from `lib/forge.ts`, which then names no helper that reads `GH_TOKEN`, so a private repository is refused. Tests first, French and English for any person's text (none was added: the new lines are the service's log, in English as the others), nothing on a real server, no deploy.
+
+**The branch.** Renamed to `v2-j6-setup-robustness`, from `origin/v2` at `0e49cbde`.
+
+**Decision.**
+1. **#436: the check's folder is its record, released by its id.** The issue offered two ways: remove at start whatever carries `cleared.role=env-check`, or record the check's id so the restart recovery releases it. A sweep by role would also remove a running check of another instance on the same host, which `releaseStopped` was written never to do, so the second way was taken. The record already existed: `<state>/env-check/<session id>`, the folder of the branch's tree. It is now made first, before any Docker object, in both checks. At start, beside `recover()`, the runtime calls `releaseInterruptedChecks`: each folder named by a session id that no check of this process runs is released by that id (`removeSession`: containers, network, images), then removed. The checks this process runs are known in memory: the engine can be built after the assistant writes the workspace (issue #420), while the environment step already runs a check in the same process, which a sweep by folder alone would kill. A removal that fails is said by id and keeps its folder, at start and at a check's own end, so the next start tries again; before, the folder went whatever Docker said. Only this state folder is read, so another instance's checks are never named.
+2. **#436: the ticket fails cleanly; it is not resumed.** The restart recovery already puts a ticket left In Progress back in Todo with the restart note, and the adapter keeps nothing to resume a session with, so an interrupted check's ticket goes back as any other. No round is recorded for a check that never answered, so its next start counts its rounds from one. The environment step keeps no state across a restart (its queue is in memory): a service whose check was interrupted shows its ready image with no check, and Build runs it again.
+3. **#421: neither option of the issue as written.** (a), the helper in `lib/forge.ts`'s ambient environment, would change every v1 install's git and break the v1 test that pins the ambient credential "exactly as before" (`test/forge.test.ts`). (b), `gh auth setup-git` in the image's entrypoint, runs before the assistant gives the service its token: the forge step sets `GH_TOKEN` in the running service (`setup/steps/forge.ts`), and `gh auth setup-git` refuses with no credential (tried once with an empty `HOME` and no credential, it said it was not logged into any GitHub host and exited 1). So the helper is added where v2 reads `lib/forge.ts`'s environments, `forgeEnvironments`, the one door of `flow/effects.ts`, `flow/runtime.ts`, `modules/lead.ts` and `lead/briefing.ts`: its child now also says whether the forge is the ambient credential (`forgeMode`), and only then git's environment goes through `cloneEnvironment`, the function of the workspace step's clones. With a GitHub App, git keeps the forge's helper alone: an empty helper after it would have dropped the app's for the personal token. `cloneEnvironment` now also drops git's debug switches (`GIT_TRACE`, `GIT_TRACE_CURL`, `GIT_CURL_VERBOSE`, `GIT_TRACE_REDACT`, the git part of `lib/forge.ts`'s list) when it adds the helper: a failed git's last lines go into the service's log through `CheckoutError`.
+4. **#421: the token's places, checked.** gh reads `GH_TOKEN` from its own environment; it is in no git setting, argument, URL or output. A session's container gets only the variables it is given by name, and the Docker client runs with the service's environment, so a bare `--env GH_TOKEN` would leak it: a test starts a session and a check with `GH_TOKEN` set and finds the name and the value in no container's arguments or private environment. Issue #147 (code a session runs reading the session's own token) is not this lane's and is unchanged.
+
+**Tests first.**
+- #436, `test/flow/env-setup.test.ts`: the real `checkBranch` on the fake `docker` with its check's `exec` never answering, so its `finally` never runs; then a new engine on the same ledger and the release at start. Before the code, the test file did not load (`releaseInterruptedChecks` missing). Two more cases: a check this process runs is left alone and a failed removal keeps its folder; the runtime, once it builds its engine, releases what a folder names. That last case failed with the runtime's call taken out.
+- #421, `test/workspace/forge-git.test.ts`, over the real `lib/forge.ts` child and a fake gh on PATH: the ambient case failed with no helper (`actual: []`); the app case and the no-token case passed before and after, as they must. git's own `git credential fill` for a private repository on GitHub gets the value from gh, and its output does not hold it. `test/container/session-runtime.test.ts`: the session's and the check's containers, which passed before and after; it guards.
+
+**The real run.** On this server, outside any container, with gh 2.101.0 (the version the image pins), an empty `HOME` and no system git configuration: `git fetch` of a private repository this server's gh login reaches, with the environment `forgeEnvironments` gives, exited 128 without `GH_TOKEN` and 0 with it, `FETCH_HEAD` a commit, and nothing git said held the token. The token came from this server's gh login into the process, never printed; the repository is not named here.
+
+**Files outside the issues' own.** `docs/troubleshooting.md` (the known gap of #436 removed, #421's narrowed to the release lock), the matrix and this log.
+
+**Not done here.**
+- **No Compose run.** No Docker was used: the fetch in the service's container, and a real restart under Compose, are left to the next rehearsal of the proof (B6.5p).
+- **The lock's git.** The v1 release lock (`serve/release-broker.ts`, `merge-pr.ts`, `lib/release.ts`) reads `lib/forge.ts` directly and is unchanged. It fetches and pushes with git itself (`merge-pr.ts`, the base's fetch and the rollback's push in `lib/release.ts`), so in the Compose `broker` container, with no GitHub App, a private repository is still refused there. Changing `lib/forge.ts`'s ambient environment is the v1 decision of point 3; the broker is left for an issue of its own, and `docs/troubleshooting.md` keeps that narrower gap.
+- **#425,** GitLab's credential for the flow's git, the sibling of #421, is unchanged.
+
+**Checks**, on this branch at `origin/v2` `0e49cbde`:
+- `npm run typecheck` in `v2/`: clean.
+- `npm test` in `v2/`: 2878 Node tests, 2743 pass, 135 skipped, 0 fail; 415 Vitest tests pass.
+- `test/forge.test.ts` of v1: 15 pass, the ambient credential unchanged.
+- `npm run guard -- --base origin/v2`: nothing refused. The guard does not read `docs/v2/`, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
+
+**Resources.** No Docker object, no container, no tunnel, no listening port but the tests' own ephemeral loopback ones. GitHub: the issues, one read-only fetch of a private repository with this server's gh login, and the pull request. No Claude Code login read. Network: `npm ci` of the lock file, `git fetch`.
+
+- Pull request: 454, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-setup-robustness`.
+
+## 2026-10-28: the workspace the assistant writes, used by every module with no restart, and the Tower's tickets named by its id (the author's choices, lane `v2-j6-workspace-reload`, B6.5, M10, P263, issues #420, #437)
 
 **The need.** Milestone 6, issues #420 and #437. The service reloads the workspace without a restart (#420), and the Tower no longer sends an empty project when it creates a ticket after the setup assistant (#437). Acceptance: an end-to-end test runs the assistant, then a first ticket, with no restart, and the ticket carries the right project; a page says which modules follow the workspace with no restart and which need one. Fakes only, nothing on a real server, no deploy. The brief says the milestone 6 plan's section for this lane is quoted in it; it is not, and no milestone 6 plan is in the repository, so the lane follows the two issues, [milestone-5-plan.md](milestone-5-plan.md) for context and the conventions of its section 3.1, as earlier lanes did when `PROMPT.md` was missing.
 
-**The branch.** `v2-j6-workspace-reload`, from `origin/v2` at `0e49cbde` (pull request 448).
+**The branch.** `v2-j6-workspace-reload`, from `origin/v2` at `0e49cbde` (pull request 448); `origin/v2` merged at `1f49a708` (pull requests 457 and 454), where lane `v2-j6-setup-robustness` had taken P262, so this lane's line is P263.
 
 **What was found.** P256 (#433) had closed the first part of #420: the flow's runtime reads its settings again while it has none and builds the engine at the first request that finds them. Its log entry left three modules that read the workspace at start only: the lead's knowledge, the mirrors and the workspace's record. Reading every module that reads the workspace found more, and a worse case: the knowledge and the notifications were gated on `CLEARED_V2_PROJECT`, and the lead's switch too (`lead/config.ts`), while the assistant writes `CLEARED_V2_WORKSPACE` only (`workspace/connect.ts`). On an install by the assistant these three never started, a restart included.
 
