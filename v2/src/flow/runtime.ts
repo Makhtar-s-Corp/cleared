@@ -25,7 +25,7 @@ import { Docker } from '../container/docker.ts';
 import type { PreviewTarget } from '../container/preview.ts';
 import { planSiblings } from '../container/services.ts';
 import { PreparedImages, preparedAfterMerge, type PreparedSource } from '../container/prepared.ts';
-import { environmentAfterMerge } from './env-setup.ts';
+import { environmentAfterMerge, releaseInterruptedChecks } from './env-setup.ts';
 import { exportBase, projectCheckout } from '../workspace/checkout.ts';
 import { forgeEnvironments } from '../workspace/publish.ts';
 import { createApiRoutes } from '../api/routes.ts';
@@ -61,6 +61,7 @@ export type RuntimeOptions = {
   readonly effects?: (config: FlowConfig) => FlowEffects;
   readonly factories?: Readonly<Partial<Record<Harness, AdapterFactory>>>;
   readonly release?: FlowDeps['release'];   // a real Docker's releaseStopped otherwise
+  readonly docker?: Docker;                 // what the interrupted environment checks are released with; a real Docker otherwise
 };
 
 export function createRuntime(options: RuntimeOptions = {}): Runtime {
@@ -123,9 +124,12 @@ export function createRuntime(options: RuntimeOptions = {}): Runtime {
     };
     engine.subscribe(preparedAfterMerge({ images, services, fetch }));
     engine.subscribe(environmentAfterMerge({ images, services, fetch, labels: async (ticket) => (await registry.ticketStore.get(ticket))?.labels ?? [] }));
-    // What the last process left running is stopped and put back (decision 12 of milestone 2).
+    // What the last process left running is stopped and put back (decision 12 of milestone 2), and
+    // what its environment checks left is released (issue #436).
     const recovering = engine;
-    recovering.recovered = recovering.recover().catch((error) => console.error(`cleared-v2: the restart recovery failed (${error instanceof Error ? error.name : typeof error})`));
+    const checks = releaseInterruptedChecks({ docker: options.docker ?? new Docker(), stateDir: stateDir() });
+    recovering.recovered = Promise.all([recovering.recover(), checks]).then(() => undefined)
+      .catch((error) => console.error(`cleared-v2: the restart recovery failed (${error instanceof Error ? error.name : typeof error})`));
     for (const listener of waiting.splice(0)) listener(engine);
     return engine;
   }

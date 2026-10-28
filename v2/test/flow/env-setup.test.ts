@@ -9,23 +9,26 @@
 // network, no real session.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Docker, LABEL, ROLE_LABEL, SESSION_LABEL } from '../../src/container/docker.ts';
 import { parseServices } from '../../src/container/services.ts';
 import { PreparedImages, readRecord, type PreparedSource } from '../../src/container/prepared.ts';
 import {
-  ENV_CHECK_ROUNDS, ENVIRONMENT_LABEL, EnvCheckStore, checkBranch, declaredCheck, envCheckComment, envCheckRequest, environmentAfterMerge, hasDevcontainer, isEnvironmentTicket, took,
+  ENV_CHECK_ROUNDS, ENVIRONMENT_LABEL, EnvCheckStore, checkBranch, declaredCheck, envCheckComment, envCheckRequest, environmentAfterMerge, hasDevcontainer, isEnvironmentTicket, releaseInterruptedChecks, took,
   type EnvCheck,
 } from '../../src/flow/env-setup.ts';
-import type { FlowEffects } from '../../src/flow/engine.ts';
+import { FlowEngine, type FlowEffects } from '../../src/flow/engine.ts';
 import type { FlowEvent } from '../../src/flow/events.ts';
 import { openStore } from '../../src/store/db.ts';
+import { createRuntime } from '../../src/flow/runtime.ts';
+import { INBOX_TABLE } from '../../src/inbox/store.ts';
+import { defaultRegistry } from '../../src/modules/registry.ts';
 import { typeLabel } from '../../src/tickets/templates.ts';
 import { commit, gitIn, tempDir } from '../workspace/git.ts';
 import { FakeDocker } from '../container/fake-docker.ts';
 import { LOCK, fetched, land, project } from '../container/prepared-fixture.ts';
-import { REPORT_PASS, finished, quickAuthor, reopenScript, reviewerScript, setup, started, text, until, type Setup } from './support.ts';
+import { REPORT_PASS, fakeEffects, finished, quickAuthor, reopenScript, reviewerScript, setup, started, text, until, type Setup } from './support.ts';
 import { execFileSync } from 'node:child_process';
 
 const BRANCH = 'cleared/LOCAL-1';
@@ -418,6 +421,101 @@ test('a ticket set aside or closed while its check runs: the result is dropped, 
     assert.equal((await comments(t, ticket.id)).length, before, `${how}: nothing said of a run that ended`);
     assert.equal(t.engine.isActive(ticket.id), false);
     await t.engine.close();
+  }
+});
+
+test('a check the service\'s restart interrupts: the new service puts the ticket back in Todo, and releases the check\'s containers, network, images and tree by its own id (issue #436)', async () => {
+  const { bare, source } = project();
+  branch(bare, source, { '.devcontainer/devcontainer.json': DEVCONTAINER, '.devcontainer/Dockerfile': DOCKERFILE, 'package-lock.json': LOCK('8.13.2') });
+  const fake = new FakeDocker();
+  fake.execAnswer = () => ({ code: 0, stdout: '', stderr: '' });
+  // The check's own command never answers: the service stops while it runs, so its finally never runs.
+  let running = false;
+  const stalled = new Docker(async (args, options) => {
+    if (args[0] === 'exec' && args.includes('npm')) { running = true; return new Promise(() => undefined); }
+    return fake.runner(args, options);
+  });
+  const stateDir = tempDir('env-state');
+  const declared = { command: ['npm', 'test'], services: parseServices('postgres:16') };
+  const t = await setup({ scripts: { author: quickAuthor }, effects: { envCheck: () => checkBranch({ docker: stalled, stateDir, source, ref: REF, declared }) } });
+  const ticket = await environmentTicket(t);
+  await t.engine.start(ticket.id, 'u1');
+  await until(() => running, 'the check running', 5000);
+  const session = fake.withLabel('cleared.dev', 'v2')[0]?.labels[SESSION_LABEL] ?? '';
+  assert.deepEqual([fake.containers.length, fake.networks.length, fake.images.length], [2, 1, 2], 'what the interrupted check leaves: the test service and the check, their network, two images');
+  assert.ok(fake.all().every((object) => object.labels[SESSION_LABEL] === session));
+  assert.deepEqual(readdirSync(join(stateDir, 'env-check')), [session], 'its folder names its id');
+
+  // What the restart must leave alone: a folder that is no session id, and another instance's objects.
+  mkdirSync(join(stateDir, 'env-check', 'notes'));
+  const other = '00000000-0000-4000-8000-0000000000aa';
+  await new Docker(fake.runner).createNetwork({ name: `cleared-v2-${other}`, session: other, internal: true });
+
+  // The restart: a new engine on the same ledger, and the release at start, in a process that runs no check.
+  const again = new FlowEngine(t.deps);
+  await again.recover();
+  assert.equal(await releaseInterruptedChecks({ docker: new Docker(fake.runner), stateDir, running: new Set() }), 1);
+
+  assert.equal((await t.tickets.get(ticket.id))?.status, t.tickets.states.todo);
+  assert.match((await comments(t, ticket.id)).at(-1) ?? '', /service restarted/);
+  assert.deepEqual(fake.withLabel(SESSION_LABEL, session), [], 'the check\'s containers, network and images');
+  assert.equal(fake.withLabel(SESSION_LABEL, other).length, 1, 'another session\'s objects stay');
+  assert.deepEqual(readdirSync(join(stateDir, 'env-check')), ['notes']);
+  // A second start finds nothing more.
+  assert.equal(await releaseInterruptedChecks({ docker: new Docker(fake.runner), stateDir, running: new Set() }), 0);
+  await again.close();
+});
+
+test('the release at start leaves a check this process runs, and keeps the folder of a check Docker could not release, for the next start', async () => {
+  const { bare, source } = project();
+  branch(bare, source, { '.devcontainer/devcontainer.json': '{ "image": "cleared-v2-session:latest" }\n' });
+  const fake = new FakeDocker();
+  let answer!: () => void;
+  let running = false;
+  const held = new Docker(async (args, options) => {
+    if (args[0] === 'exec') { running = true; await new Promise<void>((resolve) => { answer = resolve; }); return { code: 0, stdout: '# pass 1\n', stderr: '' }; }
+    return fake.runner(args, options);
+  });
+  const stateDir = tempDir('env-state');
+  const checking = checkBranch({ docker: held, stateDir, source, ref: REF, declared: { command: ['npm', 'test'], services: [] } });
+  await until(() => running, 'the check running', 5000);
+  assert.equal(await releaseInterruptedChecks({ docker: new Docker(fake.runner), stateDir }), 0);
+  assert.equal(fake.withLabel('cleared.dev', 'v2').length, 2, 'its container and its image are untouched');
+  answer();
+  assert.equal((await checking).outcome, 'passed');
+  assert.deepEqual(fake.withLabel('cleared.dev', 'v2'), []);
+
+  const gone = '00000000-0000-4000-8000-0000000000bb';
+  mkdirSync(join(stateDir, 'env-check', gone), { recursive: true });
+  const down = new FakeDocker();
+  down.intercept = (args) => (args[0] === 'ps' ? { code: 1, stdout: '', stderr: 'Cannot connect to the Docker daemon' } : undefined);
+  assert.equal(await releaseInterruptedChecks({ docker: new Docker(down.runner), stateDir, running: new Set() }), 0);
+  assert.deepEqual(readdirSync(join(stateDir, 'env-check')), [gone], 'kept: the next start tries again');
+});
+
+test('the service\'s start releases them: the runtime, once it builds its engine, with its restart recovery', async () => {
+  const stateDir = tempDir('env-state');
+  const session = '00000000-0000-4000-8000-0000000000cc';
+  mkdirSync(join(stateDir, 'env-check', session), { recursive: true });
+  const fake = new FakeDocker();
+  await new Docker(fake.runner).createNetwork({ name: `cleared-v2-${session}`, session, internal: true });
+  const env: NodeJS.ProcessEnv = {
+    CLEARED_V2_STATE_DIR: stateDir, CLEARED_V2_PROJECT: 'guestbook', CLEARED_V2_PROJECT_DIR: '/srv/guestbook',
+    CLEARED_V2_REPO_URL: 'https://example.invalid/guestbook.git', CLEARED_V2_REPO: 'example-org/guestbook',
+  };
+  const runtime = createRuntime({ env, effects: () => fakeEffects([]), release: async () => ({ containers: [], networks: [] }), docker: new Docker(fake.runner) });
+  const store = openStore(':memory:');
+  store.db.exec(INBOX_TABLE);
+  runtime.attach({ store });
+  const engine = runtime.engine(defaultRegistry());
+  try {
+    assert.ok(engine);
+    await engine.recovered;
+    assert.deepEqual(fake.withLabel(SESSION_LABEL, session), []);
+    assert.deepEqual(readdirSync(join(stateDir, 'env-check')), []);
+  } finally {
+    await engine?.close();
+    store.close();
   }
 });
 
