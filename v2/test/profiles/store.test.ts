@@ -128,10 +128,21 @@ test('what a profile refuses, each with its code, and nothing written', () => {
   refused(() => versions.profile.save({ rolePrompts: { author: 'Fine.' } }, 'u1'), 'prompt');
   for (const tool of ['*', '* --force', 'make\ncheck', '', 'x'.repeat(201)])
     refused(() => versions.profile.save({ allowedTools: [tool] }, 'u1'), 'tools');
-  // What the policy asks about stays a question: allowed commands come before its asks.
-  for (const tool of ['rm *', 'curl *', 'wget https://example.com', 'git push *', 'git reset *', 'npm install *', 'npm i lodash', 'pip install *', 'sh -c *', 'bash *', 'npx *', 'sudo *', 'xargs *'])
-    refused(() => versions.profile.save({ allowedTools: [tool] }, 'u1'), 'tools');
-  assert.deepEqual(versions.profile.save({ allowedTools: ['make check', 'npm run lint', 'git status'] }, 'u1').body.allowedTools, ['make check', 'npm run lint', 'git status']);
+  // What the policy asks about stays a question: allowed commands come before its asks
+  // (test/profiles/policy.test.ts runs them through the policy).
+  for (const tool of [
+    'rm *', 'curl *', 'wget https://example.com', 'git push *', 'git reset *', 'npm install *', 'npm i lodash', 'pip install *', 'sh -c *', 'bash *', 'npx *', 'sudo *', 'xargs *',
+    // A wildcard where the subcommand goes: the policy's * matches inside a word too.
+    'git *', 'git p*', 'git * *', 'npm *', 'npm i*', 'pnpm *', 'yarn *', 'pip *', 'pip3 *', '/usr/bin/git push origin feat',
+    // A command that runs another one.
+    'timeout 5 curl https://example.com', 'nohup *', 'time *', 'command *', 'busybox *', 'nice *', 'env *',
+    // Code on the command line, an install through a runtime, a module that is not a test or a check.
+    'node -e *', 'node --eval *', 'node *', 'python -c *', 'python3 *', 'python -m pip install *', 'python -m http.server', 'perl -e *', 'ruby -e *', 'bun install', 'deno run *',
+    // A wildcard in the arguments of a tool that can run commands: exact commands only.
+    'awk *', 'make *', 'find *', 'tar *', 'sed *', 'make check *',
+  ]) refused(() => versions.profile.save({ allowedTools: [tool] }, 'u1'), 'tools');
+  const accepted = ['make check', 'npm run lint', 'npm run lint *', 'npm test *', 'git status', 'git log *', 'node scripts/check.js *', 'python -m pytest *', 'eslint *', 'cat *', './scripts/lint.sh'];
+  assert.deepEqual(versions.profile.save({ allowedTools: accepted }, 'u1').body.allowedTools, accepted);
   versions.profile.restore(1, 'u1');
   refused(() => versions.profile.save({ allowedTools: 'make check' }, 'u1'), 'tools');
   refused(() => versions.profile.save({ mcpServers: [{ name: 'tracker', command: 'tracker-mcp' }] }, 'u1'), 'mcp');

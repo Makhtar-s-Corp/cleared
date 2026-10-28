@@ -119,14 +119,78 @@ const model = (value: unknown, which: string): string | null => {
   return value;
 };
 
-// A command run without asking names its command first: a wildcard there
-// would allow any. The policy matches the safe commands after its deny rules
-// but before its asks (session/policy.ts simple), so a command an ask guards
-// is refused here: a deletion past the ticket's files, a host the project
-// does not declare, a package installed, a shell or a push. Those stay
-// questions, or a project's own [session] safe_commands, which its review reads.
-const ASKED = /^(?:rm|curl|wget|ssh|scp|nc|npx|sudo|su|env|eval|exec|xargs|sh|bash|zsh|dash|apt|apt-get|apk|brew|docker)(?:\s|$)|^git\s+(?:push|clean|reset|checkout|restore|config|remote)\b|^(?:npm|pnpm|yarn)\s+(?:i|add|install|exec|dlx)\b|^pip3?\s+install\b/;
-const tool = (item: string): boolean => item.length > 0 && item.length <= TOOL_MAX && !/[\n\r]/.test(item) && /^[A-Za-z0-9_./-]+(?:\s|$)/.test(item) && !ASKED.test(item.trim());
+// A command run without asking names what it runs, never by a wildcard.
+// The policy matches the safe commands after its deny rules but before its
+// asks (session/policy.ts simple), and its `*` matches inside a word as
+// well as whole words, so `git *` or `git p*` would let a push through, and
+// `npm *` an install. An allowlist, then, word by word:
+//   - the program is a literal name, and none that runs another command, a
+//     shell, the network, an install or a deletion (WRAPPERS): those stay
+//     the policy's questions, or a project's own [session] safe_commands,
+//     which its review reads;
+//   - a program with subcommands names one of its safe ones, literally
+//     (SUBCOMMANDS: reads, the tests, a commit), never one that installs,
+//     pushes, resets or reconfigures;
+//   - an interpreter runs a script named literally, or one of the test and
+//     check modules after python -m, never code given on its command line
+//     (-e, -c, --eval...) nor pip;
+//   - a wildcard comes only after that head, or in the arguments of a tool
+//     that reads or checks files and runs nothing (ARGUMENTS); any other
+//     command is allowed exactly as written, as an "Always in this project"
+//     answer allows one.
+const WRAPPERS = new Set([
+  'rm', 'rmdir', 'shred', 'curl', 'wget', 'ssh', 'scp', 'sftp', 'rsync', 'nc', 'ncat', 'netcat', 'socat', 'telnet', 'ftp',
+  'npx', 'pnpx', 'bunx', 'sudo', 'su', 'doas', 'env', 'eval', 'exec', 'xargs', 'parallel', 'timeout', 'nohup', 'time', 'command', 'builtin',
+  'busybox', 'nice', 'ionice', 'stdbuf', 'setsid', 'chroot', 'unshare', 'nsenter', 'strace', 'ltrace', 'watch', 'script', 'unbuffer', 'flock',
+  'sh', 'bash', 'zsh', 'dash', 'ksh', 'fish', 'csh', 'tcsh', 'source', '.',
+  'apt', 'apt-get', 'apk', 'brew', 'dnf', 'yum', 'docker', 'podman', 'kubectl', 'chmod', 'chown', 'dd', 'mv', 'ln', 'tee', 'install',
+  // Package managers that are runtimes too: their subcommands install as often as they run.
+  'bun', 'deno', 'uv', 'uvx', 'pipx', 'poetry', 'conda', 'gem', 'cargo', 'go',
+]);
+const SUBCOMMANDS: Readonly<Record<string, ReadonlySet<string>>> = {
+  git: new Set(['status', 'diff', 'log', 'show', 'blame', 'grep', 'ls-files', 'rev-parse', 'describe', 'shortlog', 'add', 'commit']),
+  npm: new Set(['run', 'run-script', 'test', 't', 'ls', 'list', 'outdated', 'why']),
+  pnpm: new Set(['run', 'test', 't', 'ls', 'list', 'outdated', 'why']),
+  yarn: new Set(['run', 'test', 'list', 'outdated', 'why']),
+  pip: new Set(['list', 'show', 'freeze', 'check']),
+  pip3: new Set(['list', 'show', 'freeze', 'check']),
+};
+const INTERPRETERS = new Set(['node', 'nodejs', 'python', 'python2', 'python3', 'perl', 'ruby', 'php', 'lua', 'Rscript', 'tsx', 'ts-node']);
+const PYTHONS = new Set(['python', 'python2', 'python3']);
+// The modules `python -m` may run: tests and checks, never pip or a server.
+const PYTHON_MODULES = new Set(['pytest', 'unittest', 'doctest', 'mypy', 'ruff', 'black', 'flake8', 'pylint', 'isort', 'compileall']);
+const ARGUMENTS = new Set([
+  'tsc', 'eslint', 'prettier', 'biome', 'jest', 'vitest', 'mocha', 'pytest', 'ruff', 'mypy', 'black', 'flake8', 'pylint', 'shellcheck',
+  'cat', 'head', 'tail', 'wc', 'ls', 'grep', 'rg', 'diff', 'stat', 'file', 'du', 'tree', 'jq',
+]);
+const LITERAL = /^[A-Za-z0-9_@%+=:,./-]+$/;                // a word with no wildcard nor shell character
+const PATTERN = /^[A-Za-z0-9_@%+=:,./*-]+$/;               // the same, or with the policy's wildcard
+
+function tool(item: string): boolean {
+  if (item.length === 0 || item.length > TOOL_MAX || /[\n\r]/.test(item)) return false;
+  const words = item.trim().split(/\s+/);
+  const [first = '', second, third] = words;
+  if (!LITERAL.test(first)) return false;
+  const program = first.split('/').at(-1) as string;
+  if (WRAPPERS.has(program)) return false;
+  // The words that must be literal: the head; after it, the policy's wildcard is allowed.
+  let head = words.length;
+  const subcommands = SUBCOMMANDS[program];
+  if (subcommands) {
+    if (second === undefined || !subcommands.has(second)) return false;
+    head = 2;
+  } else if (INTERPRETERS.has(program)) {
+    if (second === undefined) return false;
+    if (PYTHONS.has(program) && second === '-m') {
+      if (third === undefined || !PYTHON_MODULES.has(third)) return false;
+      head = 3;
+    } else {
+      if (!LITERAL.test(second) || second.startsWith('-')) return false;
+      head = 2;
+    }
+  } else if (ARGUMENTS.has(program)) head = 1;
+  return words.every((word, index) => (index < head ? LITERAL : PATTERN).test(word));
+}
 
 export function readProfile(change: unknown, base: AgentProfile): AgentProfile {
   refuseSecrets(change, 'profile');
