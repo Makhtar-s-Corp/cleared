@@ -7791,3 +7791,26 @@ Changed with the code: the label gate's case (decision 10), the adapter test's f
 **Resources.** No Docker, no tunnel, no listening port but the tests' and the captures' own ephemeral loopback ones. Network: `npm ci`, `git fetch`, puppeteer-core from npm and oxipng 9.1.5's release archive from its GitHub repository, both into a scratch folder outside the repository; GitHub for the issue and the pull request. No photo, no remote image, no Claude Code login read, no secret.
 
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-ui-hallmark`.
+
+## 2026-10-28: the web app's professional look replaces Signal (the owner's decision, lane `v2-j6-ui-pro`, P266, B3.8, issue #461)
+
+**The need.** The owner turned down the Signal theme merged in #460 as ugly and not professional, and asked for the look of the best tools of the genre: a dense, calm, precise engineering tool, light only, flat, white or very light grey grounds, 1px soft grey lines and no 2px ink frame, radii 6 to 8 px, a neutral grey palette with one sober accent and discreet status colours, a clean sans with monospace for code and ids, 13 to 14 px body, nothing poster-like. Everything #460 gained stays: no dark mode, the CI flat guard, the sidebar for the development, AA, axe clean at 1440 and 390, 44 px targets, reduced motion, nothing clickable that moves. No revert.
+
+**The branch.** Renamed to `v2-j6-ui-pro`, from `origin/v2` at `c452ab97`.
+
+**Decision.**
+1. **References studied first,** in their 2026 public sources: Devin's desktop changelog (its agent window matches the web app since 2026-10-23), Codex's documentation and a dated review with its screenshot, Linear's UI refresh of 2026-03-12, Cursor 3.0, Vercel's navigation rollout and Geist's materials and type, Raycast 0.51 and 0.66 ([ui-pro/REFERENCES.md](ui-pro/REFERENCES.md)). The signed-in apps were not opened (they need an account); no image of theirs is in the repository.
+2. **Workbench, locked in [ui-pro/DESIGN.md](ui-pro/DESIGN.md).** White paper, the sidebar 3.5 % greyer; every grey mixed from `#1A1C21` into white; one indigo accent `#4C5BD4` (5.6:1 under white text) for the primary action, links, focus and what is live; amber, green, red and teal as 6 px dots beside their word, a pale tint only behind a line to read. 1px lines (`--line`) where regions meet, fields at 3:1 (`--input`, WCAG 1.4.11), secondary buttons lighter (`--outline`). Radii 6 px on controls, 8 px on panels, menus and dialogs. No shadow at all: the flat guard refuses a blurred one, so a menu has a line.
+3. **Geist kept,** as the owner's "Inter or equivalent": the app already self-hosts it (B3.8) and Vercel's own tools are set in it. The scale is now 12, 13, 14, 16 and 20 px (body 13), weights 400, 500 and 600; no display type.
+4. **What changed on the screens,** the structure of #460 kept: ink plates became grey selections (the current place, a pressed choice, the palette's row); the Lead's band, the setup's band, the period of Consumption and the plan's numbers are light; the session's tabs are an underline tab bar; the terminal is white with ANSI colours darkened to 5:1 on white; the services label moved under its heading (no label over a heading); a turn's cost on the Ask screen is drawn as facts, not a middle-dot line.
+5. **Tests whose values were Signal's,** replaced by values as exact for Workbench, none loosened: the type scale and weights (`tokens.test.ts`), the waiting ring at 1px (`motion.test.ts`), the paper `#FFFFFF` instead of `#EFF0F1` (`a11y-browser.test.ts`). A new capture `groups` (the sessions screen as the whole page) in `scripts/capture-screens.ts`.
+
+**Sloplint,** run in a real browser (Chromium through puppeteer-core in a scratch folder) on snapshots of the signed-in screens with their sheets inlined, `--scope app`: tower, inbox, sessions, session, lead, plan, Consumption and the service map at 0 FAIL. One FAIL left on the Ask screen (gate 63: its total line is a middle-dot string, and `app/web/test/ask/render.test.tsx` pins that markup; not changed, for the owner). The sign-in page and the setup steps were checked from the captures, not linted.
+
+**Checks.** `npm run typecheck` clean; the app's Node tests with the browser tests on (526, of which 2 failed on the paper colour and pass after the fix above; the 80 lead, redesign and shell tests rerun after the last change); Vitest 417 pass; axe with no violation at 1440 and 390, in French and English.
+
+**Not done here.** The owner validates the captures before any merge. The groups capture shows the same sessions as the sessions screen on the fixtures (they fit one window).
+
+**Resources.** No Docker, no tunnel, no listening port but the tests' and captures' own ephemeral loopback ones. Network: `npm ci`, `git fetch`, the references' public pages, puppeteer-core from npm and oxipng 9.1.5's release archive from its GitHub repository, both into a scratch folder outside the repository; GitHub for the issue and the pull request. No photo, no remote image, no secret. No sub-agent was started (the brief's rule), so the progress dashboard the owner's personal rules ask for was kept by this session itself.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-ui-pro`.
