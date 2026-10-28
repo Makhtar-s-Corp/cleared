@@ -113,6 +113,20 @@ test('harness auto with two harnesses enabled: the ticket runs as a harness pick
   assert.ok(comments.includes('Started by u1 in 2 variants, one per harness: claude-code, codex.'), comments.join('\n'));
 });
 
+test('harness auto leaves a Quick ticket in its fast lane and a setup session on its one author', async () => {
+  const t = await setup({ config: { pickHarnesses: [{ harness: 'claude-code' }, { harness: 'codex' }] }, scripts: { author: quickAuthor } });
+  t.store.db.exec(VARIANTS_TABLE);
+  otherHarness(t, 'codex');
+  profileVersions(t.store.db).profile.save({ harness: 'auto' }, 'u1');
+  for (const labels of [['Quick'], ['type:environment']]) {
+    const ticket = await t.tickets.create({ title: `A ${labels[0]} ticket`, project: 'guestbook', labels }, { kind: 'human', id: 'u1' });
+    await t.engine.start(ticket.id, 'u1');
+    const authors = t.startedSessions.filter((s) => s.input.ticket === ticket.id && s.input.role === 'author');
+    assert.deepEqual(authors.map((s) => s.input.harness), ['claude-code'], labels[0]);
+  }
+  assert.equal((t.store.db.prepare('SELECT COUNT(*) AS n FROM ticket_variants').get() as { n: number }).n, 0);
+});
+
 test('harness auto does not override what the ticket asks: a number of variants stays plain variants on Claude Code', async () => {
   const t = await setup({ config: { pickHarnesses: [{ harness: 'claude-code' }, { harness: 'codex' }] }, scripts: { author: quickAuthor } });
   t.store.db.exec(VARIANTS_TABLE);

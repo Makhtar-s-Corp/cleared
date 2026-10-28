@@ -1047,7 +1047,7 @@ export class FlowEngine {
     const tickets = this.registry.ticketStore;
     const ticket = await tickets.get(ticketId);
     if (!ticket) throw new FlowError('not_found', `unknown ticket ${ticketId}`);
-    const variants = asked ?? this.#autoHarnesses();
+    const variants = asked ?? this.#autoHarnesses(ticket);
     const count = typeof variants === 'object' ? variants.length : variants ?? 1;
     const refused = count === 1 && typeof variants !== 'object' ? undefined : this.variantsRefusal(variants as number | readonly Harness[]);
     if (refused) throw new FlowError('invalid', refused);
@@ -2067,9 +2067,11 @@ export class FlowEngine {
 
   // The harnesses of a pick a profile on auto asks for: the ones enabled
   // whose adapter is registered, on a workspace of one service; fewer than
-  // two, none, and the ticket runs on Claude Code as before.
-  #autoHarnesses(): readonly Harness[] | undefined {
+  // two, none, and the ticket runs on Claude Code as before. A Quick ticket
+  // keeps its fast lane on Haiku, and a setup session (C4) its one author.
+  #autoHarnesses(ticket: Ticket): readonly Harness[] | undefined {
     if (this.#profiles.profile.current().body.harness !== 'auto' || this.#several) return undefined;
+    if (ticket.labels.includes(QUICK_LABEL) || isEnvironmentTicket(ticket.labels)) return undefined;
     const enabled = (this.config.pickHarnesses ?? PICK_DEFAULT).map((p) => p.harness).filter((harness) => this.registry.sessionAdapters[harness]);
     return enabled.length >= VARIANTS_MIN ? enabled.slice(0, VARIANTS_MAX) : undefined;
   }

@@ -128,12 +128,17 @@ test('what a profile refuses, each with its code, and nothing written', () => {
   refused(() => versions.profile.save({ rolePrompts: { author: 'Fine.' } }, 'u1'), 'prompt');
   for (const tool of ['*', '* --force', 'make\ncheck', '', 'x'.repeat(201)])
     refused(() => versions.profile.save({ allowedTools: [tool] }, 'u1'), 'tools');
+  // What the policy asks about stays a question: allowed commands come before its asks.
+  for (const tool of ['rm *', 'curl *', 'wget https://example.com', 'git push *', 'git reset *', 'npm install *', 'npm i lodash', 'pip install *', 'sh -c *', 'bash *', 'npx *', 'sudo *', 'xargs *'])
+    refused(() => versions.profile.save({ allowedTools: [tool] }, 'u1'), 'tools');
+  assert.deepEqual(versions.profile.save({ allowedTools: ['make check', 'npm run lint', 'git status'] }, 'u1').body.allowedTools, ['make check', 'npm run lint', 'git status']);
+  versions.profile.restore(1, 'u1');
   refused(() => versions.profile.save({ allowedTools: 'make check' }, 'u1'), 'tools');
   refused(() => versions.profile.save({ mcpServers: [{ name: 'tracker', command: 'tracker-mcp' }] }, 'u1'), 'mcp');
   refused(() => versions.profile.save({ skills: 'none' }, 'u1'), 'skills');
   refused(() => versions.profile.save({ model: 'claude-opus-5-1' }, 'u1'), 'body');
   refused(() => versions.profile.save(['claude-code'], 'u1'), 'body');
-  assert.equal(versions.profile.list().length, 1);
+  assert.equal(versions.profile.list().length, 3, 'only the two writes that passed');
 });
 
 test('what an environment refuses: an image Cleared did not build, an unknown network, hosts it cannot read, limits out of bounds', () => {

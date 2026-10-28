@@ -119,8 +119,14 @@ const model = (value: unknown, which: string): string | null => {
   return value;
 };
 
-// A command run without asking names its command first: a wildcard there would allow any.
-const tool = (item: string): boolean => item.length > 0 && item.length <= TOOL_MAX && !/[\n\r]/.test(item) && /^[A-Za-z0-9_./-]+(?:\s|$)/.test(item);
+// A command run without asking names its command first: a wildcard there
+// would allow any. The policy matches the safe commands after its deny rules
+// but before its asks (session/policy.ts simple), so a command an ask guards
+// is refused here: a deletion past the ticket's files, a host the project
+// does not declare, a package installed, a shell or a push. Those stay
+// questions, or a project's own [session] safe_commands, which its review reads.
+const ASKED = /^(?:rm|curl|wget|ssh|scp|nc|npx|sudo|su|env|eval|exec|xargs|sh|bash|zsh|dash|apt|apt-get|apk|brew|docker)(?:\s|$)|^git\s+(?:push|clean|reset|checkout|restore|config|remote)\b|^(?:npm|pnpm|yarn)\s+(?:i|add|install|exec|dlx)\b|^pip3?\s+install\b/;
+const tool = (item: string): boolean => item.length > 0 && item.length <= TOOL_MAX && !/[\n\r]/.test(item) && /^[A-Za-z0-9_./-]+(?:\s|$)/.test(item) && !ASKED.test(item.trim());
 
 export function readProfile(change: unknown, base: AgentProfile): AgentProfile {
   refuseSecrets(change, 'profile');

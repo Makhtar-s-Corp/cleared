@@ -29,8 +29,9 @@ export type AgentProfile = {
   readonly reviewerModel: string | null;
   // Added after the first prompt of each author or reviewer session; '' for none.
   readonly rolePrompts: { readonly author: string; readonly reviewer: string };
-  // Commands an author or a reviewer runs without asking, added to Cleared's
-  // and the project's (the policy's safe commands): each names its command.
+  // Commands an author runs without asking, added to Cleared's and the
+  // project's (the policy's safe commands; a reviewer's are its own reads):
+  // each names its command, and none the policy asks about.
   readonly allowedTools: readonly string[];
   // What a session has today, and the only value accepted: no MCP server
   // beyond Cleared's own, and the project's skills mounted as they are (B5.5b).
