@@ -504,9 +504,37 @@ Each ticket went back to Todo after its publish with "The release could not be r
 - Pull request: 486, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-docker-hygiene`.
 
+## 2026-10-28: the 135 open review follow-ups triaged against `v2`: 18 closed with their proof, 112 grouped into five umbrellas, 5 security issues left open (the author's choices, lane `v2-j6-review-triage`, B4.4, issue #476)
+
+**The need.** Issue #476: check every open issue labelled `review-followup` (135) against `origin/v2`, close the obsolete ones with a proof (commit, file and line, or test), group the rest into three to five umbrella issues, never touch an issue labelled `security`, change no code, and record the triage in [review-triage.md](review-triage.md). The brief names a milestone 6 plan; none is in the repository, so the lane follows the issue and the brief, as the other lanes of the wave did.
+
+**How each issue was judged**, against `origin/v2` at `9e32fb8`:
+- **Obsolete** only with a proof. A commit that removed the code the issue is about counts: `c267af34` (what keep-and-drop.md drops: the bash lanes, `talk.sh`, `when-free.sh`, the one-shot adapters, `lib/contract.sh`, `serve/check-harness.sh`) and `1ec1aff3` (`lib/common.sh`). A file renamed to TypeScript (`6aedea1c`) does not: an issue whose behaviour survived the rename stays valid, as the guard's lists (#5, #15, #16), the GitHub tracker (#25 to #28) and the broker (#59 to #61) do. A fix counts when a commit, a line or a test shows it: #139 and #140 (`2c2b9879`, the Stop hook by role, the commit identity, `settingSources` by the owner's decision of 2026-10-25), #146 (`45848936`, fixed scalars), #245 (every item, each with its line).
+- **A rollup of several items** (most issues from #121 on) is closed only when every item is proven done; otherwise it is grouped whole, never split. Where the check could not prove a fix, the table says "not shown fixed; kept", as the brief asks for any doubt.
+- **#229** lists no follow-up: its body is its heading only. Closed with that said.
+
+**What was done.**
+1. Five umbrella issues, each labelled `review-followup` and `v2` so the query matrix line B4.4 cites still finds the work, each with a checklist that links its originals and says what the check found: #479 (the v1 modules kept on `v2`, 42), #480 (the v2 service: flow, sessions, lead and workspace, 24), #481 (hardening: session policy, isolation and the app's gates, 14), #482 (the web app's screens, i18n and accessibility, 16), #483 (proofs, CI, tests and docs, 16). #481 holds the unlabelled issues that touch isolation or secrets (#62, #132, #133, #137, #138, #142, #144, #147, #185, #188, #191, #219, #243, #246), so they are read as a set and not lost among the screens.
+2. Each grouped original closed as a duplicate of its umbrella, with a comment naming it and what the check found; each obsolete one closed with its proof in a comment ("completed" for the 4 fixed, "not planned" for the 14 whose code was removed). Before each close the state and labels were read again, since other lanes run in parallel. #62 was first closed as obsolete (the installer's sudo probe and bubblewrap left), then reopened and grouped into #481: `[security] agent_user` still holds the release lock (`lib/release.ts:516-517`) and the broker's peer-UID check (`serve/release-broker.ts:18-27`), so its broker check still applies.
+3. Left open, untouched (no comment, no label, no regrouping): #4, #9, #12, #31, #46, labelled `security`. #4's variable is still read at `serve/install.ts:73`, written here for the owner only.
+
+**Seen during the triage**, put on #479: `docs/security.md:138` still describes `serve/check-harness.sh`, and `docs/configuration.md:256-271` still name `when-free.sh`, both removed in `c267af34`.
+
+**For the parallel lanes.** #133 (lane `v2-j6-docker-hygiene`) and the decisions log wording items #195, #215, #260 and #262 (lane `v2-j6-decisions-log-split`) are now closed under #481 and #483: a lane that fixes one ticks its line on the umbrella.
+
+**Not done here.** No code changed, no issue fixed. No progress dashboard: the owner's rules ask a sub-agent to keep one for a long task, and the brief forbids starting any sub-agent. The quota was not measured: the lane started no Cleared session and no model call besides its own.
+
+**Checks**, on this branch: the 135 issues read back after the closes, each in the state its row says (112 closed as duplicates of their umbrella, 14 "not planned", 4 "completed", the 5 security ones open). In `v2/`: `npm run typecheck` clean; `npm test` runs 2964 Node tests, 2823 pass, 141 skipped (the browser tests), 0 fail, and 434 Vitest tests pass; `npm run guard -- --base origin/v2`: nothing refused.
+
+
+**The merge of 486** (lane `v2-j6-docker-hygiene`, at `origin/v2` `e37d8363`). The log keeps that lane's entry, then this one. #133 stays grouped into #481: `rm --force --volumes` is still in `v2/src/container/docker.ts` (line 562 after the merge). After the merge: `npm run typecheck` clean; `npm test` runs 2975 Node tests, 2834 pass, 141 skipped, 0 fail, and 434 Vitest tests pass; `npm run guard -- --base origin/v2`: nothing refused.
+
+- Pull request: against `v2`, closes #476.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-review-triage`.
+
 ## 2026-10-28: the decisions log split into one file per milestone, the old page kept as its index (the author's choices, lane `v2-j6-decisions-log-split`, issue #478)
 
-**The need.** Issue #478: `docs/v2/decisions-log.md` had grown to 1,503,949 bytes and 225 entries at the last merge of `origin/v2` (`e37d836`), one page every lane reads and appends to. Split it into one file per milestone, keep the old page as a short index so the links to it still land, say on the index where new entries go, check with a test that the files hold the old text byte for byte and that every relative link and anchor resolves, and update the references to the log. No entry edited, moved or reordered.
+**The need.** Issue #478: `docs/v2/decisions-log.md` had grown to 1,509,053 bytes and 226 entries at the last merge of `origin/v2` (`e1a0ccc`), one page every lane reads and appends to. Split it into one file per milestone, keep the old page as a short index so the links to it still land, say on the index where new entries go, check with a test that the files hold the old text byte for byte and that every relative link and anchor resolves, and update the references to the log. No entry edited, moved or reordered.
 
 **What was done.**
 1. **Six files, cut at entry headings, in order.** `decisions-log-milestone-1.md` to `decisions-log-milestone-6.md`. Each starts at the first entry written for its milestone: "Fable 5.1 used once to plan milestone 2", the first `j3` lane (`j3-cursor-harness`), the first `v2-j4` lane (`v2-j4-issue-mirrors`), "milestone 5's plan" and the first `v2-j6` lane (`v2-j6-png-compress`). The old page's title and preamble open the milestone 1 file, since the files read in order must give the old page back. The entries kept their order, so four late entries of milestone 2's lanes, written on 2026-10-25 between milestone 3's, are in the milestone 3 file; the index names them.
@@ -522,9 +550,11 @@ Each ticket went back to Todo after its publish with "The release could not be r
 - `docs/v2/milestone-6-plan.md`, which the brief lists to read first, is not on `origin/v2`; nothing was created in its place.
 - No progress dashboard: the owner's rules ask a sub-agent to keep one for a long task, and the brief forbids starting any sub-agent.
 
-**The merge of 486** (lane `v2-j6-docker-hygiene`, at `origin/v2` `e37d836`). That lane appended its entry to the old page, which this branch had made the index. Its entry was moved, unedited, to the end of the milestone 6 file, before this one; the index stays as this branch wrote it. The test's length and SHA-256 were taken again from `git show origin/v2:docs/v2/decisions-log.md` at `e37d836`, which the six files read in order start with. The matrix merged by itself (line P269 is that lane's).
+**The merge of 486** (lane `v2-j6-docker-hygiene`, at `origin/v2` `e37d836`). That lane appended its entry to the old page, which this branch had made the index. Its entry was moved, unedited, to the end of the milestone 6 file, before this one; the index stays as this branch wrote it. The matrix merged by itself (line P269 is that lane's).
 
-**Checks**, on this branch after merging `origin/v2` at `e37d836`:
+**The merge of 485** (lane `v2-j6-review-triage`, at `origin/v2` `e1a0ccc`). The same again: its entry moved, unedited, after 486's and before this one. Its new page `review-triage.md` cites `docs/v2/decisions-log.md:1516`; that line ("Twenty packages come with them") is now line 867 of the milestone 2 file, and the citation says so. The test's length and SHA-256 were taken again from `git show origin/v2:docs/v2/decisions-log.md` at `e1a0ccc`, which the six files read in order start with.
+
+**Checks**, on this branch after merging `origin/v2` at `e1a0ccc`:
 - `npm run typecheck` in `v2/`: clean.
 - `npm test` in `v2/`: 2980 Node tests, 2839 pass, 141 skipped (the browser tests, which the browser job runs apart), 0 fail; 434 Vitest tests pass.
 - The root suite (`node --test test/*.test.ts`, as `checks.yml` runs it): 413 tests, 411 pass, 2 skipped, 0 fail.

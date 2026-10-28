@@ -16,10 +16,10 @@ const docs = join(root, 'docs/v2');
 const indexFile = join(docs, 'decisions-log.md');
 const index = readFileSync(indexFile, 'utf8');
 
-// The old page at `origin/v2` e37d836 (pull request 486), the last before
+// The old page at `origin/v2` e1a0ccc (pull request 485), the last before
 // the split.
-const FROZEN_BYTES = 1503949;
-const FROZEN_SHA256 = 'ecfaf340ef562161eca66af133ff81dbc9c6f63b2ae984276aafd5451f730745';
+const FROZEN_BYTES = 1509053;
+const FROZEN_SHA256 = 'e3675da629f7d6b6985af99b9f51875843c064866091df1908be203b9a45b9c9';
 
 const FILE = /^decisions-log-milestone-(\d+)\.md$/;
 const listed = [...new Set([...index.matchAll(/\]\((decisions-log-milestone-\d+\.md)\)/g)].map(([, file]) => file!))];
