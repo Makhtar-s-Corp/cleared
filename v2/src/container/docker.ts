@@ -575,10 +575,23 @@ export class Docker {
       const name = row.name.replace(/^\//, '');
       return name === `cleared-v2-${session}` || name.startsWith(`cleared-v2-${session}-`);
     };
-    const containers = wanted.size === 0 ? [] : (await this.containers()).filter(ours).map((row) => row.name.replace(/^\//, ''));
-    if (containers.length > 0) await this.must(['rm', '--force', '--', ...containers], new Set(containers));
-    const networks = wanted.size === 0 ? [] : (await this.networks()).filter(ours).map((row) => row.name);
-    if (networks.length > 0) await this.must(['network', 'rm', '--', ...networks], new Set(networks));
+    // A removal that fails is a failure only while something it named is
+    // left: the flow's recovery and the lead's release both take a stopped
+    // lead at a restart, and the second found the first's work done (issue #465).
+    const removed = async (names: readonly string[], args: readonly string[], left: () => Promise<string[]>): Promise<void> => {
+      if (names.length === 0) return;
+      try {
+        await this.must([...args, '--', ...names], new Set(names));
+      } catch (error) {
+        if (!(error instanceof DockerError) || (await left()).some((name) => names.includes(name))) throw error;
+      }
+    };
+    const containerNames = async () => wanted.size === 0 ? [] : (await this.containers()).filter(ours).map((row) => row.name.replace(/^\//, ''));
+    const networkNames = async () => wanted.size === 0 ? [] : (await this.networks()).filter(ours).map((row) => row.name);
+    const containers = await containerNames();
+    await removed(containers, ['rm', '--force'], containerNames);
+    const networks = await networkNames();
+    await removed(networks, ['network', 'rm'], networkNames);
     return { containers, networks };
   }
 
