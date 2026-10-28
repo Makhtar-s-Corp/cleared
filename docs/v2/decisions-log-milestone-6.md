@@ -471,3 +471,31 @@ Each ticket went back to Todo after its publish with "The release could not be r
 
 - Pull request: 470, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-receipt-citations`.
+
+## 2026-10-28: the decisions log split into one file per milestone, the old page kept as its index (the author's choices, lane `v2-j6-decisions-log-split`, issue #478)
+
+**The need.** Issue #478: `docs/v2/decisions-log.md` had grown to 1,496,147 bytes and 224 entries, one page every lane reads and appends to. Split it into one file per milestone, keep the old page as a short index so the links to it still land, say on the index where new entries go, check with a test that the files hold the old text byte for byte and that every relative link and anchor resolves, and update the references to the log. No entry edited, moved or reordered.
+
+**What was done.**
+1. **Six files, cut at entry headings, in order.** `decisions-log-milestone-1.md` to `decisions-log-milestone-6.md`. Each starts at the first entry written for its milestone: "Fable 5.1 used once to plan milestone 2", the first `j3` lane (`j3-cursor-harness`), the first `v2-j4` lane (`v2-j4-issue-mirrors`), "milestone 5's plan" and the first `v2-j6` lane (`v2-j6-png-compress`). The old page's title and preamble open the milestone 1 file, since the files read in order must give the old page back. The entries kept their order, so four late entries of milestone 2's lanes, written on 2026-10-25 between milestone 3's, are in the milestone 3 file; the index names them.
+2. **The index.** [decisions-log.md](decisions-log.md) says at its top that new entries go at the end of the milestone 6 file, and that a new milestone opens its own file and adds a line to the table. It holds no entry.
+3. **The test.** `v2/test/decisions-log.test.ts` reads the files the index lists (numbered from 1 with no gap, and each one on disk listed), checks that their concatenation starts with the old page (its length and SHA-256, taken at `origin/v2` before the split), that each file after the first starts at an entry heading, that the index holds no entry and names the last file as the one to append to, and that every relative link and anchor of the index and the files resolves, anchors by GitHub's rule. A prefix and not an equality: later entries only add bytes at the end of the last file. A stored hash and not `git show`: a CI checkout or a fork may not have the base commit. Checked against a changed byte, a missing file and a missing heading: each fails it.
+4. **The references.** A link or a comment that cites one entry now names its milestone file: `docs/adapters.md`, `docs/notifications.md`, `keep-and-drop.md`, the milestone 1, 2 and 5 plans, the interface overhaul's plan, `proof-clean-base.md`, the matrix's preamble, `v2/README.md`, the guestbook's `agents.conf`, `test/ci-triggers.test.ts` and five comments under `v2/`. The milestone 1 and 2 plans' rules on appending say the current milestone's file. Links to the log as a whole keep the index: the root README, the matrix's B4.7 and B6.0d, the milestone 4 plan's inputs, the milestone 3 report. Nothing in the guard, the CI workflows or `prompts/` reads or writes this log (`prompts/` names v1's `docs/decisions.md`), so none of them changed. The file lists of the interface overhaul's done lanes still say `docs/v2/decisions-log.md`, as they were then.
+
+**Questions for the owner**, each with what this lane applied.
+1. **Where the files sit.** The brief named a folder, `docs/v2/decisions-log/`. The entries hold over a hundred relative links written from `docs/v2/` (`milestone-2-plan.md`, `../adapters.md`, `ui-pro/DESIGN.md`); one folder down they would all break, and fixing them means editing the entries. (a) The files next to the index, `docs/v2/decisions-log-milestone-<N>.md`: the text untouched and every link working (applied). (b) The folder, with `../` added to each link target and the test comparing after removing it: the entries edited, mechanically. (c) The folder, the text untouched, the links broken. Recommended: (a); a later move is a rename plus the link rewrite of (b).
+2. **A matrix line.** The split is a change of process with no requirement of its own; no `P` line was added, so that the wave's lanes do not race for the next id. (a) None (applied). (b) A `P` line the orchestrator numbers at the merge.
+
+**Not done here.**
+- `docs/v2/milestone-6-plan.md`, which the brief lists to read first, is not on `origin/v2`; nothing was created in its place.
+- No progress dashboard: the owner's rules ask a sub-agent to keep one for a long task, and the brief forbids starting any sub-agent.
+
+**Checks**, on this branch at `origin/v2` `9e32fb8` (no lane merged into `v2` during this lane):
+- `npm run typecheck` in `v2/`: clean.
+- `npm test` in `v2/`: 2969 Node tests, 2828 pass, 141 skipped (the browser tests, which the browser job runs apart), 0 fail; 434 Vitest tests pass.
+- `node --test test/ci-triggers.test.ts` at the root: 4 of 4.
+- `npm run guard -- --base origin/v2`: nothing refused.
+
+**Resources.** No listener, no container, no network other than GitHub (this lane's issue and pull request). Quota: this one session, no model call from Cleared.
+
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-decisions-log-split`.
