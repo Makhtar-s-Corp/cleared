@@ -7616,5 +7616,5 @@ The first tries found two defects, fixed here with a test each: the check's cont
 
 **Resources.** No Docker object, no port, no tunnel, no secret, no Claude Code login read. Network: `git fetch`, `npm ci` of the lock file, the Debian packages of pngquant 2.18.0 and libimagequant (`apt-get download`, unpacked without installing), oxipng 9.1.5's release archive from its GitHub repository, and Pillow and NumPy from PyPI into a scratch folder to compare the pixels; all of these outside the repository. GitHub for the pull request.
 
-- Pull request: against `v2`.
+- Pull request: 457, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-png-compress`.
