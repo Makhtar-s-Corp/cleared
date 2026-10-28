@@ -10,7 +10,8 @@ import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
 import { loadCatalog } from '../../../src/catalog.ts';
 import { translator } from '../../lib/i18n.ts';
 import { applyAll, emptyModel, phaseOf, phrase, statusTone, threadOf, type SessionView } from '../../screens/session/model.ts';
-import type { SessionPhase, SessionSummary } from '../../../../src/api/types.ts';
+import type { SessionSummary } from '../../../../src/api/types.ts';
+import type { SessionPhase } from '../../../../src/session/events.ts';
 
 const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
 const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
