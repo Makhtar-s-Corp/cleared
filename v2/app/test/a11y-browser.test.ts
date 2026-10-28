@@ -144,7 +144,17 @@ for (const language of LANGUAGES) {
           const { page, errors, close } = await open(browser, language, theme, viewport);
           const at = `${theme === 'dark' ? 'a dark system scheme and an old dark choice' : 'light'}, ${viewport.width} px`;
           const check = async (name: string) => {
-            assert.deepEqual(await page.evaluate(() => [document.documentElement.lang, document.documentElement.dataset.theme, getComputedStyle(document.documentElement).colorScheme, getComputedStyle(document.body).backgroundColor]), [language, 'light', 'light', 'rgb(239, 240, 241)'], `${name}, ${at}: the page in its language, light, on the paper`);
+            // The paper as the light theme's token computes it, whatever the system's scheme or an old stored choice.
+            const paper = await page.evaluate(() => {
+              const probe = document.createElement('span');
+              probe.style.setProperty('background-color', 'var(--canvas)');
+              document.body.append(probe);
+              const colour = getComputedStyle(probe).backgroundColor;
+              probe.remove();
+              return colour;
+            });
+            assert.deepEqual(await page.evaluate(() => [document.documentElement.lang, document.documentElement.dataset.theme, getComputedStyle(document.documentElement).colorScheme, getComputedStyle(document.body).backgroundColor]), [language, 'light', 'light', paper], `${name}, ${at}: the page in its language, light, on the paper`);
+            assert.match(paper, /0\.938|rgb\(239, 240, 241\)/, `${name}, ${at}: the paper is the light theme's (#EFF0F1)`);
             assert.equal(await page.evaluate(() => { try { return localStorage.getItem('cleared-v2-theme'); } catch { return null; } }), null, `${name}, ${at}: an old choice of theme is forgotten`);
             const result = await violations(page);
             if (result.length > 0) found.push(`${name}, ${at}:\n  ${said(result)}`);

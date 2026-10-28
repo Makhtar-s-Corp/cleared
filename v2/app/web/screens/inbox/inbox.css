@@ -262,7 +262,7 @@ a.btn, a.btn:hover { text-decoration: none; }
 .btn[data-act="approve"], .btn[data-act="approve_plan"] { min-width: 260px; }
 .btn:disabled { cursor: progress; background: var(--surface-muted); color: var(--text-faint); box-shadow: inset 0 0 0 var(--frame) var(--dashed); }
 .btn.primary[data-act="answer"]:disabled { cursor: default; background: var(--surface-muted); color: var(--text-faint); box-shadow: inset 0 0 0 var(--frame) var(--dashed); }
-.commit { font: var(--weight-regular) var(--text-sm)/1.3 var(--mono); opacity: .7; }
+.commit { font: var(--weight-regular) var(--text-sm)/1.3 var(--mono); }
 .deny-reason { flex: 1 1 220px; display: flex; }
 .deny-reason input { flex: 1; min-width: 0; }
 .d-note { flex-basis: 100%; font-size: var(--text-md); color: var(--text-secondary); }
