@@ -458,9 +458,13 @@ async function main(): Promise<void> {
     const mark = eventsOf(session.id).at(-1)?.seq ?? 0;
     await page.locator('#giveback').click();
     gesture(`gave the ${session.role} ${session.id.slice(0, 8)} back`);
+    // The session's own work after the Give back's words: a new turn, or the
+    // turn the take over found not begun yet, which the runner holds while the
+    // harness is the owner's and carries on with after the Give back.
     await until('the turn after the Give back', async () => {
       const after = eventsOf(session.id).filter((e) => e.seq > mark);
-      return after.some((e) => e.event.type === 'TEXT_MESSAGE_CONTENT' && /gave the session back/.test(e.event.delta ?? '')) && after.some((e) => e.event.type === 'RUN_STARTED');
+      const told = after.findIndex((e) => e.event.type === 'TEXT_MESSAGE_CONTENT' && /gave the session back/.test(e.event.delta ?? ''));
+      return told >= 0 && after.slice(told + 1).some((e) => ['RUN_STARTED', 'TOOL_CALL_START', 'REASONING_START'].includes(e.event.type));
     }, 180_000, 1_000);
     const after = eventsOf(session.id).filter((e) => e.seq > mark);
     // The editor's save journals its edit when it is saved; Give back, the terminal's.
