@@ -166,9 +166,11 @@ test('the sidebar is the development\'s: Consumption is not among its screens; t
     assert.ok(await page.locator('.side-foot #quota-gauge').count() === 1, 'the gauge is at the sidebar\'s foot');
     assert.match(await gauge.getAttribute('aria-label'), /^Weekly quota: 62% used, resets [A-Z][a-z]{2} \d{1,2}:\d{2}\. Opens Consumption\.$/);
     assert.match(await gauge.innerText(), /62%[^]*resets [A-Z][a-z]{2} \d{1,2}:\d{2}/);
-    // The verdict's colour: the Consumption screen's red for a quota reached before its reset.
+    // The verdict stays the Consumption screen's; the colour is by how much is used (the project lead's review of #462,
+    // lane j6-ui-pro): 62 % is under 80 %, so the figure is in the text's colour, not amber, not red.
     assert.equal(await gauge.getAttribute('data-verdict'), 'hit');
-    assert.equal(await page.locator('#quota-gauge .quota-gauge-percent').evaluate((el: any) => getComputedStyle(el).color), await tokenColour(page, '--danger-text'));
+    assert.equal(await gauge.getAttribute('data-level'), 'ok');
+    assert.equal(await page.locator('#quota-gauge .quota-gauge-percent').evaluate((el: any) => getComputedStyle(el).color), await tokenColour(page, '--text'));
     // By the keyboard: a link in the tab order, Enter opens Consumption.
     await gauge.focus();
     assert.equal(await page.evaluate(() => document.activeElement?.id), 'quota-gauge');

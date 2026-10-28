@@ -154,7 +154,7 @@ for (const language of LANGUAGES) {
               return colour;
             });
             assert.deepEqual(await page.evaluate(() => [document.documentElement.lang, document.documentElement.dataset.theme, getComputedStyle(document.documentElement).colorScheme, getComputedStyle(document.body).backgroundColor]), [language, 'light', 'light', paper], `${name}, ${at}: the page in its language, light, on the paper`);
-            assert.match(paper, /0\.938|rgb\(239, 240, 241\)/, `${name}, ${at}: the paper is the light theme's (#EFF0F1)`);
+            assert.match(paper, /^(?:color\(srgb 1 1 1\)|rgb\(255, 255, 255\))$/, `${name}, ${at}: the paper is the light theme's (#FFFFFF, lane j6-ui-pro)`);
             assert.equal(await page.evaluate(() => { try { return localStorage.getItem('cleared-v2-theme'); } catch { return null; } }), null, `${name}, ${at}: an old choice of theme is forgotten`);
             const result = await violations(page);
             if (result.length > 0) found.push(`${name}, ${at}:\n  ${said(result)}`);

@@ -42,7 +42,7 @@ test('a picked template is pressed, keeps its row shown, and gives the title its
     assert.doesNotMatch(markup, /aria-pressed="true"[^>]*data-template="(?:review|ci|question)"|data-template="(?:review|ci|question)"[^>]*aria-pressed="true"/);
     assert.match(markup, /<input[^>]*id="ask-input"[^>]*placeholder="What breaks"/);
   }
-  assert.match(html(<Bar t={en} title="" body="" />), /placeholder="A goal, a question or a ticket…"/, 'no template: the bar\'s own placeholder');
+  assert.match(html(<Bar t={en} title="" body="" />), /placeholder="E.g. add a CSV export"/, 'no template: the bar\'s own placeholder');
   assert.match(html(<Bar t={fr} title="" body="" template="question" />), /placeholder="La question"/);
 });
 

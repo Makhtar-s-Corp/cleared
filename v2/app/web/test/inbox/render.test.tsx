@@ -110,7 +110,7 @@ test('a release with no capture says so instead of an empty frame, and a capture
   const none: ReleaseItem = { ...release, captures: { before: { desktop: null, phone: null }, after: { desktop: 'https://elsewhere.invalid/a.png', phone: '//elsewhere.invalid/b.png' } } };
   const html = renderInbox(viewOf({ items: [none], selected: none.id }), en);
   assert.doesNotMatch(html, /<img/);
-  assert.ok(visibleText(html).includes('No picture of this screen.'));
+  assert.ok(visibleText(html).includes('No screen capture for this change.'));
   const unreviewed: ReleaseItem = { ...release, sessions: [{ role: 'author', model: 'claude-opus-5-5', minutes: 75 }], pr: { ...release.pr, checks: 'pending' } };
   const shown = text(viewOf({ items: [unreviewed], selected: unreviewed.id }));
   assert.ok(shown.includes('Opus wrote it in 1h\u00a015m'));

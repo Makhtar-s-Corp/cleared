@@ -14,6 +14,7 @@ import { loadCatalog } from '../../src/catalog.ts';
 import { translator } from '../../web/lib/i18n.ts';
 import { weekdayClock } from '../../web/lib/time.ts';
 import { verdictOf } from '../../web/screens/consumption/model.ts';
+import { quotaLevel } from '../../web/shell/quota.ts';
 import { paletteItems } from '../../web/shell/palette.ts';
 import { NAV, SCREENS, hrefOf } from '../../web/shell/model.ts';
 import { weeklyQuota } from '../../web/shell/quota.ts';
@@ -63,4 +64,8 @@ test('the reset is a weekday and a clock, through lib/time.ts, in the page\'s la
   assert.equal(weekdayClock('2026-10-27T08:59:00Z', 'Europe/Paris', en), 'Tue 9:59');
   assert.equal(weekdayClock('2026-10-24T19:41:00Z', 'Europe/Paris', fr), 'sam. 21\u00a0h\u00a041');
   assert.equal(weekdayClock('2026-10-27T08:59:00Z', 'Not/AZone', en), 'Tue 8:59', 'an unknown zone reads as UTC');
+});
+
+test('the gauge\'s colour by how much is used (the project lead\'s review of #462): the accent to 80 %, amber past 80 %, red past 90 %', () => {
+  assert.deepEqual([0, 62, 80, 80.5, 90, 90.1, 100, 120].map(quotaLevel), ['ok', 'ok', 'ok', 'high', 'high', 'over', 'over', 'over']);
 });

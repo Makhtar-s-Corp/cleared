@@ -1,5 +1,5 @@
 // The owner's rules for the look (issue #451, lane j6-ui-hallmark,
-// docs/v2/ui-hallmark/DESIGN.md), read from the web app's sources; CI runs
+// docs/v2/ui-pro/DESIGN.md, lane j6-ui-pro, issue #461), read from the web app's sources; CI runs
 // this file alone, before the install, in the step "Flat colours guard":
 //   - flat colours: the word "gradient" in no file of app/web, whatever its
 //     case or its place (a sheet, a component, a comment);

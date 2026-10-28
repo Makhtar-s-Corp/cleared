@@ -65,16 +65,17 @@ export function TerminalFrame({ t, status, mode = DEFAULT_MODE, harness = '', ca
   );
 }
 
-// The terminal's colours from the page's tokens, as the command block's:
-// the ink, its text the paper's; the ANSI colours lifted so each reads on
-// the ink (the default red reads at about 3:1). One theme, light (issue #451).
-const ANSI = { red: '#FF6B6B', brightRed: '#FF8A8A', green: '#3DD068', brightGreen: '#5FE08A', yellow: '#F7B955', brightYellow: '#FFCB70', blue: '#52A8FF', brightBlue: '#7DBEFF', magenta: '#D2A8FF', brightMagenta: '#E2C5FF', cyan: '#3DC6D8', brightCyan: '#6FD8E6' };
+// The terminal's colours from the page's tokens: white, its text the
+// theme's contrast, as every panel of the one light theme (issue #461); the
+// ANSI colours darkened so each reads at 5:1 or more on white (white and
+// bright white drawn as greys, so a program's "white" text still shows).
+const ANSI = { black: '#1A1C21', brightBlack: '#6B6E75', red: '#B4192C', brightRed: '#C0283A', green: '#17703D', brightGreen: '#1C7A45', yellow: '#8A5A00', brightYellow: '#946200', blue: '#3845B0', brightBlue: '#4250C4', magenta: '#7E3AAB', brightMagenta: '#8B47B8', cyan: '#0B6E7D', brightCyan: '#0B7A8A', white: '#5F6166', brightWhite: '#3D4048' };
 function themeOf(): Record<string, string> {
   const style = getComputedStyle(document.documentElement);
   const token = (name: string, fallback: string) => style.getPropertyValue(name).trim() || fallback;
-  const background = token('--ink', '#0E1726');
-  const foreground = token('--on-ink', '#FFFFFF');
-  return { ...ANSI, background, foreground, cursor: foreground, cursorAccent: background, selectionBackground: token('--ink-hover', '#26324A') };
+  const background = token('--theme-base', '#FFFFFF');
+  const foreground = token('--theme-contrast', '#1A1C21');
+  return { ...ANSI, background, foreground, cursor: foreground, cursorAccent: background, selectionBackground: token('--halo-progress', '#DCE0F7') };
 }
 
 // Fit only a terminal that is shown: a hidden one measures nothing.

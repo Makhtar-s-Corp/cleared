@@ -314,6 +314,11 @@
   "ask_failed_gone": "The service does not know this question.",
   "ask_failed_off": "Questions to the code are off on this service.",
   "ask_failed": "The question was not sent. Try again.",
+  "facts_role": "Role",
+  "facts_agent": "Agent",
+  "facts_model": "Model",
+  "facts_started": "Started",
+  "screen_waiting": "The before and after captures will show here as soon as the author changes a screen.",
   "session_versions": "Agent profile: {profile}. Environment: version {environment}.",
   "session_versions_profile": "version {version}",
   "session_versions_profile_auto": "version {version}, harness picked automatically: {harness}"

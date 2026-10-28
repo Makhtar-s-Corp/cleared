@@ -40,7 +40,7 @@
   "after": "After",
   "alt_before": "The screen before the release",
   "alt_after": "The screen after the release",
-  "shot_none": "No picture of this screen.",
+  "shot_none": "No screen capture for this change.",
   "facts_sessions": "Sessions",
   "facts_change": "Change",
   "wrote": "{model} wrote it in {time}",
