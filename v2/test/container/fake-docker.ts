@@ -156,8 +156,9 @@ export class FakeDocker {
         return ok(network.id + '\n');
       }
       case 'volume create': {
+        // As the CLI does, a name that exists is that volume, not a second one.
         const name = args[args.length - 1] ?? '';
-        this.volumes.push({ id: name, name, labels: labelsOf(args), args: [...args] });
+        if (!this.volumes.some((v) => v.name === name)) this.volumes.push({ id: name, name, labels: labelsOf(args), args: [...args] });
         return ok(name + '\n');
       }
       case 'create': {

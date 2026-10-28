@@ -65,11 +65,14 @@ test('a total lower than the one before is a new process of the session (a resum
 });
 
 // Issue #453: the flow journals cleared.container_recreated when it starts a
-// session's second process, whose running total starts again from zero.
+// session's second process. The real harness resumed in a new container
+// goes on with the session's running total (docs/adapters.md, the run of
+// 2026-10-21: 0.00536 before, 0.00560 after, a turn of about 0.0002), so the
+// second process's totals are read as the first's were.
 const recreated = (id: string, minutes: number) => ev(id, minutes, { type: 'CUSTOM', name: 'cleared.container_recreated', value: { attempt: 1, limit: 3, waitedMs: 5000 } });
 const lost = (id: string, minutes: number) => ev(id, minutes, { type: 'RUN_ERROR', message: 'the session\'s container stopped (exit code 137)', code: 'container_lost' });
 
-test('a session whose container was recreated adds both processes\' totals, each counted once, even when the second reaches past the first', () => {
+test('a session whose container was recreated counts both processes once: the running total goes on across the recreation, and a total that starts again adds', () => {
   const author = [
     started('a', 0, 'r1'), finished('a', 5, 'r1', { inputTokens: 10 }, 0.2),
     started('a', 6, 'r2'), finished('a', 8, 'r2', { inputTokens: 10 }, 0.3),
@@ -78,9 +81,11 @@ test('a session whose container was recreated adds both processes\' totals, each
     started('a', 15, 'r5'), finished('a', 16, 'r5', { inputTokens: 10 }, 0.45),
   ];
   const cost = sessionsCost([author]);
-  assert.equal(cost.costUsd, 0.75, '0.30 by the first process, then 0.45 by the second: not 0.45, and not 1.30');
+  assert.equal(cost.costUsd, 0.45, 'the session\'s last running total: not 0.75 (the first process twice) and not 1.30 (every turn summed)');
   assert.equal(cost.turns, 4, 'the cut turn finished nothing');
-  assert.equal(sessionsCost([author], Date.parse(at(13))).costUsd, 0.45, 'from a start inside the second process: its own total');
+  assert.equal(cost.workMs, 11 * 60_000, 'each turn from its start to its end, the cut one up to the loss: 5, 2, 1, 2 and 1 minutes');
+  const restarted = [...author.slice(0, 7), started('a', 12, 'r4'), finished('a', 14, 'r4', { inputTokens: 10 }, 0.05), started('a', 15, 'r5'), finished('a', 16, 'r5', { inputTokens: 10 }, 0.15)];
+  assert.equal(sessionsCost([restarted]).costUsd, 0.45, 'a second process reporting from zero: 0.30, then its 0.15');
 });
 
 test('the dollars are unknown when one session that finished a turn never reported a total; tokens and time are still counted', () => {
@@ -157,7 +162,7 @@ test('the ledger\'s cost of a ticket counts every session it holds for the ticke
   store.close();
 });
 
-test('the ledger\'s cost of a ticket reads the recreation of a session\'s container, so the second process is counted whole (issue #453)', () => {
+test('the ledger\'s cost of a ticket whose session\'s container was recreated is the session\'s last running total (issue #453)', () => {
   const store = openStore(':memory:');
   put(store, 'a1', 'author', 'claude-code');
   append(store, [
@@ -165,7 +170,9 @@ test('the ledger\'s cost of a ticket reads the recreation of a session\'s contai
     started('a1', 6, 'r2'), lost('a1', 7), recreated('a1', 8),
     started('a1', 9, 'r3'), finished('a1', 10, 'r3', { inputTokens: 10 }, 0.4),
   ]);
-  assert.equal(ticketCost(store.db, { project: PROJECT, ticket: 'LOCAL-7' }).costUsd, 0.7);
+  const cost = ticketCost(store.db, { project: PROJECT, ticket: 'LOCAL-7' });
+  assert.equal(cost.costUsd, 0.4);
+  assert.equal(cost.turns, 2);
 });
 
 test('the ledger\'s cost of a ticket with no session is empty, and another project\'s events are not read', () => {

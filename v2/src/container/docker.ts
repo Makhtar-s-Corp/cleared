@@ -443,8 +443,9 @@ export class Docker {
     await this.must(['start', '--', id], owned);
   }
 
-  // Kills a session's container (a crash, for the tests of issue #453 and
-  // the doctor's): by the id a labelled list returned, as every targeted command.
+  // Kills a session's container, as a crash would (the tests of issue #453;
+  // the service never calls it): by the id a labelled list returned, as
+  // every targeted command.
   async kill(session: string, name: string): Promise<void> {
     const { id, owned } = await this.owned(session, name);
     await this.must(['kill', '--', id], owned);

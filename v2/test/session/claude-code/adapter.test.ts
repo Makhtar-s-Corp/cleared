@@ -3,13 +3,9 @@
 // stdin and writes the runner's lines to its stdout.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import type { ChildProcessWithoutNullStreams } from 'node:child_process';
-import { EventEmitter } from 'node:events';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { createInterface } from 'node:readline';
-import { PassThrough } from 'node:stream';
 import { Docker, LABEL, SESSION_LABEL } from '../../../src/container/docker.ts';
 import { parseServices } from '../../../src/container/services.ts';
 import { LOGIN_FILE_MOUNT, WORKDIR_MOUNT, sessionNames } from '../../../src/container/session-runtime.ts';
@@ -21,6 +17,7 @@ import { CONTAINER_LOST, HandoverRefused, HostToolRefused, type HostCallContext,
 import type { AgUiEvent, EventLog, SessionEvent } from '../../../src/session/events.ts';
 import { DEFAULT_SAFE_COMMANDS } from '../../../src/session/policy.ts';
 import { FakeDocker } from '../../container/fake-docker.ts';
+import { FakeRunner } from './fake-runner.ts';
 
 const SESSION = '0b7e6f2c-3d4a-4e5f-8a9b-1c2d3e4f5a6b';
 
@@ -37,39 +34,6 @@ function memoryLog(): EventLog & { readonly all: SessionEvent[] } {
       return all.filter((e) => e.sessionId === sessionId && e.seq > seq);
     },
   };
-}
-
-// One fake runner per attach: what the adapter wrote, and a way to answer.
-class FakeRunner {
-  readonly stdin = new PassThrough();
-  readonly stdout = new PassThrough();
-  readonly stderr = new PassThrough();
-  readonly received: Record<string, unknown>[] = [];
-  readonly process: ChildProcessWithoutNullStreams;
-  private readonly emitter = new EventEmitter();
-
-  constructor() {
-    createInterface({ input: this.stdin }).on('line', (line) => this.received.push(JSON.parse(line) as Record<string, unknown>));
-    this.process = Object.assign(this.emitter, {
-      stdin: this.stdin, stdout: this.stdout, stderr: this.stderr, pid: 4242, exitCode: null,
-      kill: () => { this.exit(137); return true; },
-    }) as unknown as ChildProcessWithoutNullStreams;
-  }
-
-  say(value: unknown) { this.stdout.write(JSON.stringify(value) + '\n'); }
-  sdk(message: unknown) { this.say({ type: 'sdk', message }); }
-  exit(code: number) {
-    this.stdout.end();
-    setImmediate(() => this.emitter.emit('close', code, null));
-  }
-  async waitFor(check: (line: Record<string, unknown>) => boolean): Promise<Record<string, unknown>> {
-    for (let i = 0; i < 400; i++) {
-      const line = this.received.find(check);
-      if (line) return line;
-      await new Promise((r) => setTimeout(r, 2));
-    }
-    throw new Error(`the runner never received the line; got ${JSON.stringify(this.received)}`);
-  }
 }
 
 const input = (workdir: string): StartInput => ({

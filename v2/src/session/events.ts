@@ -232,7 +232,8 @@ export type CustomValue = {
   'cleared.prepared_image': { readonly service: string; readonly state: 'waiting' };
   // Which recreation of the session it was, of how many the flow makes, and
   // how long the flow waited before it. A new process of the harness starts
-  // here: its running cost starts again from zero (consumption/ticket-cost.ts).
+  // here; Claude Code's running total goes on from the transcript, and
+  // consumption/ticket-cost.ts reads a total that starts again as a new process.
   'cleared.container_recreated': { readonly attempt: number; readonly limit: number; readonly waitedMs: number };
 };
 

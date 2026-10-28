@@ -31,7 +31,7 @@ import type { Role } from '../session/contract.ts';
 import type { AgUiEvent, SessionEvent } from '../session/events.ts';
 import type { TicketId, TicketStore } from '../tickets/contract.ts';
 import { MIRROR_ACTOR } from '../tickets/mirror.ts';
-import { COST_EVENTS, sessionsCost, type SessionsCost } from './ticket-cost.ts';
+import { sessionsCost, type SessionsCost } from './ticket-cost.ts';
 import { dayOf, lastDays, zoneOf } from './usage.ts';
 
 export type WeekTicket = {
@@ -61,6 +61,7 @@ export type WeekFigures = {
 };
 
 const HOUR_MS = 3_600_000;
+const TURNS = "('RUN_STARTED', 'RUN_FINISHED', 'RUN_ERROR')";
 const SAMPLED = "('RUN_STARTED', 'RUN_FINISHED', 'STEP_STARTED', 'STEP_FINISHED')";
 
 // The first instant of a calendar day in a zone: UTC midnight moved by the
@@ -150,7 +151,7 @@ export async function weekFigures(db: DatabaseSync, tickets: TicketStore | undef
   const ids = (db.prepare(`SELECT DISTINCT session_id AS id FROM session_events WHERE project = ? AND type IN ('RUN_FINISHED', 'RUN_ERROR') AND at >= ?`)
     .all(input.project, since) as { id: string }[]).map((r) => r.id);
   const sessionOf = db.prepare('SELECT id, ticket, role, service FROM sessions WHERE id = ? AND project = ?');
-  const turnsOf = db.prepare(`SELECT session_id, seq, at, event FROM session_events WHERE session_id = ? AND ${COST_EVENTS} ORDER BY seq`);
+  const turnsOf = db.prepare(`SELECT session_id, seq, at, event FROM session_events WHERE session_id = ? AND type IN ${TURNS} ORDER BY seq`);
   const ticketServices = new Map<string, readonly string[]>();
   const rows = new Map<string | null, ReturnType<typeof parsed>[]>();
   for (const id of ids) {
