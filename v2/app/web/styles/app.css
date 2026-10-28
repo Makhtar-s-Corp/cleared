@@ -1,16 +1,17 @@
-/*! Hallmark · shape: app screen · genre: modern-minimal · theme: custom (Signal, from Wayfind's signage material) · redesign: full · deal: manual
- * paper: #EFF0F1 cool paper · accent: #1F45D6 cobalt, #F2B33D amber for figures · display: Geist 800 · body: Geist, Geist Mono for ids
- * nav: the sidebar kept, its current place an ink plate · signature: the figure plate (what waits, the week's quota) · states: loading, empty, error, full
- * axes: light/grotesk-sans/cool · posture: committed · contrast: pass · v2.0.0 */
-/*! Hallmark · pre-emit critique: P4 H4 E4 S4 R5 V4 · weakest: H, the screens were one grey list each; every screen now leads with one heavy heading and its figure on an ink plate */
-/*! Hallmark · waive 64 · Geist Mono for ids and commands only, the project's rule (matrix B3.8) */
+/*! Hallmark · shape: app screen · genre: modern-minimal · theme: custom (Workbench, from the owner's direction of issue #461) · redesign: full · deal: manual
+ * paper: #FFFFFF white, the sidebar a step greyer · accent: #4C5BD4 indigo, alone · display: none, headings Geist 600 at 20 px at most · body: Geist 13 px, Geist Mono for ids
+ * nav: the sidebar kept, its current place a grey fill · signature: the session groups, read as a dense list · states: loading, empty, error, full
+ * axes: light/grotesk-sans/neutral · posture: quiet · contrast: pass · v2.0.0 */
+/*! Hallmark · pre-emit critique: P4 H4 E4 S4 R4 V4 · weakest: E, a calm tool has few surprises by design; the session groups and the figures carry the screens */
+/*! Hallmark · waive 64 · Geist Mono for ids, branches, hashes and commands only, the project's rule (matrix B3.8) */
 /*! Hallmark · waive 72 · the sidebar's session titles, cut with an ellipsis inside its padding · the whole title is the link's title and the sessions screen's row */
-/* Cleared v2 app (docs/v2/ui-hallmark/DESIGN.md, lane j6-ui-hallmark, issue #451): the tokens, the shell (sidebar, top
-   bar, palette, shortcut sheet, menus, empty states, skeletons) and the parts every screen shares. The screens' own
-   sheets hold the rest. One light theme, never the system's scheme: a base, a contrast (the ink) and an accent (cobalt);
-   every neutral is a mix of the ink into the base, by a share set here. The kit's roles (--canvas, --surface, --ink,
-   ...) are read from those, and shadcn/ui's names (--background, --card, ...) from the kit's, so the screens' sheets and
-   the components keep their names. Every colour is flat; depth is a 2px ink frame or a 1px rule, never a blur.
+/* Cleared v2 app (docs/v2/ui-pro/DESIGN.md, lane j6-ui-pro, issue #461): the tokens, the shell (sidebar, top bar,
+   palette, shortcut sheet, menus, empty states, skeletons) and the parts every screen shares. The screens' own sheets
+   hold the rest. One light theme, never the system's scheme: a base (white), a contrast (a neutral near-black) and one
+   accent (indigo); every neutral is a mix of the contrast into the base, by a share set here. The kit's roles
+   (--canvas, --surface, --ink, ...) are read from those, and shadcn/ui's names (--background, --card, ...) from the
+   kit's, so the screens' sheets and the components keep their names. Every colour is flat; a surface is told from
+   another by a 1px soft grey line (--line), never a blur, never an ink frame.
    Tailwind brings its theme and its utilities, in layers, without its preflight: the rules below, unlayered, win. */
 @layer theme, base, components, utilities;
 @import "tailwindcss/theme.css" layer(theme);
@@ -24,33 +25,33 @@
    Arial, whose metrics Liberation Sans shares), so the text does not move when Geist swaps in. */
 @font-face { font-family: "Geist Fallback"; src: local("Arial"), local("Helvetica"), local("Liberation Sans"); size-adjust: 102.34%; ascent-override: 89.9%; descent-override: 21.5%; line-gap-override: 0%; }
 :root {
-  /* the one theme: white, a blue-black ink, cobalt */
-  --theme-base: #FFFFFF; --theme-contrast: #0E1726; --theme-accent: #1F45D6;
-  --mix-canvas: 6.5%; --mix-sidebar: 11%; --mix-surface: 0%; --mix-popover: 0%; --mix-sunken: 9%; --mix-surface-muted: 4%;
-  --mix-tab-fill: 13%; --mix-selected: 17%; --mix-hairline: 20%; --mix-outline: 34%; --mix-input: 100%; --mix-dashed: 45%;
-  --mix-placeholder: 67%; --mix-faint: 70%; --mix-muted: 76%; --mix-secondary: 86%;
-  /* what no mix gives: amber for what waits for the person, green, red, teal */
-  --awaiting: #F2B33D; --awaiting-text: #8A4500; --awaiting-surface: #FDF3DC; --awaiting-pill: #FBE6B3; --count-ink: #0E1726;
-  --success: #12823B; --success-text: #0F6E32; --danger: #C3122B; --danger-text: #B0102A;
-  --stage-review: #07778A;
-  --harness-claude: #C2532C; --harness-codex: #0B7D5F; --harness-other: #5C6575;
-  --accent-hover: #1838B0; --accent-press: #122C8C; --ink-hover: #26324A;
-  --scrim: rgb(14 23 38 / 0.48);
-  --e-card: 0 0 0 2px var(--ink);
-  --e-bar: 0 0 0 2px var(--ink);
-  --e-menu: 0 0 0 2px var(--ink);
-  --e-awaiting: 0 0 0 2px var(--awaiting);
-  --halo-progress: #D5DDF8; --halo-review: #CDE7EB; --halo-waiting: #FBE6B3;
-  --success-fill: #E2F2E7; --danger-fill: #FBE8EB;
+  /* the one theme: white, a neutral near-black, indigo */
+  --theme-base: #FFFFFF; --theme-contrast: #1A1C21; --theme-accent: #4C5BD4;
+  --mix-canvas: 0%; --mix-sidebar: 3.5%; --mix-surface: 0%; --mix-popover: 0%; --mix-sunken: 4%; --mix-surface-muted: 2%;
+  --mix-tab-fill: 5.5%; --mix-selected: 8%; --mix-hairline: 11%; --mix-outline: 20%; --mix-input: 22%; --mix-dashed: 30%;
+  --mix-placeholder: 64%; --mix-faint: 66%; --mix-muted: 70%; --mix-secondary: 80%;
+  /* the discreet states, each a small mark or a word, never a block: amber for what waits, green, red, teal, the accent's tint */
+  --awaiting: #E8A33D; --awaiting-text: #8A4500; --awaiting-surface: #FDF6E8; --awaiting-pill: #FAEACB; --count-ink: #1A1C21;
+  --success: #1F8A4C; --success-text: #17703D; --danger: #D1293D; --danger-text: #B4192C;
+  --stage-review: #0B7A8A;
+  --harness-claude: #C2532C; --harness-codex: #0B7D5F; --harness-other: #6B6E75;
+  --accent-hover: #4250C4; --accent-press: #3845B0; --accent-tint: #EEF0FB; --ink-hover: #2C2F36;
+  --scrim: rgb(26 28 33 / 0.32);
+  --e-card: 0 0 0 1px var(--line);
+  --e-bar: 0 0 0 1px var(--line);
+  --e-menu: 0 0 0 1px var(--line);
+  --e-awaiting: 0 0 0 1px var(--awaiting);
+  --halo-progress: #DCE0F7; --halo-review: #D3E9EC; --halo-waiting: #FAEACB;
+  --success-fill: #E7F4EC; --danger-fill: #FCECEE;
   /* the editor's code colours (lane 32), each at 4.5:1 or more on its surface */
-  --code-keyword: #6B21A8; --code-string: #0F6E32; --code-comment: #5C6575; --code-number: #8A4500; --code-function: #1F45D6; --code-definition: #0E1726; --code-property: #3A4456;
+  --code-keyword: #6B21A8; --code-string: #17703D; --code-comment: #5F6166; --code-number: #8A4500; --code-function: #3845B0; --code-definition: #1A1C21; --code-property: #3D4048;
   /* the scale: six spacing steps, five text sizes, three weights, one row height, one motion */
   --space-1: 4px; --space-2: 8px; --space-3: 16px; --space-4: 24px; --space-5: 32px; --space-6: 48px;
-  --text-sm: 0.8125rem; --text-md: 0.875rem; --text-lg: 1.25rem; --text-xl: 1.75rem; --text-display: 2.5rem;   /* 13, 14, 20, 28 and 40 px */
+  --text-sm: 0.75rem; --text-md: 0.8125rem; --text-lg: 0.875rem; --text-xl: 1rem; --text-display: 1.25rem;   /* 12, 13, 14, 16 and 20 px */
   --text-input: 1rem;   /* a phone's fields only: iOS zooms into a field under 16 px */
-  --weight-regular: 400; --weight-strong: 600; --weight-heavy: 800;
-  --row: 40px; --top-bar: 64px; --side-open: 256px; --side-rail: 64px; --bottom-bar: 60px;
-  --radius: 0px; --frame: 2px;
+  --weight-regular: 400; --weight-strong: 500; --weight-heavy: 600;
+  --row: 36px; --top-bar: 48px; --side-open: 240px; --side-rail: 56px; --bottom-bar: 56px;
+  --radius: 6px; --radius-panel: 8px; --frame: 1px;
   --motion: 140ms; --ease: cubic-bezier(.2,.8,.2,1);
   --sans: Geist, "Geist Fallback", -apple-system, "Segoe UI", Arial, sans-serif; --mono: "Geist Mono", ui-monospace, monospace;
   color-scheme: light;
@@ -75,11 +76,12 @@
   --text-secondary: color-mix(in srgb, var(--theme-contrast) var(--mix-secondary), var(--theme-base));
   --text: var(--theme-contrast);
   --ink: var(--theme-contrast); --on-ink: var(--theme-base);
+  --line: var(--hairline);
   --link: var(--theme-accent); --stage-progress: var(--theme-accent);
   --select: var(--halo-progress);
   --e-outline: 0 0 0 1px var(--outline);
   --e-control: 0 0 0 var(--frame) var(--input);
-  --e-header: 0 var(--frame) 0 var(--ink);
+  --e-header: 0 var(--frame) 0 var(--line);
   /* shadcn/ui's variables, for the components under components/ui */
   --background: var(--canvas); --foreground: var(--text);
   --card: var(--surface); --card-foreground: var(--text);
@@ -103,7 +105,7 @@
   --color-awaiting: var(--awaiting); --color-awaiting-text: var(--awaiting-text); --color-link: var(--link);
   --color-faint: var(--text-faint); --color-secondary-text: var(--text-secondary); --color-placeholder: var(--placeholder);
   --font-sans: var(--sans); --font-mono: var(--mono);
-  --radius-sm: 0px; --radius-md: var(--radius); --radius-lg: 0px; --radius-xl: 0px;
+  --radius-sm: 4px; --radius-md: var(--radius); --radius-lg: var(--radius-panel); --radius-xl: var(--radius-panel);
   --shadow-control: var(--e-control); --shadow-outline: var(--e-outline); --shadow-card: var(--e-card);
 }
 * { box-sizing: border-box; }

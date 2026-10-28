@@ -1,5 +1,5 @@
 // The design tokens (docs/v2/ui-overhaul-plan.md, 2.2.5, 2.2.8 and 2.4,
-// lane 35; docs/v2/ui-hallmark/DESIGN.md, lane j6-ui-hallmark): the one
+// lane 35; docs/v2/ui-pro/DESIGN.md, lane j6-ui-pro): the one
 // theme, light, comes from a base, a contrast and an accent, the neutrals
 // mixed from the first two; every text colour reads at AA (4.5:1) on every
 // ground it is drawn on; six spacing steps, five text sizes, three weights;
@@ -112,10 +112,10 @@ test('the theme is a base, a contrast and an accent; the neutrals are mixed from
 
 test('six spacing steps, five text sizes and three weights, and every sheet of the app uses only them', () => {
   assert.deepEqual(['--space-1', '--space-2', '--space-3', '--space-4', '--space-5', '--space-6'].map((n) => LIGHT.get(n)), ['4px', '8px', '16px', '24px', '32px', '48px']);
-  // In rem, so the person's own font size scales the text (lane 38): 13, 14, 20, 28 and 40 px at the browser's default
-  // (the Hallmark redesign, lane j6-ui-hallmark: a heading and a figure set large and heavy, DESIGN.md, Type).
-  assert.deepEqual(['--text-sm', '--text-md', '--text-lg', '--text-xl', '--text-display', '--text-input'].map((n) => LIGHT.get(n)), ['0.8125rem', '0.875rem', '1.25rem', '1.75rem', '2.5rem', '1rem']);
-  assert.deepEqual(['--weight-regular', '--weight-strong', '--weight-heavy'].map((n) => LIGHT.get(n)), ['400', '600', '800']);
+  // In rem, so the person's own font size scales the text (lane 38): 12, 13, 14, 16 and 20 px at the browser's default
+  // (the professional redesign, lane j6-ui-pro, issue #461: a dense tool's sizes, no display type, DESIGN.md, Type).
+  assert.deepEqual(['--text-sm', '--text-md', '--text-lg', '--text-xl', '--text-display', '--text-input'].map((n) => LIGHT.get(n)), ['0.75rem', '0.8125rem', '0.875rem', '1rem', '1.25rem', '1rem']);
+  assert.deepEqual(['--weight-regular', '--weight-strong', '--weight-heavy'].map((n) => LIGHT.get(n)), ['400', '500', '600']);
   // Every rule of every sheet (the sign-in page's included): no size or weight but a token; --text-input is a
   // phone's fields' size, where iOS zooms on less (art director of lane 35, item 9). Lane 35 held the app's and
   // the tower's sheets to it, lane 38 the others.
