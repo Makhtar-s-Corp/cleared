@@ -2654,7 +2654,6 @@ export class FlowEngine {
     if (step && step.state === 'running' && this.#steps.list(id).length > 1) return this.#stepDone(author, step);
     const session = { id: author.id, ticket: id, project };
     this.#step(session, 'STEP_FINISHED', 'author');
-    await this.#captureProof(author, step ? this.#service(step.service) : this.#workspace.services[0] as ServiceConfig);
     await this.#close(author, 'done');
     if (step) this.#steps.update(step.id, { state: 'done', cost: this.#stepCost(step) ?? 0, minutes: this.#stepMinutes(step) });
     this.#emit({ type: 'author_done', at: this.#at(), project, ticket: id, session: author.id });
@@ -2756,6 +2755,13 @@ export class FlowEngine {
     const report = lastReport(this.#store.events.after(reviewer.id, reviewer.turnFrom ?? 0));
     const parsed = report === undefined ? undefined : parseVerdict(report, reviewer.settings.verdict);
     this.#step(session, 'STEP_FINISHED', 'review');
+    // The receipt's captures (P210) when the review passes: the reviewer's
+    // trial environment was built after the author's commit, the author's
+    // from the base. A ticket in steps captures each step's author (#stepDone).
+    if (parsed?.verdict === 'pass') {
+      const steps = this.#steps.list(id);
+      if (steps.length <= 1) await this.#captureProof(reviewer, steps[0] ? this.#service(steps[0].service) : this.#workspace.services[0] as ServiceConfig);
+    }
     await this.#close(reviewer, 'done');
     if (report === undefined || parsed === undefined) {
       await this.#putBack(id, 'The review gave no verdict (no "Verdict:" line in its report), so nothing was published. Move the ticket to Todo to run it again.', 'no_verdict');
@@ -2910,8 +2916,9 @@ export class FlowEngine {
 
   // ---- the proof receipt (P210, issue #326) --------------------------------
 
-  // The captures of `service`, taken while the author's session and its
-  // trial environment still run, journaled on the session. A capture that
+  // The captures of `service`, taken while `live` (the reviewer whose review
+  // passed, or a step's author) and its trial environment still run,
+  // journaled on that session. A capture that
   // throws, or still runs at the cap, loses the captures, never the ticket.
   // First the rule (P226): a change no person sees, or the human's Off on
   // the ticket, takes none, and no browser starts; the journal says why.
@@ -2984,7 +2991,8 @@ export class FlowEngine {
         if (event.type !== 'CUSTOM') continue;
         if (row.role === 'reviewer' && event.name === 'cleared.review_verdict' && event.value.tests)
           tests.push({ round: event.value.round, command: event.value.tests.command, outcome: event.value.tests.outcome });
-        if (row.role === 'author' && event.name === 'cleared.proof_captured') captures.set(event.value.service, event.value);
+        // A step's author's, or the passing reviewer's (#reviewDone), the latest for each service.
+        if ((row.role === 'author' || row.role === 'reviewer') && event.name === 'cleared.proof_captured') captures.set(event.value.service, event.value);
       }
     const cost = ticketCost(this.#store.db, { project: reviewer.input.project, ticket: id });
     const versions = this.#flowRows(id).map((row) => sessionVersions(this.#store.db, row.id, row.role)).filter((v) => v !== undefined);
