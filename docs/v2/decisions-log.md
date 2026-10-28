@@ -7818,5 +7818,5 @@ Changed with the code: the label gate's case (decision 10), the adapter test's f
 
 **Resources.** No Docker object, no container, no tunnel, no listening port but the tests' own ephemeral loopback ones. No real GitHub, GitLab, Slack, Cursor or Codex account, no Claude Code login read, no secret: the secret-shaped values of the tests are built from parts at run time. Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issue and the pull request.
 
-- Pull request: PR_PLACEHOLDER, against `v2`.
+- Pull request: 459, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-agent-profiles`.
