@@ -8095,4 +8095,5 @@ Each ticket went back to Todo after its publish with "The release could not be r
 - `npm run guard -- --base origin/v2`: nothing refused.
 - No line this lane adds holds an em dash (the tests write it `\u2014`).
 
+- Pull request: 486, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-docker-hygiene`.
