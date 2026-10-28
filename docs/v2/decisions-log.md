@@ -7591,3 +7591,58 @@ The first tries found two defects, fixed here with a test each: the check's cont
 
 - Pull request: 448, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j5-proof-fixes`.
+
+## 2026-10-28: the workspace the assistant writes, used by every module with no restart, and the Tower's tickets named by its id (the author's choices, lane `v2-j6-workspace-reload`, B6.5, M10, P262, issues #420, #437)
+
+**The need.** Milestone 6, issues #420 and #437. The service reloads the workspace without a restart (#420), and the Tower no longer sends an empty project when it creates a ticket after the setup assistant (#437). Acceptance: an end-to-end test runs the assistant, then a first ticket, with no restart, and the ticket carries the right project; a page says which modules follow the workspace with no restart and which need one. Fakes only, nothing on a real server, no deploy. The brief says the milestone 6 plan's section for this lane is quoted in it; it is not, and no milestone 6 plan is in the repository, so the lane follows the two issues, [milestone-5-plan.md](milestone-5-plan.md) for context and the conventions of its section 3.1, as earlier lanes did when `PROMPT.md` was missing.
+
+**The branch.** `v2-j6-workspace-reload`, from `origin/v2` at `0e49cbde` (pull request 448).
+
+**What was found.** P256 (#433) had closed the first part of #420: the flow's runtime reads its settings again while it has none and builds the engine at the first request that finds them. Its log entry left three modules that read the workspace at start only: the lead's knowledge, the mirrors and the workspace's record. Reading every module that reads the workspace found more, and a worse case: the knowledge and the notifications were gated on `CLEARED_V2_PROJECT`, and the lead's switch too (`lead/config.ts`), while the assistant writes `CLEARED_V2_WORKSPACE` only (`workspace/connect.ts`). On an install by the assistant these three never started, a restart included.
+
+**Decision.**
+1. **One shape for every module: started once the flow runs.** Each module that needs the workspace does what it did at start when the settings name one, else it waits for the flow's engine (`runtime.whenEngine`, P256) and does it then, in the same process. The engine is built from the workspace, so a module that waits for it never reads a half-written file. A module that stops guards its listener with a start count, as the flow module does, so a stop then a start does nothing twice.
+   - The tickets module: the workspace's rows (`workspaces`, `services`) and the tracker mirrors.
+   - The knowledge module: the lessons proposed from handovers and the daily skill tickets. Its gate is now the workspace the flow reads, not `CLEARED_V2_PROJECT`.
+   - The notify module: the dispatcher, started when the settings name a workspace or a project, else once the flow runs.
+   - The lead module: the plans, the lead, the quota reading, the service map's first refresh and the schedules' first tick. The lead is on unless `CLEARED_V2_LEAD_ENABLED` turns it off; it still runs only once the flow runs (`lead/engine.ts`), as before.
+   - The approver gate (`approval/service.ts`) reads the workspace again while it has none, then keeps it, as the approval key is read (P256, decision 11).
+   - Not changed: `cleared run` builds its launcher at the first `POST /api/run`, and the reader of questions to the code at the first question, both on the engine, so both follow it already. The doctor, the test secrets and the environment step read the workspace at each call.
+2. **What still needs a restart is written down, not rebuilt.** A workspace changed once the flow runs on one (a repository connected later from the Services screen, or removed) is not taken in place: the engine holds the live sessions, the trains, the timers and the subscriptions on its configuration, and rebuilding it under them is a larger change than the two issues. The environment step already answers `restart` for such a service. `docs/install.md`, new section "What needs a restart", lists it with the heartbeat's quota line (its project is read when the beat starts), the release trains of several repositories, and the service's own settings, with the command (`docker compose -f v2/compose.yaml restart service`). Question 2.
+3. **The train approvals are unchanged.** A first try built them once the flow ran too. The end-to-end test, on two repositories, then showed the service refusing them for another reason: the assistant writes no `broker_socket` and no `broker_state`, so both services name the same lock folder ("the services guestbook and filter-api name the same broker state folder: give each its own broker_state: the trains' approvals are refused"). That is decision 21 of milestone 2 (a broker per service), which the Compose file does not run, as P261 says; a restart does not change it. So the change was dropped, and the page says the trains need a lock per repository.
+4. **#437: the Tower names the workspace's id.** Option (a) of the issue: the app reads the project from the service's `GET /api/workspace`, which the Tower reads already. A new ticket now names it as a batch did (`ticketProject` in `screens/tower/model.ts`, used by both); the app's project name, the header's label, only when the workspace could not be read. The service still refuses a ticket of another project: option (b) (the service fills a missing project) was not taken, since it would accept a ticket a page sent with no project by mistake.
+5. **No string a person reads in the product is added**, so no catalog changes: the changed lines are the service's log (English, for a developer) and the documentation.
+
+**Questions for the owner** (defaults applied):
+1. **The lead on an install by the assistant.** It never started there, since its switch read `CLEARED_V2_PROJECT`. (a) On unless `CLEARED_V2_LEAD_ENABLED` turns it off, as for an install by hand (applied): once a repository is connected, a lead session starts and uses Claude Code's quota. (b) Off on an install by the assistant until the owner turns it on in the settings. Recommended: (a), the lead being part of what Cleared is.
+2. **A repository connected later.** (a) A restart, said in the environment step and in `docs/install.md` (applied). (b) The flow rebuilt in place once no session runs, a lane of its own. (c) A restart button in the app. Recommended: (a) now, (b) if connecting later turns out to be common.
+
+**Tests first.** `fe0ea4c7` committed the tests alone. On it:
+- `test/setup/no-restart.test.ts` failed at the first module that read the workspace at start: "the workspace's rows are written" (`[]`, expected `['guestbook']`). The flow, the workspace step and `GET /api/workspace` already passed, from P256.
+- `test/approval/sensitivity.test.ts`, the gate's case, failed with `1 !== 2` (read once, the empty read kept).
+- `test/lead/config.test.ts` failed: `loadLeadConfig` said off with a workspace file and no project.
+- `app/web/test/tower-workspace.test.tsx`, its new case, failed: `ticketProject is not a function`.
+- `test/notify/module.test.ts`, "with a workspace file the dispatcher starts too", was written with the module's change and run on the old module, where it failed.
+Changed with the code, each for what the first full run of the end-to-end test showed: its workspace is two repositories and the train approvals' assertion is gone (decision 3); the mirror is seen by its first pass's rows, since that pass asks the tracker nothing; the ticket route answers 200.
+
+**The end-to-end test** runs main.ts's twelve modules in one process, their settings set before they are imported, as the settings file is applied before anything reads one: a state folder of the temporary folder, no workspace and no project, a fake `gh` over bare copies of the two examples, the fake harness with the proof's first-ticket script (`scripts/proof-j5.ts`), a token file for the GitHub mirror whose address is a recorder on loopback, and a `docker` stand-in first on `PATH`. It makes the owner from the setup code the start printed, as the app does, connects both repositories through the workspace step's routes, then checks that the workspace's rows, the knowledge, the dispatcher, the mirror's two trackers and the lead are there; it creates the first ticket from the first-ticket step and one as the Tower sends it, both with the workspace's id, and waits for the author's session plan in the inbox. The stand-in got no call and the recorder no request.
+
+**Files outside the issues' own.** `src/setup/steps/environment.ts` and `src/container/types.ts` (comments only, the restart named), `docs/install.md` and `docs/troubleshooting.md` (the known gaps: #437's line removed, #420's replaced by a link to the new section), the matrix and this log.
+
+**Not done here.**
+- No Compose run and no rehearsal: the end-to-end test is in one Node process with fakes. `scripts/proof-j5.ts` is unchanged.
+- A workspace changed once the flow runs, and the heartbeat's quota line on an install by the assistant: a restart, as written (question 2).
+- The release trains of several repositories on a Compose install: a lock per repository (decision 21 of milestone 2), not run by the Compose file.
+- No progress dashboard: the owner's rules ask a sub-agent to keep one for a long task, and the brief forbids starting any sub-agent.
+
+**Checks**, on this branch at `origin/v2` `0e49cbde`:
+- `npm run typecheck` in `v2/`: clean.
+- `npm test` in `v2/`: 2874 Node tests, 2739 pass, 135 skipped, 0 fail; 416 Vitest tests pass.
+- `node --test test/setup/no-restart.test.ts`: passes in about 3 s, the stand-in `docker` called by nobody.
+- The browser tests were not run: no screen changed, and the Tower's change is in its model, tested by Vitest.
+- `npm run guard -- --base origin/v2`: nothing refused. The guard does not read `docs/v2/` and ran without the private-term list, so the lane's diff was also searched for the owner's name, the organisation's and the first piloted project's: none.
+
+**Resources.** No Docker object (the test's stand-in refuses every call and got none), no real GitHub, GitLab, Slack, Cursor or Codex account, no Claude Code login read. Network: `npm ci` of the lock file, `git fetch`, and GitHub for the issues and the pull request. Ports: only the tests' own ephemeral loopback ones. No tunnel, no secret.
+
+- Pull request: PR_NUMBER, against `v2`.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-workspace-reload`.
