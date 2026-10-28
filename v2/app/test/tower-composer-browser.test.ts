@@ -77,6 +77,11 @@ test('Ctrl+Enter from the description starts the ticket; a suggestion fills the 
     await page.keyboard.press('Escape');
     assert.ok(!await page.locator('#ask-more-menu').isVisible(), 'closed by Escape');
     assert.equal(await page.evaluate(() => document.activeElement?.id), 'ask-more-button');
+    // A click elsewhere closes it too.
+    await page.locator('#ask-more-button').click();
+    assert.ok(await page.locator('#ask-more-menu').isVisible(), 'open again');
+    await page.locator('#tower-heading').click();
+    assert.ok(!await page.locator('#ask-more-menu').isVisible(), 'closed by a click elsewhere');
   });
 });
 

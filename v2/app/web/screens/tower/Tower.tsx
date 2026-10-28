@@ -75,8 +75,16 @@ export function Bar({ t, title, body, services = [], picked = [], variants = 1, 
     if (event.key === 'Enter' && (event.metaKey || event.ctrlKey) && !event.altKey) { event.preventDefault(); event.currentTarget.requestSubmit(); }
     if (event.key === 'Escape' && more) { setMore(false); document.getElementById('ask-more-button')?.focus(); }
   };
-  // A gesture of the menu closes it once done.
+  // A gesture of the menu closes it once done; so does a click or the focus anywhere else.
   const then = (run?: () => void) => () => { setMore(false); run?.(); };
+  const menu = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!more) return undefined;
+    const away = (event: Event) => { if (menu.current && !menu.current.contains(event.target as Node)) setMore(false); };
+    document.addEventListener('pointerdown', away);
+    document.addEventListener('focusin', away);
+    return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('focusin', away); };
+  }, [more]);
   return (
     <form className="ask" id="ask" autoComplete="off" onSubmit={onSubmit} onKeyDown={keys}>
       <Input id="ask-input" name="title" maxLength={200} placeholder={t(template ? `template_${template}_title` : 'bar_placeholder')} aria-label={t('bar_label')} value={title} onChange={(event) => onTitle?.(event.target.value)} />
@@ -142,7 +150,7 @@ export function Bar({ t, title, body, services = [], picked = [], variants = 1, 
           <span className="ask-pill"><Rows size={14} className="ask-icon" aria-hidden="true" /><Button variant="chip" className="chip-button" data-bar="batch" aria-expanded={batchOpen} aria-controls="batch-form" onClick={onBatch}>{t('bar_batch')}</Button></span>
         </div>
         <div className="ask-go">
-          <div className="ask-more" data-open={more ? 'true' : undefined}>
+          <div className="ask-more" ref={menu} data-open={more ? 'true' : undefined}>
             <Button variant="ghost" className="icon" id="ask-more-button" aria-label={t('bar_more')} data-tip={t('bar_more')} title={t('bar_more')} aria-expanded={more} aria-controls="ask-more-menu" onClick={() => setMore((open) => !open)}>
               <DotsThree size={18} weight="bold" aria-hidden="true" />
             </Button>
