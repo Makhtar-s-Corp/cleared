@@ -2964,7 +2964,7 @@ export class FlowEngine {
 
   // The human's choice of the receipt's captures on a ticket (GET and POST
   // /api/tickets/:id/captures): undefined for a ticket the store does not
-  // know. It counts from the next author that ends its work.
+  // know. It counts from the next review that passes (#reviewDone).
   async captureChoice(ticket: TicketId): Promise<CaptureChoice | undefined> {
     if (!(await this.registry.ticketStore.get(ticket))) return undefined;
     return this.#captureChoices.get(ticket);
