@@ -525,6 +525,8 @@ async function main(): Promise<void> {
     if (authorA) {
       await sleep(2_000);
       await page.goto(`${APP}/sessions/${encodeURIComponent(authorA.id)}`);
+      // The page draws from the session's detail first, then from its journal: read it once the journal is in.
+      await sleep(5_000);
       shown = (await page.locator('.phrase-title').first().innerText().catch(() => '?')).trim();
     }
     return `${card}; the review's verdict: ${verdict ?? 'none'}; set aside; the author's screen then reads "${shown}"; ${costOf(ticket)} USD`;
