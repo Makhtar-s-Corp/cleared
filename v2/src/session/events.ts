@@ -114,6 +114,8 @@ export type Usage = {
 };
 
 export type SessionPhase = 'starting' | 'working' | 'waiting_human' | 'reviewing' | 'done' | 'stopped' | 'failed';
+// The phases of a session that runs: the flow's, and the doctor's orphans line.
+export const LIVE_PHASES: ReadonlySet<string> = new Set<SessionPhase>(['starting', 'working', 'waiting_human', 'reviewing']);
 
 // The STATE_SNAPSHOT of a session: what the session screen shows above its timeline.
 export type SessionState = {

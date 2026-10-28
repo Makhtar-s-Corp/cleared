@@ -49,7 +49,7 @@ test('read only: Docker is asked its version and labelled lists, nothing is buil
   const made = install();
   await run(made);
   const verbs = made.docker.calls.map((call) => (['image', 'network', 'volume'].includes(call.args[0] ?? '') ? `${call.args[0]} ${call.args[1]}` : call.args[0]));
-  for (const verb of verbs) assert.ok(['version', 'ps', 'image ls', 'image inspect', 'network ls', 'network inspect'].includes(verb ?? ''), `only reads: ${verb}`);
+  for (const verb of verbs) assert.ok(['version', 'ps', 'image ls', 'image inspect', 'network ls', 'network inspect', 'volume ls'].includes(verb ?? ''), `only reads: ${verb}`);
   for (const call of made.docker.calls.filter((c) => ['ps', 'ls'].includes(c.args[0] === 'ps' ? 'ps' : c.args[1] ?? ''))) assert.ok(call.args.includes('label=cleared.dev=v2'), call.args.join(' '));
   assert.deepEqual(made.github.requests.map((r) => r.path), ['/user', `/repos/${REPO}`]);
   assert.ok(made.github.requests.every((r) => r.auth === `Bearer ${FORGE_VALUE}`), 'the credential travels in the authorization header only');
