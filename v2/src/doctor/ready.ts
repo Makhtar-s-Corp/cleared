@@ -2,7 +2,8 @@
 // section 7, issue #415): is this install ready for a first ticket. Read
 // only: Docker is asked its version and lists filtered on cleared.dev=v2,
 // nothing is built, made or started; GitHub is read; git reads the
-// checkouts and fetches nothing; no session, no model call. The model login
+// checkouts and fetches nothing; the ledger is opened read only, for the
+// orphans line; no session, no model call. The model login
 // is looked at (its kind, owner, mode and size) and never opened; the forge
 // credential travels in the authorization header only, and every line is
 // scrubbed of it before it leaves. Each line is passed, failed with what to
@@ -25,19 +26,21 @@ import { forgeKindOf } from '../forge/index.ts';
 import { claudeCodeRuntime } from '../session/adapters/claude-code.ts';
 import { readSettings, settingsPath, stateFolder } from '../setup/settings.ts';
 import { forgeApi } from '../setup/steps/forge.ts';
-import { LedgerPathError } from '../store/db.ts';
+import { LedgerPathError, ledgerPath } from '../store/db.ts';
 import { git } from '../workspace/checkout.ts';
 import type { WorkspaceConfig } from '../workspace/config.ts';
+import { findOrphans, readLedgerSessions, type LedgerSession, type Orphan } from './orphans.ts';
 import { doctorTranslator, type DoctorLevel, type DoctorLine } from './section.ts';
 
 // The checks, in the order they are said; each line's id is one of these.
-export const READY_CHECKS = ['docker', 'labels', 'images', 'pool', 'state', 'disk', 'settings', 'credentials', 'model', 'forge', 'repository', 'checkout'] as const;
+export const READY_CHECKS = ['docker', 'labels', 'images', 'pool', 'orphans', 'state', 'disk', 'settings', 'credentials', 'model', 'forge', 'repository', 'checkout'] as const;
 export type ReadyCheck = (typeof READY_CHECKS)[number];
 
 const GB = 1024 ** 3;
 const DISK_FAIL = 5 * GB;
 const DISK_LOW = 20 * GB;
 const FREE_SUBNETS = 2;
+const ORPHANS_SHOWN = 6;                   // names shown per orphans line; the rest are counted
 const GITHUB_TIMEOUT_MS = 15_000;
 const IMAGES = [SESSION_IMAGE, EGRESS_IMAGE] as const;
 // A role that pushes a branch and opens a pull request.
@@ -95,7 +98,7 @@ export async function readyChecks(input: { readonly env: NodeJS.ProcessEnv; read
     say('docker', 'fail', 'docker_fail', { reason: reasonOf(error) }, 'docker_todo');
   }
   if (version === undefined) {
-    for (const id of ['labels', 'images', 'pool'] as const) say(id, 'off', 'after_docker');
+    for (const id of ['labels', 'images', 'pool', 'orphans'] as const) say(id, 'off', 'after_docker');
   } else {
     let filtered = false;
     try {
@@ -107,7 +110,7 @@ export async function readyChecks(input: { readonly env: NodeJS.ProcessEnv; read
     }
     // Lists that ignore the filter would name what is not Cleared's: not run.
     if (!filtered) {
-      for (const id of ['images', 'pool'] as const) say(id, 'off', 'after_labels');
+      for (const id of ['images', 'pool', 'orphans'] as const) say(id, 'off', 'after_labels');
     } else {
       try {
         const missing: string[] = [];
@@ -126,6 +129,7 @@ export async function readyChecks(input: { readonly env: NodeJS.ProcessEnv; read
       } catch (error) {
         say('pool', 'fail', 'pool_error', { reason: reasonOf(error) }, 'pool_todo');
       }
+      await orphanChecks(env, probes.docker, t, say);
     }
   }
 
@@ -263,6 +267,34 @@ function settingsChecks(state: string, uid: number, say: (id: ReadyCheck, level:
 }
 
 // One GET of GitHub's API: its status (0 when no answer came in time) and its body.
+// The labelled networks and volumes no live session holds (src/doctor/orphans.ts),
+// listed with what to do: notices only, nothing removed, the ledger read only.
+async function orphanChecks(env: NodeJS.ProcessEnv, docker: Docker, t: Translate, say: (id: ReadyCheck, level: DoctorLevel, key: string, values?: Record<string, string | number>, todo?: string) => void): Promise<void> {
+  let sessions: ReadonlyMap<string, LedgerSession> | undefined;
+  try {
+    let path: string | undefined;
+    try { path = ledgerPath(env); } catch (error) { if (!(error instanceof LedgerPathError)) throw error; }
+    sessions = path === undefined ? undefined : readLedgerSessions(path);
+  } catch (error) {
+    say('orphans', 'notice', 'orphans_ledger', { reason: reasonOf(error) }, 'orphans_ledger_todo');
+    return;
+  }
+  let found;
+  try {
+    found = findOrphans({ containers: await docker.containers(), networks: await docker.networks(), volumes: await docker.volumes(), ...(sessions ? { sessions } : {}) });
+  } catch (error) {
+    say('orphans', 'notice', 'orphans_error', { reason: reasonOf(error) }, 'orphans_error_todo');
+    return;
+  }
+  const listed = (orphans: readonly Orphan[]): string => {
+    const names = orphans.slice(0, ORPHANS_SHOWN).map((o) => (o.ticket === undefined ? o.name : `${o.name} (${o.ticket})`)).join(', ');
+    return orphans.length > ORPHANS_SHOWN ? t('orphans_more', { names, count: orphans.length - ORPHANS_SHOWN }) : names;
+  };
+  const groups = [['orphans_networks', found.networks], ['orphans_kept', found.kept], ['orphans_unknown', found.unknown]] as const;
+  for (const [key, orphans] of groups) if (orphans.length > 0) say('orphans', 'notice', key, { count: orphans.length, names: listed(orphans) }, `${key}_todo`);
+  if (groups.every(([, orphans]) => orphans.length === 0)) say('orphans', 'ok', 'orphans_ok');
+}
+
 async function githubRead(fetcher: typeof fetch, url: string, credential: string): Promise<{ readonly status: number; readonly body?: unknown }> {
   try {
     const response = await fetcher(url, {

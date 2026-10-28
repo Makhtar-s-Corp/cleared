@@ -39,6 +39,17 @@ export class DockerError extends Error {
   }
 }
 
+// Docker has no subnet left in its address pools for a new network (issue
+// 265): the networks of sessions that no longer run may hold them. Said at
+// once, with what to run, instead of a session start that waits for its delay.
+export class PoolFullError extends DockerError {
+  override name = 'PoolFullError';
+}
+
+// The daemon's words for spent pools: moby's ipamapi.ErrNoMoreSubnets, and
+// the wording of the releases before it.
+const POOLS_SPENT = /(?:all predefined address pools have been fully subnetted|could not find an available, non-overlapping IPv4 address pool)[^\n]*/i;
+
 export class LabelRuleError extends Error {
   override name = 'LabelRuleError';
 }
@@ -299,9 +310,15 @@ export class Docker {
     // host, and every host service listening on 0.0.0.0 answers there. The
     // isolated gateway mode (checked with Docker 29.8.1) assigns it none.
     const internal = spec.internal ? ['--internal', '--opt', 'com.docker.network.bridge.gateway_mode_ipv4=isolated'] : [];
-    const out = await this.must(['network', 'create', '--driver', 'bridge', ...internal,
-      '--label', LABEL, '--label', `${SESSION_LABEL}=${spec.session}`, spec.name]);
-    return out.trim();
+    try {
+      const out = await this.must(['network', 'create', '--driver', 'bridge', ...internal,
+        '--label', LABEL, '--label', `${SESSION_LABEL}=${spec.session}`, spec.name]);
+      return out.trim();
+    } catch (error) {
+      const said = error instanceof DockerError ? POOLS_SPENT.exec(error.tail ?? '')?.[0] : undefined;
+      if (said === undefined) throw error;
+      throw new PoolFullError(`Docker's address pools are full: no subnet is left for the network ${spec.name} (${said}). Networks of sessions that no longer run may hold them. Run cleared doctor: it counts the free subnets and lists the networks labelled ${LABEL} that no live session holds.`, (error as DockerError).tail);
+    }
   }
 
   async createVolume(spec: { readonly name: string; readonly session: string }): Promise<string> {
