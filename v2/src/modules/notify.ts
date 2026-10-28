@@ -1,8 +1,10 @@
 // The notify module (docs/v2/milestone-2-plan.md, decision 14 and section
 // 6): the v2 notification dispatcher and its table, v2_notify_queue. When a
-// project is set (CLEARED_V2_PROJECT, as the flow), the dispatcher starts
-// with the service, ticks at once and every 30 seconds, and needs no request
-// to the API. It declares no route: subscribing is the app's
+// workspace is set (CLEARED_V2_WORKSPACE or CLEARED_V2_PROJECT, as the flow
+// reads it), the dispatcher starts with the service, else once the flow runs
+// on the one the assistant writes later (issue #420); it ticks at once and
+// every 30 seconds, and needs no request to the API. It declares no route:
+// subscribing is the app's
 // (app/src/notifications.ts).
 // Milestone 4 (issue #392, P239): the service's heartbeat
 // (heartbeat/beat.ts), what tells a push monitor the service is alive.
@@ -11,6 +13,7 @@
 // v2_heartbeat_state and v2_heartbeat_incidents, are this module's.
 import type { DatabaseSync } from 'node:sqlite';
 import { loadFlowConfig } from '../flow/config.ts';
+import { runtime as flowRuntime } from '../flow/runtime.ts';
 import { HEARTBEAT_TABLES, Heartbeat } from '../heartbeat/beat.ts';
 import { HeartbeatConfigError, readHeartbeatSettings, readMonitor } from '../heartbeat/settings.ts';
 import { InboxStore } from '../inbox/store.ts';
@@ -44,15 +47,20 @@ export function createNotifyModule(options: NotifyModuleOptions): NotifyModule {
   let dispatcher: Dispatcher | undefined;
   let heartbeat: Heartbeat | undefined;
   let ledger: DatabaseSync | undefined;
+  let stopped = false;
   const log = options.log ?? ((line: string) => console.error(line));
   return {
     tables: [...NOTIFY_TABLES, ...HEARTBEAT_TABLES],
     routes: [],
     provide: ({ store }) => {
       ledger = store.db;
-      if (!options.env.CLEARED_V2_PROJECT || dispatcher) return {};
-      dispatcher = new Dispatcher({ db: store.db, inbox: new InboxStore(store.db), sender: (options.sender ?? childSender)(options.env) });
-      dispatcher.start(options.intervalMs ?? 30_000);
+      if (dispatcher) return {};
+      const make = () => {
+        dispatcher = new Dispatcher({ db: store.db, inbox: new InboxStore(store.db), sender: (options.sender ?? childSender)(options.env) });
+        dispatcher.start(options.intervalMs ?? 30_000);
+      };
+      if (options.env.CLEARED_V2_PROJECT || options.env.CLEARED_V2_WORKSPACE) make();
+      else flowRuntime.whenEngine(() => { if (!dispatcher && !stopped) make(); });
       return {};
     },
     // A bad setting is said in one line, never an address, and leaves the beat off.
@@ -72,6 +80,7 @@ export function createNotifyModule(options: NotifyModuleOptions): NotifyModule {
     },
     // The beat that runs is awaited, so that the store does not close under it.
     stop: async () => {
+      stopped = true;
       const ending = heartbeat;
       heartbeat = undefined;
       await ending?.close();

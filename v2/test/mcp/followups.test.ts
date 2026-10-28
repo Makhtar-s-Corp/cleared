@@ -230,6 +230,11 @@ test('the server process whose client closed its stdout exits with 0 and no stac
     let stderr = '';
     child.stderr.on('data', (chunk) => { stderr += String(chunk); });
     const closed = new Promise<number | null>((resolve) => child.on('close', resolve));
+    // The server may exit between the check of exitCode and a write, as it
+    // is meant to: that write then meets a closed pipe (EPIPE), which is
+    // the test's, not the server's. Any other error of the pipe still fails.
+    const pipe: Error[] = [];
+    child.stdin.on('error', (error: NodeJS.ErrnoException) => { if (error.code !== 'EPIPE') pipe.push(error); });
     child.stdout.destroy();
     for (let i = 0; i < 5 && child.exitCode === null; i++) {
       child.stdin.write('{"jsonrpc":"2.0","id":1,"method":"ping"}\n');
@@ -238,6 +243,7 @@ test('the server process whose client closed its stdout exits with 0 and no stac
     const code = await Promise.race([closed, new Promise<string>((resolve) => setTimeout(() => resolve('still running'), 5000))]);
     assert.equal(code, 0, stderr);
     assert.equal(stderr, '');
+    assert.deepEqual(pipe, []);
   } finally {
     child.kill();
     fixture.close();

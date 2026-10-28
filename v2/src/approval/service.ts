@@ -306,7 +306,8 @@ export type ApproverGate = (input: { readonly ticket: string; readonly by: strin
 export function approverGate(read: () => { readonly workspace: WorkspaceConfig | undefined; readonly ownerId: string | undefined }): ApproverGate {
   let known: ReturnType<typeof read> | undefined;
   return async ({ by, users }) => {
-    known ??= read();
+    // Read again while there is no workspace: the assistant writes it while the service runs (issue #420).
+    if (!known?.workspace) known = read();
     const { workspace, ownerId } = known;
     if (!workspace || workspace.services.length !== 1) return;
     const service = workspace.services[0] as ServiceConfig;
@@ -318,7 +319,7 @@ export function approverGate(read: () => { readonly workspace: WorkspaceConfig |
   };
 }
 
-// The gate as the service's environment says: its workspace and its lock's owner_id, read once.
+// The gate as the service's environment says: its workspace and its lock's owner_id, read once there is a workspace.
 export function environmentApprovers(env: NodeJS.ProcessEnv = process.env): ApproverGate {
   return approverGate(() => {
     let workspace: WorkspaceConfig | undefined;

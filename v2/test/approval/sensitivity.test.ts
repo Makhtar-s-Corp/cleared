@@ -213,3 +213,19 @@ test('one service that is not human: the gate changes nothing', async () => {
     assert.equal((await call(`/api/tickets/${w.ticket.id}/approve`, w.body)).status, 202);
   });
 });
+
+// Issue #420: the gate is asked before the assistant wrote the workspace,
+// then after; it reads again while there is none, then keeps what it read.
+test('the gate reads the workspace again while there is none, then keeps it', async () => {
+  let reads = 0;
+  let workspace: WorkspaceConfig | undefined;
+  const gate = approverGate(() => { reads += 1; return { workspace, ownerId: OWNER }; });
+  const input = { ticket: 'LOCAL-1', by: 'u-alice', users: defaultRegistry().users };
+  await gate(input);
+  await gate(input);
+  assert.equal(reads, 2, 'no workspace yet: read at each approval');
+  workspace = { id: 'guestbook', name: 'Guestbook', file: '/etc/ws.conf', services: [svc('guestbook', '/state', 'human:alice')] };
+  await assert.rejects(gate(input), /owner_id = /, 'the workspace written since is the one checked');
+  await assert.rejects(gate(input), /owner_id = /);
+  assert.equal(reads, 3, 'then kept');
+});
