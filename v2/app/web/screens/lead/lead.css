@@ -7,18 +7,19 @@
 :root { --ok-text: var(--success-text); --ok-surface: var(--success-fill); --awaiting-outline: var(--awaiting); }
 
 
-.lead-screen { display: grid; grid-template-columns: minmax(0, 1fr) clamp(440px, 46vw, 680px); gap: var(--space-5); align-items: stretch; height: calc(100dvh - var(--top-bar)); padding: var(--space-5); }
+.lead-screen { display: grid; grid-template-columns: minmax(0, 1fr) clamp(440px, 46vw, 680px); gap: var(--space-5); align-items: stretch; min-height: calc(100dvh - var(--top-bar)); align-content: start; padding: var(--space-5); }
 .lead-screen[aria-busy="true"] { min-height: 240px; }
 
-/* the lead's card: its state, what it remembers, the thread, the reply */
-.lead-screen .lead-card { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden; border-radius: 0; background: var(--surface); box-shadow: var(--e-card); }
+/* the lead's card: its state, what it remembers, the thread, the reply. The page scrolls, never a part of it
+   (Signal, lane j6-ui-hallmark: no text runs on under the reply or the plan's facts). */
+.lead-screen .lead-card { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: visible; border-radius: 0; background: var(--surface); box-shadow: var(--e-card); }
 .lead-screen .lead-top { display: flex; align-items: center; gap: var(--space-3); padding: var(--space-3) var(--space-4); background: var(--ink); color: var(--on-ink); }
 .lead-screen .lead-top .lead-mark { width: 36px; height: 36px; background: var(--awaiting); color: var(--count-ink); }
 .lead-screen .lead-who { flex: 1 1 0; min-width: 0; line-height: 1.25; }
 .lead-screen .lead-who h2 { font-size: var(--text-lg); font-weight: var(--weight-heavy); }
 .lead-screen .lead-line { font-size: var(--text-sm); line-height: 1.4; color: var(--on-ink); }
 .lead-screen :is(.lead-line, .system-line) .fact-sep { display: inline-block; width: 1px; height: 0.85em; margin: 0 var(--space-2); background: currentColor; vertical-align: -0.08em; }
-.lead-screen .lead-top .link-button { flex: none; max-width: 40%; color: var(--on-ink); text-decoration: underline; font-weight: var(--weight-strong); }
+.lead-screen .lead-top .link-button { flex: none; white-space: nowrap; color: var(--on-ink); text-decoration: underline; font-weight: var(--weight-strong); }
 .lead-screen .lead-line.lead-down { display: inline-flex; align-items: center; gap: var(--space-2); margin-top: var(--space-1); padding: 2px 12px; border-radius: 0; background: var(--surface); box-shadow: inset 0 0 0 var(--frame) var(--danger); color: var(--danger-text); font-weight: var(--weight-strong); }
 .lead-screen .lead-line.lead-down::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--danger); flex: none; }
 .lead-screen .link-button { margin-left: auto; min-height: 32px; padding: 0; border: 0; background: none; color: var(--link); font-size: var(--text-sm); text-align: right; cursor: pointer; }
@@ -39,7 +40,7 @@
 .lead-screen .commitments p:first-child { overflow-wrap: anywhere; }
 .lead-screen .commitments.done p:first-child { color: var(--text-secondary); }
 
-.lead-screen .thread { flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: var(--space-2) var(--space-3) 12px; font-size: var(--text-md); }
+.lead-screen .thread { flex: 1; min-height: 0; overflow: visible; list-style: none; margin: 0; padding: var(--space-2) var(--space-3) 12px; font-size: var(--text-md); }
 .lead-screen .thread > li { margin: 12px 0; }
 .lead-screen .owner-row { display: flex; justify-content: flex-end; }
 .lead-screen .bubble { padding: 12px 12px; border-radius: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
@@ -101,7 +102,7 @@
 .plan-panel.awaiting .plan-eyebrow { background: var(--awaiting); color: var(--count-ink); }
 .plan-head h2 { margin-bottom: var(--space-2); font-size: var(--text-xl); font-weight: var(--weight-heavy); line-height: 1.12; letter-spacing: -0.03em; overflow-wrap: anywhere; }
 .plan-summary { font-size: var(--text-md); color: var(--text-secondary); }
-.plan-items { flex: 1 1 auto; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: var(--space-2) var(--space-5) var(--space-3); font-size: var(--text-md); }
+.plan-items { flex: 1 1 auto; min-height: 0; overflow: visible; list-style: none; margin: 0; padding: var(--space-2) var(--space-5) var(--space-3); font-size: var(--text-md); }
 .plan-items > :first-child { border-top: var(--frame) solid var(--ink); }
 .plan-item { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto auto; gap: var(--space-3); align-items: start; padding: var(--space-3) 0; border-top: 1px solid var(--hairline); }
 .plan-n { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 0; background: var(--ink); color: var(--on-ink); font-size: var(--text-sm); font-weight: var(--weight-heavy); }
@@ -182,7 +183,7 @@
   .lead-screen .bubble-link { display: inline-flex; margin-top: 0; }
   .lead-screen .train-link { display: inline-flex; align-items: center; min-height: 44px; margin: 0; }
   .lead-screen .thread { padding: var(--space-1) var(--space-3) 12px; }
-  .lead-screen .reply { padding: 12px var(--space-3) calc(10px + env(safe-area-inset-bottom)); }
+  .lead-screen .reply { padding: var(--space-3) var(--space-3) calc(var(--space-3) + env(safe-area-inset-bottom)); }
   .lead-screen .reply textarea, .lead-screen .goal-toggle, .lead-screen .reply .primary { min-height: 44px; }
   .lead-screen .reply textarea { order: -1; flex-basis: 100%; }
   .lead-screen .reply .primary { margin-left: auto; }

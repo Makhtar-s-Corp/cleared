@@ -28,7 +28,8 @@ const stampFirst = (): Plugin => ({
       const banner = /^\/\*! tailwindcss [^*]*\*\/\s*/.exec(asset.source);
       const rest = banner ? asset.source.slice(banner[0].length) : '';
       const stamp = /^\/\*! Hallmark[^]*?\*\/\s*(?:\/\*! Hallmark[^]*?\*\/\s*)*/.exec(rest);
-      if (banner && stamp) asset.source = `${stamp[0]}${banner[0]}${rest.slice(stamp[0].length)}`;
+      // The minifier keeps a comment only as /*! */; the stamp is written back as the plain comment Hallmark reads.
+      if (banner && stamp) asset.source = `${stamp[0].replaceAll('/*! Hallmark', '/* Hallmark')}${banner[0]}${rest.slice(stamp[0].length)}`;
     }
   },
 });

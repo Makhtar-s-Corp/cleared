@@ -17,8 +17,8 @@ export const buttonVariants = cva(
     variants: {
       variant: {
         ink: 'rounded-md bg-primary text-primary-foreground font-[var(--weight-strong)] hover:bg-[var(--accent-hover)] active:bg-[var(--accent-press)] disabled:bg-[var(--surface-muted)] disabled:text-[var(--text-faint)]',
-        outline: 'rounded-md bg-card [box-shadow:var(--e-control)] hover:bg-accent active:bg-[var(--selected)] disabled:text-[var(--text-faint)] disabled:[box-shadow:var(--e-outline)]',
-        chip: 'rounded-md bg-card [box-shadow:var(--e-control)] text-xs hover:bg-accent active:bg-[var(--selected)]',
+        outline: 'rounded-md bg-[var(--surface)] [box-shadow:var(--e-control)] hover:bg-accent active:bg-[var(--selected)] disabled:text-[var(--text-faint)] disabled:[box-shadow:var(--e-outline)]',
+        chip: 'rounded-md bg-[var(--surface)] [box-shadow:var(--e-control)] text-xs hover:bg-accent active:bg-[var(--selected)]',
         ghost: 'rounded-md bg-transparent text-muted-foreground hover:bg-accent hover:text-foreground active:bg-[var(--selected)]',
         link: 'bg-transparent p-0 text-link hover:underline',
       },
