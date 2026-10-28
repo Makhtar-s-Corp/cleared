@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { Docker, LABEL, ROLE_LABEL, SESSION_LABEL } from '../../src/container/docker.ts';
 import { parseServices } from '../../src/container/services.ts';
 import { PreparedImages, readRecord, type PreparedSource } from '../../src/container/prepared.ts';
+import { SESSION_IMAGE } from '../../src/container/session-runtime.ts';
 import {
   ENV_CHECK_ROUNDS, ENVIRONMENT_LABEL, EnvCheckStore, checkBranch, declaredCheck, envCheckComment, envCheckRequest, environmentAfterMerge, hasDevcontainer, isEnvironmentTicket, releaseInterruptedChecks, took,
   type EnvCheck,
@@ -91,9 +92,9 @@ test('the image is built from the ticket\'s branch, never the base, and the decl
   assert.match(check.tail ?? '', /# pass 1/);
   assert.equal(typeof check.buildMs, 'number');
 
-  // The branch's Dockerfile first, then Cleared's layer with the branch's lock file.
+  // The branch's Dockerfile first, on this install's session image, then Cleared's layer with the branch's lock file.
   assert.equal(seen.length, 2);
-  assert.equal(seen[0]?.dockerfile, DOCKERFILE);
+  assert.equal(seen[0]?.dockerfile, DOCKERFILE.replace('cleared-v2-session:latest', SESSION_IMAGE));
   assert.match(seen[1]?.dockerfile ?? '', /^FROM cleared-v2-check-api:[0-9a-f]{16}-devcontainer$/m);
   assert.equal(seen[1]?.files['package-lock.json'], LOCK('8.13.2'), 'the branch\'s lock file, not the base\'s');
   for (const build of builds(fake)) {
