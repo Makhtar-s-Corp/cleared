@@ -64,6 +64,25 @@ test('a total lower than the one before is a new process of the session (a resum
   assert.equal(sessionsCost([author]).costUsd, 0.75, '0.50 before the resume, then 0.25 since');
 });
 
+// Issue #453: the flow journals cleared.container_recreated when it starts a
+// session's second process, whose running total starts again from zero.
+const recreated = (id: string, minutes: number) => ev(id, minutes, { type: 'CUSTOM', name: 'cleared.container_recreated', value: { attempt: 1, limit: 3, waitedMs: 5000 } });
+const lost = (id: string, minutes: number) => ev(id, minutes, { type: 'RUN_ERROR', message: 'the session\'s container stopped (exit code 137)', code: 'container_lost' });
+
+test('a session whose container was recreated adds both processes\' totals, each counted once, even when the second reaches past the first', () => {
+  const author = [
+    started('a', 0, 'r1'), finished('a', 5, 'r1', { inputTokens: 10 }, 0.2),
+    started('a', 6, 'r2'), finished('a', 8, 'r2', { inputTokens: 10 }, 0.3),
+    started('a', 9, 'r3'), lost('a', 10), recreated('a', 11),
+    started('a', 12, 'r4'), finished('a', 14, 'r4', { inputTokens: 10 }, 0.35),
+    started('a', 15, 'r5'), finished('a', 16, 'r5', { inputTokens: 10 }, 0.45),
+  ];
+  const cost = sessionsCost([author]);
+  assert.equal(cost.costUsd, 0.75, '0.30 by the first process, then 0.45 by the second: not 0.45, and not 1.30');
+  assert.equal(cost.turns, 4, 'the cut turn finished nothing');
+  assert.equal(sessionsCost([author], Date.parse(at(13))).costUsd, 0.45, 'from a start inside the second process: its own total');
+});
+
 test('the dollars are unknown when one session that finished a turn never reported a total; tokens and time are still counted', () => {
   const author = [started('a', 0, 'r1'), finished('a', 10, 'r1', { inputTokens: 100 }, 0.4)];
   const codex = [started('c', 11, 'r1'), finished('c', 20, 'r1', { inputTokens: 40, outputTokens: 2 }, null)];

@@ -11,7 +11,7 @@ const OTHER = '9a8b7c6d-5e4f-4a3b-8c1d-0e9f8a7b6c5d';
 
 const CREATES = new Set(['create', 'build', 'network create', 'volume create']);
 const LISTS = new Set(['ps', 'network ls', 'volume ls', 'image ls']);
-const TARGETED = new Set(['start', 'stop', 'rm', 'exec', 'inspect', 'logs', 'network rm', 'network inspect', 'volume rm', 'image inspect', 'image rm']);
+const TARGETED = new Set(['start', 'stop', 'kill', 'rm', 'exec', 'inspect', 'logs', 'network rm', 'network inspect', 'volume rm', 'image inspect', 'image rm']);
 
 const verbOf = (args: readonly string[]): string =>
   args[0] === 'network' || args[0] === 'volume' || args[0] === 'image' ? `${args[0]} ${args[1]}` : (args[0] ?? '');
@@ -73,6 +73,7 @@ async function everyMethod(docker: Docker): Promise<void> {
   await docker.inspect(SESSION, `cleared-v2-${SESSION}-session`);
   await docker.inspectNetwork(SESSION, `cleared-v2-${SESSION}`);
   await docker.logs(SESSION, `cleared-v2-${SESSION}-session`);
+  await docker.kill(SESSION, `cleared-v2-${SESSION}-session`);
   await docker.attach(SESSION, `cleared-v2-${SESSION}-session`);
   await docker.containers();
   await docker.networks(SESSION);
@@ -129,7 +130,8 @@ test('an object not found by the labelled list cannot be targeted', async () => 
   await assert.rejects(docker.exec(SESSION, `cleared-v2-${SESSION}-session`, ['true']), /no container named/);
   await assert.rejects(docker.start(SESSION, `cleared-v2-${SESSION}-session`), /no container named/);
   await assert.rejects(docker.inspect(SESSION, `cleared-v2-${SESSION}-session`), /no container named/);
-  assert.ok(!fake.calls.some((call) => ['exec', 'start', 'inspect'].includes(call.args[0] ?? '')));
+  await assert.rejects(docker.kill(SESSION, `cleared-v2-${SESSION}-session`), /no container named/);
+  assert.ok(!fake.calls.some((call) => ['exec', 'start', 'inspect', 'kill'].includes(call.args[0] ?? '')));
 });
 
 test('the gate refuses a command line that breaks the label rule', () => {
