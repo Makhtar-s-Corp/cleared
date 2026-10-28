@@ -139,7 +139,7 @@
   "all_sessions": "Toutes les sessions",
   "bar_variants": "Auteurs",
   "bar_variants_label": "Combien d'auteurs travaillent ce ticket en même temps",
-  "bar_variants_one": "Un auteur",
+  "bar_variants_one": "1\u00a0auteur",
   "bar_variants_other": "{n}\u00a0variantes, comparées dans la réception",
   "ticket_created_variants": "{id} créé, état «\u00a0{status}\u00a0», en {n}\u00a0variantes.",
   "bar_batch": "Lot",

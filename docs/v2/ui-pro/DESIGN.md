@@ -36,6 +36,7 @@ Rules:
 - **Flat.** No gradient, no blurred shadow, no `backdrop-filter`. Depth is a 1px line (`--e-card`, `--e-menu`, `--e-control` are 0-blur 1px rings) or a step of grey. The only translucent colour is the dialog's scrim.
 - **One accent.** Indigo marks the primary action, a link, the focus ring and what is live, nothing decorative. A screen has at most one indigo button.
 - **Status is a mark, not a block.** A 6 px dot beside its word; a tint (`--awaiting-surface`, `--danger-fill`) only behind a short line that must be read (an error, a fresh secret).
+- **A quota's colour is how much is used** (the project lead's review of #462): the accent up to 80 %, amber past 80 %, red only past 90 % (`shell/quota.ts`, `quotaLevel`). Whether it will be reached before its reset is said in words, not by the colour.
 
 ## Type
 
@@ -64,6 +65,15 @@ Rules:
 | Error | `--danger-text` on `--danger-fill`, or a field's line in `--danger`; the message says what to do |
 | Loading | a skeleton in the shape of what comes (`.skeleton`, grey bars with a 4 px radius), the words kept for a screen reader, `aria-busy` on the region |
 | Empty | what belongs here and the one action that fills it (`.empty-state`, `.empty-state.block`) |
+
+## The Tour's composer
+
+The screen's centre piece (the owner's request of 2026-10-28, inspired by Devin's and Codex's composers): one panel with the soft 1px line, the title on a 16 px line, the description under it on three lines that grow with the text, suggestions while it is empty (the ready-made tickets, each its kind and what to write), then a toolbar on a light band.
+
+- **Only real controls**: the authors (1 to 4) or, on a workspace of several, the services; the next authors' model (Consumption's lever, `/api/consumption/levers`); Template; Batch. Each is a pill: an icon and a word, a menu or a set of choices on click.
+- **Not drawn, because the service cannot do it from here**: a harness pick (the API takes `harnesses`, but the web is told of no enabled harness and only Claude Code is enabled by default), an agent profile, attachments, a project picker (a service runs one project).
+- **The other gestures** (a goal, a question for the Lead or for the code, a recipe) are in a menu behind one icon with its tooltip, closed by Escape.
+- **Start** is the one indigo button, `Ctrl`+`Enter` (`⌘`+`Enter` on a Mac) shown beside it and working from either field.
 
 ## Motion and access
 
