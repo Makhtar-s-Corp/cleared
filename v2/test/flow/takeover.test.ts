@@ -71,6 +71,16 @@ async function startAuthor(h: Harness, waits: () => boolean, what: string): Prom
 
 const detail = (h: Harness, id: SessionId) => h.engine.sessionDetail(id) as SessionDetail;
 const events = (h: Harness, id: SessionId) => h.store.events.after(id).map((e) => e.event);
+// The phase the session screen reads from the journal: the last snapshot,
+// then the deltas after it (app/web/screens/session/model.ts).
+function journalPhase(h: Harness, id: SessionId): string | undefined {
+  let phase: string | undefined;
+  for (const e of events(h, id)) {
+    if (e.type === 'STATE_SNAPSHOT') phase = e.snapshot.phase;
+    if (e.type === 'STATE_DELTA') for (const op of e.delta) if (op.path === '/phase') phase = String(op.value);
+  }
+  return phase;
+}
 
 test('the routes ask for the proof and a known user; Take over is the owner\'s alone, and an unknown session is 404', async () => {
   const h = await harness();
@@ -164,6 +174,9 @@ test('a paused session is neither stopped by the idle rule, nor reviewed, nor wr
     await until(() => h.startedSessions.some((s) => s.input.role === 'reviewer'), 'the review');
     await h.engine.settled();
     assert.equal((await post(h, `/api/sessions/${id}/giveback`, as('u1'))).status, 409, 'nothing to give back any more');
+    // Issue #233: the screen read "Working" here, from the snapshot the Give back wrote.
+    assert.equal(detail(h, id).phase, 'done');
+    assert.equal(journalPhase(h, id), 'done', 'the journal ends on the phase the session ended with');
   } finally {
     await h.close();
   }
