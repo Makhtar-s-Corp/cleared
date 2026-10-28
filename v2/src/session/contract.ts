@@ -95,6 +95,13 @@ export type Answer = {
   readonly rule?: string;                                  // the rule id when the policy decided
 };
 
+// The RUN_ERROR code of a session whose container stopped under it: the
+// container's command ended without the runner saying why, and nobody had
+// asked it to stop (a kill, the kernel's out-of-memory killer, the Docker
+// daemon going away). The flow recreates such a container (issue #453,
+// flow/engine.ts); a runner that says why it exits is `runner_exit` instead.
+export const CONTAINER_LOST = 'container_lost';
+
 // ACP StopReason values, plus 'error' for a harness process that died.
 export type StopReason = 'end_turn' | 'max_tokens' | 'max_turn_requests' | 'refusal' | 'cancelled' | 'error';
 

@@ -25,7 +25,7 @@
 // and `login` the state of its login; `host_call` and `measure` are the
 // adapter's.
 import type { RunnerOutput } from '../../../../images/session/runner/main.ts';
-import type { Answer, SessionId, StopReason } from '../../contract.ts';
+import { CONTAINER_LOST, type Answer, type SessionId, type StopReason } from '../../contract.ts';
 import { toolArgs, toolResult, type AgUiEvent, type ContextShare, type CustomValue, type Question, type SessionPhase, type SessionState, type ToolInput, type ToolOutput, type Usage } from '../../events.ts';
 import type { ToolRequest, Verdict } from '../../policy.ts';
 
@@ -179,6 +179,9 @@ export type Mapper = {
   userMessage(messageId: string, text: string, by: string): AgUiEvent[];
   // A runner line other than a request: an SDK frame, a cancelled request, an error, the exit.
   line(line: RunnerOutput): AgUiEvent[];
+  // The container's command ended with no exit line and no stop asked: the
+  // container stopped under the session (issue #453).
+  containerLost(code: number): AgUiEvent[];
   // A permission request with the policy's verdict: only an `ask` shows.
   permissionRequest(line: PermissionLine, verdict: Verdict): AgUiEvent[];
   question(line: QuestionLine): AgUiEvent[];
@@ -457,6 +460,9 @@ export function createMapper(options: { readonly sessionId: SessionId }): Mapper
         default:
           return [];
       }
+    },
+    containerLost(code) {
+      return end([{ type: 'RUN_ERROR', message: `the session's container stopped (exit code ${code})`, code: CONTAINER_LOST }], 'failed', 'Container stopped');
     },
     permissionRequest(line, verdict) {
       if (verdict.decision !== 'ask') return [];

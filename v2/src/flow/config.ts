@@ -71,6 +71,10 @@ export type FlowConfig = {
   // when named: CLEARED_V2_PICK_HARNESSES. loadFlowConfig always sets it; a
   // configuration written without it allows Claude Code alone (PICK_DEFAULT).
   readonly pickHarnesses?: readonly PickHarness[];
+  // The wait before the first recreation of a session's container that
+  // stopped (issue #453), doubled at each next one; RECREATE_BACKOFF_MS
+  // when unset. The tests set it short.
+  readonly recreateBackoffMs?: number;
 };
 
 // How long a team's question waits for the owner before the lead decides

@@ -73,6 +73,8 @@ export class FakeDocker {
   execAnswer: (command: readonly string[]) => DockerResult = () => ok();
   // When false, the fake ignores label filters on lists, as a broken CLI would.
   honourFilters = true;
+  // Called with each container `kill` stops: what its attached process does then.
+  onKill: (container: FakeObject) => void = () => undefined;
   private next = 1;
 
   readonly runner: DockerRunner = async (args, options) => {
@@ -154,8 +156,9 @@ export class FakeDocker {
         return ok(network.id + '\n');
       }
       case 'volume create': {
+        // As the CLI does, a name that exists is that volume, not a second one.
         const name = args[args.length - 1] ?? '';
-        this.volumes.push({ id: name, name, labels: labelsOf(args), args: [...args] });
+        if (!this.volumes.some((v) => v.name === name)) this.volumes.push({ id: name, name, labels: labelsOf(args), args: [...args] });
         return ok(name + '\n');
       }
       case 'create': {
@@ -185,6 +188,14 @@ export class FakeDocker {
           const container = this.containers.find((c) => c.id === id);
           if (!container) return fail(`Error: No such container: ${id}`);
           container.state = verb === 'start' ? 'running' : 'exited';
+        }
+        return ok(targets(args).join('\n') + '\n');
+      case 'kill':
+        for (const id of targets(args)) {
+          const container = this.containers.find((c) => c.id === id);
+          if (!container || container.state !== 'running') return fail(`Error: container ${id} is not running`);
+          container.state = 'exited';
+          this.onKill(container);
         }
         return ok(targets(args).join('\n') + '\n');
       case 'rm':

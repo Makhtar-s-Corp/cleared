@@ -12,8 +12,12 @@
 // that name from StartInput.tools with the scripted input, as the runner
 // relays a model's call; a context step reports a context share, as the
 // runner does after a turn or a tool call.
+//
+// A lose step, or lose(id, code) from a test, stops the session's
+// container under it as the Claude Code adapter reports it (RUN_ERROR
+// container_lost) and closes the session (issue #453).
 import { randomUUID } from 'node:crypto';
-import { HostToolRefused, type Answer, type Harness, type HostTool, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
+import { CONTAINER_LOST, HostToolRefused, type Answer, type Harness, type HostTool, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
 import { handoverOf } from '../handover.ts';
 import { createCleaner, type Cleaner } from '../clean.ts';
 import { toolArgs, toolResult, type AgUiEvent, type CustomValue, type EventLog, type SessionEvent } from '../events.ts';
@@ -24,7 +28,8 @@ export type FakeStep =
   | { readonly permission: CustomValue['cleared.permission_request'] }
   | { readonly question: CustomValue['cleared.question'] }
   | { readonly hostCall: { readonly toolCallId: string; readonly name: string; readonly input: unknown } }
-  | { readonly context: CustomValue['cleared.context_usage'] };
+  | { readonly context: CustomValue['cleared.context_usage'] }
+  | { readonly lose: number };
 
 export type FakeAdapterOptions = {
   readonly log: EventLog;
@@ -50,7 +55,9 @@ type Session = {
   readonly wake: Set<() => void>;
 };
 
-export function createFakeAdapter(options: FakeAdapterOptions): SessionAdapter {
+export type FakeAdapter = SessionAdapter & { lose(id: SessionId, code: number): void };
+
+export function createFakeAdapter(options: FakeAdapterOptions): FakeAdapter {
   const { log, script } = options;
   const now = options.now ?? (() => new Date());
   const sessions = new Map<SessionId, Session>();
@@ -64,6 +71,12 @@ export function createFakeAdapter(options: FakeAdapterOptions): SessionAdapter {
   function close(session: Session): void {
     session.closed = true;
     for (const wake of session.wake) wake();
+  }
+
+  function lose(session: Session, code: number): void {
+    if (session.closed) return;
+    emit(session, { type: 'RUN_ERROR', message: `the session's container stopped (exit code ${code})`, code: CONTAINER_LOST });
+    close(session);
   }
 
   // Whether the script may go on after a wait: not once the session is
@@ -106,6 +119,7 @@ export function createFakeAdapter(options: FakeAdapterOptions): SessionAdapter {
       const step = script[session.step];
       if (step === undefined) return close(session);
       if ('awaitMessage' in step) return;
+      if ('lose' in step) return lose(session, step.lose);
       if ('permission' in step || 'question' in step) {
         const requestId = 'permission' in step ? step.permission.requestId : step.question.requestId;
         if (session.pending === requestId) return;
@@ -230,6 +244,10 @@ export function createFakeAdapter(options: FakeAdapterOptions): SessionAdapter {
       const session = sessions.get(id);
       if (!session) throw new Error(`unknown session ${id}`);
       return handle(session);
+    },
+    lose(id: SessionId, code: number) {
+      const session = sessions.get(id);
+      if (session) lose(session, code);
     },
     // A scripted session has no harness a human could talk to.
     async interactive() {

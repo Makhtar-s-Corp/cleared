@@ -21,7 +21,7 @@
 // changed file for editing (decision 33). Both packages load by a dynamic
 // import (lane 32).
 import {
-  ArrowCounterClockwise, ArrowRight, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, Terminal, WarningCircle, X, type Icon,
+  ArrowCounterClockwise, ArrowRight, ArrowsClockwise, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, Terminal, WarningCircle, X, type Icon,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react';
 import type { CaptureChoice, ConfirmableRule, EditorLinks, ProductionCheck, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketCost, TicketStep, Workspace } from '../../../../src/api/types.ts';
@@ -306,6 +306,10 @@ function ReplayLine({ row, view, t }: { readonly row: ReplayRow; readonly view: 
   );
 }
 
+// The errors the screen says in the person's language, by their code; any
+// other shows the service's message.
+const ERROR_KEYS: Readonly<Record<string, string>> = { container_lost: 'row_container_lost', container_failed: 'row_container_failed' };
+
 function RowView({ row, view, t, onAnswer, onQuestion, onFile, resume }: {
   readonly row: Row; readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer; readonly onQuestion?: QuestionAnswer; readonly onFile?: OpenFile | undefined;
   readonly resume?: ReactNode;
@@ -330,7 +334,9 @@ function RowView({ row, view, t, onAnswer, onQuestion, onFile, resume }: {
     case 'interrupted':
       return <Frame kind="interrupted" at={row.at} icon={Stop}><div>{t('row_interrupted')}</div></Frame>;
     case 'error':
-      return <Frame kind="error" at={row.at} icon={WarningCircle} refused><div className="bad">{row.message}</div></Frame>;
+      return <Frame kind="error" at={row.at} icon={WarningCircle} refused><div className="bad">{row.code !== undefined && ERROR_KEYS[row.code] ? t(ERROR_KEYS[row.code] as string) : row.message}</div></Frame>;
+    case 'recreated':
+      return <Frame kind="recreated" at={row.at} icon={ArrowsClockwise}><div>{t('row_recreated', { time: duration(row.waitedMs, t), attempt: row.attempt, limit: row.limit })}</div></Frame>;
     case 'verdict':
       return <Frame kind="verdict" at={row.at} icon={Check}><div>{t(row.verdict === 'changes_requested' ? 'verdict_changes' : 'verdict_ok', { round: row.round })}</div></Frame>;
     case 'channel':
