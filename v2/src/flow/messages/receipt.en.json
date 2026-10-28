@@ -29,5 +29,7 @@
   "receipt_cost": "Cost: {count} tokens",
   "receipt_cost_unreported": "Cost: tokens not reported by the agents",
   "receipt_usd": "{usd} as the agents reported it (API-equivalent)",
-  "receipt_time": "Time: {time} from the first session to this pull request"
+  "receipt_time": "Time: {time} from the first session to this pull request",
+  "receipt_versions": "Agent profile version: {profile}. Environment version: {environment}.",
+  "receipt_versions_then": "{first}, then {next}"
 }

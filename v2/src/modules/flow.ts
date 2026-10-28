@@ -45,6 +45,7 @@ import { VARIANTS_TABLE, variantRoutes } from '../flow/variants.ts';
 import { loadPlanConfig } from '../lead/plans/runner.ts';
 import { lanesMcpRoutes, mcpTokenPath, readOrCreateMcpToken } from '../mcp/http.ts';
 import { createRedactor, type Redactor } from '../mcp/redact.ts';
+import { profileRoutes } from '../profiles/routes.ts';
 import { TRAIN_TABLE } from '../release/store.ts';
 import { ledgerPath, type Store } from '../store/db.ts';
 import { dockerContainer } from '../terminal/container.ts';
@@ -153,6 +154,8 @@ const flow: Module = {
     ...replayRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),
     ...batchRoutes({ runner: batchesOf, proof: () => runtime.proof() }),
     ...chatRoutes({ config: chatConfigOf, launcher: chatOf }),
+    // The agent profile's and the environment's versions (issue #452), on the ledger, with or without an engine.
+    ...profileRoutes({ db: () => store?.db, proof: () => runtime.proof() }),
     ...lanesMcpRoutes({
       engine: (registry) => runtime.engine(registry), store: () => store, token: mcpTokenOf,
       language: () => mcpSettingsOf().language,

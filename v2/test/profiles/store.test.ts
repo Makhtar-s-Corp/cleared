@@ -39,6 +39,7 @@ test('a new ledger has the default profile and the default environment, version 
   assert.deepEqual(profile.body, DEFAULT_PROFILE);
   assert.equal(profile.createdBy, 'cleared');
   assert.equal(profile.restoredFrom, null);
+  assert.equal(profile.createdAt, null, 'the service as it always ran: no day');
   assert.equal(environment.version, 1);
   assert.deepEqual(environment.body, DEFAULT_ENVIRONMENT);
   assert.deepEqual(DEFAULT_PROFILE, {
@@ -47,13 +48,17 @@ test('a new ledger has the default profile and the default environment, version 
   assert.deepEqual(DEFAULT_ENVIRONMENT, { image: null, network: 'project', allowedHosts: [], cpus: null, memory: null });
 });
 
-test('opening the same ledger again adds no version', () => {
+test('opening a ledger writes nothing; the first version is written with the second', () => {
   const file = join(tempDir('profiles'), 'ledger.db');
   openStore(file).close();
   const store = openStore(file);
+  assert.equal(store.db.prepare('SELECT COUNT(*) AS n FROM agent_profile_versions').get()?.n, 0, 'an empty ledger stays empty');
   const versions = profileVersions(store.db);
   assert.equal(versions.profile.list().length, 1);
   assert.equal(versions.environment.list().length, 1);
+  versions.profile.save({ harness: 'auto' }, 'u1');
+  assert.deepEqual((store.db.prepare('SELECT version, created_at, created_by FROM agent_profile_versions ORDER BY version').all() as { version: number; created_at: string | null; created_by: string }[])
+    .map((r) => [r.version, r.created_at === null, r.created_by]), [[1, true, 'cleared'], [2, false, 'u1']]);
   store.close();
 });
 
@@ -79,6 +84,7 @@ test('an edit is a new version; the old one stays readable and unchanged; the ot
 test('the ledger itself refuses to change or remove a version', () => {
   const { store, versions } = open();
   versions.profile.save({ authorModel: 'claude-opus-5-1' }, 'u1');
+  versions.environment.save({ cpus: '1' }, 'u1');
   assert.throws(() => store.db.prepare("UPDATE agent_profile_versions SET body = '{}' WHERE version = 1").run(), /never changed/);
   assert.throws(() => store.db.prepare('DELETE FROM agent_profile_versions WHERE version = 1').run(), /never changed/);
   assert.throws(() => store.db.prepare("UPDATE environment_versions SET created_by = 'u2'").run(), /never changed/);

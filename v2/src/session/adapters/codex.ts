@@ -40,7 +40,7 @@ import { join } from 'node:path';
 import { createInterface } from 'node:readline';
 import { Docker, type Limits } from '../../container/docker.ts';
 import type { ServiceSpec } from '../../container/services.ts';
-import { WORKDIR_MOUNT, sessionNames, startSession, stopSession } from '../../container/session-runtime.ts';
+import { WORKDIR_MOUNT, limitsOf, sessionNames, startSession, stopSession } from '../../container/session-runtime.ts';
 import type { Cleaner } from '../clean.ts';
 import { type InteractiveResume, type SessionAdapter, type SessionHandle, type SessionId, type StartInput, type UserMessage } from '../contract.ts';
 import { handoverOf } from '../handover.ts';
@@ -97,7 +97,7 @@ export function dockerLauncher(docker: Docker, runtime: CodexRuntime): CodexLaun
         // Its service's test secrets, for an author or a reviewer (C16).
         ...(input.service === undefined ? {} : { service: input.service }), role: input.role,
         ...(runtime.image === undefined ? {} : { image: runtime.image }),
-        ...(runtime.limits === undefined ? {} : { limits: runtime.limits }),
+        ...(limitsOf(runtime.limits, input.limits) ?? {}),
       });
     },
     turn: (session, command) => docker.execStream(session, sessionNames(session).container, { user: runtime.user, workdir: WORKDIR_MOUNT, command }),

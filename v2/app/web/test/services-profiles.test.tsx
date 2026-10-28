@@ -36,7 +36,8 @@ test('the panel lists both histories newest first, the current version marked an
     const markup = html(<ProfilesPanel t={t} view={VIEW} />);
     assert.doesNotMatch(markup, /⟦/, `${language}: no missing key`);
     assert.match(markup, /<section[^>]*aria-labelledby="profiles-title"/);
-    const versions = [...markup.matchAll(/data-profile-version="(\d+)"/g)].map((m) => m[1]);
+    const agent = markup.slice(markup.indexOf('data-profiles-object="agent"'), markup.indexOf('data-profiles-object="environment"'));
+    const versions = [...agent.matchAll(/data-profile-version="(\d+)"/g)].map((m) => m[1]);
     assert.deepEqual(versions, ['3', '2', '1'], `${language}: newest first`);
     const restore = [...markup.matchAll(/<button[^>]*data-restore="(agent|environment):(\d+)"/g)].map((m) => `${m[1]}:${m[2]}`);
     assert.deepEqual(restore, ['agent:2', 'agent:1'], `${language}: every version but the current one`);

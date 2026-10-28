@@ -1,0 +1,25 @@
+/* The Agent profile panel (issue #452), on the Services screen under the
+   test secrets: the two histories side by side on a wide screen, one under
+   the other on a narrow one, each version a line with its facts. Tokens of
+   app/DESIGN.md only, as the test secrets' panel uses them. */
+.services-values .profiles { margin-top: var(--space-4); }
+.profiles-head h2 { margin: 0; font-size: var(--text-md); font-weight: var(--weight-strong); }
+.profiles-intro, .profiles-meta, .profiles-facts { color: var(--text-muted); font-size: var(--text-sm); text-wrap: pretty; }
+.profiles-intro { margin: 4px 0 0; max-width: 72ch; }
+.profiles-note { margin: var(--space-2) 0 0; color: var(--text-secondary); font-size: var(--text-sm); min-height: 1lh; }
+.profiles-error { margin: var(--space-2) 0 0; padding: var(--space-2); border-radius: var(--radius); background: var(--sunken); color: var(--danger-text); }
+.profiles-objects { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); margin-top: var(--space-2); max-width: 960px; }
+.profiles-object h3 { margin: 0 0 var(--space-1); font-size: var(--text-sm); font-weight: var(--weight-strong); }
+.profiles-versions { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.profiles-version { padding: 10px 12px; border-radius: var(--radius); box-shadow: inset 3px 0 0 var(--hairline); }
+.profiles-version[data-current="yes"] { box-shadow: inset 3px 0 0 var(--ink); }
+.profiles-version-head { display: flex; align-items: center; justify-content: space-between; gap: 4px 12px; flex-wrap: wrap; }
+.profiles-version-head button { min-height: 36px; padding: 0 10px; }
+.profiles-version-title { margin: 0; display: flex; gap: var(--space-1); align-items: baseline; font-size: var(--text-sm); font-weight: var(--weight-strong); }
+.profiles-current { color: var(--text-secondary); font-weight: normal; }
+.profiles-meta { margin: 2px 0 0; }
+.profiles-facts { list-style: none; margin: 4px 0 0; padding: 0; overflow-wrap: anywhere; }
+
+@media (max-width: 768px) {
+  .profiles-objects { grid-template-columns: minmax(0, 1fr); }
+}

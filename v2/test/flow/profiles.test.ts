@@ -137,8 +137,10 @@ test('the receipt names the profile and environment versions the ticket\'s sessi
   assert.deepEqual(receipt?.versions, { profile: [1], environment: [2] });
   const en = renderReceipt(receipt as ReceiptData, 'en');
   const fr = renderReceipt(receipt as ReceiptData, 'fr');
-  assert.ok(en.includes('- Agent profile: version 1. Environment: version 2.'), en);
-  assert.ok(fr.includes('- Profil d\'agent\u00a0: version 1. Environnement\u00a0: version 2.'), fr);
+  assert.ok(en.includes('- Agent profile version: 1. Environment version: 2.'), en);
+  assert.ok(fr.includes('- Version du profil d\'agent\u00a0: 1. Version de l\'environnement\u00a0: 2.'), fr);
+  const changed = renderReceipt({ ...(receipt as ReceiptData), versions: { profile: [1, 2], environment: [2] } }, 'en');
+  assert.ok(changed.includes('- Agent profile version: 1, then 2. Environment version: 2.'), changed);
   const without = renderReceipt({ ...(receipt as ReceiptData), versions: undefined }, 'en');
   assert.ok(!without.includes('Agent profile'), 'a receipt with no versions reads as before');
 });

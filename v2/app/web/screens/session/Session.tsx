@@ -458,6 +458,12 @@ export function LeftCards({ view, t, onPlan, close, onCaptures, capturesBusy, ca
   const cost = view.ticket?.status === 'Done' ? ticketCostFacts(view.cost, view.language, t) : [];
   // Its production page (P218), checked once its release landed: when, and the capture, or why not.
   const production = view.ticket?.status === 'Done' ? productionFacts(view.production, view.summary.ticket, t) : [];
+  // The agent profile's and the environment's versions it started on (issue #452), and the harness an auto profile's pick ran it on.
+  const started = view.summary.versions;
+  const versions = started ? t('session_versions', {
+    profile: started.auto ? t('session_versions_profile_auto', { version: started.profile, harness: harnessName(view.summary.harness) }) : t('session_versions_profile', { version: started.profile }),
+    environment: started.environment,
+  }) : '';
   // A card with nothing to say is not drawn (lane 34's art director): the ticket card says it all.
   return (
     <>
@@ -465,6 +471,7 @@ export function LeftCards({ view, t, onPlan, close, onCaptures, capturesBusy, ca
         <p className="eyebrow">{t('ticket_label')} <span className="id">{view.summary.ticket}</span>{service ? <> · <span className="service">{service}</span></> : null}</p>
         <h2 id="ticket-title" className="card-title">{view.ticket?.title ?? view.summary.ticket}</h2>
         {parsed.description.map((p, index) => <p key={index} className="desc">{p}</p>)}
+        {versions ? <p className="session-versions faint small" data-session-versions="">{versions}</p> : null}
         {cost.length > 0 ? <p className="ticket-cost faint small" data-ticket-cost="">{cost.map((fact) => <span key={fact} className="fact">{fact}</span>)}</p> : null}
         {production.length > 0 ? (
           <p className="ticket-production faint small" data-ticket-production="">

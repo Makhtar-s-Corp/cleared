@@ -42,6 +42,11 @@ export type StartInput = {
   readonly siblings?: readonly SiblingSpec[];
   readonly skills?: string;
   readonly tools?: readonly HostTool[];                    // milestone 2: the host's tools, the lead's (lead/contract.ts)
+  // The environment's version (issue #452): its image, over the runtime's
+  // and the service's prepared one (Claude Code's adapter only: Codex's and
+  // Cursor's images carry their own program), and its limits, over Cleared's.
+  readonly image?: string;
+  readonly limits?: { readonly cpus?: string; readonly memory?: string };
 };
 
 export type UserMessage = {
