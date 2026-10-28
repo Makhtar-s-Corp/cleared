@@ -1,6 +1,6 @@
 # The multi-service proof's clean base
 
-Every run of the multi-service proof (`v2/scripts/proof-j2-multi.ts`) starts from the same commits, recreated automatically, and nothing is ever pushed to the `main` branch of a proof repository. Since the owner's approval of 2026-10-23 at 11:24 (the LOCAL-20 reverts, in [decisions-log.md](decisions-log.md)), that push was the last one to `main`.
+Every run of the multi-service proof (`v2/scripts/proof-j2-multi.ts`) starts from the same commits, recreated automatically, and nothing is ever pushed to the `main` branch of a proof repository. Since the owner's approval of 2026-10-23 at 11:24 (the LOCAL-20 reverts, in [decisions-log-milestone-2.md](decisions-log-milestone-2.md)), that push was the last one to `main`.
 
 ## How it works
 

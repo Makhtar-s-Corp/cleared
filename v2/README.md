@@ -10,7 +10,7 @@ The core of Cleared v2, rewritten as a Node service in TypeScript. This folder h
 
 Node.js 24 or later. Node runs the service's and the app server's `.ts` files directly through its type stripping: no build step and no emitted JavaScript for them. Only syntax Node can erase is allowed (no `enum`, no `namespace`, no constructor parameter properties); `tsc` enforces it with `erasableSyntaxOnly`. Relative imports name the `.ts` file.
 
-The one exception is the app's front end (`app/web/`, React): Vite builds it into `app/dist/`, which the app serves (the owner's decision of 2026-10-22, in the [decisions log](../docs/v2/decisions-log.md)). `npm run app` and `npm test` build it first. The app reads the build's file names once, at its first page: restart it after a new `npm run build`.
+The one exception is the app's front end (`app/web/`, React): Vite builds it into `app/dist/`, which the app serves (the owner's decision of 2026-10-22, in the [decisions log](../docs/v2/decisions-log-milestone-2.md)). `npm run app` and `npm test` build it first. The app reads the build's file names once, at its first page: restart it after a new `npm run build`.
 
 ## Install with Docker Compose
 

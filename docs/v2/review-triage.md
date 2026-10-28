@@ -129,7 +129,7 @@ In all: 18 closed obsolete (14 whose code was removed, 4 fixed), 112 grouped int
 | #188 | review-followup: #186 filter API example | grouped into #481 | `examples/guestbook/src/config.ts:15` still omits 8791 to 8795. |
 | #190 | review-followup: #187 workspace store | grouped into #480 | `v2/src/store/migrations.ts:31` still creates `v2_schema` outside the transaction. |
 | #191 | review-followup: #189 plan addendum | grouped into #481 | `hostAllowed` (`v2/app/src/preview.ts:119`) still reads headers; the terminal gate items are not shown closed; kept. |
-| #195 | review-followup: #194 terminal and editor dependencies | grouped into #483 | `docs/v2/decisions-log.md:1516` still says "Twenty packages come with them". |
+| #195 | review-followup: #194 terminal and editor dependencies | grouped into #483 | `docs/v2/decisions-log-milestone-2.md:867` still says "Twenty packages come with them". |
 | #196 | review-followup: #193 workspace runtime | grouped into #480 | `v2/src/container/services.ts:199` still overlays the checkout with `COPY`. |
 | #197 | review-followup: #192 clickable answers | grouped into #482 | `busy` (`v2/app/web/screens/session/Session.tsx:136`) is still read from state; kept. |
 | #200 | review-followup: #199 xterm and style shims | grouped into #482 | `v2/app/web/lib/style-nonce.ts:6` still wraps only `appendChild`, `insertBefore`, `append` and `prepend`. |

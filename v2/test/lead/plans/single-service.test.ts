@@ -1,6 +1,6 @@
 // A workspace that went from several services to one under the same id
-// (docs/v2/decisions-log.md, 2026-10-23, single-service mode): the ledger
-// keeps the old services' rows (recordWorkspace deletes nothing), and the
+// (docs/v2/decisions-log-milestone-2.md, 2026-10-23, single-service mode): the
+// ledger keeps the old services' rows (recordWorkspace deletes nothing), and the
 // plans read only the services the configuration has now, so their tickets
 // name a service the flow knows. The tickets an earlier plan created with
 // an old service are repaired by lead/plans/repair.ts, a dry run unless
