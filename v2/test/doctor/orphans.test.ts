@@ -130,7 +130,7 @@ test('in French too, with every word there; a long list says how many more', asy
   }
   const all = JSON.stringify([...orphansOf(en), ...orphansOf(fr)]);
   assert.ok(!all.includes('⟦'), `no missing word: ${all}`);
-  assert.ok(!all.includes('—'), 'no em dash');
+  assert.ok(!all.includes('\u2014'), 'no em dash');
   const networks = orphansOf(en).find((line) => line.text.includes(sessionNames(STOPPED).network))!;
   assert.match(networks.text, /\b18\b/, 'the count of networks');
   assert.match(networks.text, /and \d+ more/);

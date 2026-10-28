@@ -47,7 +47,7 @@ test('a network Docker has no subnet for fails at once with a PoolFullError that
     assert.match(error.message, /cleared doctor/);
     assert.ok(error.message.includes(sessionNames(SESSION).network), 'it names the network it could not make');
     assert.ok(error.message.includes(stderr.replace('Error response from daemon: ', '')), 'the daemon\'s own line is kept');
-    assert.ok(!/—/.test(error.message));
+    assert.ok(!/\u2014/.test(error.message));
     assert.equal(fake.networks.length, 0);
   }
 });
