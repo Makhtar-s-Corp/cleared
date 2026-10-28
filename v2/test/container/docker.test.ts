@@ -398,6 +398,26 @@ test('releaseStopped removes by name the containers, then the networks, of the s
   assert.deepEqual(fake.calls[3]?.args, ['network', 'rm', '--', `cleared-v2-${STOPPED}`, `cleared-v2-${STOPPED}-out`]);
 });
 
+// The live run of 2026-10-28 (issue #465): at a restart the flow's recovery
+// and the lead's both release a stopped lead; the one that came second
+// failed on what the first had removed, and the service said a failure.
+test('releaseStopped run twice at once for the same session: both succeed and nothing of it is left; a removal that fails while its objects remain still fails', async () => {
+  const fake = new FakeDocker();
+  const labels = { [LABEL.split('=')[0] as string]: 'v2', 'cleared.session': SESSION };
+  fake.containers.push({ id: 'c1', name: `cleared-v2-${SESSION}-session`, labels, state: 'exited' }, { id: 'c2', name: `cleared-v2-${SESSION}-egress`, labels, state: 'running' });
+  fake.networks.push({ id: 'n1', name: `cleared-v2-${SESSION}`, labels }, { id: 'n2', name: `cleared-v2-${SESSION}-out`, labels });
+  const docker = new Docker(fake.runner);
+  const [one, two] = await Promise.all([docker.releaseStopped([SESSION]), docker.releaseStopped([SESSION])]);
+  assert.deepEqual(one.containers, two.containers);
+  assert.deepEqual(fake.containers, []);
+  assert.deepEqual(fake.networks, []);
+
+  fake.containers.push({ id: 'c3', name: `cleared-v2-${SESSION}-session`, labels, state: 'running' });
+  fake.intercept = (args) => (args[0] === 'rm' ? { code: 1, stdout: '', stderr: 'Error: cannot remove container: device busy\n' } : undefined);
+  await assert.rejects(docker.releaseStopped([SESSION]), /docker rm failed/);
+  assert.equal(fake.containers.length, 1);
+});
+
 test('releaseStopped with no session asks Docker nothing, and refuses what is not a session id before any call', async () => {
   const fake = new FakeDocker();
   const docker = new Docker(fake.runner);
