@@ -71,6 +71,9 @@ export const DEFAULT_SAFE_COMMANDS: readonly string[] = [
   'ls', 'ls *',
   'cat *', 'head *', 'tail *', 'grep *', 'find *',
   'pwd',
+  // What is installed: reads, which a setup session asks first (the owner's report of permission requests in a loop).
+  'which *',
+  'node --version', 'node -v', 'npm --version', 'npm -v', 'python --version', 'python3 --version',
 ];
 
 // The reviewer's own reads, on top of the safe commands (owner decision of
@@ -882,7 +885,20 @@ function ticketDeletion(words: readonly string[], policy: Policy): boolean {
   return operands.length > 0 && operands.every((path) => inside(policy.workdir, path) && policy.ticketFiles.includes(relative(policy.workdir, path)));
 }
 
+// The very text an "always in this project" answered: what a person read and
+// allowed, whichever way the policy reads it.
+const learnedText = (request: ToolRequest, policy: Policy): boolean =>
+  typeof request.input.command === 'string' && policy.learned.some((entry) => entry.tool === request.tool && entry.pattern === request.input.command);
+
+// What "always in this project" remembers of a command: each part of a list,
+// which `compound` asks part by part, or the whole text when it cannot be split.
+export function learnedPatterns(command: string): string[] {
+  const list = parseList(command);
+  return list ? [...new Set(list.map((part) => part.words.join(' ')))] : [command];
+}
+
 function learned(request: ToolRequest, words: readonly string[] | undefined, policy: Policy): boolean {
+  if (words && learnedText(request, policy)) return true;
   const input = request.input;
   const subject = words
     ? undefined
@@ -954,7 +970,7 @@ function part(request: ToolRequest, command: SimpleCommand, policy: Policy, cont
 // and names them, and only them, with the rule of the first.
 function compound(request: ToolRequest, command: string, policy: Policy, context: PolicyContext): Verdict {
   const list = parseList(command);
-  if (!list) return ask('shell.compound', 'shell syntax the policy does not read word for word');
+  if (!list) return learnedText(request, policy) ? allow('learned') : ask('shell.compound', 'shell syntax the policy does not read word for word');
   const asks: { readonly words: readonly string[]; readonly verdict: Extract<Verdict, { decision: 'ask' }> }[] = [];
   for (const command of list) {
     const verdict = part(request, command, policy, context);
@@ -963,6 +979,8 @@ function compound(request: ToolRequest, command: string, policy: Policy, context
   }
   const [first] = asks;
   if (!first) return allow('shell.compound_safe');
+  // Asked and answered "always", as written (a part that writes outside what an edit may is not learned over).
+  if (learnedText(request, policy) && asks.every(({ verdict }) => verdict.rule === 'shell.compound' && !/redirection/.test(verdict.reason))) return allow('learned');
   if (asks.length === 1) return first.verdict;
   const reasons = asks.map(({ words, verdict }) => (verdict.reason.startsWith(words.join(' ')) ? verdict.reason : `${words.join(' ')}: ${verdict.reason}`));
   return ask(first.verdict.rule, `${asks.length} parts of this command ask, the others are allowed: ${reasons.join('; ')}`);

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { DEFAULT_SAFE_COMMANDS, evaluate, parseCommand, parseList, type Policy, type ToolRequest, type Verdict } from '../../src/session/policy.ts';
+import { DEFAULT_SAFE_COMMANDS, evaluate, learnedPatterns, parseCommand, parseList, type Policy, type ToolRequest, type Verdict } from '../../src/session/policy.ts';
 
 // The container sees the ticket checkout at /workspace. The credential path
 // is built in two parts only to keep this file readable by the repository
@@ -589,4 +589,48 @@ test('the config folder the user source reads is not written without the human',
     // "Always in this project" on that exact write opens it, as for any path: the human's answer.
     { name: 'the human\'s always for that file', request: { tool: 'Write', input: { file_path: `${config}/settings.json`, content: '{}' } }, policy: { learned: [{ tool: 'Write', pattern: `${config}/settings.json` }] }, decision: 'allow', rule: 'learned' },
   ]);
+});
+
+// The owner's report: permission requests that come back in a loop. "Always
+// in this project" on a command of several parts stored the whole text, which
+// no part of it ever matched, so the same request came back at each run.
+test('"always in this project" on a command of several parts holds the next time it runs', () => {
+  const command = 'npm ci && node scripts/check.js && which npm';
+  const whole = evaluate(bash(command), { ...base, learned: [{ tool: 'Bash', pattern: command }] }, context);
+  assert.equal(whole.decision, 'allow', JSON.stringify(whole));
+  assert.equal(whole.rule, 'learned');
+  const parts = learnedPatterns(command);
+  assert.deepEqual(parts, ['npm ci', 'node scripts/check.js', 'which npm']);
+  const learned = parts.map((pattern) => ({ tool: 'Bash', pattern }));
+  assert.equal(evaluate(bash('node scripts/check.js && npm ci'), { ...base, learned }, context).decision, 'allow', 'each part holds on its own');
+});
+
+test('"always" on a command the policy cannot split holds for that exact text, and for nothing else', () => {
+  const command = 'node -e "console.log(process.version)" | tee "$(mktemp)"';
+  assert.equal(evaluate(bash(command), { ...base, learned: [{ tool: 'Bash', pattern: command }] }, context).decision, 'allow');
+  assert.equal(evaluate(bash(`${command} # more`), { ...base, learned: [{ tool: 'Bash', pattern: command }] }, context).decision, 'ask');
+});
+
+test('a command with a quoted argument holds once it is always allowed', () => {
+  const command = 'node -e "console.log(1 + 1)"';
+  assert.equal(evaluate(bash(command), { ...base, learned: [{ tool: 'Bash', pattern: command }] }, context).decision, 'allow');
+});
+
+test('what the policy denies stays denied, whatever was learned', () => {
+  const command = 'npm ci && docker ps';
+  const verdict = evaluate(bash(command), { ...base, learned: [{ tool: 'Bash', pattern: command }, { tool: 'Bash', pattern: 'docker ps' }] }, context);
+  assert.equal(verdict.decision, 'deny', JSON.stringify(verdict));
+});
+
+test('a learned command that writes a file while the plan waits for its Go still asks or is refused', () => {
+  const command = 'node scripts/check.js > notes.txt && npm ci';
+  const verdict = evaluate(bash(command), { ...base, planning: true, learned: [{ tool: 'Bash', pattern: command }] }, context);
+  assert.notEqual(verdict.decision, 'allow', JSON.stringify(verdict));
+});
+
+test('looking at what is installed asks nobody: which and the version of the runtimes', () => {
+  for (const command of ['which npm', 'which node npm', 'node --version', 'node -v', 'npm --version', 'npm -v', 'python3 --version']) {
+    assert.equal(evaluate(bash(command), base, context).decision, 'allow', command);
+  }
+  assert.equal(evaluate(bash('node script.js'), base, context).decision, 'ask', 'running a script still asks');
 });

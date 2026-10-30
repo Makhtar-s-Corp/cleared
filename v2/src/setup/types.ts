@@ -94,6 +94,7 @@ export type FirstTicket = {
   readonly createdAt: string;
   readonly rolledBack: boolean;                      // the release watch put it back in Todo after it was approved
   readonly plan?: string;                            // the session plan's inbox item while it waits for its Go
+  readonly pullRequest?: { readonly number: number; readonly url: string };   // once the branch is published
 };
 
 // GET /api/setup/first-ticket?language= and POST { service, language }.

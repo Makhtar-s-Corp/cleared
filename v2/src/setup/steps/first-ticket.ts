@@ -77,6 +77,18 @@ function stageOf(status: string, states: TicketStore['states']): FirstTicketStag
 const waitingPlan = (engine: FlowEngine, ticket: string): string | undefined =>
   engine.inbox.items().find((item) => item.kind === 'session_plan' && item.state === 'waiting' && item.ticket === ticket)?.id;
 
+// The ticket's pull request, for its link: on the release card once it waits
+// for the approval, else from its number and its repository's address.
+function pullRequestOf(engine: FlowEngine, ticket: Ticket): { readonly number: number; readonly url: string } | undefined {
+  const release = engine.inbox.items().find((item) => item.kind === 'release' && item.ticket === ticket.id);
+  if (release?.kind === 'release') return { number: release.pr.number, url: release.pr.url };
+  const part = ticket.services?.find((service) => service.pr !== null);
+  const service = part && workspaceOf(engine.config).services.find((known) => known.name === part.name);
+  if (!part?.pr || !service) return undefined;
+  const home = service.url.replace(/\.git$/, '');
+  return { number: part.pr, url: `${home}/${/gitlab/i.test(new URL(home).host) ? '-/merge_requests' : 'pull'}/${part.pr}` };
+}
+
 const ms = (from: string | undefined, to: string | undefined): number =>
   from && to ? Math.max(0, Date.parse(to) - Date.parse(from)) : 0;
 
@@ -115,7 +127,8 @@ export function firstTicketStep(options: { readonly engine: (registry: Registry)
       deps.records.machine('first-ticket', machineOf(history, tickets.states));
       deps.records.done('first-ticket', history.filter((change) => change.status === tickets.states.done).at(-1)?.at ?? deps.now().toISOString());
     }
-    return { id: ticket.id, title: ticket.title, service: kept.service, stage, createdAt: kept.created_at, rolledBack: rolledBack(history, tickets.states), ...(plan ? { plan } : {}) };
+    const pullRequest = engine ? pullRequestOf(engine, ticket) : undefined;
+    return { id: ticket.id, title: ticket.title, service: kept.service, stage, createdAt: kept.created_at, rolledBack: rolledBack(history, tickets.states), ...(plan ? { plan } : {}), ...(pullRequest ? { pullRequest } : {}) };
   }
 
   async function viewOf(deps: StepDeps, context: RouteContext, language: Language): Promise<FirstTicketView> {

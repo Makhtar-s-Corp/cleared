@@ -54,3 +54,26 @@ test('the message that reopens the author carries the report and the round', () 
   assert.match(text, /round 1/);
   assert.match(text, /a\.ts:3/);
 });
+
+// Issue #496: a French interface read plans, reasons and steps in English.
+test('the author writes what a person reads in the interface language, in French as in English', () => {
+  const ticket = { id: 'LOCAL-1', title: 'A title', body: 'A body' };
+  const french = authorPrompt(ticket, { plan: true, report: true }, 'fr');
+  assert.match(french, /French/);
+  assert.match(french, /plan/i);
+  assert.match(french, /confidence/i);
+  assert.match(french, /question/i);
+  assert.match(french, /HANDOVER/);
+  assert.match(authorPrompt(ticket, { plan: true, report: true }, 'en'), /in English/);
+  assert.doesNotMatch(authorPrompt(ticket), /interface/, 'no language asked: the prompt as before');
+});
+
+test('the reviewer reports in the interface language and keeps the verdict phrase as written', () => {
+  const ticket = { id: 'LOCAL-1', title: 'A title', body: '' };
+  const french = reviewPrompt({ ticket, base: 'main', verdict: 'no blocking issues', language: 'fr' });
+  assert.match(french, /Write in French/);
+  assert.doesNotMatch(french, /Write in English/);
+  assert.match(french, /“no blocking issues”/);
+  assert.match(french, /word for word/);
+  assert.match(reviewPrompt({ ticket, base: 'main', verdict: 'no blocking issues' }), /Write in English/);
+});

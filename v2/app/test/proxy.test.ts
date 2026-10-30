@@ -151,3 +151,23 @@ test('a proof not ready yet is said, never sent, and a refused proof is read aga
     await service.close();
   }
 });
+
+// Issue #491: a proof that cannot serve is not a service that does not answer.
+test('a refused proof is said with its reason, and the service is not asked', async () => {
+  const service = await fakeService((response) => { response.writeHead(200); response.end('[]'); });
+  const proof = Object.assign(() => { throw new ProofError('the app\'s proof at /state/v2-app-proof is not 64 hex characters', 'malformed'); }, { forget: () => undefined });
+  const app = await startApp({ source: serviceSource({ url: service.url, proof }) });
+  const logged = console.error;
+  console.error = () => undefined;
+  try {
+    const { cookie } = await signedIn(app);
+    const answer = await fetch(`${app.base}/api/service/sessions`, { headers: { cookie } });
+    assert.equal(answer.status, 503);
+    assert.deepEqual(await answer.json(), { error: 'proof_refused', reason: 'malformed' }, 'the reason, never the path');
+    assert.equal(service.seen.length, 0);
+  } finally {
+    console.error = logged;
+    await app.close();
+    await service.close();
+  }
+});

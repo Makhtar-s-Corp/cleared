@@ -120,7 +120,7 @@ import { handoverNote, refuseTarget } from '../session/handover.ts';
 import { LIVE_PHASES, readToolInput, readToolOutput, type AgUiEvent, type Question, type SessionEvent, type SessionPhase, type StepName } from '../session/events.ts';
 import { skillTicketService } from '../knowledge/store.ts';
 import { skillPath } from '../knowledge/skill.ts';
-import { DEFAULT_SAFE_COMMANDS, type Policy } from '../session/policy.ts';
+import { DEFAULT_SAFE_COMMANDS, learnedPatterns, type Policy } from '../session/policy.ts';
 import type { Store } from '../store/db.ts';
 import type { Actor, Ticket, TicketId } from '../tickets/contract.ts';
 import { replayBranch, ticketBranch } from '../workspace/checkout.ts';
@@ -380,7 +380,7 @@ function ticketPath(path: string): string | undefined {
 
 const name = (error: unknown): string => (error instanceof Error ? error.message : String(error));
 
-// What "Always in this project" remembers for a request: the thing asked.
+// What a request names: the thing asked.
 function patternOf(item: PermissionItem): string | undefined {
   const input = item.input;
   switch (input.kind) {
@@ -390,6 +390,13 @@ function patternOf(item: PermissionItem): string | undefined {
     case 'search': return input.pattern;
     default: return undefined;
   }
+}
+
+// What "Always in this project" remembers for a request: each part of a command, the thing asked otherwise.
+function patternsOf(item: PermissionItem): readonly string[] {
+  const pattern = patternOf(item);
+  if (pattern === undefined) return [];
+  return item.input.kind === 'execute' ? learnedPatterns(pattern) : [pattern];
 }
 
 // The policy's answer to a session's own host tools: the runner asks the
@@ -448,6 +455,7 @@ export class FlowEngine {
   // inbox, and the answers given since are told to them when they resume.
   #dormant = new Map<SessionId, Live>();
   #told = new Map<SessionId, string[]>();
+  #granted = new Map<SessionId, readonly { readonly tool: string; readonly pattern: string }[]>();   // what a session stopped while it waited was allowed once, for its run again
   // Sessions whose container stopped (issue #453): those whose container is
   // being recreated, out of #live and closed meanwhile; the losses and the
   // recreations tried of each; the dormant ones whose answer recreates it.
@@ -1096,7 +1104,7 @@ export class FlowEngine {
     const workspaceDone = this.#now();
     const tools = this.config.authorTools === true;
     const tip = await this.#tipOf(prepared.workdir);
-    const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, prompt(authorPrompt(ticket, { plan: tools, report: tools })), tools ? 'plan' : undefined);
+    const live = await this.#launch(adapter, ticket, 'author', this.#authorModel(ticket), prepared.workdir, prepared.briefing, settings, prompt(authorPrompt(ticket, { plan: tools, report: tools }, this.config.language)), tools ? 'plan' : undefined);
     const session = { id: live.id, ticket: ticket.id, project: this.config.project };
     this.#step(session, 'STEP_STARTED', 'workspace', began);
     this.#step(session, 'STEP_FINISHED', 'workspace', workspaceDone);
@@ -1294,7 +1302,7 @@ export class FlowEngine {
     const note = this.#origins.get(id)?.note;
     const handed = this.#notesFor(step, new Set());
     const prompt = [
-      authorPrompt(ticket, { plan: tools, report: tools }),
+      authorPrompt(ticket, { plan: tools, report: tools }, this.config.language),
       stepPrompt({ kind: step.kind, service: step.service, position: step.position, count, ...(contract ? { contract } : {}), ...(step.note ? { note: step.note } : {}) }),
       ...(handed.length > 0 ? [notesText(handed, (n) => this.#noteSource(id, n))] : []),
       ...(note ? [note] : []),
@@ -1834,7 +1842,7 @@ export class FlowEngine {
     // A Codex or Cursor author has no host tools (their adapters take none), as in a handover.
     const tools = this.config.authorTools === true && variant.harness === HARNESS;
     const note = this.#origins.get(id)?.note;
-    const prompt = [authorPrompt(ticket, { plan: tools, report: tools }), variantPrompt(variant.position, count), ...(variant.pick ? [pickPrompt(settings.testCommand)] : []), ...(note ? [note] : [])].join('\n\n');
+    const prompt = [authorPrompt(ticket, { plan: tools, report: tools }, this.config.language), variantPrompt(variant.position, count), ...(variant.pick ? [pickPrompt(settings.testCommand)] : []), ...(note ? [note] : [])].join('\n\n');
     this.#variantDirs.add(prepared.workdir);
     const live = await this.#launch(adapter, ticket, 'author', this.#variantModel(ticket, variant.harness), prepared.workdir, prepared.briefing, settings, prompt, tools ? 'plan' : undefined, undefined, variant.harness);
     const session = { id: live.id, ticket: id, project: this.config.project };
@@ -2224,12 +2232,13 @@ export class FlowEngine {
   // The session is found by its policy object, which an adapter's copy of the input keeps.
   policyFor(input: StartInput): Policy {
     if (input.role === 'lead' || input.project !== this.config.project) return input.policy;
-    const live = input.role === 'author' ? [...this.#live.values()].find((candidate) => candidate.input.policy === input.policy) : undefined;
+    const session = [...this.#live.values()].find((candidate) => candidate.input.policy === input.policy);
+    const live = input.role === 'author' ? session : undefined;
     const gate = live ? this.#gates.get(live.id) : undefined;
     const planning = input.role === 'author' && (gate ? gate.phase !== 'working' : input.policy.planning === true);
     const skill = input.role === 'author' ? skillTicketService(this.#store.db, input.ticket) : undefined;
     return {
-      ...input.policy, planning, learned: [...this.#store.policyRules.learned(input.project), ...toolRules(input.tools)], ticketFiles: this.#ticketFiles(input.ticket, input.workdir),
+      ...input.policy, planning, learned: [...this.#store.policyRules.learned(input.project), ...toolRules(input.tools), ...(session ? this.#granted.get(session.id) ?? [] : [])], ticketFiles: this.#ticketFiles(input.ticket, input.workdir),
       ...(skill ? { skillFile: skillPath(skill) } : {}),
     };
   }
@@ -2698,7 +2707,7 @@ export class FlowEngine {
       const edits = this.#flowRows(ticket.id).filter((row) => row.role === 'author').flatMap((row) => humanEdits({ events: this.#store.events.after(row.id) }));
       // The reviewer's git commands name its own service's base.
       const base = this.#several ? (this.#servicesOf(ticket)[0] as ServiceConfig).base : this.config.base;
-      const prompt = reviewPrompt({ ticket, base, verdict: settings.verdict, humanEdits: edits, ...(await this.#reviewServices(ticket)), ...(settings.testCommand ? { testCommand: settings.testCommand } : {}) });
+      const prompt = reviewPrompt({ ticket, base, verdict: settings.verdict, ...(this.config.language ? { language: this.config.language } : {}), humanEdits: edits, ...(await this.#reviewServices(ticket)), ...(settings.testCommand ? { testCommand: settings.testCommand } : {}) });
       const live = await this.#launch(adapter, ticket, 'reviewer', harness === HARNESS ? this.#reviewerModel(ticket) : CODEX_MODEL, prepared.workdir || workdir, prepared.briefing, settings,
         channel ? `${prompt}\n\n${channelPrompt(channel)}` : prompt, undefined, undefined, harness);
       this.#step({ id: live.id, ticket: ticket.id, project: ticket.project ?? this.config.project }, 'STEP_STARTED', 'review', began);
@@ -2865,7 +2874,7 @@ export class FlowEngine {
     const tools = this.config.authorTools === true && harness === HARNESS;
     const model = harness === HARNESS ? this.#authorModel(ticket) : (authorRow ? this.#store.sessions.get(authorRow.id)?.model : undefined) ?? CODEX_MODEL;
     const live = await this.#launch(adapter, ticket, 'author', model, prepared.workdir, prepared.briefing, settings,
-      `${authorPrompt(ticket, { plan: false, report: tools })}\n\n${message}`, tools ? 'report' : undefined, undefined, harness);
+      `${authorPrompt(ticket, { plan: false, report: tools }, this.config.language)}\n\n${message}`, tools ? 'report' : undefined, undefined, harness);
     this.#step({ id: live.id, ticket: id, project: live.input.project }, 'STEP_STARTED', 'author', began);
     if (journal && !journaled) this.#journal({ id: live.id, ticket: id, project: live.input.project }, journal);
     this.#snapshot(live.id, id);
@@ -3432,10 +3441,7 @@ export class FlowEngine {
     const answer: Answer = { decision, by };
     await live.handle.answer(requestId, answer);
     if (this.inbox.handle(item.id, by)) this.#answered(item.id, item.ticket, id, requestId, by);
-    if (decision.kind === 'allow_always' && item.kind === 'permission') {
-      const pattern = patternOf(item);
-      if (pattern) this.#store.policyRules.learn({ project: item.project, tool: item.tool, pattern, by, at: this.#now().toISOString() });
-    }
+    if (decision.kind === 'allow_always' && item.kind === 'permission') this.#learn(item, by);
     this.#waitEnds(live);
   }
 
@@ -3602,6 +3608,10 @@ export class FlowEngine {
     return true;
   }
 
+  #learn(item: PermissionItem, by: UserId): void {
+    for (const pattern of patternsOf(item)) this.#store.policyRules.learn({ project: item.project, tool: item.tool, pattern, by, at: this.#now().toISOString() });
+  }
+
   // The answer from the inbox, the lead or a person to a session the
   // watchdog stopped: once nothing else of it waits, it resumes with what
   // it was answered.
@@ -3611,9 +3621,11 @@ export class FlowEngine {
     const asks = item.kind === 'question';
     if (asks !== (decision.kind === 'answer')) throw new FlowError('invalid', asks ? 'a question is answered with an answer' : 'a permission request is answered with allow or reject');
     if (!this.#settleStopped(dormant, item, decision, by)) return;
-    if (decision.kind === 'allow_always' && item.kind === 'permission') {
+    if (decision.kind === 'allow_always' && item.kind === 'permission') this.#learn(item, by);
+    // The session is told to run it again: that run must not ask again, or the answer never ends.
+    if (decision.kind === 'allow_once' && item.kind === 'permission') {
       const pattern = patternOf(item);
-      if (pattern) this.#store.policyRules.learn({ project: item.project, tool: item.tool, pattern, by, at: this.#now().toISOString() });
+      if (pattern) this.#granted.set(dormant.id, [...(this.#granted.get(dormant.id) ?? []), { tool: item.tool, pattern }]);
     }
     const who = by === 'lead' ? 'the lead' : 'the owner';
     const told = this.#told.get(dormant.id) ?? [];
@@ -4006,7 +4018,7 @@ export class FlowEngine {
       // A Codex author has no host tools (its adapter takes none): the report of changes is Claude's.
       const tools = this.config.authorTools === true && target.harness === HARNESS;
       fresh = await this.#launch(next, ticket, 'author', target.model, kept.input.workdir, kept.input.briefing, kept.settings,
-        `${authorPrompt(ticket, { plan: false, report: tools })}\n\n${handoverMessage({ from: live.input.harness, fromModel: live.input.model, to: target.harness, note })}`,
+        `${authorPrompt(ticket, { plan: false, report: tools }, this.config.language)}\n\n${handoverMessage({ from: live.input.harness, fromModel: live.input.model, to: target.harness, note })}`,
         tools ? 'report' : undefined, undefined, target.harness);
     } catch (error) {
       return back(`the ${target.harness} session could not be started: ${name(error)}`);

@@ -45,10 +45,10 @@ export const AUTHOR_TOOLS: readonly (Pick<HostTool, 'description' | 'inputSchema
     inputSchema: {
       type: 'object',
       properties: {
-        steps: list('The steps you will take, in order, one short sentence each.'),
+        steps: list('The steps you will take, in order, one short sentence each, in the language your first message names.'),
         files: list('The files you mean to change or create, as paths in the checkout.'),
         confidence: { type: 'string', enum: ['low', 'medium', 'high'], description: 'high: the change is clear and small; medium: one point is uncertain; low: you need the owner to look first.' },
-        reason: text('Why this confidence, in one or two sentences.'),
+        reason: text('Why this confidence, in one or two sentences, in the language your first message names.'),
       },
       required: ['steps', 'files', 'confidence', 'reason'],
     },

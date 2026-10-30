@@ -23,6 +23,7 @@ export class FlowConfigError extends Error {
 
 export type FlowConfig = {
   readonly project: string;                 // the workspace's id, as tickets name it (their `project`)
+  readonly language?: 'en' | 'fr';          // the interface's: what a session writes for a person (issue #496)
   readonly projectDir: string;              // the first service's checkout on this server
   readonly repoUrl: string;                 // its address on the forge
   readonly repo: string;                    // owner/name, for gh
@@ -239,6 +240,7 @@ export function loadFlowConfig(env: NodeJS.ProcessEnv = process.env): FlowConfig
   const pickHarnesses = pickHarnessesOf(env.CLEARED_V2_PICK_HARNESSES);
   return {
     project: workspace.id, projectDir: first.dir, repoUrl: first.url, repo: first.repo,
+    language: env.CLEARED_V2_APP_LANGUAGE?.trim() === 'en' ? 'en' : 'fr',
     base: first.base, workdirRoot,
     authorModel,
     reviewerModel: env.CLEARED_V2_REVIEWER_MODEL || 'claude-sonnet-5-5',
