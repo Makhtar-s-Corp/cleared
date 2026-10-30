@@ -124,7 +124,7 @@ test('a permission asks its question, offers its three answers first, then says 
     'Permission', 'LOCAL-161', 'Open the session', 'Allow the author to install date-fns?', 'Upcoming: group entries by week',
     'Session', 'Author · Opus, paused for 3\u00a0min', 'Allow once', 'Always in this project', 'Deny',
     'Why it asks', 'The command adds a dependency to the project.',
-    'Command', 'npm install date-fns', 'What for', 'Install date-fns to group dates by week',
+    'Command', 'npm install date-fns', 'What for: Install date-fns to group dates by week',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.match(html, /<a class="d-link" href="\/sessions\/fixture-author">/);
   assert.deepEqual([...html.matchAll(/data-act="([a-z_]+)"/g)].map((m) => m[1]), ['allow_once', 'allow_always', 'reject_once'], 'the one that lets the work go on first');

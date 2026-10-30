@@ -20,7 +20,7 @@ const savedName = (view: TestValuesView | undefined, service: string, name: stri
 type Initial = TestValuesView & { readonly expected?: ExpectedSecrets };
 
 export function SecretsStep({ t, api, onDone, initial, onOwnAction }: StepProps<Initial>) {
-  const [expected, setExpected] = useState<ExpectedSecrets | undefined>(initial?.expected);
+  const [expected, setExpected] = useState<ExpectedSecrets | undefined>(initial ? initial.expected ?? { services: [] } : undefined);
   const [values, setValues] = useState<TestValuesView | undefined>(initial);
   const [saved, setSaved] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -36,7 +36,7 @@ export function SecretsStep({ t, api, onDone, initial, onOwnAction }: StepProps<
 
   const rows = expected?.services.flatMap((service) => service.names.map((name) => ({ service: service.service, ...name }))) ?? [];
   const several = (expected?.services.filter((service) => service.names.length > 0).length ?? 0) > 1;
-  const nothing = expected !== undefined && values !== undefined && rows.length === 0 && !savedAny(values);
+  const nothing = expected !== undefined && values?.workspace === true && values.key !== 'unusable' && rows.length === 0 && !savedAny(values);
 
   // Nothing to ask: the step skips itself, once.
   const skipped = useRef(false);
@@ -76,9 +76,11 @@ export function SecretsStep({ t, api, onDone, initial, onOwnAction }: StepProps<
 
   if (!expected || !values) return <StepFrame t={t} prefix="test_values" sentence={t('test_values_step_read')}><span className="setup-spinner" aria-hidden="true" /></StepFrame>;
   const editor = <TestValuesEditor t={t} client={api} path="/secrets" idPrefix="setup" titled={false} initial={values} onView={setValues} />;
+  if (!values.workspace) return <StepFrame t={t} prefix="test_values" sentence={t('test_values_no_workspace')} />;
+  if (values.key === 'unusable') return <StepFrame t={t} prefix="test_values" detail={editor}><p className="setup-error" role="alert">{t('test_values_key_unusable')}</p></StepFrame>;
   if (nothing) return <StepFrame t={t} prefix="test_values" sentence={t('test_values_step_none')} detail={editor}><span data-test-values-none /></StepFrame>;
   return (
-    <StepFrame t={t} prefix="test_values" sentence={missing.length === 0 ? t('test_values_step_saved') : undefined} detail={editor}>
+    <StepFrame t={t} prefix="test_values" sentence={missing.length === 0 && (saved || rows.length > 0) ? t('test_values_step_saved') : undefined} detail={editor}>
       {missing.length > 0 ? (
         <form className="setup-form" onSubmit={(event) => void submit(event)} aria-busy={busy} data-test-values-expected>
           {missing.map((row) => {

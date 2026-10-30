@@ -68,7 +68,7 @@ const environment = {
   }],
 };
 
-const testValues = { workspace: true, keyUsable: true, services: [{ name: SERVICE, known: true, values: [] }] };
+const testValues = { workspace: true, key: 'none', services: [{ name: SERVICE, inWorkspace: true, values: [] }] };
 const expected = { services: [{ service: SERVICE, names: [{ name: 'STRIPE_TEST_KEY', from: '.env.example' }, { name: 'MAILER_SANDBOX_TOKEN', from: 'test/mail.test.ts' }] }] };
 
 const doctorLine = (id: string, level: string, text: string, todo?: string) => ({ id, level, text, ...(todo ? { todo } : {}) });

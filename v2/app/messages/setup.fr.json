@@ -48,6 +48,6 @@
   "setup_live_read": "lire {path}",
   "setup_live_edit": "modifier {path}",
   "setup_live_other": "utiliser {tool}",
-  "setup_live_pr": "Pull request {number}",
+  "setup_live_pr": "Voir la pull request",
   "setup_time_long": "plus d'une heure"
 }

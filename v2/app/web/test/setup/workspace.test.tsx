@@ -93,8 +93,7 @@ test('the proposal: each service, its contract and the link with the place that 
     assert.match(text, /src\/filter\.ts/);
     assert.match(text, /38/);
     assert.match(text, /contract\/openapi\.yaml/);
-    assert.match(text, /3\s?s/, 'the machine\'s time, as a person reads it');
-    assert.doesNotMatch(text, /\d{4,} ?ms/);
+    assert.doesNotMatch(text, /\d\s?s\b|\d{4,} ?ms/, 'issue #494: no time that says nothing');
     assert.match(markup, /data-act="setup_workspace_write"/);
   });
 });
@@ -111,23 +110,28 @@ test('a monorepo: its folders as services or the repository as one, a choice of 
   });
 });
 
-test('a connected service with no .devcontainer is said, with the step that proposes it a setup session; one with one, or unread, is not', () => {
+// Issue #494: a single service with no contract or call is said simply.
+test('one repository, one service, nothing else found: one sentence and one button, no empty section, nothing glued', () => {
+  const ONE: WorkspaceProposal = { repositories: [{ repo: 'example-org/guestbook', layout: 'whole', folders: [], from: null }], services: [{ name: 'guestbook', repo: 'example-org/guestbook', kind: 'repository', path: null, contract: null }], links: [], machineMs: 0 };
   each((t, language) => {
-    const services = [
-      { name: 'guestbook', repo: 'example-org/guestbook', path: null, devcontainer: false },
-      { name: 'filter-api', repo: 'example-org/filter-api', path: null, devcontainer: true },
-      { name: 'jobs', repo: 'example-org/jobs', path: null, devcontainer: null },
-    ];
-    const one = html(<WorkspaceStep t={t} step={{ ...step, state: 'done' }} api={api} onDone={noop} initial={{ view: { ...VIEW, connected: { services, at: '2026-10-25T20:00:00.000Z' }, source: 'assistant' } }} />);
-    noMark(one, `no devcontainer ${language}`);
-    assert.match(one, /data-workspace-no-devcontainer/);
-    const text = visibleText(one).join(' ');
-    assert.ok(text.includes(t('workspace_no_devcontainer_one', { services: 'guestbook' })), `${language}: only the service without one`);
-    assert.match(one, /<a class="setup-link" href="\/setup\/environment">/);
-    const many = html(<WorkspaceStep t={t} step={{ ...step, state: 'done' }} api={api} onDone={noop} initial={{ view: { ...VIEW, connected: { services: services.map((s) => ({ ...s, devcontainer: false })), at: null }, source: 'assistant' } }} />);
-    assert.ok(visibleText(many).join(' ').includes(t('workspace_no_devcontainer_many', { services: 'guestbook, filter-api, jobs' })));
-    const none = html(<WorkspaceStep t={t} step={{ ...step, state: 'done' }} api={api} onDone={noop} initial={{ view: { ...VIEW, connected: { services: services.slice(1), at: null }, source: 'assistant' } }} />);
-    assert.doesNotMatch(none, /data-workspace-no-devcontainer/);
+    const markup = html(<WorkspaceStep t={t} step={step} api={api} onDone={noop} initial={{ view: VIEW, proposal: ONE, picked: ['example-org/guestbook'] }} />);
+    noMark(markup, `one ${language}`);
+    assert.match(markup, /data-workspace-simple/);
+    assert.ok(visibleText(markup).join(' ').includes(t('workspace_one_service', { service: 'guestbook' })));
+    assert.doesNotMatch(markup, /<fieldset|name="service"|name="repository"/, 'nothing to tick');
+    assert.doesNotMatch(visibleText(markup).join(' '), /guestbookle|\d\s?s\b/);
+    assert.ok(!markup.includes(t('workspace_contracts')) && !markup.includes(t('workspace_links')), 'no empty section');
+    assert.equal(markup.match(/primary/g)?.length, 1);
+  });
+});
+
+test('a service that is its whole repository under its own name says nothing more; sections with nothing are not drawn', () => {
+  each((t) => {
+    const noContract: WorkspaceProposal = { ...TWO, services: TWO.services.map((s) => ({ ...s, contract: null })), links: [] };
+    const markup = html(<WorkspaceStep t={t} step={step} api={api} onDone={noop} initial={{ view: VIEW, proposal: noContract, picked: ['example-org/guestbook', 'example-org/filter-api'] }} />);
+    assert.ok(!markup.includes('class="ws-meta"'), 'its name is its repository');
+    assert.ok(!visibleText(markup).includes(t('workspace_contracts')));
+    assert.ok(!visibleText(markup).includes(t('workspace_links')));
   });
 });
 

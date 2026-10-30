@@ -60,7 +60,7 @@ export function OwnerFirst({ t, onMade }: { readonly t: Translate; readonly onMa
     <StepFrame t={t} prefix="owner" detail={<p>{t('owner_detail_code')}</p>}>
       <form className="setup-form" onSubmit={submit} aria-busy={busy}>
         <label htmlFor="setup-code">{t('owner_code')}</label>
-        <Input id="setup-code" name="code" autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false} required maxLength={16} placeholder="ABCD-EFGH" autoFocus />
+        <Input id="setup-code" name="code" autoComplete="one-time-code" autoCapitalize="characters" spellCheck={false} required maxLength={16} autoFocus />
         <label htmlFor="setup-name">{t('owner_name')}</label>
         <Input id="setup-name" name="name" autoComplete="username" autoCapitalize="none" spellCheck={false} required maxLength={32} />
         <label htmlFor="setup-password">{t('owner_phrase')}</label>

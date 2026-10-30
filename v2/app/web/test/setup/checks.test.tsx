@@ -30,11 +30,12 @@ const WELL: ChecksView = { failed: 0, tookMs: 1_200, lines: FAILED.lines.filter(
 
 const each = (run: (t: Translate, language: 'en' | 'fr') => void) => { run(en, 'en'); run(fr, 'fr'); };
 
-test('each line says its level in words, a failure and a notice say what to do, a passed line never does', () => {
+test('every line is in the fold, its level in words, a failure and a notice saying what to do, a passed line never', () => {
   each((t, language) => {
     const markup = html(<ChecksStep t={t} step={step} api={api} onDone={noop} initial={FAILED} />);
     assert.doesNotMatch(markup, /⟦/, `${language}: no missing key`);
-    assert.equal(markup.match(/<li /g)?.length, 5);
+    assert.equal(markup.match(/<li class="setup-check"/g)?.length, 5);
+    assert.match(markup, /<details class="setup-detail">[\s\S]*data-check="docker"/, 'in the fold');
     for (const level of ['ok', 'fail', 'notice', 'off']) assert.match(markup, new RegExp(`data-level="${level}"`));
     const text = visibleText(markup).join(' ');
     for (const level of ['ok', 'fail', 'notice', 'off']) assert.ok(text.includes(t(`checks_level_${level}`)), `${language} ${level} in words`);
@@ -47,12 +48,12 @@ test('each line says its level in words, a failure and a notice say what to do, 
   });
 });
 
-test('the summary: how many failed of how many, or none and how long it took, as a person reads it', () => {
-  assert.equal(checksSummary(en, FAILED), '1 check failed, of 5. Fix it, then check again.');
-  assert.equal(checksSummary(en, { ...FAILED, failed: 2 }), '2 checks failed, of 5. Fix them, then check again.');
-  assert.equal(checksSummary(en, WELL), '2 checks, none failed, in 1s.');
-  assert.match(checksSummary(fr, WELL), /^2 vérifications, aucune en échec, en 1\s?s\.$/);
-  assert.doesNotMatch(checksSummary(en, { ...WELL, tookMs: 65_000 }), /\d{4,}|ms/);
+// The owner's request of 2026-10-30: 14 lines of plumbing became one sentence.
+test('the summary: everything is ready, or how many things to fix', () => {
+  assert.equal(checksSummary(en, FAILED), 'One thing to fix.');
+  assert.equal(checksSummary(en, { ...FAILED, failed: 2 }), '2 things to fix.');
+  assert.equal(checksSummary(en, WELL), 'Everything is ready.');
+  assert.equal(checksSummary(fr, WELL), 'Tout est prêt.');
 });
 
 test('all passed: the summary is the green one, and no note about notices', () => {
@@ -60,5 +61,18 @@ test('all passed: the summary is the green one, and no note about notices', () =
     const markup = html(<ChecksStep t={t} step={step} api={api} onDone={noop} initial={WELL} />);
     assert.match(markup, /class="setup-ok setup-checks-summary"/);
     assert.ok(!visibleText(markup).join(' ').includes(t('checks_notices')));
+  });
+});
+
+test('what needs an action is outside the fold: one sentence and its button, nothing about what passed', () => {
+  each((t) => {
+    const markup = html(<ChecksStep t={t} step={step} api={api} onDone={noop} initial={FAILED} />);
+    const shown = visibleText(markup.replace(/<details[\s\S]*<\/details>/, '')).join(' ');
+    assert.ok(shown.includes(t('checks_fail_forge')));
+    assert.match(markup.replace(/<details[\s\S]*<\/details>/, ''), /data-fix="forge"[\s\S]*href="\/setup\/forge"/);
+    assert.ok(!shown.includes('Docker 29.8.1'), 'what passed stays in the fold');
+    assert.ok(!shown.includes('12 GB'), 'a notice too');
+    const well = html(<ChecksStep t={t} step={step} api={api} onDone={noop} initial={WELL} />);
+    assert.ok(visibleText(well.replace(/<details[\s\S]*<\/details>/, '')).join(' ').includes(t('checks_ready')));
   });
 });

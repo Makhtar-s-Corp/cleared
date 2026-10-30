@@ -140,7 +140,7 @@ test('the milestone 1 variables make a one-service workspace, and the flow confi
   // The fields and values of the milestone 1 FlowConfig, unchanged but the
   // review rounds' default, 3 since the review channel (issue 291).
   assert.deepEqual(rest, {
-    project: 'guestbook', projectDir: '/srv/guestbook', repoUrl: 'https://github.com/example-org/cleared-example-guestbook.git',
+    language: 'fr', project: 'guestbook', projectDir: '/srv/guestbook', repoUrl: 'https://github.com/example-org/cleared-example-guestbook.git',
     repo: 'example-org/cleared-example-guestbook', base: 'trunk', workdirRoot: '/state/work', authorModel: 'claude-opus-5-5',
     reviewerModel: 'claude-sonnet-5-5', idleMs: 15 * 60_000, maxReviewRounds: 3, budgetUsd: undefined, mergeRetryMs: 60_000,
   });

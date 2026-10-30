@@ -74,7 +74,7 @@ function Followed({ t, view, summary }: { readonly t: Translate; readonly view: 
     <div className="setup-result" data-first-ticket={ticket.stage}>
       <p className="first-ticket-id"><span className="first-ticket-ref">{ticket.id}</span> {ticket.title}</p>
       {ticket.stage === 'live' ? null : <LiveSession t={t} ticket={ticket.id} pullRequest={ticket.pullRequest} />}
-      {ticket.stage === 'live' && ticket.pullRequest ? <p><a className="setup-link" href={ticket.pullRequest.url} target="_blank" rel="noreferrer">{t('setup_live_pr', { number: ticket.pullRequest.number })}</a></p> : null}
+      {ticket.stage === 'live' && ticket.pullRequest ? <p><a className="setup-link" href={ticket.pullRequest.url} target="_blank" rel="noreferrer">{t('setup_live_pr')}</a></p> : null}
       {ticket.rolledBack && ticket.stage !== 'live' ? <p className="setup-note" data-rolled-back>{t('first_ticket_rolled_back')}</p> : null}
       {ticket.stage === 'plan' && ticket.plan ? <a className="primary" href={`/inbox#${encodeURIComponent(ticket.plan)}`}>{t('first_ticket_open_plan')}</a> : null}
       {ticket.stage === 'approval' ? <a className="primary" href="/inbox">{t('first_ticket_open_inbox')}</a> : null}

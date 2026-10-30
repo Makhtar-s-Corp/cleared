@@ -39,7 +39,7 @@ test('the English screen reads as the capture, in milestone 1\'s words', () => {
     'Paused, waiting for you', '18\u00a0min · 35,500 tokens',
     'Read', 'src/screens/Upcoming.jsx', 'and 2 more files', 'Edit', 'src/engine/upcoming.mjs', '+24', '−6', 'Run the project\'s tests', 'npm run test:upcoming', '18 passed', QUESTION_TEXT, ANSWER_TEXT,
     'Allow the author to install date-fns?', 'The command adds a dependency to the project.', 'Command', 'npm install date-fns', 'Allow once', 'Always in this project', 'Deny',
-    'Changes', 'Checks', 'Targeted tests', 'Full suite', 'Screen so far', 'Hand over to Codex', 'Interrupt', 'Send',
+    'Changes', 'Checks', 'Targeted tests', 'Full suite', 'Hand over to Codex', 'Interrupt', 'Send',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
 });
 
@@ -161,13 +161,13 @@ test('the policy refusal and the answered requests read as sentences', () => {
   ]);
   const html = renderSession(on(model), en);
   const text = visibleText(html);
-  assert.ok(text.includes('Blocked by the rules: pushing to the base branch.'), 'the policy refusal, with its rule in words');
+  assert.ok(text.includes('The agent tried to push to the base branch. Cleared never lets a session do that: it publishes the branch itself, after the review.'), 'the policy refusal, explained in one human sentence');
   assert.ok(text.includes('Allowed once by you'));
   assert.ok(text.includes('Denied by a teammate'));
   assert.ok(text.includes('Cancelled when the turn was interrupted'));
   assert.equal(count(html, /data-answer=/g), 0, 'no button for an answered request');
   const unknown = renderSession(on(modelOf([{ type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId: 'r9', decision: 'reject_once', by: 'policy', rule: 'future.rule' } }])), en);
-  assert.ok(visibleText(unknown).includes('Blocked by the rules (future.rule).'), 'a rule the catalog does not know is named as it is');
+  assert.ok(visibleText(unknown).includes("Cleared's rules stopped this action (future.rule); the agent has to find another way."), 'a rule the catalog does not know is named as it is');
 });
 
 test('Author and Reviewer filter the ticket\'s thread, never links to another page (lane 36)', () => {

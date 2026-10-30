@@ -389,8 +389,6 @@
   "close_failed": "Closing did not reach the service. Try again.",
   "closed_done": "Closed at {time}. Nothing was merged. The card stays in the history.",
   "closed_by": "Closed by {who} at {time}: “{reason}”",
-  "group_ticket": "{ticket}: {title}",
-  "group_ticket_plain": "{ticket}",
   "request_waiting_line": "This session is paused until you answer, for {age} so far. Other sessions are not affected.",
   "request_what_for": "What for: {what}"
 }

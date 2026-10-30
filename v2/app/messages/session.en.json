@@ -334,6 +334,5 @@
   "summary_where_role": "{role}, for {time}",
   "summary_where_ended": "{role}, ended",
   "details_title": "Show details",
-  "details_session": "Session",
   "checks_times": "{n} times"
 }

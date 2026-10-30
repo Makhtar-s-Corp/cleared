@@ -18,7 +18,7 @@ import { translator } from '../lib/i18n.ts';
 import { ConsumptionView } from '../screens/consumption/Consumption.tsx';
 import { type InboxView } from '../screens/inbox/model.ts';
 import { applyAll, emptyModel, threadOf, type SessionView } from '../screens/session/model.ts';
-import { RightCards } from '../screens/session/Session.tsx';
+import { RightCards, FoldedFacts } from '../screens/session/Session.tsx';
 import { PlanAskCard } from '../screens/session/Tabs.tsx';
 import { Bar } from '../screens/tower/Tower.tsx';
 import { html, renderInbox, visibleText } from './render.tsx';
@@ -54,7 +54,8 @@ test('a ticket still running keeps its "yet" and its "screen so far" card', () =
   const running = shown(html(<RightCards view={sessionView('In Progress')} t={of('session', 'en')} />));
   assert.match(running, /No file changed yet\./);
   assert.match(running, /No check reported yet\./);
-  assert.match(running, /Screen so far/);
+  assert.match(shown(html(<FoldedFacts view={sessionView('In Progress')} t={of('session', 'en')} />)), /Screen so far/, 'in the fold');
+  assert.doesNotMatch(running, /Screen so far/);
 });
 
 test('the Plan tab\'s question card names the question once and does not explain where the answer opens', () => {

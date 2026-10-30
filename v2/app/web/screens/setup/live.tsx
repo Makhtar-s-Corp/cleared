@@ -131,7 +131,7 @@ export function LiveSession({ t, ticket, pullRequest, now = new Date() }: {
       {last ? <p className="setup-live-last">{lastLine(last, t)}</p> : null}
       <p className="setup-live-links">
         {session ? <a className="setup-link" href={`/sessions/${encodeURIComponent(session.id)}`} data-setup-session-link>{t('setup_live_open')}</a> : null}
-        {pullRequest ? <a className="setup-link" href={pullRequest.url} target="_blank" rel="noreferrer">{t('setup_live_pr', { number: pullRequest.number })}</a> : null}
+        {pullRequest ? <a className="setup-link" href={pullRequest.url} target="_blank" rel="noreferrer">{t('setup_live_pr')}</a> : null}
       </p>
     </div>
   );

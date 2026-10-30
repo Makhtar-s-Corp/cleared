@@ -72,12 +72,16 @@ function Empty({ t }: { readonly t: Translate }) {
 // What waits, then the handled and the expired items in one folded group,
 // "Traité", with its count (plan, 2.5.5). The top bar names the screen: the
 // list has no heading of its own (lane 35's art director).
-// What waits, one group per ticket, in the order they first come.
+// What waits, each run of one ticket's items under its name, in the order of the kinds.
 const isLeadTicket = (ticket: string): boolean => ticket === LEAD_TICKET || ticket === DREAM_TICKET;
-function bySession(items: readonly Item[]): { readonly ticket: string; readonly items: Item[] }[] {
-  const groups = new Map<string, Item[]>();
-  for (const item of items) groups.set(item.ticket, [...(groups.get(item.ticket) ?? []), item]);
-  return [...groups].map(([ticket, grouped]) => ({ ticket, items: grouped }));
+function bySession(items: readonly Item[]): { readonly ticket: string; readonly at: number; readonly items: Item[] }[] {
+  const groups: { ticket: string; at: number; items: Item[] }[] = [];
+  items.forEach((item, at) => {
+    const last = groups.at(-1);
+    if (last?.ticket === item.ticket) last.items.push(item);
+    else groups.push({ ticket: item.ticket, at, items: [item] });
+  });
+  return groups;
 }
 
 export function List({ view, t, handledOpen = false, onHandled, onAnswer }: {
@@ -98,7 +102,7 @@ export function List({ view, t, handledOpen = false, onHandled, onAnswer }: {
           <h2 className="group-title" id="waiting-title">{t('waiting_group', { n: waiting.length })}</h2>
           {/* Issue #495: what one session asks is never read as an answer to another's. */}
           {bySession(waiting).length > 1 ? bySession(waiting).map((group) => (
-            <div key={group.ticket} className="session-group" data-session-group={group.ticket}>
+            <div key={`${group.ticket}-${group.at}`} className="session-group" data-session-group={group.ticket}>
               <h3 className="session-group-title">{isLeadTicket(group.ticket) ? itemTitle(group.items[0] as Item, view, t) : <><span className="id">{group.ticket}</span>{ticketTitle(view, group.ticket) ? ` ${ticketTitle(view, group.ticket)}` : ''}</>}</h3>
               {list(group.items)}
             </div>
@@ -756,7 +760,7 @@ export default function Inbox() {
   const { t, api } = context;
   const [data, setData] = useKept<Data | undefined>('inbox', undefined);
   const [failed, setFailed] = useState<false | 'error' | 'pending'>(false);
-  const [failure, setFailure] = useState('');
+  const [failedLine, setFailedLine] = useState('');
   const [local, setLocal] = useState<ReadonlyMap<string, Local>>(restore);
   const [plans, setPlans] = useKept<ReadonlyMap<string, Plan>>('inbox-plans', new Map());
   // On a phone the captures start in their phone frame; the switch changes the frame only.
@@ -808,7 +812,7 @@ export default function Inbox() {
       setData({ items, tickets, sessions });
       setFailed(false);
     } catch (error) {
-      setFailure(serviceFailure(error, t, ''));
+      setFailedLine(serviceFailure(error, t, ''));
       setFailed(setupPending(error) ? 'pending' : 'error');
     }
   }, [api, change, setData, setPlans]);
@@ -1076,7 +1080,7 @@ export default function Inbox() {
   if (!view) {
     return failed === 'pending' ? <SetupPending t={t} />
       : failed
-      ? <div className="inbox-error"><p className="empty error inbox-failed"><span>{failure || t('inbox_load_failed')}</span><button type="button" className="chip-button" onClick={() => { setFailed(false); void load(); }}>{t('inbox_retry')}</button></p></div>
+      ? <div className="inbox-error"><p className="empty error inbox-failed"><span>{failedLine || t('inbox_load_failed')}</span><button type="button" className="chip-button" onClick={() => { setFailed(false); void load(); }}>{t('inbox_retry')}</button></p></div>
       : <div className="inbox-loading" aria-busy="true" />;
   }
   // A row's answer is the detail's, given with no reason (a deny's reason is

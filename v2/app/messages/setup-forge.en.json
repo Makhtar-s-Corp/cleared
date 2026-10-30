@@ -36,7 +36,7 @@
   "forge_error_refused": "GitHub refused this token: it may be expired or badly copied.",
   "forge_error_forbidden": "A permission is missing, or the organization has not approved the token yet.",
   "forge_error_unreachable": "GitHub did not answer. Check the network, then try again.",
-  "forge_error_empty": "This token reaches no repository yet: give it access to yours.",
+  "forge_error_empty": "This token reaches no repository yet, so give it access to yours.",
   "forge_error_environment": "The token comes from Cleared's settings: change it there.",
   "forge_error_other": "The token could not be saved. Try again in a moment.",
   "gitlab_intro": "Create a personal access token on your GitLab, then paste it here.",

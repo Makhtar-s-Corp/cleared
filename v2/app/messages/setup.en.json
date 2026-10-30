@@ -48,6 +48,6 @@
   "setup_live_read": "read {path}",
   "setup_live_edit": "change {path}",
   "setup_live_other": "use {tool}",
-  "setup_live_pr": "Pull request {number}",
+  "setup_live_pr": "See the pull request",
   "setup_time_long": "over an hour"
 }

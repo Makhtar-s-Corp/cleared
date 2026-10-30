@@ -389,8 +389,6 @@
   "close_failed": "La fermeture n'a pas atteint le service. Réessayez.",
   "closed_done": "Fermé à {time}. Rien n'a été fusionné. La carte reste dans l'historique.",
   "closed_by": "Fermé par {who} à {time} : « {reason} »",
-  "group_ticket": "{ticket} : {title}",
-  "group_ticket_plain": "{ticket}",
   "request_waiting_line": "Cette session est en pause jusqu'à votre réponse, depuis {age}. Les autres sessions n'en dépendent pas.",
   "request_what_for": "Pour : {what}"
 }

@@ -103,7 +103,9 @@ test('the session view has one heading for the screen: its ticket\'s number and 
 test('a card with nothing to say is not drawn: no criteria, no plan, the ticket card alone', () => {
   const view = ticketView();
   const left = html(<LeftCards view={view} t={en} />);
-  assert.equal([...left.matchAll(/<section class="card"/g)].length, 2, 'the ticket and its criteria; no session plan on this ticket');
+  assert.equal([...left.matchAll(/<section class="card"/g)].length, 1, 'the ticket; its criteria in the fold');
+  assert.match(left, /<details class="card s-fold"[\s\S]*criteria-title/);
+  assert.ok(!left.includes('plan-title'), 'no session plan on this ticket');
   const bare = html(<LeftCards view={{ ...view, ticket: { ...view.ticket!, body: 'Only words.' } }} t={en} />);
   assert.equal([...bare.matchAll(/<section class="card"/g)].length, 1);
   assert.ok(!visibleText(bare).some((line) => /no criteria|No session plan/.test(line)));

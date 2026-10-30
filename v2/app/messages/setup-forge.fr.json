@@ -36,7 +36,7 @@
   "forge_error_refused": "GitHub a refusé ce jeton : il est peut-être expiré ou mal copié.",
   "forge_error_forbidden": "Il manque une permission, ou l'organisation n'a pas encore approuvé le jeton.",
   "forge_error_unreachable": "GitHub n'a pas répondu. Vérifiez le réseau, puis réessayez.",
-  "forge_error_empty": "Ce jeton n'atteint encore aucun dépôt : donnez-lui accès aux vôtres.",
+  "forge_error_empty": "Ce jeton n'atteint encore aucun dépôt, donnez-lui donc accès aux vôtres.",
   "forge_error_environment": "Le jeton vient des réglages de Cleared : modifiez-le là.",
   "forge_error_other": "Le jeton n'a pas pu être enregistré. Réessayez dans un instant.",
   "gitlab_intro": "Créez un jeton d'accès personnel sur votre GitLab, puis collez-le ici.",

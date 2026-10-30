@@ -7,12 +7,11 @@ import assert from 'node:assert/strict';
 import type { SetupView, StepView } from '../../../../src/setup/types.ts';
 import { STEP_IDS } from '../../../../src/setup/types.ts';
 import type { Translate } from '../../lib/i18n.ts';
-import { setupTranslator, stepTime } from '../../screens/setup/model.ts';
+import { credibleTime, setupTranslator } from '../../screens/setup/model.ts';
 import { Progress } from '../../screens/setup/Setup.tsx';
 import { OwnerFirst, OwnerStep } from '../../screens/setup/steps/Owner.tsx';
 import { ForgeStep } from '../../screens/setup/steps/Forge.tsx';
-import { ModelStep } from '../../screens/setup/steps/Model.tsx';
-import { StepStub } from '../../screens/setup/step.tsx';
+import { ModelStep, pastedToken } from '../../screens/setup/steps/Model.tsx';
 import { html, visibleText } from '../render.tsx';
 
 const en = setupTranslator('en');
@@ -35,7 +34,8 @@ const VIEW: SetupView = {
 const noMark = (markup: string, what: string) => assert.doesNotMatch(markup, /⟦/, `${what}: no missing key`);
 const each = (run: (t: Translate, language: 'en' | 'fr') => void) => { run(en, 'en'); run(fr, 'fr'); };
 
-test('the progress line: every step in order, the current one marked for assistive technology, each done step with its time', () => {
+// Issue #492: "Fait, 4 j 5 h" beside a step is gone; a step is its name and its mark.
+test('the progress line: every step in order, the current one marked for assistive technology, no time beside any', () => {
   each((t, language) => {
     const markup = html(<Progress t={t} view={VIEW} current="model" />);
     noMark(markup, `progress ${language}`);
@@ -45,17 +45,16 @@ test('the progress line: every step in order, the current one marked for assisti
     assert.match(markup, /data-step="model"[^>]*aria-current="step"|aria-current="step"[^>]*data-step="model"/);
     assert.match(markup, /data-state="skipped"/);
     const text = visibleText(markup).join(' ');
-    assert.match(text, /2\smin/, 'the forge step\'s time, as a person reads it');
-    assert.doesNotMatch(text, /\d{4,} ?ms/, 'no figure in milliseconds');
+    assert.doesNotMatch(text, /\bmin\b|\d\s?h\b|\d\s?j\b/, 'no time beside a step');
+    assert.ok(text.includes(t('setup_state_done')), 'a state in words');
   });
 });
 
-test('a step\'s time: the person\'s, and the machine\'s when it worked', () => {
-  // The shell's units of time: "2 min" with a no-break space, "40s" in English.
-  assert.equal(stepTime(step('forge', { state: 'done', personMs: 130_000, machineMs: 1_400 }), en), '2\u00a0min, machine 1s');
-  assert.equal(stepTime(step('owner', { state: 'done', personMs: 40_000 }), en), '40s');
-  assert.equal(stepTime(step('checks'), en), '');
-  assert.match(stepTime(step('forge', { state: 'done', personMs: 130_000, machineMs: 1_400 }), fr), /2\s?min, machine 1\s?s/);
+test('a step\'s time in the fold: as a person reads it, and past an hour said so', () => {
+  assert.equal(credibleTime(130_000, en), '2\u00a0min');
+  assert.equal(credibleTime(40_000, en), '40s');
+  assert.equal(credibleTime(4 * 86_400_000, en), en('setup_time_long'));
+  assert.equal(credibleTime(4 * 86_400_000, fr), fr('setup_time_long'));
 });
 
 test('the first step: the setup code, the owner\'s name and password, each with its label and the browser\'s hints', () => {
@@ -100,23 +99,23 @@ test('the forge step: a hidden field, the rights a fine-grained credential needs
   });
 });
 
-test('the model step: the command to run, a terminal to run it in, and the field to paste what it prints', () => {
+// Issue #490: the step runs the command itself and takes the token.
+test('the model step: one button that opens the sign-in; what it runs and the field to paste in the fold', () => {
   each((t, language) => {
     const markup = html(<ModelStep t={t} step={step('model')} api={api} onDone={noop} initial={{ credential: { set: false }, terminal: true }} />);
     noMark(markup, `model ${language}`);
-    assert.match(markup, /<code>claude setup-token<\/code>/);
-    assert.match(markup, /data-act="setup_terminal"/);
-    assert.match(markup, /type="password"/);
+    const outside = markup.replace(/<details[\s\S]*<\/details>/, '');
+    assert.match(outside, /data-act="setup_terminal"/);
+    assert.doesNotMatch(outside, /setup-token|type="password"/, 'nothing to copy');
+    assert.match(markup, /<details[\s\S]*<code>claude setup-token<\/code>[\s\S]*type="password"/);
     const noTerminal = html(<ModelStep t={t} step={step('model')} api={api} onDone={noop} initial={{ credential: { set: false }, terminal: false }} />);
     assert.doesNotMatch(noTerminal, /data-act="setup_terminal"/);
+    assert.match(noTerminal.replace(/<details[\s\S]*<\/details>/, ''), /<code>claude setup-token<\/code>[\s\S]*type="password"/, 'elsewhere: the field is the action');
   });
 });
 
-// The stub itself, not a step's screen: each step's lane fills its own (the secrets step's, lane v2-j5-secrets, has its tests).
-test('a step a later lane fills says so, and offers Skip', () => {
-  each((t, language) => {
-    const markup = html(<StepStub t={t} id="first-ticket" />);
-    noMark(markup, `stub ${language}`);
-    assert.match(markup, /data-step-stub="first-ticket"/);
-  });
+test('what a terminal did to a token is undone, and words are left alone', () => {
+  const token = ['sk', 'ant', 'oat01', 'x'.repeat(40)].join('-');
+  assert.equal(pastedToken(`  ${token.slice(0, 20)}\n   ${token.slice(20)} \n`), token);
+  assert.equal(pastedToken(' not a token '), 'not a token');
 });
