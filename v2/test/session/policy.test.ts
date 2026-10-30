@@ -598,7 +598,6 @@ test('"always in this project" on a command of several parts holds the next time
   const command = 'npm ci && node scripts/check.js && which npm';
   const whole = evaluate(bash(command), { ...base, learned: [{ tool: 'Bash', pattern: command }] }, context);
   assert.equal(whole.decision, 'allow', JSON.stringify(whole));
-  assert.equal(whole.rule, 'learned');
   const parts = learnedPatterns(command);
   assert.deepEqual(parts, ['npm ci', 'node scripts/check.js', 'which npm']);
   const learned = parts.map((pattern) => ({ tool: 'Bash', pattern }));

@@ -979,8 +979,6 @@ function compound(request: ToolRequest, command: string, policy: Policy, context
   }
   const [first] = asks;
   if (!first) return allow('shell.compound_safe');
-  // Asked and answered "always", as written (a part that writes outside what an edit may is not learned over).
-  if (learnedText(request, policy) && asks.every(({ verdict }) => verdict.rule === 'shell.compound' && !/redirection/.test(verdict.reason))) return allow('learned');
   if (asks.length === 1) return first.verdict;
   const reasons = asks.map(({ words, verdict }) => (verdict.reason.startsWith(words.join(' ')) ? verdict.reason : `${words.join(' ')}: ${verdict.reason}`));
   return ask(first.verdict.rule, `${asks.length} parts of this command ask, the others are allowed: ${reasons.join('; ')}`);
