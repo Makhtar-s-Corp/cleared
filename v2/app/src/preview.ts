@@ -80,7 +80,7 @@ export function servicePreview(options: { readonly url: string; readonly proof: 
   const base = new URL(options.url);
   return (path, method) => new Promise((resolve, reject) => {
     const proof = currentProof(options.proof);
-    if (proof === undefined) { resolve({ status: 503, headers: {}, body: Buffer.alloc(0) }); return; }
+    if (typeof proof !== 'string') { resolve({ status: 503, headers: {}, body: Buffer.alloc(0) }); return; }
     const upstream = httpRequest({ protocol: base.protocol, hostname: base.hostname, port: base.port, method, path, headers: { [SERVICE_PROOF_HEADER]: proof } }, (answer) => {
       if (answer.statusCode === 401 && typeof options.proof !== 'string') options.proof.forget?.();
       const chunks: Buffer[] = [];

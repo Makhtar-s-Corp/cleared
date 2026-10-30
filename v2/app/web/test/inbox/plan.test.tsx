@@ -180,6 +180,7 @@ test('every word of the plan and the lead\'s question comes from the catalog or 
   const items: NextInboxItem[] = [...fixture.items, question];
   const allowed = strings([items, fixture.plans]);
   allowed.add('demo').add('Only the visible ones');
+  for (const ticket of viewOf().tickets) allowed.add(ticket.title).add(ticket.id).add(`${ticket.id} ${ticket.title}`);
   for (const n of [1, 2, 3, 4, 5]) allowed.add(String(n));
   for (const selected of [`plan:${PLAN_ID}`, question.id]) {
     for (const local of [undefined, { kind: 'busy' }, { kind: 'plan_approved', at: FIXTURE_NOW.toISOString() }] as (Local | undefined)[]) {

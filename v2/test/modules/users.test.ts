@@ -146,3 +146,15 @@ test('two proofs compare in constant time and only an exact match passes', () =>
   assert.equal(sameProof(proof.slice(1), proof), false);
   assert.equal(sameProof(['x', proof], proof), false);
 });
+
+// Issue #491: a proof that cannot serve was said to the browser as a service
+// that does not answer. The refusal now says which, without the path.
+test('a refused proof names its reason', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cleared-proof-'));
+  const path = join(dir, PROOF_FILE);
+  writeFileSync(path, 'short\n', { mode: 0o600 });
+  assert.throws(() => readOrCreateProof(path), (error: ProofError) => error.reason === 'malformed');
+  chmodSync(path, 0o644);
+  assert.throws(() => readOrCreateProof(path), (error: ProofError) => error.reason === 'exposed');
+  rmSync(dir, { recursive: true, force: true });
+});

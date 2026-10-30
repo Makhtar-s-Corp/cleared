@@ -148,7 +148,7 @@
   "plan_cost": "${amount}",
   "plan_work": "About {time} of work",
   "plan_week_total": "{n}% of the week",
-  "plan_cost_total": "About\u00a0{amount}",
+  "plan_cost_total": "About {amount}",
   "plan_parallel": "Up to {n} sessions at a time",
   "plan_parallel_one": "One session at a time",
   "plan_samples": "Estimates from {n} similar tickets",
@@ -388,5 +388,7 @@
   "close_invalid": "The service refused the reason: some text of at most 2000 characters.",
   "close_failed": "Closing did not reach the service. Try again.",
   "closed_done": "Closed at {time}. Nothing was merged. The card stays in the history.",
-  "closed_by": "Closed by {who} at {time}: “{reason}”"
+  "closed_by": "Closed by {who} at {time}: “{reason}”",
+  "request_waiting_line": "This session is paused until you answer, for {age} so far. Other sessions are not affected.",
+  "request_what_for": "What for: {what}"
 }

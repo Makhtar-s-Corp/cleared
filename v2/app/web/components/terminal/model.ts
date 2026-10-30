@@ -187,7 +187,7 @@ export function terminalApi(session: string, csrf: string, fetcher: Fetch = (url
   };
   return {
     streamUrl: `${root}/stream`,
-    async open(size: { readonly cols: number; readonly rows: number }, mode: TerminalMode): Promise<OpenResult> {
+    async open(size: { readonly cols: number; readonly rows: number; readonly capture?: boolean }, mode: TerminalMode): Promise<OpenResult> {
       const response = await post('open', { ...size, mode });
       if (response.ok) {
         const opened = await response.json() as { cols: number; rows: number; mode?: TerminalMode; name?: string };

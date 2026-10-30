@@ -46,6 +46,13 @@
         "grep *",
         "find *",
         "pwd",
+        "which *",
+        "node --version",
+        "node -v",
+        "npm --version",
+        "npm -v",
+        "python --version",
+        "python3 --version",
         "npm ci"
       ],
       "allowedHosts": [
@@ -127,6 +134,13 @@
         "grep *",
         "find *",
         "pwd",
+        "which *",
+        "node --version",
+        "node -v",
+        "npm --version",
+        "npm -v",
+        "python --version",
+        "python3 --version",
         "npm ci"
       ],
       "allowedHosts": [

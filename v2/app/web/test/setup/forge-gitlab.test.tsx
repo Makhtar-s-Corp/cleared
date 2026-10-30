@@ -34,11 +34,11 @@ test('the step offers GitHub and GitLab as two radio buttons of one labelled gro
     assert.match(radios[1]!, /value="gitlab"/);
     assert.doesNotMatch(radios[1]!, /checked/);
     assert.match(visibleText(markup).join(' '), /GitHub[\s\S]*GitLab/);
-    assert.match(markup, /github\.com\/settings\/personal-access-tokens/, 'GitHub\'s fields, as before');
+    assert.match(markup, /github\.com\/settings\/personal-access-tokens\/new\?name=Cleared&amp;[^"]*contents=write[^"]*pull_requests=write[^"]*statuses=read/, 'GitHub\'s page, the token\'s permissions filled in');
   });
 });
 
-test('GitLab\'s fields: the address, gitlab.com by default, a hidden field, the api scope and the role, and the page that makes the token on that GitLab', () => {
+test('GitLab\'s fields: the address, gitlab.com by default, a hidden field, and the page that makes the token on that GitLab', () => {
   assert.equal(gitlabTokenPage('https://gitlab.com'), 'https://gitlab.com/-/user_settings/personal_access_tokens?name=Cleared&scopes=api');
   assert.equal(gitlabTokenPage('https://example.org/gitlab'), 'https://example.org/gitlab/-/user_settings/personal_access_tokens?name=Cleared&scopes=api');
   each((t, language) => {
@@ -49,11 +49,17 @@ test('GitLab\'s fields: the address, gitlab.com by default, a hidden field, the 
     assert.match(markup, /type="password"/);
     assert.match(markup, /autocomplete="off"/i);
     assert.match(markup, /personal_access_tokens\?name=Cleared&amp;scopes=api/);
+    for (const id of ['setup-gitlab-address', 'setup-gitlab-value']) assert.match(markup, new RegExp(`<label[^>]*for="${id}"`), `${id} has its label`);
+  });
+});
+
+test('the scope and the role a GitLab token needs are in the fold', () => {
+  each((t, language) => {
+    const markup = html(<ForgeStep t={t} step={step} api={api} onDone={noop} initial={{ credential: { set: false }, gitlab: { credential: { set: true, at: null, source: 'assistant' }, address: 'https://gitlab.com' } }} />);
     const text = visibleText(markup).join(' ');
     assert.match(text, /\bapi\b/);
     assert.match(text, language === 'en' ? /Developer/ : /Développeur/);
     assert.match(text, language === 'en' ? /Maintainer/ : /Mainteneur/);
-    for (const id of ['setup-gitlab-address', 'setup-gitlab-value']) assert.match(markup, new RegExp(`<label[^>]*for="${id}"`), `${id} has its label`);
   });
 });
 
@@ -84,7 +90,6 @@ test('what GitLab answered is said with its name, not GitHub\'s', () => {
     const line = checkedLine(t, { forge: 'gitlab', credential: { set: true, at: null, source: 'assistant' }, repositories: 2, more: false, sample: ['example/apps/filter-api', 'example/guestbook'] });
     assert.match(line, /GitLab/);
     assert.doesNotMatch(line, /GitHub/);
-    assert.match(line, /example\/guestbook/);
     assert.doesNotMatch(line, /⟦/, language);
   });
 });

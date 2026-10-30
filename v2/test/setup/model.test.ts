@@ -21,6 +21,7 @@ class FakeContainer implements SessionContainer {
   ended = 0;
   #output: ((chunk: Buffer) => void)[] = [];
   #exit: (() => void)[] = [];
+  print(text: string) { for (const listener of this.#output) listener(Buffer.from(text)); }
   async exec() { return { code: 0, stdout: '', stderr: '' }; }
   async terminal(_id: string, size: { cols: number; rows: number }, command: readonly string[]): Promise<TerminalProcess> {
     this.opened.push({ command, ...size });
@@ -78,6 +79,54 @@ test('a paste that is not a setup token is refused and nothing is written', asyn
     assert.equal(refused.status, 400);
     assert.equal(refused.json.error, 'invalid');
     assert.equal(existsSync(join(service.dir, 'claude.token')), false);
+  });
+});
+
+// Issue #490: the token wraps on two lines in a terminal; pasted, it was refused.
+test('a paste with spaces and line breaks in it is saved without them', async () => {
+  await withModel(async (service, owner) => {
+    const wrapped = `  ${LOGIN.slice(0, 20)}\r\n   ${LOGIN.slice(20, 40)} \n${LOGIN.slice(40)}\n`;
+    const saved = await service.call('/api/setup/model', { method: 'POST', user: owner, body: { value: wrapped } });
+    assert.equal(saved.status, 200, saved.text);
+    assert.equal(readFileSync(join(service.dir, 'claude.token'), 'utf8'), `${LOGIN}\n`);
+  });
+});
+
+test('the step runs the command in its own terminal, takes the token from its output, never streams it, and closes', async () => {
+  await withModel(async (service, owner, container) => {
+    const opened = await service.call('/api/setup/model/terminal/open', { method: 'POST', user: owner, body: { cols: 40, rows: 30, capture: true } });
+    assert.equal(opened.status, 200, opened.text);
+    assert.deepEqual(container.opened.at(-1)?.command, ['claude', 'setup-token']);
+    const controller = new AbortController();
+    const stream = await fetch(`${service.base}/api/setup/model/terminal/stream?after=0`, { headers: { 'x-cleared-proof': 'a'.repeat(64), 'x-cleared-user': owner }, signal: controller.signal });
+    const reader = stream.body!.getReader();
+    const decoder = new TextDecoder();
+    let shown = '';
+    const read = (async () => { try { for (;;) { const { value, done } = await reader.read(); if (done) return; shown += decoder.decode(value); } } catch { /* aborted */ } })();
+    container.print(`Your OAuth token:\r\n\r\n\u001b[1m${LOGIN.slice(0, 30)}\r\n`);
+    container.print(`${LOGIN.slice(30)}\u001b[0m\r\n\r\nStore this token securely.\r\n`);
+    for (let tries = 0; tries < 100 && existsSync(join(service.dir, 'claude.token')) === false; tries += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(readFileSync(join(service.dir, 'claude.token'), 'utf8'), `${LOGIN}\n`);
+    const view = await service.call('/api/setup/model', { user: owner });
+    assert.equal(view.json.credential.set, true);
+    for (let tries = 0; tries < 100 && container.ended === 0; tries += 1) await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(container.ended, 1, 'the terminal and its container go');
+    controller.abort();
+    await read;
+    assert.ok(!shown.includes(LOGIN.slice(0, 30)) && !shown.includes(LOGIN.slice(30)), 'no part of the token reaches the browser');
+    assert.match(shown, /Your OAuth token/);
+    const steps = (await service.call('/api/setup', { user: owner })).json.steps as { id: string; state: string }[];
+    assert.equal(steps.find((s) => s.id === 'model')?.state, 'done');
+  });
+});
+
+test('a piece of a token, the output cut in its middle, is not saved', async () => {
+  await withModel(async (service, owner, container) => {
+    assert.equal((await service.call('/api/setup/model/terminal/open', { method: 'POST', user: owner, body: { cols: 40, rows: 30, capture: true } })).status, 200);
+    container.print(`${LOGIN.slice(0, 25)}\r\n\r\nStopped.\r\n`);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(existsSync(join(service.dir, 'claude.token')), false);
+    await service.call('/api/setup/model/terminal/close', { method: 'POST', user: owner });
   });
 });
 

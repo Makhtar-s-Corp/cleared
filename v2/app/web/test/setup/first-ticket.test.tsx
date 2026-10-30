@@ -54,15 +54,17 @@ test('the proposal: its title and its words as the ticket will carry them, the s
   });
 });
 
-test('the ticket followed: each stage in words, the current one marked for assistive technology, the approval sent to the inbox', () => {
+// The owner's request of 2026-10-30: no circle timeline, the real progress.
+test('the ticket followed: where it stands in one sentence, its session live, the approval sent to the inbox', () => {
   each((t, language) => {
     const working = render(t, view({ ticket: ticket('working') }));
     noMark(working, `working ${language}`);
     assert.match(working, /LOCAL-1/);
-    assert.equal(working.match(/aria-current="step"/g)?.length, 1);
-    assert.match(working, /data-stage="working"[^>]*aria-current="step"|aria-current="step"[^>]*data-stage="working"/);
+    assert.doesNotMatch(working, /data-stage=|aria-current="step"/, 'no list of stages');
+    assert.match(working, /data-setup-live=/);
     assert.match(working, /role="status"/);
     assert.doesNotMatch(working, /data-act="first_ticket_move"/);
+    assert.ok(visibleText(working).join(' ').includes(t('first_ticket_now_working')));
     const approval = render(t, view({ ticket: ticket('approval') }));
     assert.match(approval, /href="\/inbox"/);
     const back = render(t, view({ ticket: ticket('todo', true) }));
@@ -72,24 +74,28 @@ test('the ticket followed: each stage in words, the current one marked for assis
   });
 });
 
+test('its pull request is a link once there is one', () => {
+  each((t) => {
+    const markup = render(t, view({ ticket: { ...ticket('review') as NonNullable<FirstTicketView['ticket']>, pullRequest: { number: 12, url: 'https://github.com/o/r/pull/12' } } }));
+    assert.match(markup, /href="https:\/\/github\.com\/o\/r\/pull\/12"/);
+  });
+});
+
 // Issue #446: the author's session plan waits for the person's Go in the
-// inbox. The step says so and links to that item; the list keeps the
-// author's stage as the current one, so it never moves back.
-test('the plan waiting for its Go: said in words, the author\'s stage current, and a link to the plan in the inbox', () => {
+// inbox. The step says so and links to that item.
+test('the plan waiting for its Go: said in words, and a link to the plan in the inbox', () => {
   each((t, language) => {
     const markup = render(t, view({ ticket: { ...ticket('plan') as NonNullable<FirstTicketView['ticket']>, plan: 'session_plan:s-1:1' } }));
     noMark(markup, `plan ${language}`);
     assert.match(markup, /data-first-ticket="plan"/);
-    assert.equal(markup.match(/aria-current="step"/g)?.length, 1);
-    assert.match(markup, /data-stage="working"[^>]*aria-current="step"|aria-current="step"[^>]*data-stage="working"/);
     assert.match(markup, /href="\/inbox#session_plan%3As-1%3A1"/);
-    assert.match(visibleText(markup).join(' '), language === 'en' ? /your Go/ : /votre Go/);
+    assert.ok(visibleText(markup).join(' ').includes(t('first_ticket_now_plan')));
   });
 });
 
-test('the proposal says the author\'s plan waits for a Go before the change, as the approval does before live', () => {
-  each((t, language) => {
-    assert.match(visibleText(render(t, view())).join(' '), language === 'en' ? /plan[^.]*your Go/ : /plan[^.]*votre Go/);
+test('the proposal says, in its fold, that the plan comes first and nothing ships without the person', () => {
+  each((t) => {
+    assert.ok(visibleText(render(t, view())).join(' ').includes(t('first_ticket_flow_note')));
   });
 });
 
@@ -98,15 +104,14 @@ const steps: StepView[] = STEP_IDS.map((id, index) => ({
 }));
 const SETUP: SetupView = { steps, owner: 'alex', current: null, total: { personMs: steps.reduce((sum, s) => sum + s.personMs, 0), machineMs: 18 * 60_000 } };
 
-test('the summary: a table of each step\'s time, the person\'s and the machine\'s, a skipped step said, and the total in words', () => {
+test('the summary: a table of each step\'s time, the person\'s and the machine\'s, a skipped step said', () => {
   each((t, language) => {
     const markup = html(<SetupSummary t={t} view={SETUP} />);
     noMark(markup, `summary ${language}`);
     assert.match(markup, /<table/);
     assert.match(markup, /<caption/);
-    assert.equal(markup.match(/<th scope="row"/g)?.length, STEP_IDS.length + 1, 'a row per step and the total');
+    assert.equal(markup.match(/<th scope="row"/g)?.length, STEP_IDS.length, 'a row per step');
     const text = visibleText(markup).join(' ');
-    assert.match(text, /18\smin/, 'the machine\'s total');
     assert.match(text, language === 'en' ? /Skipped/ : /Passée/);
     noMs(markup);
   });
@@ -116,7 +121,17 @@ test('live: the step says so and shows the setup\'s summary', () => {
   each((t, language) => {
     const markup = html(<FirstTicketStep t={t} step={{ ...STEP, state: 'done' }} api={api} onDone={noop} initial={view({ ticket: ticket('live') })} summary={SETUP} />);
     noMark(markup, `live ${language}`);
-    assert.match(markup, /data-stage="live"[^>]*aria-current="step"|aria-current="step"[^>]*data-stage="live"/);
-    assert.match(markup, /<table/);
+    assert.ok(visibleText(markup).join(' ').includes(t('first_ticket_now_live')));
+    assert.match(markup, /<details class="setup-detail">[\s\S]*<table/, 'the time per step, folded');
+  });
+});
+
+// Issue #492: a step left open for days is not days of a person's work.
+test('a step\'s time past an hour is said so, not as days', () => {
+  const long = { ...SETUP, steps: SETUP.steps.map((s) => (s.id === 'forge' ? { ...s, personMs: (4 * 24 + 5) * 3_600_000 } : s)) };
+  each((t) => {
+    const text = visibleText(html(<SetupSummary t={t} view={long} />)).join(' ');
+    assert.ok(text.includes(t('setup_time_long')));
+    assert.doesNotMatch(text, /\d\s?(j|d)\b/);
   });
 });

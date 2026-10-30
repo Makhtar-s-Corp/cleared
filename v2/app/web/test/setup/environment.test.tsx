@@ -11,7 +11,7 @@ import assert from 'node:assert/strict';
 import type { EnvironmentService, EnvironmentView } from '../../../../src/container/types.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { setupTranslator } from '../../screens/setup/model.ts';
-import { EnvironmentStep, environmentSummary, sessionBody } from '../../screens/setup/steps/Environment.tsx';
+import { EnvironmentStep, checkReason, environmentSummary, sessionBody } from '../../screens/setup/steps/Environment.tsx';
 import { html, visibleText } from '../render.tsx';
 
 const en = setupTranslator('en');
@@ -37,33 +37,45 @@ const READY: EnvironmentView = { workspace: true, sessions: 'ready', services: [
 
 const each = (run: (t: Translate, language: 'en' | 'fr') => void) => { run(en, 'en'); run(fr, 'fr'); };
 
-test('each service says its image in words, its build\'s time as a person reads it, and a failure what to do', () => {
+test('each service says its state in a word; its image, its time and what failed are in the fold', () => {
   each((t, language) => {
     const markup = html(<EnvironmentStep t={t} step={step} api={api} onDone={noop} initial={MIXED} />);
     assert.doesNotMatch(markup, /⟦/, `${language}: no missing key`);
     assert.match(markup, /data-environment-step/);
-    assert.equal(markup.match(/<li /g)?.length, 4);
+    assert.equal(markup.match(/<li class="setup-env-item"/g)?.length, 4);
     for (const state of ['ready', 'failed', 'building', 'none']) assert.match(markup, new RegExp(`data-state="${state}"`));
+    const outside = visibleText(markup.replace(/<details[\s\S]*<\/details>/, '')).join(' ');
+    for (const state of ['ready', 'failed', 'building', 'none']) assert.ok(outside.includes(t(`environment_state_${state}`)), `${language} ${state} in words`);
+    assert.ok(outside.includes(t('environment_failed')), 'a failure says what can be done');
+    assert.doesNotMatch(outside, /devcontainer|install_command|agents\.conf|cleared-v2-prep|ERESOLVE/, 'no file or setting in the sentences');
     const text = visibleText(markup).join(' ');
-    for (const state of ['ready', 'failed', 'building', 'none']) assert.ok(text.includes(t(`environment_state_${state}`)), `${language} ${state} in words`);
-    assert.match(text, /3\s?min/, 'the build\'s time');
+    assert.match(text, /3\s?min/, 'the build\'s time, in the fold');
     assert.ok(text.includes('cleared-v2-prep-api:9f2c4e6a8b0d1f3a'));
     assert.ok(text.includes('npm ci'));
     assert.ok(text.includes(t('environment_foreign_image', { image: 'mcr.microsoft.com/devcontainers/javascript-node:24' })), 'an image not Cleared\'s says what a session needs in it');
     assert.match(text, /ERESOLVE/);
-    assert.ok(text.includes(t('environment_failed_todo')));
     assert.doesNotMatch(text, /\d\s?ms\b/, 'no figure in milliseconds');
     assert.match(markup, /aria-busy="true"/, 'a build running is said to assistive technology');
-    assert.match(markup, /data-act="setup_environment_build"[^>]*disabled|disabled[^>]*data-act="setup_environment_build"/, 'no second Build while one runs');
+    assert.doesNotMatch(markup, /data-act="setup_environment_build"/, 'no Build while one runs');
   });
 });
 
-test('all ready: the summary says so, and Build again is offered', () => {
+test('all ready: nothing to do, and building again is in the fold', () => {
   each((t) => {
     const markup = html(<EnvironmentStep t={t} step={step} api={api} onDone={noop} initial={READY} />);
-    assert.ok(visibleText(markup).join(' ').includes(environmentSummary(t, READY)));
-    assert.match(markup, /data-act="setup_environment_build"/);
-    assert.doesNotMatch(markup, /data-act="setup_environment_build"[^>]*disabled/);
+    assert.doesNotMatch(markup.replace(/<details[\s\S]*<\/details>/, ''), /data-act="setup_environment_build"/);
+    assert.match(markup, /<details[\s\S]*data-act="setup_environment_build"/);
+    assert.ok(visibleText(markup).join(' ').includes(t('environment_state_ready')));
+    assert.ok(environmentSummary(t, READY).length > 0);
+  });
+});
+
+test('nothing installed: one primary action, Prepare', () => {
+  const view: EnvironmentView = { workspace: true, sessions: 'ready', services: [service({})] };
+  each((t) => {
+    const markup = html(<EnvironmentStep t={t} step={step} api={api} onDone={noop} initial={view} />);
+    assert.match(markup, /class="[^"]*primary[^"]*"[^>]*data-act="setup_environment_build"|data-act="setup_environment_build"[^>]*class="[^"]*primary/);
+    assert.equal(markup.match(/primary/g)?.length, 1);
   });
 });
 
@@ -87,34 +99,32 @@ const CHECKED: EnvironmentView = {
   ],
 };
 
-test('each ready image says its check\'s result, a failed one its last lines; a setup session is proposed with its reason, or said running', () => {
+test('tests that fail are explained in one sentence, a start for each; a session running is shown live; the lines are in the fold', () => {
   each((t, language) => {
     const markup = html(<EnvironmentStep t={t} step={step} api={api} onDone={noop} initial={CHECKED} />);
     assert.doesNotMatch(markup, /⟦/, `${language}: no missing key`);
     const text = visibleText(markup).join(' ');
-    assert.ok(text.includes(`npm test ${t('environment_check_failed')}`));
-    assert.match(markup, /<pre class="setup-env-output" tabindex="0" aria-label="[^"]+">not ok 2 - sqlite3: command not found<\/pre>/, 'the output, reachable by keyboard and named');
-    assert.match(markup, /data-env-check="passed"/);
+    assert.ok(text.includes(t('environment_check_missing')), 'a tool is missing from what was installed');
+    assert.match(markup, /<pre class="setup-env-output" tabindex="0" aria-label="[^"]+" data-env-check="failed">not ok 2 - sqlite3: command not found<\/pre>/, 'the output, reachable by keyboard and named');
     assert.match(text, /npm run check[^.]*1\s?min/, 'the check\'s time as a person reads it');
-    assert.ok(text.includes(t('environment_no_check')), 'a service with no declared check says so');
-    for (const reason of ['check_failed', 'build_failed']) {
-      assert.match(markup, new RegExp(`data-env-session="${reason}"`));
-      assert.ok(text.includes(t(`environment_proposal_${reason}`)), `${language} ${reason}`);
-    }
-    assert.equal(markup.match(/data-act="setup_environment_session"/g)?.length, 2, 'a start for each proposal with no open session');
-    assert.ok(text.includes(t('environment_session_open', { ticket: 'LOCAL-7' })), 'an open session is said, not proposed again');
+    assert.ok(text.includes(t('environment_detail_check_none')), 'a service with no declared check says so');
+    assert.equal(markup.replace(/<details[\s\S]*<\/details>/, '').match(/data-act="setup_environment_session"/g)?.length, 2, 'a start for each failure with no open session');
+    assert.ok(text.includes(t('environment_session_doing', { service: 'jobs' })), 'an open session is said, not proposed again');
+    assert.match(markup, /data-setup-live=/, 'its live state');
     assert.doesNotMatch(text, /\d\s?ms\b/);
   });
 });
 
-test('every image built but a check red: the summary says so, not that all is ready', () => {
-  const view: EnvironmentView = { ...CHECKED, services: CHECKED.services.slice(0, 3) };
+// The owner's report: tests fail because nothing is installed, with no human explanation.
+test('why the tests fail, from what they printed', () => {
+  const failing = (tail: string, install: string | null) => service({ install, check: { command: 'npm test', passed: false, at: '2026-10-25T20:01:00.000Z', ms: 1, tail } });
+  assert.equal(checkReason(failing('sh: 1: vitest: not found', null)), 'none_installed');
+  assert.equal(checkReason(failing('Error: Cannot find module x', 'npm ci')), 'missing');
+  assert.equal(checkReason(failing('not ok 3 - totals', 'npm ci')), 'other');
   each((t) => {
-    assert.equal(environmentSummary(t, view), t('environment_summary_check_failed_one'));
-    const markup = html(<EnvironmentStep t={t} step={step} api={api} onDone={noop} initial={view} />);
-    assert.doesNotMatch(markup, /class="setup-ok setup-env-summary"/);
-    const both = { ...view, services: view.services.map((s) => (s.check ? { ...s, check: { ...s.check, passed: false } } : s)) };
-    assert.equal(environmentSummary(t, both), t('environment_summary_check_failed_many', { failed: 2 }));
+    for (const reason of ['none_installed', 'missing', 'other']) {
+      assert.doesNotMatch(t(`environment_check_${reason}`), /⟦|devcontainer|agents\.conf/);
+    }
   });
 });
 
@@ -131,7 +141,7 @@ test('with no flow, or a flow that read the workspace before, the proposal waits
 test('the setup session\'s ticket is the tower\'s Environment template, in the person\'s language, named after the service', () => {
   const english = sessionBody(en, 'api');
   assert.equal(english.service, 'api');
-  assert.equal(english.title, 'Prepare the environment of api');
+  assert.equal(english.title, 'Prepare the environment of the api service');
   assert.match(english.body, /^## The service\n/);
   assert.match(english.body, /cleared-v2-session/);
   const french = sessionBody(fr, 'api');

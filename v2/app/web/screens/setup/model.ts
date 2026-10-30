@@ -2,7 +2,7 @@
 // section 5): the words (the shell's catalog, the assistant's and every
 // step's, bundled into this screen's chunk only), a step's time as a person
 // reads it, a date, and the service's setup routes through the app.
-import type { SetupView, StepId, StepView } from '../../../../src/setup/types.ts';
+import type { SetupView, StepId } from '../../../../src/setup/types.ts';
 import { STEP_IDS } from '../../../../src/setup/types.ts';
 import checksEn from '../../../messages/setup-checks.en.json';
 import checksFr from '../../../messages/setup-checks.fr.json';
@@ -43,12 +43,10 @@ export function setupTranslator(language: Language): Translate {
 // "secret" in it as an assigned secret (as P246 found for "token" and "pass").
 export const stepKey = (id: StepId): string => (id === 'secrets' ? 'test_values' : id.replace(/-/g, '_'));
 
-// The person's time on a step, and the machine's when it worked; nothing for a step not finished.
-export function stepTime(step: StepView, t: Translate): string {
-  if (step.state === 'todo') return '';
-  const person = lasted(step.personMs, t);
-  return step.machineMs >= 1000 ? t('setup_time_both', { person, machine: lasted(step.machineMs, t) }) : person;
-}
+// A step's time as the last page's fold says it (issue #492): a step left open
+// over a night is not an hour of anyone's work, so past an hour it says so.
+const HOUR_MS = 3_600_000;
+export const credibleTime = (ms: number, t: Translate): string => (ms >= HOUR_MS ? t('setup_time_long') : lasted(ms, t));
 
 // "25 October", "25 octobre": the day a credential was saved, the day before
 // the month in both languages, as the plan writes it ("set on 25 October").

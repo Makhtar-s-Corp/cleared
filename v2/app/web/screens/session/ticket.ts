@@ -117,6 +117,23 @@ export function ticketChecks(parts: readonly TicketPart[]): { readonly name: str
   return [...out.values()];
 }
 
+// The checks as a person reads them (the owner's request of 2026-10-30): the
+// ones that read the same are one line, its state the worst of them, with the
+// commands behind it.
+export type ReadCheck = { readonly name: string; readonly state: 'passed' | 'pending' | 'failed'; readonly commands: readonly string[] };
+const WORST = { failed: 2, pending: 1, passed: 0 } as const;
+export function readChecks(checks: readonly { readonly name: string; readonly state: ReadCheck['state'] }[], read: (name: string) => string): ReadCheck[] {
+  const out = new Map<string, ReadCheck>();
+  for (const check of checks) {
+    const name = read(check.name);
+    const seen = out.get(name);
+    out.set(name, seen
+      ? { name, state: WORST[check.state] > WORST[seen.state] ? check.state : seen.state, commands: [...seen.commands, check.name] }
+      : { name, state: check.state, commands: [check.name] });
+  }
+  return [...out.values()];
+}
+
 // The time by step of every session of the ticket, added up by step.
 export function ticketSteps(parts: readonly TicketPart[], now: number): StepTotal[] {
   const out = new Map<string, StepTotal>();

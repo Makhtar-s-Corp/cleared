@@ -9,6 +9,9 @@
 //   POST /api/setup/secrets          { service, name, value } -> TestValueSaved
 //   POST /api/setup/secrets/remove   { service, name } -> { removed: true }
 //   POST /api/setup/secrets/done     -> { done: true }; 409 { error: 'empty' } with no value
+//   GET  /api/setup/secrets/expected -> ExpectedSecrets: the names the repositories show their tests read
+import { FlowConfigError, loadFlowConfig, workspaceOf } from '../../flow/config.ts';
+import { expectedSecrets } from '../../secrets/expected.ts';
 import { testValuesOf } from '../../secrets/live.ts';
 import { removeTestValue, setTestValue, testValuesView } from '../../secrets/routes.ts';
 import { TEST_VALUE_TABLES } from '../../secrets/store.ts';
@@ -30,6 +33,19 @@ const secrets: SetupStep = {
       {
         method: 'POST', path: '/api/setup/secrets',
         handle: guarded(deps, async (context, user) => answer(context, 200, await setTestValue(context, store(), deps.env, user.id))),
+      },
+      {
+        method: 'GET', path: '/api/setup/secrets/expected',
+        handle: guarded(deps, async (context) => {
+          let services: readonly { readonly name: string; readonly dir: string; readonly base: string }[] = [];
+          try {
+            const config = loadFlowConfig(deps.env);
+            services = config ? workspaceOf(config).services : [];
+          } catch (error) {
+            if (!(error instanceof FlowConfigError)) throw error;
+          }
+          answer(context, 200, { services: await Promise.all(services.map(async (service) => ({ service: service.name, names: await expectedSecrets(service) }))) });
+        }),
       },
       {
         method: 'POST', path: '/api/setup/secrets/remove',

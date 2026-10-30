@@ -50,14 +50,30 @@ test('each service lists its values by name, with the day and the person, never 
     assert.match(markup, /<label[^>]*for="setup-test-value-value"/, 'the value field is labelled');
     assert.match(markup, /<label[^>]*for="setup-test-value-service"/, 'the service is picked when there are several');
     assert.match(markup, /aria-label="[^"]*PAYMENT_SANDBOX_KEY[^"]*"/, 'Remove and Replace name the value they act on');
-    assert.doesNotMatch(markup, /data-act="setup_test_values_done"[^>]*disabled/, 'Done once a value is saved');
   });
 });
 
-test('nothing saved: Done is not offered, skipping is; no workspace and an unusable key are said', () => {
+const EXPECTED = { services: [{ service: 'api', names: [{ name: 'STRIPE_TEST_KEY', from: '.env.example' }, { name: 'PAYMENT_SANDBOX_KEY', from: 'test/pay.test.ts' }] }] };
+
+// The owner's request of 2026-10-30.
+test('the names the repository shows are asked for, one field each; one already saved is not', () => {
+  each((t, language) => {
+    const markup = html(<SecretsStep t={t} step={step} api={api} onDone={noop} initial={{ ...VIEW, expected: EXPECTED }} />);
+    assert.doesNotMatch(markup, /⟦/, language);
+    const outside = markup.replace(/<details[\s\S]*<\/details>/, '');
+    assert.match(outside, /data-expected="STRIPE_TEST_KEY"/);
+    assert.doesNotMatch(outside, /data-expected="PAYMENT_SANDBOX_KEY"/, 'saved already');
+    assert.match(outside, /name="api:STRIPE_TEST_KEY"[^>]*type="password"|type="password"[^>]*name="api:STRIPE_TEST_KEY"/);
+    assert.equal(outside.match(/data-act="setup_test_values_done"/g)?.length, 1, 'one button');
+    assert.ok(visibleText(outside).join(' ').includes(t('test_values_step_from', { file: '.env.example' })));
+  });
+});
+
+test('none expected and none saved: one sentence, no form; no workspace and an unusable key are said', () => {
   each((t, language) => {
     const empty = html(<SecretsStep t={t} step={step} api={api} onDone={noop} initial={EMPTY} />);
-    assert.match(empty, /data-act="setup_test_values_done"[^>]*disabled|disabled[^>]*data-act="setup_test_values_done"/, `${language}: Done waits for a value`);
+    assert.ok(visibleText(empty).join(' ').includes(t('test_values_step_none')), language);
+    assert.doesNotMatch(empty.replace(/<details[\s\S]*<\/details>/, ''), /<form|type="password"/);
     assert.doesNotMatch(empty, /setup-test-value-service/, 'one service: no choice to make');
     const none = visibleText(html(<SecretsStep t={t} step={step} api={api} onDone={noop} initial={{ workspace: false, key: 'none', services: [] }} />)).join(' ');
     assert.ok(none.includes(t('test_values_no_workspace')), language);

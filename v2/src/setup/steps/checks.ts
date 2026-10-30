@@ -30,7 +30,8 @@ export function checksStep(probes: (deps: StepDeps) => ReadyProbes = (deps) => (
           const asked = (await readBody(context.request)).language;
           const language: Language = asked === 'en' || asked === 'fr' ? asked : languageOf(deps.env);
           const started = Date.now();
-          const lines = await readyChecks({ env: deps.env, language, probes: probes(deps) });
+          // What earlier tests left behind asks nothing of a person installing: `cleared doctor` still says it.
+          const lines = (await readyChecks({ env: deps.env, language, probes: probes(deps) })).filter((line) => line.id !== 'orphans');
           const tookMs = Date.now() - started;
           deps.records.machine('checks', tookMs);
           const failed = lines.filter((line) => line.level === 'fail').length;

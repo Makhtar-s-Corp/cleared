@@ -457,10 +457,8 @@ export function createAppHandler(options: AppOptions): (request: IncomingMessage
     const read = method === 'GET' || method === 'HEAD';
     const firstStart = setupNeeded(options.setup);
 
-    if (path === '/setup/owner') {
-      if (method !== 'POST') return send(response, 405, 'method not allowed', 'text/plain; charset=utf-8', { allow: 'POST' });
-      return setupOwner(request, response);
-    }
+    // POST: the owner's form; a read is the step's page (the assistant's list links to it).
+    if (path === '/setup/owner' && method === 'POST') return setupOwner(request, response);
     const setupPlace = setupPlaceOf(path);
     if (setupPlace) {
       if (!read) return send(response, 405, 'method not allowed', 'text/plain; charset=utf-8', { allow: 'GET, HEAD' });

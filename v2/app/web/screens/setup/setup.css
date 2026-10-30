@@ -1,94 +1,110 @@
-/* The setup assistant (milestone 5, lane v2-j5-assistant), on top of
-   styles/app.css: a page of its own, the progress line at the left of the
-   step from 1024 px, above it below. Same tokens as the sign-in page, flat
-   colours; a step's state is said in words beside its mark, never by its
-   colour alone. Workbench (lane j6-ui-pro): the product's name in a thin white bar over a 1px line, the heading at
-   20 px, the steps a quiet list of numbered circles (done with a check's green, the current one indigo), the step a
-   white panel with a 1px line and an 8 px radius. */
+/* Hallmark · shape: app screen · redesign: full · system: docs/v2/ui-pro/DESIGN.md (Workbench) · direction: the owner's of 2026-10-30, issue #497 */
+/* Critique: one person setting up their own tool: a step is a sentence and one button, what is under it folds; nothing here competes with that. */
+/* The setup assistant, on top of styles/app.css: a page of its own, the steps a quiet list at the left of
+   the step from 1024 px, a count and a thin bar above it below. Same tokens as the sign-in page, flat colours,
+   1 px soft lines, one indigo button on a screen; a step's state is said in words for who does not see its mark. */
 
 .setup-page { min-height: 100vh; }
-.setup { max-width: 1120px; margin: 0 auto; padding: 0 var(--space-5) var(--space-6); }
+.setup { max-width: 1040px; margin: 0 auto; padding: 0 var(--space-5) var(--space-6); }
 
-.setup-head { margin-bottom: var(--space-4); }
-.setup-brand { display: flex; align-items: center; gap: var(--space-2); min-height: var(--top-bar); margin: 0 calc(-1 * var(--space-5)) var(--space-5); padding: 0 var(--space-5); background: var(--canvas); color: var(--text); }
+.setup-head { margin-bottom: var(--space-5); }
+.setup-brand { display: flex; align-items: center; gap: var(--space-2); min-height: var(--top-bar); margin: 0 calc(-1 * var(--space-5)); padding: 0 var(--space-5); background: var(--canvas); color: var(--text); }
 /* The bar runs the window's width, past the page's measure: its white and its 1px line drawn out on both sides, flat. */
 .setup-brand { box-shadow: 0 0 0 100vmax var(--canvas), 0 1px 0 100vmax var(--line); clip-path: inset(0 -100vmax -1px); }
 .setup-brand .logo { fill: var(--ink); }
+.setup-brand .name { font-weight: var(--weight-heavy); font-size: var(--text-lg); }
+.setup-sessions { margin-left: auto; padding: var(--space-1) var(--space-2); border-radius: var(--radius); color: var(--text-secondary); font-size: var(--text-md); font-weight: var(--weight-strong); text-decoration: none; }
+.setup-count-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: var(--space-2); padding: 0 var(--space-1); border-radius: 9px; background: var(--awaiting-surface); color: var(--awaiting-text); font-size: var(--text-sm); }
+.setup-sessions:hover { background: var(--tab-fill); color: var(--text); }
+.setup-sessions:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 /* The language choice (issue #431): a segmented control, each language named in itself. */
 .setup-language { margin-left: auto; display: flex; gap: 2px; padding: 2px; border-radius: var(--radius); background: var(--tab-fill); font-size: var(--text-sm); }
-.setup-language button { min-height: 28px; padding: 0 var(--space-3); border: 0; border-radius: 4px; background: transparent; color: var(--text-secondary); font-weight: var(--weight-strong); cursor: pointer; }
+.setup-sessions + .setup-language { margin-left: var(--space-2); }
+.setup-language button { min-height: 24px; padding: 0 var(--space-2); border: 0; border-radius: 4px; background: transparent; color: var(--text-secondary); font-weight: var(--weight-strong); cursor: pointer; }
 .setup-language button:hover { color: var(--text); }
+.setup-language button:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .setup-language button[aria-pressed="true"] { background: var(--surface); box-shadow: 0 0 0 1px var(--line); color: var(--text); }
-@media (max-width: 767px) { .setup-language button { min-height: 44px; } }
-.setup-brand .name { font-weight: var(--weight-heavy); font-size: var(--text-lg); }
-.setup-head h1 { margin: 0; font-size: var(--text-display); font-weight: var(--weight-heavy); line-height: 1.3; }
-.setup-lead { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-md); text-wrap: pretty; }
 
-.setup-body { display: grid; grid-template-columns: 240px minmax(0, 1fr); gap: var(--space-4); align-items: start; }
+.setup-body { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: var(--space-5); align-items: start; }
 
-/* The route: each step a numbered circle on one thin line, as a checklist. */
-.setup-progress { position: relative; list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 0; }
-.setup-progress::before { content: ""; position: absolute; left: 21px; top: 18px; bottom: 18px; width: 1px; background: var(--line); pointer-events: none; }
-.setup-progress li { position: relative; display: flex; align-items: flex-start; gap: 12px; padding: 6px var(--space-2); border-radius: var(--radius); }
-.setup-progress li[aria-current="step"] { background: var(--selected); }
-.setup-mark { display: inline-grid; place-items: center; flex: none; width: 24px; height: 24px; border-radius: 50%; background: var(--surface); box-shadow: inset 0 0 0 1px var(--input); font-size: var(--text-sm); font-weight: var(--weight-strong); color: var(--text-secondary); }
-.setup-progress li[data-state="done"] .setup-mark { background: var(--success-fill); color: var(--success-text); box-shadow: inset 0 0 0 1px var(--success); }
-.setup-progress li[aria-current="step"] .setup-mark { background: var(--theme-accent); color: var(--on-ink); box-shadow: none; }
-.setup-progress li[data-state="skipped"] .setup-mark { background: var(--surface-muted); color: var(--text-secondary); box-shadow: inset 0 0 0 1px var(--line); }
-.setup-progress-text { display: flex; flex-direction: column; min-width: 0; }
-.setup-progress-name, .setup-progress-text a { color: var(--text); font-weight: var(--weight-strong); font-size: var(--text-md); text-decoration: none; }
-.setup-progress-text a:hover { text-decoration: underline; }
-.setup-progress-text a:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
-.setup-progress-state { color: var(--text-muted); font-size: var(--text-sm); }
+/* The steps: a name and a mark, nothing else. */
+.setup-count { margin: 0 0 var(--space-1); padding-left: var(--space-2); color: var(--text-muted); font-size: var(--text-sm); }
+.setup-progress { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.setup-progress li { display: flex; align-items: center; gap: var(--space-2); min-height: 32px; padding: 0 var(--space-2); border-radius: var(--radius); font-size: var(--text-md); color: var(--text-secondary); }
+.setup-progress li[aria-current="step"] { background: var(--selected); color: var(--text); font-weight: var(--weight-strong); }
+.setup-mark { display: inline-grid; place-items: center; flex: none; width: 18px; height: 18px; border-radius: 50%; box-shadow: inset 0 0 0 1px var(--outline); font-size: var(--text-sm); color: var(--text-muted); }
+.setup-progress li[data-state="done"] .setup-mark { box-shadow: none; background: var(--success-fill); color: var(--success-text); }
+.setup-progress li[aria-current="step"] .setup-mark { box-shadow: none; background: var(--theme-accent); color: var(--on-ink); }
+.setup-progress li[data-state="skipped"] .setup-mark { background: var(--surface-muted); }
+.setup-progress a { color: inherit; text-decoration: none; }
+.setup-progress a:hover { color: var(--text); text-decoration: underline; }
+.setup-progress a:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
 
-.setup-main { min-width: 0; padding: var(--space-4); border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--e-card); }
-.setup-count { display: inline-block; margin: 0 0 var(--space-1); color: var(--text-muted); font-size: var(--text-sm); }
-.setup-step h2 { margin: 0 0 var(--space-2); font-size: var(--text-xl); font-weight: var(--weight-heavy); line-height: 1.35; }
-.setup-step h3 { margin: var(--space-4) 0 var(--space-2); padding-bottom: var(--space-1); border-bottom: 1px solid var(--line); font-size: var(--text-lg); font-weight: var(--weight-heavy); }
-.setup-step p { margin: 0 0 var(--space-2); max-width: 68ch; text-wrap: pretty; }
-.setup-intro { color: var(--text-secondary); }
+.setup-main { min-width: 0; max-width: 620px; display: flex; flex-direction: column; gap: var(--space-3); }
+.setup-panel { padding: var(--space-4); border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--e-card); }
+.setup-step h2 { margin: 0 0 var(--space-1); font-size: var(--text-display); font-weight: var(--weight-heavy); line-height: 1.3; }
+.setup-step h3 { margin: var(--space-3) 0 var(--space-1); font-size: var(--text-md); font-weight: var(--weight-strong); }
+.setup-step p { margin: 0 0 var(--space-2); text-wrap: pretty; }
+.setup-intro { margin-bottom: var(--space-3); color: var(--text-secondary); font-size: var(--text-lg); line-height: 1.5; }
+.setup-step p.setup-intro { margin-bottom: var(--space-3); }
 .setup-note, .setup-hint { color: var(--text-muted); font-size: var(--text-sm); }
-.setup-link { color: var(--link); font-weight: var(--weight-strong); }
+.setup-link { color: var(--link); font-weight: var(--weight-strong); text-underline-offset: 2px; }
 .setup-link:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
 
-.setup-form { display: flex; flex-direction: column; max-width: 420px; margin-top: var(--space-3); }
-.setup-form label { font-size: var(--text-sm); font-weight: var(--weight-strong); color: var(--text-secondary); margin-bottom: var(--space-1); }
-.setup-form input { height: 36px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); font-size: var(--text-input); }
-.setup-form input:focus { outline: 2px solid transparent; box-shadow: 0 0 0 1px var(--theme-accent), 0 0 0 3px var(--halo-progress); }
-.setup-form .setup-hint { margin: var(--space-1) 0 var(--space-3); }
-.setup-form input + .setup-error, .setup-form input + .primary { margin-top: var(--space-3); }
+/* The fold: what the step's sentence leaves out. */
+.setup-detail { margin-top: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--line); font-size: var(--text-md); }
+.setup-detail > summary { width: fit-content; min-height: 28px; display: flex; align-items: center; gap: var(--space-2); color: var(--text-secondary); font-weight: var(--weight-strong); cursor: pointer; border-radius: 4px; list-style: none; }
+.setup-detail > summary::-webkit-details-marker { display: none; }
+.setup-detail > summary::before { content: ""; flex: none; width: 5px; height: 5px; margin-left: 2px; border-right: 1px solid currentColor; border-bottom: 1px solid currentColor; transform: rotate(-45deg); }
+.setup-detail[open] > summary::before { transform: rotate(45deg); }
+.setup-detail > summary:hover { color: var(--text); }
+.setup-detail > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.setup-detail-body { padding-top: var(--space-2); color: var(--text-secondary); overflow-wrap: anywhere; }
+.setup-facts { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-3); margin: 0 0 var(--space-2); }
+.setup-facts dt { color: var(--text-muted); }
+.setup-facts dd { margin: 0; min-width: 0; }
 
-.setup-step .primary, .setup-actions .primary { min-height: 36px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius); background: var(--theme-accent); color: var(--on-ink); font-weight: var(--weight-strong); cursor: pointer; }
+.setup-form { display: flex; flex-direction: column; max-width: 420px; }
+.setup-form label { font-size: var(--text-sm); font-weight: var(--weight-strong); color: var(--text-secondary); margin-bottom: var(--space-1); }
+.setup-form input { height: 36px; padding: 0 var(--space-2); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); font-size: var(--text-input); margin-bottom: var(--space-3); }
+.setup-form input:focus { outline: 2px solid transparent; box-shadow: 0 0 0 1px var(--theme-accent), 0 0 0 3px var(--halo-progress); }
+.setup-step .setup-form .setup-hint { margin: calc(-1 * var(--space-2)) 0 var(--space-3); }
+.setup-field { display: flex; flex-direction: column; }
+.setup-field-service { color: var(--text-muted); font-weight: var(--weight-regular); }
+.setup-form .primary, .setup-form .btn { align-self: flex-start; }
+
+.setup-step .primary, .setup-actions .primary { display: inline-flex; align-items: center; min-height: 36px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius); background: var(--theme-accent); color: var(--on-ink); font-size: var(--text-md); font-weight: var(--weight-strong); text-decoration: none; cursor: pointer; }
 .setup-step .primary:hover, .setup-actions .primary:hover { background: var(--accent-hover); }
 .setup-step .primary:active, .setup-actions .primary:active { background: var(--accent-press); }
 .setup-step .primary:disabled, .setup-actions .primary:disabled { background: var(--surface-muted); color: var(--text-faint); box-shadow: inset 0 0 0 1px var(--line); cursor: default; }
-.setup-step .btn, .setup-actions .btn { min-height: 36px; padding: 0 var(--space-3); border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); color: var(--text); font-weight: var(--weight-strong); cursor: pointer; }
-.setup-step .btn:hover, .setup-actions .btn:hover { background: var(--surface-muted); }
-.setup-step .btn:active, .setup-actions .btn:active { background: var(--tab-fill); }
-.setup-form .primary { align-self: flex-start; margin-top: var(--space-1); }
+.setup-step .btn, .setup-actions .btn, .setup-waiting .btn { display: inline-flex; align-items: center; min-height: 32px; padding: 0 12px; border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); color: var(--text); font-size: var(--text-md); font-weight: var(--weight-strong); text-decoration: none; cursor: pointer; }
+.setup-step .btn:hover, .setup-actions .btn:hover, .setup-waiting .btn:hover { background: var(--surface-muted); }
+.setup-step .btn:active, .setup-actions .btn:active, .setup-waiting .btn:active { background: var(--tab-fill); }
+.setup-step .btn.quiet, .setup-actions .btn.quiet { background: transparent; box-shadow: none; color: var(--text-secondary); }
+.setup-step .btn.quiet:hover, .setup-actions .btn.quiet:hover { background: var(--tab-fill); color: var(--text); }
+:is(.setup-step, .setup-actions, .setup-waiting) :is(a, button):focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.setup-row-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
 
-.setup-error { padding: var(--space-2) var(--space-3); border-radius: var(--radius); background: var(--danger-fill); color: var(--danger-text); font-weight: var(--weight-strong); }
-.setup-ok { padding: var(--space-2) var(--space-3); border-radius: var(--radius); background: var(--success-fill); color: var(--success-text); }
-.setup-saved { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-3) 0; }
+.setup-error { padding: var(--space-2) 12px; border-radius: var(--radius); background: var(--danger-fill); color: var(--danger-text); font-weight: var(--weight-strong); }
+.setup-step p.setup-ok { display: flex; align-items: center; gap: var(--space-2); margin-bottom: var(--space-2); font-weight: var(--weight-strong); color: var(--success-text); }
+.setup-step p.setup-ok::before { content: ""; flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--success); }
+.setup-saved { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: 0 0 var(--space-2); }
 .setup-saved p { margin: 0; }
 
-.setup-rights { list-style: none; margin: 0 0 var(--space-2); padding: 0; display: grid; grid-template-columns: max-content max-content minmax(0, 1fr); gap: var(--space-2) var(--space-3); max-width: 760px; }
+.setup-rights { list-style: none; margin: 0 0 var(--space-2); padding: 0; display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: var(--space-1) var(--space-3); }
 .setup-rights li { display: contents; }
-.setup-right-name { font-weight: var(--weight-strong); }
-.setup-right-access { color: var(--text-secondary); }
+.setup-right-name { font-weight: var(--weight-strong); color: var(--text); }
+.setup-right-access { display: none; }
 .setup-right-use { color: var(--text-muted); }
 .setup-tag { margin-left: var(--space-2); padding: 1px var(--space-2); border-radius: 999px; background: var(--sunken); color: var(--text); font-size: var(--text-sm); font-weight: var(--weight-strong); white-space: nowrap; }
 
-.setup-code { margin: 0 0 var(--space-2); padding: 12px 12px; border-radius: var(--radius); background: var(--sunken); overflow-x: auto; font-family: var(--mono); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
-.setup-more { margin-top: var(--space-2); }
-.setup-more summary { cursor: pointer; color: var(--text-secondary); }
-.setup-more[open] summary { margin-bottom: var(--space-2); }
+.setup-code { margin: 0 0 var(--space-2); padding: 12px; border-radius: var(--radius); background: var(--sunken); overflow-x: auto; font-family: var(--mono); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; word-break: break-all; }
 .setup-terminal { margin: var(--space-2) 0; }
 /* The web terminal's frame, as the session screen draws it (session.css), which this page does not load. */
 .setup-terminal .term { display: flex; flex-direction: column; gap: var(--space-2); }
 .setup-terminal .term-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2) 12px; flex-wrap: wrap; }
-.setup-terminal .term-mode { margin: 0; font-size: var(--text-md); font-weight: var(--weight-strong); }
-.setup-terminal .term-host { height: 300px; padding: var(--space-2) var(--space-1) var(--space-2) 12px; border-radius: var(--radius-panel); background: var(--theme-base); box-shadow: var(--e-card); overflow: hidden; }
+.setup-terminal .term-mode { display: none; }
+.setup-terminal .term-host { height: 280px; padding: var(--space-2) var(--space-1) var(--space-2) 12px; border-radius: var(--radius-panel); background: var(--theme-base); box-shadow: var(--e-card); overflow: hidden; }
 .setup-terminal .term-host .xterm { height: 100%; }
 .setup-terminal .term-foot { display: flex; align-items: center; gap: var(--space-2) 12px; flex-wrap: wrap; }
 .setup-terminal .term-state { display: grid; grid-template-columns: 8px minmax(0, 1fr); align-items: baseline; gap: 2px var(--space-2); flex: 1 1 260px; margin: 0; font-size: var(--text-sm); color: var(--text-secondary); }
@@ -98,30 +114,58 @@
 .setup-terminal .term-detail { grid-column: 2; color: var(--text-muted); }
 .setup-terminal .term-detail.bad { color: var(--danger-text); }
 
-.setup-result { margin-top: var(--space-2); }
-.setup-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin: var(--space-4) calc(-1 * var(--space-4)) calc(-1 * var(--space-4)); padding: 12px var(--space-4); border-top: 1px solid var(--line); border-radius: 0 0 var(--radius-panel) var(--radius-panel); background: var(--surface-muted); }
+.setup-result { margin-top: var(--space-1); }
+.setup-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-4); }
 .setup-actions-gap { flex: 1; }
 
+/* A session that waits for the person, said on every step (issue #495). */
+.setup-waiting { display: flex; align-items: center; gap: var(--space-2) var(--space-3); padding: 12px var(--space-3); border-radius: var(--radius-panel); background: var(--awaiting-surface); }
+.setup-waiting p { flex: 1; min-width: 0; margin: 0; font-size: var(--text-md); text-wrap: pretty; }
+
+/* A session, live (issue #493): its state, its link, its last action. */
+.setup-live { margin: var(--space-2) 0 var(--space-3); padding: 12px var(--space-3); border-radius: var(--radius); box-shadow: inset 0 0 0 1px var(--line); }
+.setup-step .setup-live p { margin: 0; }
+.setup-live-state { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); font-size: var(--text-md); }
+.setup-live-word { font-weight: var(--weight-strong); }
+.setup-live-ticket { font-family: var(--mono); font-size: var(--text-sm); color: var(--text-secondary); }
+.setup-live-age { color: var(--text-muted); font-size: var(--text-sm); }
+.setup-live .dot { flex: none; width: 6px; height: 6px; border-radius: 50%; background: var(--placeholder); }
+.setup-live .dot.ok { background: var(--success); } .setup-live .dot.awaiting { background: var(--awaiting); } .setup-live .dot.danger { background: var(--danger); }
+.setup-step p.setup-live-last { margin-top: var(--space-1); color: var(--text-secondary); font-size: var(--text-sm); overflow-wrap: anywhere; }
+.setup-step p.setup-live-links { display: flex; flex-wrap: wrap; gap: var(--space-1) var(--space-3); margin-top: var(--space-2); font-size: var(--text-md); }
+.setup-live-links:empty { display: none; }
+
+/* What is running turns, and only that; with motion reduced it stands still, and the words say it. */
+.setup-spinner { display: inline-block; flex: none; width: 12px; height: 12px; margin-right: var(--space-1); border-radius: 50%; box-shadow: inset 0 0 0 2px var(--line); position: relative; vertical-align: -1px; animation: setup-turn 900ms linear infinite; }
+.setup-spinner::after { content: ""; position: absolute; inset: 0; border-radius: 50%; border: 2px solid transparent; border-top-color: var(--theme-accent); }
+@keyframes setup-turn { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .setup-spinner { animation: none; } }
+
 @media (max-width: 1023px) {
-  .setup-body { grid-template-columns: minmax(0, 1fr); }
-  .setup-progress { flex-direction: row; flex-wrap: nowrap; gap: var(--space-1); overflow-x: auto; }
-  .setup-progress li { flex: none; }
-  .setup-progress::before { left: 18px; right: 18px; top: 18px; bottom: auto; width: auto; height: 1px; }
-  .setup-progress li { padding: var(--space-2) var(--space-2); }
+  .setup-body { grid-template-columns: minmax(0, 1fr); gap: var(--space-3); }
+  .setup-main { max-width: none; }
+  /* The steps as one thin bar of 8, the current one named above it. */
+  .setup-count { padding-left: 0; }
+  .setup-progress { flex-direction: row; gap: var(--space-1); }
+  .setup-progress li { flex: 1; min-height: 4px; height: 4px; padding: 0; overflow: hidden; border-radius: 2px; background: var(--line); }
+  .setup-progress li[data-state="done"] { background: var(--success); }
+  .setup-progress li[data-state="skipped"] { background: var(--outline); }
+  .setup-progress li[aria-current="step"] { background: var(--theme-accent); }
+  .setup-progress li > .setup-mark, .setup-progress li > a, .setup-progress li > .setup-progress-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 }
 
 @media (max-width: 640px) {
   .setup { padding: 0 var(--space-3) var(--space-5); }
-  .setup-brand { margin: 0 calc(-1 * var(--space-3)) var(--space-3); padding: 0 var(--space-3); }
-  .setup-head h1 { font-size: var(--text-xl); }
-  .setup-main { padding: var(--space-3); }
-  .setup-actions { margin: var(--space-4) calc(-1 * var(--space-3)) calc(-1 * var(--space-3)); padding: var(--space-3); }
-  .setup-progress::before { display: none; }
-  .setup-progress li:not([aria-current="step"]) .setup-progress-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .setup-rights { grid-template-columns: minmax(0, 1fr); gap: 2px; }
-  .setup-rights li { display: block; margin-bottom: var(--space-2); }
-  .setup-rights li > span { display: block; }
-  .setup-step .primary, .setup-actions .primary, .setup-step .btn, .setup-actions .btn { min-height: 44px; }
-  .setup-progress { gap: 2px; }
-  .setup-progress li { padding: var(--space-1); }
+  .setup-head { margin-bottom: var(--space-3); }
+  .setup-brand { margin: 0 calc(-1 * var(--space-3)); padding: 0 var(--space-3); }
+  .setup-panel { padding: var(--space-3); }
+  .setup-step h2 { font-size: var(--text-xl); }
+  .setup-intro { font-size: var(--text-md); }
+  .setup-rights { grid-template-columns: minmax(0, 1fr); }
+  .setup-right-use { margin-bottom: var(--space-1); }
+  .setup-waiting { flex-direction: column; align-items: stretch; }
+  .setup-step .primary, .setup-actions .primary, .setup-step .btn, .setup-actions .btn, .setup-waiting .btn, .setup-language button, .setup-sessions, .setup-detail > summary { min-height: 44px; }
+  .setup-step .primary, .setup-actions .primary, .setup-step .btn, .setup-actions .btn, .setup-waiting .btn { justify-content: center; }
+  .setup-sessions { display: inline-flex; align-items: center; }
+  .setup-step .btn.quiet, .setup-actions .btn.quiet { padding: 0 var(--space-2); }
 }

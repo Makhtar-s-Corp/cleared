@@ -51,9 +51,11 @@ export class SetupRecords {
 
   // Done: a skip before it no longer counts. Done without being shown counts
   // from then. `at`: when it was done, if not now (the first ticket went
-  // live before its page looked), never before it was shown.
+  // live before its page looked), never before it was shown. Done again keeps
+  // the first time (issue #492): a credential replaced days later, or a check
+  // run again, is not time spent on the step.
   done(step: StepId, at: string = this.#at()): void {
-    this.#db.prepare('INSERT INTO v2_setup_steps (step, shown_at, done_at) VALUES (?, ?, ?) ON CONFLICT (step) DO UPDATE SET shown_at = COALESCE(shown_at, excluded.shown_at), done_at = MAX(excluded.done_at, COALESCE(shown_at, excluded.done_at)), skipped_at = NULL').run(known(step), at, at);
+    this.#db.prepare('INSERT INTO v2_setup_steps (step, shown_at, done_at) VALUES (?, ?, ?) ON CONFLICT (step) DO UPDATE SET shown_at = COALESCE(shown_at, excluded.shown_at), done_at = COALESCE(done_at, MAX(excluded.done_at, COALESCE(shown_at, excluded.done_at))), skipped_at = NULL').run(known(step), at, at);
   }
 
   skipped(step: StepId): void {

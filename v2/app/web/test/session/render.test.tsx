@@ -12,7 +12,7 @@ import { applyAll, emptyModel, parseCriteria, threadOf, timeline, type SessionMo
 import type { SessionSummary } from '../../../../src/api/types.ts';
 import { modelOf, tool } from '../../../test/session/support.ts';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { Composer } from '../../screens/session/Session.tsx';
+import { Composer, SessionSummaryStrip } from '../../screens/session/Session.tsx';
 
 const sentinel: Translate = (key) => `«${key}»`;
 // The screen's catalog over the shell's, as the shell gives it (lib/catalogs.ts): the intent's words are the shell's.
@@ -39,7 +39,7 @@ test('the English screen reads as the capture, in milestone 1\'s words', () => {
     'Paused, waiting for you', '18\u00a0min · 35,500 tokens',
     'Read', 'src/screens/Upcoming.jsx', 'and 2 more files', 'Edit', 'src/engine/upcoming.mjs', '+24', '−6', 'Run the project\'s tests', 'npm run test:upcoming', '18 passed', QUESTION_TEXT, ANSWER_TEXT,
     'Allow the author to install date-fns?', 'The command adds a dependency to the project.', 'Command', 'npm install date-fns', 'Allow once', 'Always in this project', 'Deny',
-    'Changes', 'Checks', 'Targeted tests', 'Full suite', 'Screen so far', 'Hand over to Codex', 'Interrupt', 'Send',
+    'Changes', 'Checks', 'Targeted tests', 'Full suite', 'Hand over to Codex', 'Interrupt', 'Send',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
 });
 
@@ -161,13 +161,13 @@ test('the policy refusal and the answered requests read as sentences', () => {
   ]);
   const html = renderSession(on(model), en);
   const text = visibleText(html);
-  assert.ok(text.includes('Blocked by the rules: pushing to the base branch.'), 'the policy refusal, with its rule in words');
+  assert.ok(text.includes('The agent tried to push to the base branch. Cleared never lets a session do that: it publishes the branch itself, after the review.'), 'the policy refusal, explained in one human sentence');
   assert.ok(text.includes('Allowed once by you'));
   assert.ok(text.includes('Denied by a teammate'));
   assert.ok(text.includes('Cancelled when the turn was interrupted'));
   assert.equal(count(html, /data-answer=/g), 0, 'no button for an answered request');
   const unknown = renderSession(on(modelOf([{ type: 'CUSTOM', name: 'cleared.permission_answered', value: { requestId: 'r9', decision: 'reject_once', by: 'policy', rule: 'future.rule' } }])), en);
-  assert.ok(visibleText(unknown).includes('Blocked by the rules (future.rule).'), 'a rule the catalog does not know is named as it is');
+  assert.ok(visibleText(unknown).includes("Cleared's rules stopped this action (future.rule); the agent has to find another way."), 'a rule the catalog does not know is named as it is');
 });
 
 test('Author and Reviewer filter the ticket\'s thread, never links to another page (lane 36)', () => {
@@ -291,4 +291,13 @@ test('a container lost then recreated reads in English and in French, from the c
     'Conteneur recréé sur la même copie de travail après 5\u00a0s, tentative 1 sur 3\u00a0: la session continue, son travail non commité conservé.',
     'Le conteneur de la session n\'a pas pu rester en marche\u00a0: la session s\'est arrêtée, et son ticket est revenu en Todo.',
   ]) assert.ok(french.some((line) => line.includes(expected)), `manque : ${expected}`);
+});
+
+// The owner's request of 2026-10-30: what it does, what it waits for from me, where it is.
+test('the summary says what the session does, what it waits for and where it is, and the answer is one click away', () => {
+  const html = renderToStaticMarkup(<SessionSummaryStrip view={viewOf()} t={en} onAnswer={() => undefined} />);
+  assert.match(html, /data-session-summary=""[^>]*data-wants="answer"/);
+  assert.match(html, /data-act="summary_answer"/);
+  const text = visibleText(html);
+  for (const word of ['What it does', 'What it needs from you', 'Where it is', TICKET_TITLE, 'Your answer to a request']) assert.ok(text.includes(word), `missing: ${word}`);
 });

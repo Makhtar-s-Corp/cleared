@@ -17,7 +17,7 @@ import { Input } from '@/components/ui/input.tsx';
 import { Textarea } from '@/components/ui/textarea.tsx';
 import { Toggle } from '@/components/ui/toggle.tsx';
 import { useScreen } from '@/lib/context.tsx';
-import { SetupPending, setupPending } from '@/lib/setup-pending.tsx';
+import { SetupPending, serviceFailure, setupPending } from '@/lib/setup-pending.tsx';
 import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { planStateLine } from '@/plan-panel/model.ts';
@@ -28,7 +28,7 @@ import { CHORD_MS } from '@/shell/keys.ts';
 import { focusOf } from '@/shell/Shortcuts.tsx';
 import {
   ROW_ANSWERS_MIN, closesOnEscape, foldOf, foldOpen, inboxKey, permissionAsk, permissionTitle, reasonOf, rowAnswers, type Answer,
-  CHANGE_MAX, CHECKS, GRACE_MS, SEND_BACK_MAX, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approveContract, approveKnowledge, approvePlan,
+  CHANGE_MAX, CHECKS, DREAM_TICKET, GRACE_MS, LEAD_TICKET, SEND_BACK_MAX, STORE_KEY, afterPlanRefusal, answerRequest, answersFor, approvable, approve, approveContract, approveKnowledge, approvePlan,
   changeMessage, chooseVariant, chosen, chosenLine, clock, deadlineLine, decisionFor, detailKey, doneLine, failure, flagKey, flagsOf, goLine, graceLeft, groupsOf, isDream, isLead, isWebLink, itemFromHash, itemLine, itemTitle,
   kept, known, laneLine, ordered, outcomeLine, pausedLine, planChange, planGo, planOf, readPlan, rejectKnowledge, releaseSession, sameOrigin, sendBack, sendBackContract, sendBackMessage,
   repairLine, sessionLink, sessionOf, sessionsLine, shareLine, short, variantFacts, variantHarness, variantTests,
@@ -72,6 +72,18 @@ function Empty({ t }: { readonly t: Translate }) {
 // What waits, then the handled and the expired items in one folded group,
 // "Traité", with its count (plan, 2.5.5). The top bar names the screen: the
 // list has no heading of its own (lane 35's art director).
+// What waits, each run of one ticket's items under its name, in the order of the kinds.
+const isLeadTicket = (ticket: string): boolean => ticket === LEAD_TICKET || ticket === DREAM_TICKET;
+function bySession(items: readonly Item[]): { readonly ticket: string; readonly at: number; readonly items: Item[] }[] {
+  const groups: { ticket: string; at: number; items: Item[] }[] = [];
+  items.forEach((item, at) => {
+    const last = groups.at(-1);
+    if (last?.ticket === item.ticket) last.items.push(item);
+    else groups.push({ ticket: item.ticket, at, items: [item] });
+  });
+  return groups;
+}
+
 export function List({ view, t, handledOpen = false, onHandled, onAnswer }: {
   readonly view: InboxView; readonly t: Translate; readonly handledOpen?: boolean; readonly onHandled?: () => void; readonly onAnswer?: (item: Item, act: Answer) => void;
 }) {
@@ -85,7 +97,18 @@ export function List({ view, t, handledOpen = false, onHandled, onAnswer }: {
   const open = handledOpen || (shown?.state === 'handled' && view.selected === shown.id);
   return (
     <>
-      {waiting.length > 0 ? <section aria-labelledby="waiting-title"><h2 className="group-title" id="waiting-title">{t('waiting_group', { n: waiting.length })}</h2>{list(waiting)}</section> : <Empty t={t} />}
+      {waiting.length > 0 ? (
+        <section aria-labelledby="waiting-title">
+          <h2 className="group-title" id="waiting-title">{t('waiting_group', { n: waiting.length })}</h2>
+          {/* Issue #495: what one session asks is never read as an answer to another's. */}
+          {bySession(waiting).length > 1 ? bySession(waiting).map((group) => (
+            <div key={`${group.ticket}-${group.at}`} className="session-group" data-session-group={group.ticket}>
+              <h3 className="session-group-title">{isLeadTicket(group.ticket) ? itemTitle(group.items[0] as Item, view, t) : <><span className="id">{group.ticket}</span>{ticketTitle(view, group.ticket) ? ` ${ticketTitle(view, group.ticket)}` : ''}</>}</h3>
+              {list(group.items)}
+            </div>
+          )) : list(waiting)}
+        </section>
+      ) : <Empty t={t} />}
       {handled.length > 0 ? (
         <section className="handled-group" id="handled" data-open={String(open)}>
           <h2 className="group-title">
@@ -288,6 +311,7 @@ function PermissionBody({ item, view, t, note, reason, onReason, onAct }: {
   const why = reasonOf(item, t);
   const fold = foldOf(item);
   const description = item.input.kind === 'execute' ? item.input.description : undefined;
+  const waitingNow = item.state === 'waiting';
   const facts = [
     why.said ? <Fact key="why" label={t('facts_why')}>{why.said}</Fact> : null,
     session ? <Fact key="session" label={t('facts_session')}>{pausedLine(item, session, view.now, t)}</Fact> : null,
@@ -296,19 +320,20 @@ function PermissionBody({ item, view, t, note, reason, onReason, onAct }: {
     <>
       <Eyebrow item={item} kind={t('eyebrow_permission')} open={sessionLink(item.sessionId)} openKey="open_session" t={t} />
       <h2 className="d-title d-ask">{item.state === 'waiting' ? permissionAsk(item, view, t) : permissionTitle(item, t)}</h2>
+      {description ? <p className="d-what-for" data-what-for="">{t('request_what_for', { what: description })}</p> : null}
       {title ? <p className="d-ticket">{title}</p> : null}
+      {waitingNow ? <p className="d-paused" data-request-paused="">{t('request_waiting_line', { age: since(item.since, view.now, t) })}</p> : null}
       <div className="d-answers" id="d-answers"><PermissionAnswers item={item} view={view} t={t} note={note} reason={reason} onReason={onReason} onAct={onAct} /></div>
       {facts.length ? <dl className="facts">{facts}</dl> : null}
-      {fold.length > 0 || why.raw || description ? (
+      {fold.length > 0 || why.raw ? (
         <details className="fold" id="fold" open={foldOpen(item)}>
           <summary>
             <CaretRight size={12} aria-hidden="true" className="caret" /><span className="fold-label">{t(item.input.kind === 'execute' ? 'fold_command' : 'fold_target')}</span>
             <code className="fold-peek">{fold[0]?.text ?? ''}</code>{fold.length > 1 ? <span className="fold-more">{t(fold.length === 2 ? 'fold_more_one' : 'fold_more_other', { n: fold.length - 1 })}</span> : null}
           </summary>
           {fold.length > 0 ? <pre className="fold-command"><code>{fold.map((part, index) => <span key={index} className="fold-line">{part.op ? <><span className="op">{part.op}</span>{' '}</> : null}{part.text}{'\n'}</span>)}</code></pre> : null}
-          {description || why.raw ? (
+          {why.raw ? (
             <dl className="facts fold-facts">
-              {description ? <Fact label={t('facts_what_for')}>{description}</Fact> : null}
               {why.raw ? <Fact label={t('fold_policy')}>{why.raw}</Fact> : null}
             </dl>
           ) : null}
@@ -735,6 +760,7 @@ export default function Inbox() {
   const { t, api } = context;
   const [data, setData] = useKept<Data | undefined>('inbox', undefined);
   const [failed, setFailed] = useState<false | 'error' | 'pending'>(false);
+  const [failedLine, setFailedLine] = useState('');
   const [local, setLocal] = useState<ReadonlyMap<string, Local>>(restore);
   const [plans, setPlans] = useKept<ReadonlyMap<string, Plan>>('inbox-plans', new Map());
   // On a phone the captures start in their phone frame; the switch changes the frame only.
@@ -786,6 +812,7 @@ export default function Inbox() {
       setData({ items, tickets, sessions });
       setFailed(false);
     } catch (error) {
+      setFailedLine(serviceFailure(error, t, ''));
       setFailed(setupPending(error) ? 'pending' : 'error');
     }
   }, [api, change, setData, setPlans]);
@@ -1053,7 +1080,7 @@ export default function Inbox() {
   if (!view) {
     return failed === 'pending' ? <SetupPending t={t} />
       : failed
-      ? <div className="inbox-error"><p className="empty error inbox-failed"><span>{t('inbox_load_failed')}</span><button type="button" className="chip-button" onClick={() => { setFailed(false); void load(); }}>{t('inbox_retry')}</button></p></div>
+      ? <div className="inbox-error"><p className="empty error inbox-failed"><span>{failedLine || t('inbox_load_failed')}</span><button type="button" className="chip-button" onClick={() => { setFailed(false); void load(); }}>{t('inbox_retry')}</button></p></div>
       : <div className="inbox-loading" aria-busy="true" />;
   }
   // A row's answer is the detail's, given with no reason (a deny's reason is

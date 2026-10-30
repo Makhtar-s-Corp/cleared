@@ -15,7 +15,7 @@
 import { request as httpRequest, type IncomingMessage, type ServerResponse } from 'node:http';
 import { SERVICE_PROOF_HEADER, SERVICE_USER_HEADER } from '../../src/api/types.ts';
 import type { User } from '../../src/modules/registry.ts';
-import { ProofError } from '../../src/modules/users.ts';
+import { ProofError, type ProofReason } from '../../src/modules/users.ts';
 
 export type Forward = {
   readonly method: string;
@@ -40,12 +40,17 @@ export function sendJson(response: ServerResponse, status: number, body: unknown
 // The app's proof: a fixed one (the tests), or the app's reader of the file (src/modules/users.ts, proofReader).
 export type ProofSource = string | ((() => string) & { readonly forget?: () => void });
 
-// The proof, or undefined when the file does not hold a whole one yet.
-export function currentProof(proof: ProofSource): string | undefined {
+// The proof, or the error that stands in for it (issue #491). The browser is
+// told the reason in one word; the file's path goes to the app's log, once.
+export type ProofRefusal = { readonly error: 'service_starting' } | { readonly error: 'proof_refused'; readonly reason: ProofReason };
+let logged = '';
+export function currentProof(proof: ProofSource): string | ProofRefusal {
   if (typeof proof === 'string') return proof;
   try { return proof(); } catch (error) {
-    if (error instanceof ProofError) return undefined;
-    throw error;
+    if (!(error instanceof ProofError)) throw error;
+    if (error.reason === 'starting') return { error: 'service_starting' };
+    if (logged !== error.message) { logged = error.message; console.error(`cleared-v2-app: ${error.message}`); }
+    return { error: 'proof_refused', reason: error.reason };
   }
 }
 
@@ -56,7 +61,7 @@ export function serviceSource(options: { readonly url: string; readonly proof: P
     kind: 'service',
     forward(request, response, forward) {
       const proof = currentProof(source);
-      if (proof === undefined) { sendJson(response, 503, { error: 'service_starting' }); return; }
+      if (typeof proof !== 'string') { sendJson(response, 503, proof); return; }
       const headers: Record<string, string> = { [SERVICE_PROOF_HEADER]: proof, [SERVICE_USER_HEADER]: forward.user.id };
       for (const name of REQUEST_HEADERS) {
         const value = request.headers[name];

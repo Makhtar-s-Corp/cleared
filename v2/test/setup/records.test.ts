@@ -68,3 +68,15 @@ test('an unknown step is refused; a step never seen has no record', () => {
   assert.equal(r.get('checks'), undefined);
   assert.deepEqual(r.all(), []);
 });
+
+// Issue #492: "Fait, 4 j 5 h" on a step done in a minute, then redone days later.
+test('a step done again keeps its first done time: replacing a credential days later adds nothing to its time', () => {
+  const { records: r, at } = records();
+  r.shown('forge');
+  at('2026-10-25T10:01:00.000Z');
+  r.done('forge');
+  at('2026-10-29T15:00:00.000Z');
+  r.done('forge');
+  assert.equal(r.get('forge')?.doneAt, '2026-10-25T10:01:00.000Z');
+  assert.equal(r.get('forge')?.personMs, 60_000);
+});

@@ -124,7 +124,7 @@ test('a permission asks its question, offers its three answers first, then says 
     'Permission', 'LOCAL-161', 'Open the session', 'Allow the author to install date-fns?', 'Upcoming: group entries by week',
     'Session', 'Author · Opus, paused for 3\u00a0min', 'Allow once', 'Always in this project', 'Deny',
     'Why it asks', 'The command adds a dependency to the project.',
-    'Command', 'npm install date-fns', 'What for', 'Install date-fns to group dates by week',
+    'Command', 'npm install date-fns', 'What for: Install date-fns to group dates by week',
   ]) assert.ok(shown.includes(expected), `missing: ${expected}`);
   assert.match(html, /<a class="d-link" href="\/sessions\/fixture-author">/);
   assert.deepEqual([...html.matchAll(/data-act="([a-z_]+)"/g)].map((m) => m[1]), ['allow_once', 'allow_always', 'reject_once'], 'the one that lets the work go on first');
@@ -270,4 +270,22 @@ test('a session the list does not know still shows its request', () => {
   assert.ok(shown.includes('Allow once'));
   assert.ok(!shown.includes('Author · Opus, paused for 3\u00a0min'));
   assert.equal(AUTHOR_ID.length > 0, true);
+});
+
+// Issue #495: a request of one session is not read as the answer to another's plan.
+test('what waits is under the name of its session once there are several', () => {
+  const fixture = inboxFixture(FIXTURE_NOW);
+  const html = renderInbox(viewOf(), en);
+  const tickets = new Set(fixture.items.filter((item) => item.state === 'waiting').map((item) => item.ticket));
+  assert.ok(tickets.size > 1);
+  assert.match(html, /data-session-group=/);
+  assert.match(html, /class="session-group-title"/);
+});
+
+test('a permission says what it is for and that only its own session is paused', () => {
+  const html = renderInbox(viewOf({ selected: idOf('permission'), open: true }), en);
+  const shown = visibleText(html).join(' ');
+  assert.match(shown, /What for: Install date-fns/);
+  assert.match(html, /data-request-paused/);
+  assert.match(shown, /Other sessions are not affected/);
 });

@@ -94,6 +94,7 @@ export type FirstTicket = {
   readonly createdAt: string;
   readonly rolledBack: boolean;                      // the release watch put it back in Todo after it was approved
   readonly plan?: string;                            // the session plan's inbox item while it waits for its Go
+  readonly pullRequest?: { readonly number: number; readonly url: string };   // once the branch is published
 };
 
 // GET /api/setup/first-ticket?language= and POST { service, language }.
@@ -103,3 +104,7 @@ export type FirstTicketView = {
   readonly proposal: { readonly title: string; readonly body: string };
   readonly ticket: FirstTicket | null;
 };
+
+// GET /api/setup/secrets/expected: the names of the test secrets each service's
+// repository shows it needs, and where one was seen (secrets/expected.ts).
+export type ExpectedSecrets = { readonly services: readonly { readonly service: string; readonly names: readonly { readonly name: string; readonly from: string }[] }[] };

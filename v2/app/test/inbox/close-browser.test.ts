@@ -105,6 +105,7 @@ for (const language of ['fr', 'en'] as const) {
       const sent: { url: string; body: unknown }[] = [];
       await page.route(/\/api\/service\/tickets\/[^/]+\/close$/, async (route: any) => { sent.push({ url: route.request().url(), body: route.request().postDataJSON() }); await route.continue(); });
       await page.goto(`${base}/sessions/${author.id}`);
+      await page.locator('[data-session-details] > summary').first().click();
       await page.locator('#close-open').waitFor();
       assert.equal((await page.locator('#close-open').innerText()).trim(), words.close);
       await page.locator('#close-open').click();

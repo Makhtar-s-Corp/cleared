@@ -208,6 +208,24 @@ test('a stuck session the watchdog stopped is handed over: nothing to interrupt,
   }
 });
 
+// The owner's report of permission requests in a loop: the session stopped
+// while it waited is told "run it again" and must not be asked the same again.
+test('a request answered "once" while its session was stopped does not ask again when the session runs it again', async () => {
+  const r = await rig({ scripts: { author: stuck } });
+  try {
+    const id = await stuckAuthor(r);
+    const input = r.startedSessions[0]!.input;
+    const command = 'touch test/fixtures/entries.json';
+    assert.ok(!r.engine.policyFor(input).learned.some((rule) => rule.pattern === command), 'nothing allowed before the answer');
+    await r.engine.idleStop(id);
+    await r.engine.answer(id, 'request-1', { kind: 'allow_once' }, 'u1');
+    await r.engine.settled();
+    assert.ok(r.engine.policyFor(input).learned.some((rule) => rule.tool === 'Bash' && rule.pattern === command), 'allowed for its run again');
+  } finally {
+    await r.close();
+  }
+});
+
 test('a dormant session whose target cannot start stays dormant, the answer still resumes it', async () => {
   const r = await rig({ scripts: { author: stuck } });
   try {

@@ -81,9 +81,10 @@ function themeOf(): Record<string, string> {
 // Fit only a terminal that is shown: a hidden one measures nothing.
 const shown = (element: HTMLElement | null): element is HTMLElement => !!element && element.offsetWidth > 0 && element.offsetHeight > 0;
 
-export function WebTerminal({ session, csrf, active, t, harness, root, fixedMode }: {
+export function WebTerminal({ session, csrf, active, t, harness, root, fixedMode, capture = false }: {
   readonly session: string; readonly csrf: string; readonly active: boolean; readonly t: Translate; readonly harness: string;
   readonly root?: string; readonly fixedMode?: TerminalMode;
+  readonly capture?: boolean;                                // the setup assistant's: it opens on its sign-in command, whose token the service takes (issue #490)
 }) {
   const host = useRef<HTMLDivElement | null>(null);
   const [status, setStatus] = useState<TerminalStatus>({ kind: 'opening' });
@@ -130,7 +131,7 @@ export function WebTerminal({ session, csrf, active, t, harness, root, fixedMode
       cleanups.unshift(() => batcher.dispose());
       term.onData((data) => batcher.push(data));
 
-      const opened = await api.open({ cols: term.cols, rows: term.rows }, mode).catch((): { kind: 'lost' } => ({ kind: 'lost' }));
+      const opened = await api.open({ cols: term.cols, rows: term.rows, ...(capture ? { capture } : {}) }, mode).catch((): { kind: 'lost' } => ({ kind: 'lost' }));
       if (disposed) return;
       switching.current = false;
       if (opened.kind === 'lost') return setStatus({ kind: 'closed', reason: 'lost' });

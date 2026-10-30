@@ -111,6 +111,22 @@ test('the right code creates the owner, makes the approval key, names the owner 
   } finally { await s.done(); }
 });
 
+// The owner's step is in the assistant's list: a click on it used to answer "method not allowed".
+test('a signed-in owner reads the owner step\'s page, and its form posts as before', async () => {
+  const s = await start();
+  try {
+    const made = await owner(s, { code: s.code, name: 'alex', password: PASSWORD });
+    assert.equal(made.status, 201, made.text);
+    const cookie = String(made.headers['set-cookie']).split(';')[0] as string;
+    const page = await ask(s.app, 'GET', '/setup/owner', { cookie });
+    assert.equal(page.status, 200);
+    assert.match(page.text, /<html/);
+    assert.equal((await ask(s.app, 'PUT', '/setup/owner', { cookie })).status, 405);
+  } finally {
+    await s.done();
+  }
+});
+
 test('two posts with the right code at once make one owner', async () => {
   const s = await start();
   try {

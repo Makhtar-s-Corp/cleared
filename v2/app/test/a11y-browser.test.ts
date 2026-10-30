@@ -206,6 +206,7 @@ for (const language of LANGUAGES) {
 
         // The session's page: its ticket card's Close.
         await page.goto(`${base}/sessions/fixture-1`);
+        await page.locator('[data-session-details] > summary').first().click();
         await drawn(page, '#close-open');
         await page.focus('#close-open');
         await page.keyboard.press('Enter');

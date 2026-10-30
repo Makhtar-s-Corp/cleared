@@ -64,7 +64,7 @@
 .ask-more-menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 240px; padding: var(--space-1); gap: 2px; }
 .ask-more-menu[hidden] { display: none; }
 .ask-more-menu .ask-pill { display: flex; }
-.ask-more-menu .chip-button { width: 100%; min-height: 32px; padding: 0 var(--space-2) 0 32px; border-radius: var(--radius); background: transparent; box-shadow: none; font-size: var(--text-md); font-weight: var(--weight-regular); }
+.ask-more-menu .chip-button { width: 100%; min-height: 32px; padding: 0 var(--space-2) 0 var(--space-5); border-radius: var(--radius); background: transparent; box-shadow: none; font-size: var(--text-md); font-weight: var(--weight-regular); }
 .ask-more-menu .chip-button:hover { background: var(--tab-fill); }
 .ask-keys { color: var(--text-muted); }
 .ask-go .chip-button.primary { min-height: 32px; padding: 0 var(--space-4); font-size: var(--text-md); }

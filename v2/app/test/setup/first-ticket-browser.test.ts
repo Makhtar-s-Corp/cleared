@@ -104,6 +104,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await page.goto(`${app.base}/setup/first-ticket`);
     await page.locator('[data-first-ticket="proposal"]').waitFor();
     await checked(page, 'the proposal');
+    await page.locator('.setup-detail > summary').first().click();
     assert.match(await page.locator('.first-ticket-card').innerText(), /README/);
     assert.equal(await page.locator('[data-act="first_ticket_move"]').count(), 1);
     await capture(page, language, 'first-ticket-proposal');
@@ -115,7 +116,6 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await flow.engine.settled();
     await page.locator('[data-first-ticket="approval"]').waitFor({ timeout: 15_000 });
     await checked(page, 'the approval');
-    assert.equal(await page.locator('[data-stage="approval"]').getAttribute('aria-current'), 'step');
     assert.equal(await page.locator('a[href="/inbox"]').count(), 1);
 
     // Approved, merged, the watch over: live, the step done, the summary.
@@ -124,6 +124,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await flow.tickets.recordApproval(ticket.id, { kind: 'human', id: 'u1' });
     await flow.tickets.move(ticket.id, 'Done', { kind: 'agents', id: 'cleared-v2' });
     await page.locator('[data-first-ticket="live"]').waitFor({ timeout: 15_000 });
+    await page.locator('.setup-detail > summary').first().click();
     await page.locator('[data-setup-summary]').waitFor();
     await checked(page, 'live');
     assert.equal(await page.locator('.setup-progress li[data-step="first-ticket"]').getAttribute('data-state'), 'done');

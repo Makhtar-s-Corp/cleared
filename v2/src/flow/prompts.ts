@@ -12,12 +12,20 @@ type TicketText = { readonly id: string; readonly title: string; readonly body: 
 // neither, and a new author after a review is not asked for a plan again.
 export type AuthorAsks = { readonly plan: boolean; readonly report: boolean };
 
-export function authorPrompt(ticket: TicketText, asks: AuthorAsks = { plan: false, report: false }): string {
+const LANGUAGE_NAME = { en: 'English', fr: 'French' } as const;
+
+// Issue #496: what a person reads in the interface, in the interface's language.
+// Code, commands, paths and git stay as the repository has them.
+const languageRule = (language: 'en' | 'fr'): string =>
+  `The person you work for reads this interface in ${LANGUAGE_NAME[language]}. Write in ${LANGUAGE_NAME[language]} everything a person reads: your session plan's steps and the reason for your confidence, your questions and their options (keep the "(Recommended)" mark as written), the description you give each command, your messages, your report of changes and HANDOVER.md. Code, commands, file names, commit messages and quoted output stay as they are.`;
+
+export function authorPrompt(ticket: TicketText, asks: AuthorAsks = { plan: false, report: false }, language?: 'en' | 'fr'): string {
   return [
     `Ticket ${ticket.id}: ${ticket.title}`,
     '',
     ticket.body.trim() || '(The ticket has no description: the title is the whole request.)',
     '',
+    ...(language ? [languageRule(language)] : []),
     ...(asks.plan ? [
       'Before you change any file, read what you need, then call propose_session_plan with your plan: its steps, the files you mean to change, your confidence (high when the change is clear and small, medium when one point is uncertain, low when the owner should look first) and why.',
       'Then end your turn and change nothing: Cleared sends you the Go, or what to change in your plan.',
@@ -162,6 +170,7 @@ export function reviewPrompt(input: {
   readonly ticket: TicketText; readonly base: string; readonly verdict: string; readonly humanEdits?: readonly HumanEdit[];
   readonly services?: readonly ReviewService[]; readonly contracts?: readonly ReviewContract[];
   readonly testCommand?: readonly string[];
+  readonly language?: 'en' | 'fr';
 }): string {
   const { ticket, base, verdict } = input;
   // The one command that runs code a reviewer may run (issue #268).
@@ -200,7 +209,7 @@ export function reviewPrompt(input: {
     'To verify: what you could not establish.',
     'Questions for the user: one closed question per line with a recommendation, or “None.”',
     '',
-    'Write in English, in complete sentences a product owner can follow, with a concrete example when a defect is about behavior.',
+    `Write in ${LANGUAGE_NAME[input.language ?? 'en']}, in complete sentences a product owner can follow, with a concrete example when a defect is about behavior.${input.language && input.language !== 'en' ? ' Keep the Verdict line\'s phrase word for word, as it is written above.' : ''}`,
     '',
     'You cannot write files in this session, so do not write HANDOVER.md. Your final message must be the full report: it alone is saved and posted. If you are asked for HANDOVER.md at the end of the session, answer in one sentence that your report is your handover; do not repeat the report and do not try to write the file.',
   ].join('\n');

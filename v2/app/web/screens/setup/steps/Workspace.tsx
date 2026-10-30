@@ -1,18 +1,17 @@
 // The assistant's workspace step's screen (docs/v2/milestone-5-plan.md,
-// section 9, decision 15): the repositories the forge credential reaches,
-// one box each; once picked, the service clones and reads them and proposes
-// the services, a monorepo's two layouts, each contract file it found and
-// each call between the services, with the places that suggested it. A
-// proposed line is the person's to tick: only what is ticked is written.
-// A connected service with no .devcontainer is said, with the environment
-// step, which proposes it a setup session (section 13, C4).
-// The Services screen's Connect opens this step too.
+// section 9, decision 15; issue #494): the repositories the forge credential
+// reaches, one box each; once picked, the service clones and reads them. One
+// service with no contract and no call is said in one sentence. Otherwise the
+// step proposes the services, a monorepo's two layouts, each contract file it
+// found and each call between the services, with the places that suggested
+// it; a section with nothing in it is not drawn, and a proposed line is the
+// person's to tick: only what is ticked is written. The Services screen's
+// Connect opens this step too.
 import { useEffect, useState, type FormEvent } from 'react';
-import type { ConfirmBody, ConnectedService, ProposeBody, ProposedLink, ProposedService, WorkspaceProposal, WorkspaceView, WorkspaceWritten } from '../../../../../src/workspace/types.ts';
+import type { ConfirmBody, ProposeBody, ProposedLink, ProposedService, WorkspaceProposal, WorkspaceView, WorkspaceWritten } from '../../../../../src/workspace/types.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import type { Translate } from '@/lib/i18n.ts';
-import { lasted } from '@/lib/time.ts';
 import { dayOf, refusal } from '../model.ts';
 import { StepFrame, type StepProps } from '../step.tsx';
 import './workspace.css';
@@ -28,20 +27,10 @@ const toggled = (set: ReadonlySet<string>, value: string, on: boolean): Set<stri
   return next;
 };
 
-// The connected services whose base holds no .devcontainer, and where their setup session is proposed.
-export function NoDevcontainer({ t, services }: { readonly t: Translate; readonly services: readonly ConnectedService[] }) {
-  const names = services.filter((service) => service.devcontainer === false).map((service) => service.name);
-  if (names.length === 0) return null;
-  return (
-    <p className="setup-note" data-workspace-no-devcontainer>
-      {t(names.length === 1 ? 'workspace_no_devcontainer_one' : 'workspace_no_devcontainer_many', { services: names.join(', ') })}{' '}
-      <a className="setup-link" href="/setup/environment">{t('workspace_to_environment')}</a>
-    </p>
-  );
-}
-
+// Where a service lies: nothing to say when it is its whole repository, under the same name.
 function serviceLine(t: Translate, service: ProposedService): string {
-  return service.path === null ? t('workspace_service_repository', { repo: service.repo }) : t('workspace_service_folder', { repo: service.repo, path: service.path });
+  if (service.path !== null) return t('workspace_service_folder', { repo: service.repo, path: service.path });
+  return service.repo === service.name || service.repo.endsWith(`/${service.name}`) ? '' : t('workspace_service_repository', { repo: service.repo });
 }
 
 function contractLine(t: Translate, service: ProposedService): string {
@@ -119,35 +108,34 @@ export function WorkspaceStep({ t, api, onDone, initial }: StepProps<Initial>) {
   };
 
   if (!view) return <StepFrame t={t} prefix="workspace"><p className="setup-note" aria-busy="true">{t('setup_loading')}</p></StepFrame>;
-  if (view.source === 'environment') return <StepFrame t={t} prefix="workspace"><p className="setup-note" data-workspace-environment>{t('workspace_environment')}</p></StepFrame>;
+  if (view.source === 'environment') return <StepFrame t={t} prefix="workspace" sentence={t('workspace_environment')} detail={<p data-workspace-environment>{t('workspace_environment_detail')}</p>} />;
 
   const kept = proposal?.services.filter((s) => !left.has(s.name)) ?? [];
   const keptNames = new Set(kept.map((s) => s.name));
   const withContract = kept.filter((s) => s.contract !== null);
   const shownLinks = proposal?.links.filter((link) => keptNames.has(link.from) && keptNames.has(link.to)) ?? [];
   const narrowed = view.repositories.filter((r) => !filter || r.repo.toLowerCase().includes(filter.toLowerCase()));
-  const showPicker = !view.connected || again || proposal !== undefined;
+  // One repository, one service, nothing else found: nothing to choose, one sentence and its button.
+  const simple = proposal !== undefined && proposal.services.length === 1 && proposal.links.length === 0
+    && proposal.services.every((s) => s.contract === null) && proposal.repositories.every((r) => r.folders.length === 0);
+  const showPicker = (!view.connected || again || proposal !== undefined) && !simple;
+  const connected = view.connected && !again && !proposal;
+  const detail = connected && view.connected ? (
+    <div className="setup-saved" data-workspace-connected-detail>
+      {view.connected.at ? <p>{t('workspace_connected_detail', { date: dayOf(view.connected.at, t) })}</p> : null}
+      <Button className="btn" data-act="setup_workspace_again" onClick={() => { setAgain(true); setWritten(undefined); }}>{t('workspace_again')}</Button>
+    </div>
+  ) : undefined;
 
   return (
-    <StepFrame t={t} prefix="workspace">
+    <StepFrame t={t} prefix="workspace" detail={detail}>
       <div className="ws" data-workspace-step>
-        {written ? (
-          <p className="setup-ok" data-workspace-result="ok" role="status">
-            {t('workspace_written', { services: written.services.map((s) => s.name).join(', '), links: written.links, contracts: written.contracts })}
-          </p>
-        ) : null}
-        {written ? <NoDevcontainer t={t} services={written.services} /> : null}
-        {view.connected && !again && !proposal ? (
-          <div className="setup-saved" data-workspace-connected>
-            <p>{view.connected.at
-              ? t('workspace_connected', { services: view.connected.services.map((s) => s.name).join(', '), date: dayOf(view.connected.at, t) })
-              : t('workspace_connected_undated', { services: view.connected.services.map((s) => s.name).join(', ') })}</p>
-            {written ? null : <NoDevcontainer t={t} services={view.connected.services} />}
-            <Button className="btn" data-act="setup_workspace_again" onClick={() => { setAgain(true); setWritten(undefined); }}>{t('workspace_again')}</Button>
-          </div>
+        {written ? <p className="setup-ok" data-workspace-result="ok" role="status">{t('workspace_written', { services: written.services.map((s) => s.name).join(', ') })}</p> : null}
+        {connected && view.connected && !written ? (
+          <p className="setup-ok" data-workspace-connected role="status">{t('workspace_connected_undated', { services: view.connected.services.map((s) => s.name).join(', ') })}</p>
         ) : null}
         {showPicker && view.problem === 'no_forge' ? (
-          <p className="setup-note" data-workspace-problem="no_forge">{t('workspace_problem_no_forge')} <a className="setup-link" href="/setup/forge">{t('workspace_to_forge')}</a></p>
+          <p data-workspace-problem="no_forge">{t('workspace_problem_no_forge')} <a className="setup-link" href="/setup/forge">{t('workspace_to_forge')}</a></p>
         ) : null}
         {showPicker && view.problem === 'unreachable' ? (
           <div className="setup-saved">
@@ -158,7 +146,7 @@ export function WorkspaceStep({ t, api, onDone, initial }: StepProps<Initial>) {
         {showPicker && view.problem === null ? (
           <form className="ws-pick" onSubmit={submitPick} aria-busy={busy}>
             <fieldset>
-              <legend>{t('workspace_repositories')}</legend>
+              <legend className="sr-only">{t('workspace_repositories')}</legend>
               {view.repositories.length > FILTER_FROM ? (
                 <div className="ws-filter">
                   <label htmlFor="workspace-filter">{t('workspace_filter')}</label>
@@ -184,10 +172,20 @@ export function WorkspaceStep({ t, api, onDone, initial }: StepProps<Initial>) {
             </Button>
           </form>
         ) : null}
-        {proposal ? (
+        {simple && proposal ? (
+          <section className="ws-proposal ws-simple" data-workspace-proposal data-workspace-simple aria-busy={busy}>
+            <p>{t('workspace_one_service', { service: proposal.services[0]?.name ?? '' })}</p>
+            {error ? <p className="setup-error" role="alert">{error}</p> : null}
+            <div className="setup-row-actions">
+              <Button variant="ink" className="primary" data-act="setup_workspace_write" disabled={busy} onClick={write}>{busy ? t('workspace_writing') : t('workspace_write_one')}</Button>
+              <Button variant="ghost" className="btn quiet" data-act="setup_workspace_change" disabled={busy} onClick={() => setProposal(undefined)}>{t('workspace_change')}</Button>
+            </div>
+          </section>
+        ) : null}
+        {proposal && !simple ? (
           <section className="ws-proposal" data-workspace-proposal aria-labelledby="workspace-proposal-title" aria-busy={busy}>
             <h3 id="workspace-proposal-title">{t('workspace_proposal_title')}</h3>
-            <p className="setup-note">{t('workspace_read_in', { time: lasted(proposal.machineMs, t) })} {t('workspace_tick_hint')}</p>
+            <p className="setup-note">{t('workspace_tick_hint')}</p>
             {/* The radios follow the person's choice at once (whole); the proposal of that choice follows. */}
             {proposal.repositories.filter((r) => r.folders.length > 0).map((r, i) => (
               <fieldset key={r.repo} className="ws-group">
@@ -207,18 +205,21 @@ export function WorkspaceStep({ t, api, onDone, initial }: StepProps<Initial>) {
             <fieldset className="ws-group">
               <legend>{t('workspace_services')}</legend>
               <ul className="ws-list">
-                {proposal.services.map((s, i) => (
-                  <li key={s.name}>
-                    <input type="checkbox" id={`workspace-service-${i}`} name="service" value={s.name} checked={!left.has(s.name)}
-                      onChange={(event) => setLeft(toggled(left, s.name, !event.currentTarget.checked))} />
-                    <label htmlFor={`workspace-service-${i}`}><span className="ws-name">{s.name}</span><span className="ws-meta">{serviceLine(t, s)}</span></label>
-                  </li>
-                ))}
+                {proposal.services.map((s, i) => {
+                  const where = serviceLine(t, s);
+                  return (
+                    <li key={s.name}>
+                      <input type="checkbox" id={`workspace-service-${i}`} name="service" value={s.name} checked={!left.has(s.name)}
+                        onChange={(event) => setLeft(toggled(left, s.name, !event.currentTarget.checked))} />
+                      <label htmlFor={`workspace-service-${i}`}><span className="ws-name">{s.name}</span>{where ? <span className="ws-meta">{where}</span> : null}</label>
+                    </li>
+                  );
+                })}
               </ul>
             </fieldset>
-            <fieldset className="ws-group">
-              <legend>{t('workspace_contracts')}</legend>
-              {withContract.length === 0 ? <p className="setup-note">{t('workspace_contracts_none')}</p> : (
+            {withContract.length > 0 ? (
+              <fieldset className="ws-group">
+                <legend>{t('workspace_contracts')}</legend>
                 <ul className="ws-list">
                   {withContract.map((s, i) => (
                     <li key={s.name}>
@@ -228,11 +229,11 @@ export function WorkspaceStep({ t, api, onDone, initial }: StepProps<Initial>) {
                     </li>
                   ))}
                 </ul>
-              )}
-            </fieldset>
-            <fieldset className="ws-group">
-              <legend>{t('workspace_links')}</legend>
-              {shownLinks.length === 0 ? <><p className="setup-note">{t('workspace_links_none')}</p><p className="setup-note">{t('workspace_links_note')}</p></> : (
+              </fieldset>
+            ) : null}
+            {shownLinks.length > 0 ? (
+              <fieldset className="ws-group">
+                <legend>{t('workspace_links')}</legend>
                 <ul className="ws-list">
                   {shownLinks.map((link, i) => (
                     <li key={link.id}>
@@ -245,8 +246,8 @@ export function WorkspaceStep({ t, api, onDone, initial }: StepProps<Initial>) {
                     </li>
                   ))}
                 </ul>
-              )}
-            </fieldset>
+              </fieldset>
+            ) : null}
             {error ? <p className="setup-error" role="alert">{error}</p> : null}
             <Button variant="ink" className="primary" data-act="setup_workspace_write" disabled={busy || kept.length === 0} onClick={write}>
               {busy ? t('workspace_writing') : t('workspace_write')}

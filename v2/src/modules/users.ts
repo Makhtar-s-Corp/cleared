@@ -151,8 +151,19 @@ export class SqliteUsers implements UserDirectory {
 // characters is refused and left as it is.
 export const PROOF_FILE = 'v2-app-proof';
 
+// Why a proof cannot serve (issue #491), as the app tells the browser, which
+// is not told the path: `starting` is a file another process has not filled
+// yet, and passes by itself; the others stay until a person acts.
+export type ProofReason = 'starting' | 'unmade' | 'unreadable' | 'foreign' | 'exposed' | 'malformed';
+const STARTING_MS = 60_000;
+
 export class ProofError extends Error {
   override name = 'ProofError';
+  readonly reason: ProofReason;
+  constructor(message: string, reason: ProofReason = 'starting') {
+    super(message);
+    this.reason = reason;
+  }
 }
 
 export function proofPath(ledger: string): string {
@@ -171,7 +182,7 @@ export function readOrCreateProof(path: string, what = 'the app\'s proof'): stri
       finally { closeSync(fd); }
       linkSync(draft, path);
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new ProofError(`cannot make ${what} at ${path}: ${(error as Error).message}`);
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw new ProofError(`cannot make ${what} at ${path}: ${(error as Error).message}`, 'unmade');
     } finally {
       rmSync(draft, { force: true });
     }
@@ -179,15 +190,15 @@ export function readOrCreateProof(path: string, what = 'the app\'s proof'): stri
   try {
     fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
   } catch (error) {
-    throw new ProofError(`cannot read ${what} at ${path}: ${(error as Error).message}`);
+    throw new ProofError(`cannot read ${what} at ${path}: ${(error as Error).message}`, 'unreadable');
   }
   try {
     const stat = fstatSync(fd);
-    if (!stat.isFile()) throw new ProofError(`${what} at ${path} is not a regular file`);
-    if (stat.uid !== process.getuid?.()) throw new ProofError(`${what} at ${path} belongs to another account`);
-    if ((stat.mode & 0o077) !== 0) throw new ProofError(`${what} at ${path} can be read by others: chmod 600 it`);
+    if (!stat.isFile()) throw new ProofError(`${what} at ${path} is not a regular file`, 'unreadable');
+    if (stat.uid !== process.getuid?.()) throw new ProofError(`${what} at ${path} belongs to another account`, 'foreign');
+    if ((stat.mode & 0o077) !== 0) throw new ProofError(`${what} at ${path} can be read by others: chmod 600 it`, 'exposed');
     const proof = readFileSync(fd, 'utf8').trim();
-    if (!/^[0-9a-f]{64}$/.test(proof)) throw new ProofError(`${what} at ${path} is not 64 hex characters`);
+    if (!/^[0-9a-f]{64}$/.test(proof)) throw new ProofError(`${what} at ${path} is not 64 hex characters`, proof === '' && Date.now() - stat.mtimeMs < STARTING_MS ? 'starting' : 'malformed');
     return proof;
   } finally {
     closeSync(fd);
