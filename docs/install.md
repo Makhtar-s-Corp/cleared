@@ -77,59 +77,59 @@ A refusal ends with "Nothing was written.": the command stopped before writing o
 
 ## The setup assistant
 
-Open the address the command printed, on the same machine (or [from another computer](#from-another-computer)). Every page sends you to `/setup` until the owner's account exists. A line on the left shows the eight steps, each one's state and how long it took, split between your time and the machine's. Back returns to a step; Skip leaves a step that allows it for later. The language choice is at the top right. The captures below are from the assistant's own browser tests, on fake services.
+Open the address the command printed, on the same machine (or [from another computer](#from-another-computer)). Every page sends you to `/setup` until the owner's account exists. Each step is one sentence and one action, with the rest behind Show details; the list on the left shows where you are. Back returns to a step; Skip leaves a step that allows it for later. Sessions and the language choice are at the top right, and a session waiting for your answer is said on every step, with a link to answer. The captures below use the app's fixtures and made-up answers.
 
 ### 1. Your account
 
 Type the setup code the command printed, a name and a password of 15 characters at least. The account is the owner's: it approves releases. Cleared also makes its approval signature on this machine; there is nothing to add to your repository.
 
-![The first step: the setup code, a name and a password](v2/setup-assistant/owner-1440-light.png)
+![The owner step once the account exists](v2/onboarding/after/owner-desktop.png)
 
-### 2. Forge
+### 2. Your code
 
-Pick GitHub or GitLab and paste a token. Cleared checks it with the forge at once, says how many repositories it reaches, and keeps it in a file of the state folder that no other account can read. The page is never shown the token again: it says since when one is saved, and offers Replace.
+Pick GitHub or GitLab and paste a token. Cleared checks it with the forge at once and keeps it in a file of the state folder that no other account can read. The page never shows the token again; since when one is saved and Replace are in the details.
 
-For GitHub, the page links to the fine-grained token form and lists the permissions to give: Metadata (read), Contents, Pull requests and Commit statuses (read and write); Workflows only if a ticket may change `.github/workflows/`, Issues only for the GitHub Issues mirror. For GitLab: the `api` scope, and the Developer role on each project (Maintainer to merge into a protected branch).
+For GitHub, the page links to the fine-grained token form with the name and the required permissions filled in: Metadata (read), Contents and Pull requests (read and write), Commit statuses (read). Add Workflows only if a ticket may change `.github/workflows/`, Issues only for the GitHub Issues mirror. For GitLab: the `api` scope, and the Developer role on each project (Maintainer to merge into a protected branch).
 
-![The forge step, GitHub chosen, with the permissions to give](v2/setup-assistant/forge-1440-light.png)
+![The forge step once GitHub is connected](v2/onboarding/after/forge-desktop.png)
 
 ### 3. Claude Code
 
-Run `claude setup-token`, open the address it shows, sign in with your Claude account, and paste the line it prints. The page offers a terminal to run it in: a throwaway container with nothing of this machine in it, removed when the terminal closes. Any computer where Claude Code is installed does too.
+Connect Claude Code opens a terminal running `claude setup-token`, in a throwaway container with nothing of this machine in it. Open the link it shows, sign in with your Claude account and paste the code back in the terminal. Cleared takes the token from the output itself, masks it, saves it, and removes the container. The terminal opens on the app's loopback address only: elsewhere, or if you prefer, run the command on any computer with Claude Code and paste what it prints, under Show details. Spaces and line breaks in a wrapped token do not matter.
 
-![The Claude Code step with its terminal (in French)](v2/setup-assistant/model-1440-light-fr.png)
+![The Claude Code step, one button](v2/onboarding/after/model-desktop.png)
 
 ### 4. Repositories
 
-The repositories the token reaches are listed; tick the ones Cleared works on, or the folders of a monorepo. Cleared clones them, reads their code, and proposes how they fit together: the services, their contracts and the calls between them, each with the file and line that suggested it. Only the lines you tick are written. The list comes from GitHub only for now: the step does not list GitLab projects yet (issue #424).
+The repositories the token reaches are listed; tick the ones Cleared works on. Cleared clones and reads them. One repository with one service, no contract and no call is said in one sentence. Otherwise it proposes the services, the folders of a monorepo, their contracts and the calls between them, each with the file and line that suggested it, and only the lines you tick are written. The list comes from GitHub only for now: the step does not list GitLab projects yet (issue #424).
 
-![The repositories step, with the proposed links](v2/workspace-connect/workspace-1440-light.png)
+![The repositories step, one repository in one sentence](v2/onboarding/after/workspace-desktop.png)
 
 ### 5. Environment
 
-Each service gets an image built ahead, with its dependencies installed, so that a session starts on it in seconds. The image comes from the project's `.devcontainer`, else Cleared's own session image. The step shows each build and its time, then runs the project's declared check in it. For a service with no `.devcontainer`, or whose check fails, the step proposes a setup session: a ticket whose author writes the `.devcontainer`, reviewed and approved like any other.
+Each service gets an image built ahead, with its dependencies installed, so that a session starts on it in seconds. The image comes from the project's `.devcontainer`, else Cleared's own session image. The step shows each service's state, then runs the project's declared check in the image. When tests fail, it says why in one sentence and offers a setup session: a ticket whose author writes the `.devcontainer`, reviewed and approved like any other. The session then shows live on the step, with a link to it. Commands, images and the tests' last lines are in the details.
 
-![The environment step, an image ready](v2/env-setup/environment-1440-light.png)
+![The environment step, tests failing because nothing is installed](v2/onboarding/after/environment-desktop.png)
+
+![The environment step, its setup session live](v2/onboarding/after/environment-session-desktop.png)
 
 ### 6. Test secrets
 
-The values the project's tests need, such as a sandbox account's key, by the name the tests read from the environment. They are encrypted on this machine, given to the sessions and the tests only, removed from everything Cleared writes, and never shown again. Skip the step if the tests need none.
+The step reads the base branch of your repositories (example environment files, what the tests read from the environment, what the workflows take from their secrets) and asks for the names that look like secrets, one field each. The values are encrypted on this machine, given to the sessions and the tests only, removed from everything Cleared writes, and never shown again. With none to ask for, it says so and skips itself; any other value can be added under Show details.
 
-![The test secrets step: names and dates, never values](v2/test-secrets/secrets-1440-light.png)
+![The test secrets step: the names read from the repository](v2/onboarding/after/secrets-desktop.png)
 
 ### 7. Checks
 
-The checks of `cleared doctor`: Docker, the images, the state folder, the disk, the settings, the tokens, the repositories and their checkouts. Each line is green, or red with what to do; [troubleshooting.md](troubleshooting.md) explains each one. Fix what is red, then Check again.
+The checks of `cleared doctor`: Docker, the images, the state folder, the disk, the settings, the tokens, the repositories and their checkouts. The step says "Everything is ready", or each thing to fix in one sentence, with its button when another step fixes it. Every line is in the details; [troubleshooting.md](troubleshooting.md) explains each one.
 
-![The checks step, each line with its state](v2/doctor/checks-1440-light.png)
+![The checks step, everything ready](v2/onboarding/after/checks-desktop.png)
 
 ### 8. First ticket
 
-A small first ticket, proposed for one of your repositories: one line added at the end of its README. One click moves it to Todo. The step follows it through its author, whose plan waits for your Go in the Inbox (the step links to it), its review, your approval in the Inbox, the merge and the release watch, to live, then shows the time of each step and the total.
+A small first ticket, for one of your repositories: one line added at the end of its README, its text in the details. One button starts it. The step then says where it stands and shows its session live, with links to the session and the pull request. Its plan waits for your Go in Reception and its release for your approval; the step links to each. Once it is live, the time of each step is in a fold.
 
-![The first ticket, proposed](v2/first-ticket/first-ticket-proposal-1440-light.png)
-
-![The first ticket, live, with the setup's times](v2/first-ticket/first-ticket-live-1440-light.png)
+![The first ticket, in review](v2/onboarding/after/first-ticket-desktop.png)
 
 On a Compose install, the release lock still reads the owner's public key from the project's `.cleared/agents.conf` only, so the approved first ticket is not merged there until that line is in the repository. [Troubleshooting](troubleshooting.md#known-gaps-of-a-compose-install) lists this gap and the others.
 

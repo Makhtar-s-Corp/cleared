@@ -12,7 +12,7 @@ import { applyAll, emptyModel, parseCriteria, threadOf, timeline, type SessionMo
 import type { SessionSummary } from '../../../../src/api/types.ts';
 import { modelOf, tool } from '../../../test/session/support.ts';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { Composer } from '../../screens/session/Session.tsx';
+import { Composer, SessionSummaryStrip } from '../../screens/session/Session.tsx';
 
 const sentinel: Translate = (key) => `«${key}»`;
 // The screen's catalog over the shell's, as the shell gives it (lib/catalogs.ts): the intent's words are the shell's.
@@ -295,8 +295,9 @@ test('a container lost then recreated reads in English and in French, from the c
 
 // The owner's request of 2026-10-30: what it does, what it waits for from me, where it is.
 test('the summary says what the session does, what it waits for and where it is, and the answer is one click away', () => {
-  const html = renderSession(viewOf(), en);
+  const html = renderToStaticMarkup(<SessionSummaryStrip view={viewOf()} t={en} onAnswer={() => undefined} />);
   assert.match(html, /data-session-summary=""[^>]*data-wants="answer"/);
+  assert.match(html, /data-act="summary_answer"/);
   const text = visibleText(html);
   for (const word of ['What it does', 'What it needs from you', 'Where it is', TICKET_TITLE, 'Your answer to a request']) assert.ok(text.includes(word), `missing: ${word}`);
 });

@@ -564,3 +564,56 @@ Each ticket went back to Todo after its publish with "The release could not be r
 
 - Pull request: 484, against `v2`.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j6-decisions-log-split`.
+
+## 2026-10-30: the setup assistant redone, copy and interface, with the session and the inbox readable at a glance (the owner's direction, lane `v2-j7-onboarding`, issues #490 to #497, P270)
+
+**The need.** The owner called the 8-step assistant "fuckin slop" and asked for far better, not touch-ups: one clear sentence a step, the technical detail folded behind "Voir le détail" / "Show details", one primary action a step, no file or setting name in a sentence, light and flat, no coloured side border, no big bold block. With it, the bugs the owner met in use (#490 to #496), and during the lane, the session screen: "difficile à comprendre", to be read in five seconds. What was taken from Linear, Vercel, Devin and Codex is in [onboarding/REFERENCES.md](onboarding/REFERENCES.md), each with its link. [ui-pro/DESIGN.md](ui-pro/DESIGN.md) stays the system.
+
+**Decisions of the owner, applied as given.**
+1. **Each step.** A title, one sentence, its one action, the rest in a fold (`screens/setup/step.tsx`, `Detail`). Continue is indigo only when the step itself shows no action (`onOwnAction`), so a screen has one indigo button. The list of steps is a name and a mark, no time; under 1024 px, a count and a thin bar of 8.
+2. **Claude Code (#490).** A paste that starts as a token loses its spaces and line breaks, in the browser and in the service. Better: one button opens the disposable terminal already running `claude setup-token`, and the service takes the token from the output itself (`src/setup/token-catch.ts`). From its first character the token is held back, then replaced by a mask, so it reaches no browser and no kept output; it is then saved as a paste is, and the terminal and its container close. The paste stays in the fold, and is the action where the terminal cannot open.
+3. **Forge (#492).** See "the cause" below. No time beside a step any more.
+4. **Repositories (#494).** The glued "cleared-example-guestbookle dépôt" is gone (a service that is its whole repository under its own name says nothing more), so is the time. One repository with one service, no contract and no call is one sentence and one button; a section with nothing in it is not drawn.
+5. **Environment (#493).** A service is its name and its state in a word beside its mark; failing tests are explained from what they printed ("rien n'est installé" when a tool is missing and no install is declared); the action of the moment alone shows, none during a build. A session started shows live here: its state, how long, its last action, a link to it. "Sessions" is in the assistant's bar, with how many wait.
+6. **Test secrets.** The step reads the base branch (`src/secrets/expected.ts`): example environment files, what the tests read from the environment, what the workflows take from their secrets, and keeps names that look like secrets, never a value. They are asked for one field each. With none, one sentence, and the step skips itself.
+7. **Checks.** "Tout est prêt", or each thing to fix in one sentence with its button; every line in the fold. What earlier tests left behind no longer appears in the assistant; `cleared doctor` still says it.
+8. **First ticket.** No title about production, no circles, no grey sentence: where it stands in one sentence, its session live with its link and its pull request, the person's gesture when it is theirs.
+9. **Reception (#495).** What waits is under the name of its ticket, so a request is not read as the answer to another session's plan; a request says what it is for and that only its session is paused. Every step of the assistant says when a session waits for the person, for how long and what it asks, with a link to answer.
+10. **Agent language (#496).** `authorPrompt` and `reviewPrompt` impose the interface's language (`CLEARED_V2_APP_LANGUAGE`, `FlowConfig.language`) on all a person reads: plan steps and reason, questions, command descriptions, messages, report, handover. Code, commands, paths, commit messages, the "(Recommended)" mark and the verdict phrase stay as they are.
+11. **Session.** Two columns, not three, under a line that says what it does, what it needs from the person (with Answer) and where it is. The ticket's Markdown is rendered (`components/markdown/`, as elements, never as HTML; only http and https links). Checks that read the same are one line, the worst state, the commands kept. A refusal is explained in one human sentence. The time per step, the screen so far, the facts, the plan, the criteria and Close are in the fold.
+
+**The author's findings on the causes.**
+- **#491.** The race the owner met on 26 October was fixed on 27 October by #429 (written whole, then linked; read at each request until whole). What was left is what the owner then read: every refused proof was said as "the service does not answer". `ProofError` now carries a reason; the proxy answers `service_starting` for a file not filled yet and `proof_refused` with the reason for the rest, the path going to the app's log only; the Tour and the Inbox say exactly that.
+- **#492.** `SetupRecords.done` moved the done time at each call, so replacing a credential days later gave "Fait, 4 j 5 h". The first done now stays. In the last page's fold a step's time past an hour says so.
+- **Requests in a loop**, read in the code and proven by tests, not seen on the owner's instance (the brief forbids touching it): (a) "always in this project" on a command of several parts stored the whole text, which no part ever matched; it now stores each part, and the very text holds too, which also heals rows already stored; a deny still wins. (b) A session the watchdog stopped is told "run it again" after "once", and that run asked again; what it was allowed is now kept for that session. (c) `which` and the runtimes' version commands no longer ask: they are what a setup session runs first.
+- **`/setup/owner`** answered "method not allowed" to a click on the first step, found by the before capture. It now serves the page.
+
+**Questions for the owner**, each with what this lane applied.
+1. **The Tour's composer and sloplint.** In a real browser sloplint gives 0 FAIL on the eight steps, Reception and the session, and one FAIL on the Tour, gate 40: the composer's fields have no 3:1 edge inside their panel. That is the composer the owner asked for on 2026-10-28, which this lane does not touch. (a) Unchanged (applied). (b) A 1 px line under each field, which reaches 3:1 and meets WCAG 1.4.11. Recommended: (b), as a small change of its own, since the fields are hard to see as fields.
+2. **The agent's language per person.** The prompt takes the install's language, not the language each person picked in the browser, since a ticket carries none. (a) The install's (applied). (b) A language on each ticket, from whoever creates it. Recommended: (a) while one person runs an install.
+3. **"Once" on a live session.** It stays once: the same command asks again if the agent runs it again. Only a session stopped while waiting keeps it for its run again. (a) As it is (applied). (b) "Once" means for the whole session. Recommended: (a), which keeps what the button says.
+
+**Not done here.**
+- **The real end of the sign-in.** Reading the token was tested on the screen as Claude Code 2.1.306 draws it, taken from its bundle (a coloured text, a blank row, spaces as moves), with the command run for real up to its link in a labelled throwaway container; no real token was made, since that needs a login. If a later version draws it otherwise, the terminal shows no token and the paste in the fold still works.
+- **The owner's real session.** Loops, the waiting alert and the live state are proven on fakes and made-up answers; nothing ran on `cleared-v2-e2e`.
+- **The weekly quota.** This session had no way to read it, so the 90 % stop could not be checked; the lane started no sub-agent and no model call from Cleared.
+- **No progress dashboard by sub-agent:** the brief forbids starting one, so the author kept the owner's `.dashboard/index.html` by hand, outside git.
+
+**Checks** on this branch, the suites run apart, each under a time limit (a first run of `npm test` hung on a test of this lane that left its app open: it was stopped and the test fixed):
+- `npm run typecheck` in `v2/`: clean.
+- Node tests of `v2/`: 3007 tests, 2866 pass, 141 skipped (the browser tests, run apart), 0 fail.
+- Vitest: 455 tests, 455 pass.
+- The browser tests, with `CLEARED_V2_PLAYWRIGHT`: 136 tests, 136 pass.
+- The root suite (`node --test test/*.test.ts`): 413 tests, 411 pass, 2 skipped, 0 fail.
+- sloplint in Chrome's render tier, on snapshots of 13 screens with their real sheets: 0 FAIL on the eight steps, the session live, Reception and the session; 2 FAIL, gate 40, both on the Tour (question 1). 101 REFLEX remain across the app's sheets, most of them on earlier screens.
+- axe with the folds open, at 1440 and 390: no violation on any screen of the captures.
+- `npm run guard -- --base origin/v2`: nothing refused.
+
+**Tests first, and what that means here.** The bugs' tests were written before their fixes, but in the same commits, and were not run on the old code at that moment. They were run on `f833d15` at the end of the lane instead, in a temporary worktree: the records, the paste and the capture, the proof's reason (test and proxy), the prompts (author and reviewer), the stopped session and the owner's page failed there, nine tests. `test/session/policy.test.ts` could not load on that commit, since it imports a new function, so the loop was checked there by hand: a command of several parts, one the policy cannot split and one with a quoted argument each still ask after "always". The screens' tests were written with the screens, so they have no such run. Tests that asserted the old words or layout were changed to the owner's direction, in `app/web/test/setup/`, `app/web/test/session/`, `app/web/test/inbox/`, `app/test/setup/*-browser`, `app/test/inbox/`, `app/test/session/capture-choice-browser.test.ts`, `app/test/a11y-browser.test.ts`, `test/flow/config.test.ts`, and `test/profiles/fixtures/default-inputs.json` for the new safe commands.
+
+**Captures.** `docs/v2/onboarding/before/` and `after/`, made by `v2/scripts/onboarding-captures.ts` on the app's fixtures and made-up answers, each under 500 KB (oxipng 9.1.5 from its release archive, in a scratch folder). The script also runs axe with the folds open: no violation at 1440 and 390.
+
+**Resources.** The temporary instance was the script's own app on a port it found free in 9800 to 9899, stopped with the run, so `ss -ltn` shows none left. Three throwaway containers ran for a moment, each labelled `cleared.dev=v2` and removed by `--rm`: two named `cleared-v2-j7-onboarding-probe`, and one, by a slip of the author's, unnamed, which ran `true`. Nothing else of Docker was touched. Network: `npm ci`, puppeteer-core and oxipng into a scratch folder, the sources of the references, GitHub for this lane's issues and pull request. No secret, no Claude login read.
+
+- Pull request: against `v2`, closes #490 to #497 as it says.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j7-onboarding`.

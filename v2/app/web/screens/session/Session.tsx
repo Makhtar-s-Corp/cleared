@@ -602,7 +602,7 @@ export function SessionSummaryStrip({ view, t, onAnswer }: { readonly view: Sess
   const question = asks && view.thread.rows.some((row) => row.kind === 'question' && row.requestId === view.thread.pending[0]);
   const wants = ended ? 'ended' : question ? 'question' : asks ? 'answer' : view.thread.plan?.go === null ? 'go' : 'nothing';
   const role = t(`role_${view.summary.role}`);
-  const time = duration(Date.now() - Date.parse(view.summary.startedAt), t);
+  const time = duration(view.now.getTime() - Date.parse(view.summary.startedAt), t);
   return (
     <dl className="s-summary" data-session-summary="" data-wants={wants}>
       <div><dt>{t('summary_doing')}</dt><dd>{view.ticket?.title ?? view.summary.ticket}</dd></div>

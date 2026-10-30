@@ -75,6 +75,12 @@ The screen's centre piece (the owner's request of 2026-10-28, inspired by Devin'
 - **The other gestures** (a goal, a question for the Lead or for the code, a recipe) are in a menu behind one icon with its tooltip, closed by Escape.
 - **Start** is the one indigo button, `Ctrl`+`Enter` (`⌘`+`Enter` on a Mac) shown beside it and working from either field.
 
+## The setup assistant and the session (the owner's direction of 2026-10-30, issue #497)
+
+- **A step** is a title, one sentence, its one action, and the rest behind "Show details" (`screens/setup/step.tsx`). No file or setting name in a sentence: those are in the fold. Continue is indigo only when the step shows no action of its own.
+- **No coloured side on anything.** A state is a word beside its mark, in a box with the soft 1 px line.
+- **A session** reads in five seconds: a line with what it does, what it needs from the person and where it is, then the thread beside one column of the ticket, its changes and its checks; the rest in a fold. Two columns, not three.
+
 ## Motion and access
 
 - Only `opacity` and `transform` transition, at `--motion` (140 ms); nothing animates on a hover or a press; `prefers-reduced-motion: reduce` sets `--motion` to 0.
