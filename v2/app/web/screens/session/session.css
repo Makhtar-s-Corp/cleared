@@ -12,8 +12,9 @@
 .s-summary > div { min-width: 0; }
 .s-summary dt { margin-bottom: 2px; font-size: var(--text-sm); color: var(--text-muted); }
 .s-summary dd { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); margin: 0; font-size: var(--text-lg); font-weight: var(--weight-strong); overflow-wrap: anywhere; }
-.s-summary .dot { flex: none; width: 6px; height: 6px; border-radius: 50%; }
-.s-summary .dot.awaiting { background: var(--awaiting); }
+.s-summary[data-wants="answer"] .s-summary-wants dd, .s-summary[data-wants="question"] .s-summary-wants dd, .s-summary[data-wants="go"] .s-summary-wants dd { color: var(--awaiting-text); }
+.s-ticket-line { margin-bottom: var(--space-2); font-size: var(--text-sm); color: var(--text-muted); }
+.s-ticket-line .service { margin-left: var(--space-2); padding-left: var(--space-2); border-left: 1px solid var(--line); }
 .s-summary .btn { min-height: 28px; padding: 0 12px; }
 .s-side { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding-top: var(--space-2); }
 .s-after { display: contents; }

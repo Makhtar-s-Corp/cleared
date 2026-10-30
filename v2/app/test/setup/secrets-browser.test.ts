@@ -82,10 +82,16 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await page.waitForURL(`${app.base}/`);
     await page.goto(`${app.base}/setup/secrets`);
 
-    await page.locator('[data-test-values-service="web"]').waitFor();
+    // Nothing in these repositories asks for a secret: one sentence, the step skipped by itself.
+    await page.locator('[data-test-values-none]').waitFor({ state: 'attached' });
+    await page.locator('.setup-progress li[data-step="secrets"][data-state="skipped"]').waitFor();
     assert.equal(await page.evaluate(() => document.documentElement.lang), language);
     await checked(page, 'empty');
-    assert.equal(await page.locator('[data-act="setup_test_values_done"]').isDisabled(), true, 'Done waits for a value');
+    assert.equal(await page.locator('form[data-test-values-expected]').count(), 0, 'no form to fill');
+
+    // Any other value is one click away.
+    await page.locator('.setup-detail > summary').first().click();
+    await page.locator('[data-test-values-service="web"]').waitFor();
 
     await page.selectOption('#setup-test-value-service', 'api');
     await page.fill('#setup-test-value-name', 'PAYMENT_SANDBOX_KEY');
@@ -121,7 +127,6 @@ async function run(language: 'en' | 'fr'): Promise<void> {
       }
     }
 
-    await page.click('[data-act="setup_test_values_done"]');
     await page.locator('.setup-progress li[data-step="secrets"][data-state="done"]').waitFor();
     assert.deepEqual(errors, [], 'no page error');
   } finally {

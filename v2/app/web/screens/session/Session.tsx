@@ -477,8 +477,8 @@ export function LeftCards({ view, t, onPlan, close, onCaptures, capturesBusy, ca
   return (
     <>
       <section className="card" aria-labelledby="ticket-title">
-        <p className="eyebrow">{t('ticket_label')} <span className="id">{view.summary.ticket}</span>{service ? <> · <span className="service">{service}</span></> : null}</p>
         <h2 id="ticket-title" className="card-title">{view.ticket?.title ?? view.summary.ticket}</h2>
+        <p className="s-ticket-line">{t('ticket_label')} <span className="id">{view.summary.ticket}</span>{service ? <span className="service">{service}</span> : null}</p>
         {parsed.description.length > 0 ? <Markdown className="desc" text={parsed.description.join('\n\n')} /> : null}
         {cost.length > 0 ? <p className="ticket-cost faint small" data-ticket-cost="">{cost.map((fact) => <span key={fact} className="fact">{fact}</span>)}</p> : null}
         {production.length > 0 ? (
@@ -609,7 +609,6 @@ export function SessionSummaryStrip({ view, t, onAnswer }: { readonly view: Sess
       <div className="s-summary-wants">
         <dt>{t('summary_wants')}</dt>
         <dd>
-          {wants === 'nothing' || wants === 'ended' ? null : <span className="dot awaiting" aria-hidden="true" />}
           <span>{t(`summary_wants_${wants}`)}</span>
           {asks && onAnswer ? <Button className="btn" data-act="summary_answer" onClick={onAnswer}>{t('summary_answer')}</Button> : null}
         </dd>

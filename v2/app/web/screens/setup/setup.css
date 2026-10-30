@@ -14,7 +14,7 @@
 .setup-brand .logo { fill: var(--ink); }
 .setup-brand .name { font-weight: var(--weight-heavy); font-size: var(--text-lg); }
 .setup-sessions { margin-left: auto; padding: var(--space-1) var(--space-2); border-radius: var(--radius); color: var(--text-secondary); font-size: var(--text-md); font-weight: var(--weight-strong); text-decoration: none; }
-.setup-count-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: var(--space-2); padding: 0 4px; border-radius: 9px; background: var(--awaiting-surface); color: var(--awaiting-text); font-size: var(--text-sm); }
+.setup-count-badge { display: inline-grid; place-items: center; min-width: 18px; height: 18px; margin-left: var(--space-2); padding: 0 var(--space-1); border-radius: 9px; background: var(--awaiting-surface); color: var(--awaiting-text); font-size: var(--text-sm); }
 .setup-sessions:hover { background: var(--tab-fill); color: var(--text); }
 .setup-sessions:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 /* The language choice (issue #431): a segmented control, each language named in itself. */
@@ -121,7 +121,6 @@
 /* A session that waits for the person, said on every step (issue #495). */
 .setup-waiting { display: flex; align-items: center; gap: var(--space-2) var(--space-3); padding: 12px var(--space-3); border-radius: var(--radius-panel); background: var(--awaiting-surface); }
 .setup-waiting p { flex: 1; min-width: 0; margin: 0; font-size: var(--text-md); text-wrap: pretty; }
-.setup-waiting .dot { display: inline-block; width: 6px; height: 6px; margin-right: var(--space-2); vertical-align: 2px; border-radius: 50%; background: var(--awaiting); }
 
 /* A session, live (issue #493): its state, its link, its last action. */
 .setup-live { margin: var(--space-2) 0 var(--space-3); padding: 12px var(--space-3); border-radius: var(--radius); box-shadow: inset 0 0 0 1px var(--line); }
@@ -147,7 +146,7 @@
   .setup-main { max-width: none; }
   /* The steps as one thin bar of 8, the current one named above it. */
   .setup-count { padding-left: 0; }
-  .setup-progress { flex-direction: row; gap: 4px; }
+  .setup-progress { flex-direction: row; gap: var(--space-1); }
   .setup-progress li { flex: 1; min-height: 4px; height: 4px; padding: 0; overflow: hidden; border-radius: 2px; background: var(--line); }
   .setup-progress li[data-state="done"] { background: var(--success); }
   .setup-progress li[data-state="skipped"] { background: var(--outline); }

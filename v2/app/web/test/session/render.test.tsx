@@ -292,3 +292,11 @@ test('a container lost then recreated reads in English and in French, from the c
     'Le conteneur de la session n\'a pas pu rester en marche\u00a0: la session s\'est arrêtée, et son ticket est revenu en Todo.',
   ]) assert.ok(french.some((line) => line.includes(expected)), `manque : ${expected}`);
 });
+
+// The owner's request of 2026-10-30: what it does, what it waits for from me, where it is.
+test('the summary says what the session does, what it waits for and where it is, and the answer is one click away', () => {
+  const html = renderSession(viewOf(), en);
+  assert.match(html, /data-session-summary=""[^>]*data-wants="answer"/);
+  const text = visibleText(html);
+  for (const word of ['What it does', 'What it needs from you', 'Where it is', TICKET_TITLE, 'Your answer to a request']) assert.ok(text.includes(word), `missing: ${word}`);
+});

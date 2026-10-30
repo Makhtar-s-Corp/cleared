@@ -27,7 +27,7 @@
   "setup_tower": "Open Cleared",
   "setup_detail": "Show details",
   "setup_sessions": "Sessions",
-  "setup_sessions_waiting": "Sessions, {count} waiting for you",
+  "setup_sessions_waiting": "{count} waiting for you",
   "setup_waiting_one": "{ticket} has been waiting for your answer for {age}: {ask}",
   "setup_waiting_many": "{count} sessions are waiting for your answer. The oldest, {ticket}, for {age}: {ask}",
   "setup_waiting_plan": "its plan needs your go.",

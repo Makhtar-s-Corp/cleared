@@ -93,22 +93,23 @@ async function run(language: 'en' | 'fr', failing = false): Promise<void> {
     assert.equal(await page.evaluate(() => document.documentElement.lang), language);
     await checked(page, 'not built');
     assert.deepEqual(await page.locator('.setup-env-item').evaluateAll((items: any[]) => items.map((item) => item.dataset.state)), ['none', 'none']);
-    assert.match(await page.locator('[data-service="api"]').innerText(), /npm ci/);
+    await page.locator('.setup-detail > summary').first().click();
+    assert.match(await page.locator('[data-env-detail="api"]').innerText(), /npm ci/);
 
     await page.click('[data-act="setup_environment_build"]');
     await page.locator('.setup-env-item[data-state="building"]').first().waitFor();
-    assert.equal(await page.locator('[data-act="setup_environment_build"]').isDisabled(), true, 'no second Build while one runs');
+    assert.equal(await page.locator('[data-act="setup_environment_build"]').count(), 0, 'no second Build while one runs');
     await page.waitForFunction(() => [...document.querySelectorAll('.setup-env-item')].every((item: any) => item.dataset.state === 'ready'), undefined, { timeout: 30_000 });
     await checked(page, 'ready');
-    const api = await page.locator('[data-service="api"]').innerText();
+    const api = await page.locator('[data-env-detail="api"]').innerText();
     assert.match(api, /cleared-v2-prep-api:[0-9a-f]{16}/);
     assert.doesNotMatch(api, /\d\s?ms\b/, 'no figure in milliseconds');
     assert.equal(await page.locator('[role="alert"]').count(), 0, 'no refusal');
     if (failing) {
       // A check that fails in its image: its last lines, and a setup session proposed for that reason.
-      await page.locator('[data-service="api"] [data-env-check="failed"]').waitFor();
-      assert.match(await page.locator('[data-service="api"] .setup-env-output').innerText(), /sqlite3: command not found/);
-      assert.equal(await page.locator('[data-service="web"] [data-env-session="check_failed"]').count(), 1);
+      await page.locator('[data-env-detail="api"] [data-env-check="failed"]').waitFor();
+      assert.match(await page.locator('[data-env-detail="api"] .setup-env-output').innerText(), /sqlite3: command not found/);
+      assert.equal(await page.locator('[data-service="api"] [data-env-need="missing"]').count(), 1, 'said in one sentence');
       await checked(page, 'check failed');
       if (CAPTURES) {
         for (const [width, theme] of [[1440, 'light'], [390, 'light']] as const) {
@@ -121,10 +122,9 @@ async function run(language: 'en' | 'fr', failing = false): Promise<void> {
       return;
     }
     // The declared check ran in each ready image; the service with no .devcontainer is proposed a setup session.
-    await page.locator('[data-service="api"] [data-env-check="passed"]').waitFor();
-    assert.match(await page.locator('[data-service="api"] [data-env-check]').innerText(), /npm test/);
-    assert.equal(await page.locator('[data-service="api"] [data-env-session="no_devcontainer"]').count(), 1);
-    assert.equal(await page.locator('[data-service="web"] [data-env-session]').count(), 0, 'a .devcontainer and a passing check: nothing proposed');
+    await page.waitForFunction(() => /npm test/.test((document.querySelector('[data-env-detail="api"]') as any)?.innerText ?? ''));
+    await page.locator('[data-service="api"] .setup-env-state').waitFor();
+    assert.equal(await page.locator('[data-env-need]').count(), 0, 'nothing to act on');
     assert.equal(await page.locator('[data-act="setup_environment_session"]').count(), 0, 'no flow runs here: no start offered');
     await checked(page, 'checked');
     await page.locator('.setup-progress li[data-step="environment"][data-state="done"]').waitFor();

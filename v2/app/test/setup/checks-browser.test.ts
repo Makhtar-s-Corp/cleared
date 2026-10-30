@@ -101,7 +101,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await page.click('[data-act="setup_forge_check"]');
     await page.locator('[data-forge-result="ok"]').waitFor();
     await page.click('[data-act="setup_next"]');
-    await page.locator('#setup-model-value').waitFor();
+    await page.locator('.setup-detail > summary').first().click();
     await page.fill('#setup-model-value', LOGIN);
     await page.click('[data-act="setup_model_save"]');
     await page.locator('[data-model-result="ok"]').waitFor();
@@ -113,6 +113,8 @@ async function run(language: 'en' | 'fr'): Promise<void> {
 
     // The egress image is missing: a failed line, what to do, no Continue.
     await page.waitForURL(`${app.base}/setup/checks`);
+    await page.locator('[data-checks-summary]:not([data-checks-summary=""])').waitFor();
+    await page.locator('.setup-detail > summary').first().click();
     await page.locator('[data-check="images"]').waitFor();
     await checked(page, 'checks, one image missing');
     const images = page.locator('[data-check="images"]');

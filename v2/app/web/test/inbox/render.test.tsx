@@ -271,3 +271,21 @@ test('a session the list does not know still shows its request', () => {
   assert.ok(!shown.includes('Author · Opus, paused for 3\u00a0min'));
   assert.equal(AUTHOR_ID.length > 0, true);
 });
+
+// Issue #495: a request of one session is not read as the answer to another's plan.
+test('what waits is under the name of its session once there are several', () => {
+  const fixture = inboxFixture(FIXTURE_NOW);
+  const html = renderInbox(viewOf(), en);
+  const tickets = new Set(fixture.items.filter((item) => item.state === 'waiting').map((item) => item.ticket));
+  assert.ok(tickets.size > 1);
+  assert.match(html, /data-session-group=/);
+  assert.match(html, /class="session-group-title"/);
+});
+
+test('a permission says what it is for and that only its own session is paused', () => {
+  const html = renderInbox(viewOf({ selected: idOf('permission'), open: true }), en);
+  const shown = visibleText(html).join(' ');
+  assert.match(shown, /What for: Install date-fns/);
+  assert.match(html, /data-request-paused/);
+  assert.match(shown, /Other sessions are not affected/);
+});

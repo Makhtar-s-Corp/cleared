@@ -9,7 +9,7 @@
 // It starts the built app (npm run build first) on a port of 9800 to 9899 that
 // is free, signs in a made-up user, draws each screen and closes all of it.
 import { spawn } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
@@ -200,6 +200,41 @@ async function shot(page: any, name: string, frame: 'desktop' | 'mobile') {
   await page.mouse.move(0, 0);
   await page.waitForTimeout(350);
   await page.screenshot({ path: join(folder, `${name}-${frame}.png`), fullPage: true, animations: 'disabled' });
+  if (process.env.ONBOARDING_SNAPSHOTS && frame === 'desktop') await snapshot(page, name);
+}
+
+// The screen as a page of its own, its sheets inline and no script, for
+// sloplint's render tier (ONBOARDING_SNAPSHOTS names the folder).
+async function snapshot(page: any, name: string) {
+  const dir = process.env.ONBOARDING_SNAPSHOTS as string;
+  mkdirSync(dir, { recursive: true });
+  const markup: string = await page.evaluate(async () => {
+    const sheets = await Promise.all([...document.querySelectorAll('link[rel="stylesheet"]')].map(async (link: any) => (await fetch(link.href)).text()));
+    const clone = document.documentElement.cloneNode(true) as HTMLElement;
+    clone.querySelectorAll('script, link[rel="stylesheet"], link[rel="modulepreload"]').forEach((node) => node.remove());
+    const style = document.createElement('style');
+    style.textContent = sheets.join('\n');
+    clone.querySelector('head')?.prepend(style);
+    return `<!doctype html>${clone.outerHTML}`;
+  });
+  // The bundle has no comment left: the stamp of the app's sheet first, as sloplint reads it.
+  const stamp = /^\/\* Hallmark[^]*?(?=\n\n|\n[^/ ])/.exec(readFileSync('app/web/styles/app.css', 'utf8'))?.[0] ?? '';
+  writeFileSync(join(dir, `${name}.html`), markup.replace('<style>', `<style>${stamp}\n`).replaceAll('/fonts/', `file://${resolve('app/public/fonts')}/`));
+}
+
+// axe on the screen with its folds open: nothing may fail, in the fold or out of it.
+const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'];
+const axeSource = readFileSync(createRequire(import.meta.url).resolve('axe-core/axe.min.js'), 'utf8');
+const problems: string[] = [];
+async function accessible(page: any, what: string) {
+  await page.evaluate(() => { document.querySelectorAll('details').forEach((fold: any) => { fold.open = true; }); });
+  await page.evaluate(axeSource);
+  const found: string[] = await page.evaluate(async (tags: string[]) => {
+    // The shell's named controls and the Tour's rows carry the longer name the app's own accessibility test allows them (app/test/a11y-browser.test.ts).
+    const result = await (window as any).axe.run({ include: [document], exclude: [['#palette-open'], ['#person'], ['.tower a'], ['#screen a[data-kind]'], ['#screen a[aria-labelledby]'], ['#screen a[href*="inbox#"]'], ['#screen a[href*="plan"]']] }, { resultTypes: ['violations'], runOnly: { type: 'tag', values: tags } });
+    return result.violations.map((v: { id: string; nodes: { target: string[] }[] }) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`);
+  }, TAGS);
+  for (const problem of found) problems.push(`${what}: ${problem}`);
 }
 
 const FRAMES = { desktop: { width: 1440, height: 900 }, mobile: { width: 390, height: 844 } } as const;
@@ -285,11 +320,14 @@ try {
       await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => undefined);
       await scene.act?.(page);
       await shot(page, scene.name, frame);
+      await accessible(page, `${scene.name} ${frame}`);
       await page.close();
     }
     await context.close();
   }
   await browser.close();
+  console.log(problems.length === 0 ? 'axe: no violation on any screen, at 1440 and 390' : `axe:\n${problems.join('\n')}`);
+  if (problems.length > 0) process.exitCode = 1;
 } finally {
   app.kill();
   rmSync(state, { recursive: true, force: true });

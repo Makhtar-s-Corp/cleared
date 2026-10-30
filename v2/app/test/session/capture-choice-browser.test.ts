@@ -50,7 +50,7 @@ async function withBrowser(options: Options, run: (page: any) => Promise<void>):
     const author = await page.evaluate(async (ticket: string) => ((await (await fetch('/api/service/sessions')).json()) as { id: string; ticket: string; role: string }[]).find((s) => s.ticket === ticket && s.role === 'author')?.id, TICKET_ID);
     assert.ok(author, `an author of ${TICKET_ID} in the fixtures`);
     await page.goto(`${app.base}/sessions/${encodeURIComponent(author)}`);
-    await page.locator('#s-left [data-ticket-captures]').waitFor();
+    await openFold(page);
     await run(page);
     assert.deepEqual(errors, [], 'no page error');
     assert.doesNotMatch(await page.evaluate(() => document.body.innerText), /⟦/, 'no missing key drawn');
@@ -60,6 +60,11 @@ async function withBrowser(options: Options, run: (page: any) => Promise<void>):
   }
 }
 
+// The switch is in the session's fold.
+const openFold = async (page: any): Promise<void> => {
+  await page.locator('[data-session-details] > summary').click();
+  await page.locator('#s-left [data-ticket-captures]').waitFor();
+};
 const buttons = (page: any): Promise<string[]> => page.locator('#s-left [data-ticket-captures] button').allInnerTexts();
 const pressed = (page: any): Promise<string[]> => page.locator('#s-left [data-ticket-captures] button[aria-pressed="true"]').evaluateAll((all: any[]) => all.map((b) => b.dataset.captures));
 const hint = async (page: any): Promise<string> => ((await page.locator('#s-left [data-ticket-captures] > p').first().innerText()) as string).trim();
@@ -88,6 +93,7 @@ test('the ticket card draws Auto, On and Off; Off is saved on the ticket and kep
     assert.equal(typeof kept.by, 'string', 'the signed-in account\'s id, who chose');
     assert.ok(!Number.isNaN(Date.parse(kept.at)), 'and when');
     await page.reload();
+    await openFold(page);
     await page.locator('#s-left [data-captures="off"][aria-pressed="true"]').waitFor();
     assert.deepEqual(await pressed(page), ['off']);
   });

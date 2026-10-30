@@ -49,6 +49,14 @@ export function SecretsStep({ t, api, onDone, initial, onOwnAction }: StepProps<
   const missing = rows.filter((row) => !savedName(values, row.service, row.name));
   useEffect(() => { onOwnAction?.(missing.length > 0); }, [onOwnAction, missing.length]);
 
+  // A value saved by hand when none was expected closes the step too.
+  const closed = useRef(false);
+  useEffect(() => {
+    if (initial || closed.current || !expected || rows.length > 0 || !savedAny(values)) return;
+    closed.current = true;
+    void api.post('/secrets/done', {}).then(() => done.current());
+  }, [api, expected, initial, rows.length, values]);
+
   const submit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
@@ -63,8 +71,8 @@ export function SecretsStep({ t, api, onDone, initial, onOwnAction }: StepProps<
       }
       const reread = await api.get<TestValuesView>('/secrets');
       if (reread.status === 200) setValues(reread.body);
-      const closed = await api.post('/secrets/done', {});
-      if (closed.status !== 200) { setError(testValueRefusal(t, closed.body)); return; }
+      const answer = await api.post('/secrets/done', {});
+      if (answer.status !== 200) { setError(testValueRefusal(t, answer.body)); return; }
       setSaved(true);
       done.current();
     } catch {
@@ -76,11 +84,11 @@ export function SecretsStep({ t, api, onDone, initial, onOwnAction }: StepProps<
 
   if (!expected || !values) return <StepFrame t={t} prefix="test_values" sentence={t('test_values_step_read')}><span className="setup-spinner" aria-hidden="true" /></StepFrame>;
   const editor = <TestValuesEditor t={t} client={api} path="/secrets" idPrefix="setup" titled={false} initial={values} onView={setValues} />;
-  if (!values.workspace) return <StepFrame t={t} prefix="test_values" sentence={t('test_values_no_workspace')} />;
+  if (!values.workspace) return <StepFrame t={t} prefix="test_values" sentence={t('test_values_no_workspace')}><span data-test-values-none /></StepFrame>;
   if (values.key === 'unusable') return <StepFrame t={t} prefix="test_values" detail={editor}><p className="setup-error" role="alert">{t('test_values_key_unusable')}</p></StepFrame>;
   if (nothing) return <StepFrame t={t} prefix="test_values" sentence={t('test_values_step_none')} detail={editor}><span data-test-values-none /></StepFrame>;
   return (
-    <StepFrame t={t} prefix="test_values" sentence={missing.length === 0 && (saved || rows.length > 0) ? t('test_values_step_saved') : undefined} detail={editor}>
+    <StepFrame t={t} prefix="test_values" sentence={missing.length === 0 ? t('test_values_step_saved') : undefined} detail={editor}>
       {missing.length > 0 ? (
         <form className="setup-form" onSubmit={(event) => void submit(event)} aria-busy={busy} data-test-values-expected>
           {missing.map((row) => {

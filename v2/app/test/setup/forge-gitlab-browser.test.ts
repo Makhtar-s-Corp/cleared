@@ -137,9 +137,11 @@ async function run(language: 'en' | 'fr'): Promise<void> {
 
     // Back on the step, GitLab is the forge it shows, with its address and no field.
     await page.reload();
-    await page.locator('[data-act="setup_gitlab_replace"]').waitFor();
+    await page.locator('[data-forge-saved]').waitFor();
     assert.equal(await page.locator('#setup-forge-gitlab').isChecked(), true);
-    assert.match(await page.locator('.setup-saved').innerText(), /127\.0\.0\.1/);
+    assert.match(await page.locator('[data-forge-saved]').innerText(), /127\.0\.0\.1/);
+    await page.locator('.setup-detail > summary').first().click();
+    await page.locator('[data-act="setup_gitlab_replace"]').waitFor();
     await checked(page, 'GitLab saved, again');
 
     assert.deepEqual(errors, [], 'no page error');

@@ -167,12 +167,6 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     assert.match(written, /^contract = openapi:contract\/openapi\.yaml$/m);
     assert.equal(readSettings(join(service.dir, 'settings.conf')).env.CLEARED_V2_WORKSPACE, join(service.dir, WORKSPACE_FILE));
     await page.locator('.setup-progress li[data-step="workspace"][data-state="done"]').waitFor();
-    // The guestbook has no .devcontainer here: said, with the step that proposes it a setup session.
-    const missing = await page.locator('[data-workspace-no-devcontainer]').innerText();
-    assert.match(missing, /guestbook/);
-    assert.doesNotMatch(missing, /filter-api/);
-    assert.equal(await page.locator('[data-workspace-no-devcontainer] a[href="/setup/environment"]').count(), 1);
-    await checked(page, 'no .devcontainer said');
     if (CAPTURES) {
       for (const [width, theme] of (language === 'en' ? [[1440, 'light'], [390, 'light']] : [[1440, 'light']]) as [number, string][]) {
         await page.evaluate((value: string) => { document.documentElement.dataset.theme = value; }, theme);

@@ -67,7 +67,7 @@ export function WaitingAlert({ t, now = new Date() }: { readonly t: Translate; r
   const values = { ticket: first.ticket, age: lasting(first.since, now, t), ask: askOf(first, t), count: waiting.length };
   return (
     <div className="setup-waiting" role="status" data-setup-waiting={first.id}>
-      <p><span className="dot" aria-hidden="true" />{t(waiting.length === 1 ? 'setup_waiting_one' : 'setup_waiting_many', values)}</p>
+      <p>{t(waiting.length === 1 ? 'setup_waiting_one' : 'setup_waiting_many', values)}</p>
       <a className="btn" href={`/inbox#${encodeURIComponent(first.id)}`}>{t('setup_waiting_open')}</a>
     </div>
   );
@@ -121,7 +121,7 @@ export function LiveSession({ t, ticket, pullRequest, now = new Date() }: {
   const phase = session?.phase;
   const busy = !phase || phase === 'starting' || phase === 'working' || phase === 'reviewing';
   return (
-    <div className="setup-live" data-setup-live={phase ?? 'none'} aria-busy={busy}>
+    <div className="setup-live" data-setup-live={phase ?? 'none'}>
       <p className="setup-live-state" role="status" aria-live="polite">
         {busy ? <span className="setup-spinner" aria-hidden="true" /> : <span className={`dot ${phase === 'waiting_human' ? 'awaiting' : phase === 'failed' ? 'danger' : 'ok'}`} aria-hidden="true" />}
         <span className="setup-live-word">{session ? t(`setup_live_${session.phase}`) : t('setup_live_none')}</span>

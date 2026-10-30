@@ -141,11 +141,11 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await page.click('[data-act="setup_next"]');
 
     await page.waitForURL(`${app.base}/setup/model`);
-    await page.locator('#setup-model-value').waitFor();
     await page.click('[data-act="setup_terminal"]');
     await page.locator('.term[data-terminal-state="open"]').waitFor();
     await checked(page, 'model with its terminal');
     if (CAPTURES && language === 'fr') await page.screenshot({ path: join(CAPTURES, 'model-1440-light-fr.png'), fullPage: true });
+    await page.locator('.setup-detail > summary').first().click();
     await page.fill('#setup-model-value', LOGIN);
     await page.click('[data-act="setup_model_save"]');
     await page.locator('[data-model-result="ok"]').waitFor();
@@ -157,7 +157,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
       // each with its own tests); with no workspace yet, each says so.
       const marker = id === 'workspace' ? '[data-workspace-step] [name="repository"]' : id === 'checks' ? '[data-check="docker"]'
         : id === 'environment' ? '[data-environment-none]' : id === 'secrets' ? '[data-test-values-none]' : '[data-first-ticket="waiting"]';
-      await page.locator(marker).first().waitFor();
+      await page.locator(marker).first().waitFor({ state: 'attached' });
       if (id === 'environment') await checked(page, 'the environment with no workspace');
       if (id === 'secrets') await checked(page, 'the test secrets with no workspace');
       if (id === 'first-ticket') await checked(page, 'the first ticket with no workspace');

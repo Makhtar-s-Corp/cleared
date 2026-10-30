@@ -89,8 +89,8 @@ function Shell({ t, view, current, linked, children }: { readonly t: Translate; 
         <div className="setup-brand">
           <Logo /><span className="name">{t('app_name')}</span>
           {linked ? (
-            <a className="setup-sessions" href="/sessions" data-setup-sessions aria-label={waiting.length > 0 ? t('setup_sessions_waiting', { count: waiting.length }) : undefined}>
-              {t('setup_sessions')}{waiting.length > 0 ? <span className="setup-count-badge" aria-hidden="true">{waiting.length}</span> : null}
+            <a className="setup-sessions" href="/sessions" data-setup-sessions>
+              {t('setup_sessions')}{waiting.length > 0 ? <><span className="setup-count-badge" aria-hidden="true">{waiting.length}</span><span className="sr-only">{t('setup_sessions_waiting', { count: waiting.length })}</span></> : null}
             </a>
           ) : null}
           {languages ? <LanguageChoice t={t} {...languages} /> : null}
