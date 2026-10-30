@@ -123,7 +123,7 @@ test('a signed-in owner reads the owner step\'s page, and its form posts as befo
     assert.match(page.text, /<html/);
     assert.equal((await ask(s.app, 'PUT', '/setup/owner', { cookie })).status, 405);
   } finally {
-    await s.stop();
+    await s.done();
   }
 });
 

@@ -15,6 +15,9 @@ import { createServer } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 
+declare const document: any;
+declare const window: any;
+
 const require = createRequire(import.meta.url);
 const { chromium } = require('playwright-core') as { chromium: { launch(options: Record<string, unknown>): Promise<any> } };
 
@@ -210,8 +213,8 @@ async function snapshot(page: any, name: string) {
   mkdirSync(dir, { recursive: true });
   const markup: string = await page.evaluate(async () => {
     const sheets = await Promise.all([...document.querySelectorAll('link[rel="stylesheet"]')].map(async (link: any) => (await fetch(link.href)).text()));
-    const clone = document.documentElement.cloneNode(true) as HTMLElement;
-    clone.querySelectorAll('script, link[rel="stylesheet"], link[rel="modulepreload"]').forEach((node) => node.remove());
+    const clone = document.documentElement.cloneNode(true);
+    clone.querySelectorAll('script, link[rel="stylesheet"], link[rel="modulepreload"]').forEach((node: any) => node.remove());
     const style = document.createElement('style');
     style.textContent = sheets.join('\n');
     clone.querySelector('head')?.prepend(style);
