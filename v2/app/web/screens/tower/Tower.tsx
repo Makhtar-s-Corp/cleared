@@ -27,7 +27,7 @@ import { Empty } from '@/shell/Empty.tsx';
 import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { ApiError } from '@/lib/screen.ts';
-import { SetupPending, setupPending } from '@/lib/setup-pending.tsx';
+import { SetupPending, serviceFailure, setupPending } from '@/lib/setup-pending.tsx';
 import { sessionStatus, ticketState } from '@/lib/status.ts';
 import { QUESTION_MAX, askBody, askFailure, askHref, questionProblem, startAsk } from '@/screens/ask/model.ts';
 import {
@@ -501,7 +501,7 @@ export default function Tower() {
       setFailed(null);
     } catch (error) {
       if (!live()) return;
-      setFailed(setupPending(error) ? PENDING : t(error instanceof ApiError && error.status === 401 ? 'signed_out' : 'load_failed'));
+      setFailed(setupPending(error) ? PENDING : serviceFailure(error, t, t(error instanceof ApiError && error.status === 401 ? 'signed_out' : 'load_failed')));
     }
   }, [context, t, setModel]);
 

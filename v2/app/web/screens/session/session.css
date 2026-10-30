@@ -6,26 +6,36 @@
 .session { --ok-text: var(--success-text); --add-fill: var(--success-fill); --del-fill: var(--danger-fill); }
 
 
-.session { display: grid; grid-template-columns: 272px minmax(0, 1fr) 288px; gap: var(--space-4); padding: var(--space-4) var(--space-4) var(--space-5); align-items: start; }
-/* The Editor open on a wide screen (lane 38, the critique): the ticket's column steps aside and the diff takes its
-   width, as a review pane would; Changes and Checks stay on the right. */
-@container screen (min-width: 1160px) {
-  .session:has(#tab-editor-button[aria-selected="true"]) { grid-template-columns: minmax(0, 1fr) 300px; }
-  .session:has(#tab-editor-button[aria-selected="true"]) > .s-left { display: none; }
-}
+.session { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--space-3) var(--space-4); padding: var(--space-3) var(--space-4) var(--space-5); align-items: start; }
+/* The session in five seconds: what it does, what it waits for from the person, where it is. */
+.s-summary { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-2) var(--space-4); margin: 0; padding-bottom: var(--space-3); border-bottom: 1px solid var(--line); }
+.s-summary > div { min-width: 0; }
+.s-summary dt { margin-bottom: 2px; font-size: var(--text-sm); color: var(--text-muted); }
+.s-summary dd { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); margin: 0; font-size: var(--text-lg); font-weight: var(--weight-strong); overflow-wrap: anywhere; }
+.s-summary .dot { flex: none; width: 6px; height: 6px; border-radius: 50%; }
+.s-summary .dot.awaiting { background: var(--awaiting); }
+.s-summary .btn { min-height: 28px; padding: 0 12px; }
+.s-side { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding-top: var(--space-2); }
+.s-after { display: contents; }
+.s-side .card { padding: 0; border-radius: var(--radius); background: transparent; box-shadow: none; }
+.s-side .card + .card, .s-side > .s-after + .card { padding-top: var(--space-3); border-top: 1px solid var(--line); }
+/* The title is in the summary above: the card keeps it for a screen reader. */
+.s-side > .card:first-child .card-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.s-fold > summary { display: flex; align-items: center; gap: var(--space-1); min-height: 28px; width: fit-content; font-size: var(--text-md); font-weight: var(--weight-strong); color: var(--text-secondary); cursor: pointer; list-style: none; border-radius: 4px; }
+.s-fold > summary::-webkit-details-marker { display: none; }
+.s-fold > summary:hover { color: var(--text); }
+.s-fold > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.s-fold[open] > summary .caret { transform: rotate(90deg); }
+.s-fold[open] > summary { margin-bottom: var(--space-2); }
+.s-fold-part { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--line); }
 /* The screen's own width decides the columns, since the sidebar (lane 35) takes
    its share of the window, open or folded: three from 1160 px, then two. */
 #screen:has(> [data-session-view] .session, > .session) { container: screen / inline-size; }
-.s-left, .s-right { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding-top: var(--space-2); }
 .card { padding: var(--space-3); border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-outline); }
 /* Beside the thread, the ticket and its facts lie on the page, as a review pane's sections: a hairline parts them,
    and the thread is the one framed surface (lane j3-visual-redesign, P227). */
-:is(.s-left, .s-right) > .card { padding: 0; border-radius: var(--radius); background: transparent; box-shadow: none; }
-:is(.s-left, .s-right) > .card + .card { padding-top: var(--space-3); border-top: 1px solid var(--line); }
-.s-left > .card:first-child .card-title { font-size: var(--text-xl); font-weight: var(--weight-heavy); line-height: 1.35; }
 .eyebrow { margin-bottom: var(--space-1); font-size: var(--text-sm); color: var(--text-muted); }
 .card-title { text-wrap: balance; margin-bottom: var(--space-2); font-size: var(--text-md); font-weight: var(--weight-heavy); line-height: 1.4; overflow-wrap: anywhere; }
-.desc { font-size: var(--text-md); color: var(--text-secondary); } .desc + .desc { margin-top: var(--space-2); }
 /* A resolved ticket's cost (P211): a fact a line, none cut, no separator left at a line's end. */
 .ticket-cost .fact { display: block; } .desc + .ticket-cost { margin-top: var(--space-2); }
 .ticket-production .fact { display: block; } .desc + .ticket-production, .ticket-cost + .ticket-production { margin-top: var(--space-2); }
@@ -64,7 +74,7 @@
 .changes .link-button:hover { color: var(--link); }
 
 /* the conversation */
-.session .panel { container: panel / inline-size; display: flex; flex-direction: column; min-height: 520px; height: calc(100vh - var(--top-bar) - var(--space-4) - var(--space-5)); border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--e-card); overflow: hidden; }
+.session .panel { container: panel / inline-size; display: flex; flex-direction: column; min-height: 520px; height: calc(100vh - var(--top-bar) - var(--space-5) - 96px); border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--e-card); overflow: hidden; }
 .session .panel-head { display: grid; grid-template-columns: 6px minmax(0, 1fr) auto; align-items: center; column-gap: 12px; row-gap: 2px; padding: 12px var(--space-3); border-bottom: 1px solid var(--line); background: var(--surface-muted); flex: none; }
 /* The status's phrase, its meta under it, Take over beside both (lane 36's art director). */
 .panel-head .phrase-title { min-width: 0; }
@@ -380,19 +390,12 @@ details.row .what > .sub { margin: 0 0 0 auto; }
   .file-pick { box-shadow: inset 0 0 0 1px var(--hairline); }
 }
 @container screen (max-width: 1159px) {
-  .session { grid-template-columns: 250px minmax(0, 1fr); grid-template-areas: "left panel" "right panel"; }
-  .s-left { grid-area: left; } .s-right { grid-area: right; } .panel { grid-area: panel; }
+  .session { grid-template-columns: minmax(0, 1fr) 260px; }
 }
-/* Under 760 px of screen (a tablet beside the folded sidebar, a phone): one column, the thread first. */
+/* Under 760 px of screen (a tablet beside the folded sidebar, a phone): one column, the summary, the thread, the rest. */
 @container screen (max-width: 759px) {
-  .session { grid-template-columns: minmax(0, 1fr); grid-template-areas: "panel" "left" "right"; }
-  /* The ticket first, its title and number only, so a phone says which ticket it is in (lane 38, the critique);
-     the thread next, then the rest of the left column and the right one. */
-  .session:has(> .s-left > .card:first-child) { grid-template-areas: "ticket" "panel" "left" "right"; }
-  .s-left { display: contents; }
-  .s-left > .card:first-child { grid-area: ticket; }
-  .s-left > .card:first-child .desc { display: none; }
-  .s-left > .card:not(:first-child) { grid-area: left; }
+  .session { grid-template-columns: minmax(0, 1fr); }
+  .s-summary { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 1100px) {
   .btn, .composer .btn, .panel-head .takeover-button, .panel-head .open-editor-button, .open-editor-links a.btn { min-height: 44px; }

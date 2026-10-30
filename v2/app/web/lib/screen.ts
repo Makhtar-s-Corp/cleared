@@ -19,10 +19,12 @@ export class ApiError extends Error {
   override name = 'ApiError';
   readonly status: number;
   readonly reason: string | undefined;                     // the answer's { error }, when it gave one
-  constructor(status: number, message: string, reason?: string) {
+  readonly detail: string | undefined;                     // the answer's { reason }: why, when the error has several
+  constructor(status: number, message: string, reason?: string, detail?: string) {
     super(message);
     this.status = status;
     this.reason = reason;
+    this.detail = detail;
   }
 }
 

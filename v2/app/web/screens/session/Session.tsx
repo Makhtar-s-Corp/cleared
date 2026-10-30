@@ -39,6 +39,7 @@ import { WebTerminal } from '@/components/terminal/Terminal.tsx';
 import { CopilotThreads, useThread } from '@/copilot/provider.tsx';
 import { useGo, useScreen } from '@/lib/context.tsx';
 import { Facts } from '@/components/facts/Facts.tsx';
+import { Markdown } from '@/components/markdown/Markdown.tsx';
 import { Empty } from '@/shell/Empty.tsx';
 import { stateOf, type SessionState } from '@/shell/model.ts';
 import { commandParts, intentSentence, looksLikeCommand } from '@/lib/intent.ts';
@@ -59,7 +60,7 @@ import { CloseTicket } from './CloseTicket.tsx';
 import { BrowserTab, Confidence, Criteria, EditorTab, OpenInEditor, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown, type PlanAsk } from './Tabs.tsx';
 import { browserView, changeProblem, CHANGE_MAX, editorOffer, goLine, handoverFor, nextTab, planAskBody, planAskProblem, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import {
-  CAPTURE_CHOICES, actingSession, captureChoiceOf, chooseCaptures, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, ticketCostFacts, productionFacts, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
+  CAPTURE_CHOICES, actingSession, captureChoiceOf, chooseCaptures, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, readChecks, type ReadCheck, ticketCostFacts, productionFacts, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
   type Filter, type Handover, type ThreadEntry, type TicketPart,
 } from './ticket.ts';
 import { askFailure, askHref, startAsk } from '@/screens/ask/model.ts';
@@ -455,8 +456,8 @@ function CaptureSwitch({ choice, t, busy, note, onCaptures }: {
   );
 }
 
-export function LeftCards({ view, t, onPlan, close, onCaptures, capturesBusy, capturesNote }: {
-  readonly view: SessionView; readonly t: Translate; readonly onPlan?: () => void; readonly close?: ReactNode;
+export function LeftCards({ view, t, onPlan, close, onCaptures, capturesBusy, capturesNote, extra, after }: {
+  readonly view: SessionView; readonly t: Translate; readonly onPlan?: () => void; readonly close?: ReactNode; readonly extra?: ReactNode; readonly after?: ReactNode;
   readonly onCaptures?: (choice: CaptureChoice['choice']) => void; readonly capturesBusy?: boolean; readonly capturesNote?: string;
 }) {
   const parsed = parseCriteria(view.ticket?.body ?? '');
@@ -478,15 +479,7 @@ export function LeftCards({ view, t, onPlan, close, onCaptures, capturesBusy, ca
       <section className="card" aria-labelledby="ticket-title">
         <p className="eyebrow">{t('ticket_label')} <span className="id">{view.summary.ticket}</span>{service ? <> · <span className="service">{service}</span></> : null}</p>
         <h2 id="ticket-title" className="card-title">{view.ticket?.title ?? view.summary.ticket}</h2>
-        {parsed.description.map((p, index) => <p key={index} className="desc">{p}</p>)}
-        {/* The session that works it, in facts (the project lead's review of #462): its role, its agent and model, since when. */}
-        <dl className="ticket-facts" data-session-facts="">
-          <dt>{t('facts_role')}</dt><dd>{t(`role_${view.summary.role}`)}</dd>
-          <dt>{t('facts_agent')}</dt><dd><span className={`sq ${harnessSquare(view.summary.harness)}`} aria-hidden="true" /><span className="id">{view.summary.harness}</span></dd>
-          <dt>{t('facts_model')}</dt><dd className="id">{view.summary.model}</dd>
-          <dt>{t('facts_started')}</dt><dd>{ago(view.summary.startedAt, view.now, t)}</dd>
-        </dl>
-        {versions ? <p className="session-versions faint small" data-session-versions="">{versions}</p> : null}
+        {parsed.description.length > 0 ? <Markdown className="desc" text={parsed.description.join('\n\n')} /> : null}
         {cost.length > 0 ? <p className="ticket-cost faint small" data-ticket-cost="">{cost.map((fact) => <span key={fact} className="fact">{fact}</span>)}</p> : null}
         {production.length > 0 ? (
           <p className="ticket-production faint small" data-ticket-production="">
@@ -495,40 +488,54 @@ export function LeftCards({ view, t, onPlan, close, onCaptures, capturesBusy, ca
               : <span key={index} className="fact">{fact.text}</span>))}
           </p>
         ) : null}
+      </section>
+      {after}
+      {/* The rest is one click away (the owner's request of 2026-10-30): a session reads in five seconds. */}
+      <details className="card s-fold" data-session-details="">
+        <summary className="s-fold-title"><CaretRight className="caret" size={11} aria-hidden="true" />{t('details_title')}</summary>
+        {/* The session that works it, in facts (the project lead's review of #462): its role, its agent and model, since when. */}
+        <dl className="ticket-facts" data-session-facts="">
+          <dt>{t('facts_role')}</dt><dd>{t(`role_${view.summary.role}`)}</dd>
+          <dt>{t('facts_agent')}</dt><dd><span className={`sq ${harnessSquare(view.summary.harness)}`} aria-hidden="true" /><span className="id">{view.summary.harness}</span></dd>
+          <dt>{t('facts_model')}</dt><dd className="id">{view.summary.model}</dd>
+          <dt>{t('facts_started')}</dt><dd>{ago(view.summary.startedAt, view.now, t)}</dd>
+        </dl>
+        {versions ? <p className="session-versions faint small" data-session-versions="">{versions}</p> : null}
         {view.captures && closable(view.ticket)
           ? <CaptureSwitch choice={view.captures.choice} t={t} busy={capturesBusy ?? false} {...(capturesNote ? { note: capturesNote } : {})} {...(onCaptures ? { onCaptures } : {})} />
           : null}
-        {close}
-      </section>
-      {parsed.criteria.length > 0 ? (
-        <section className="card" aria-labelledby="criteria-title">
-          <h3 id="criteria-title" className="card-label">{t('criteria_title')}</h3>
-          <Criteria view={view} t={t} />
-        </section>
-      ) : null}
-      {plan ? (
-        <section className="card" aria-labelledby="plan-title">
-          <h3 id="plan-title" className="card-label">{t('plan_title')}</h3>
-          <div className="plan-short">
-            <p><Confidence plan={plan} t={t} /> <span className="faint small">{t('plan_steps_count', { n: plan.steps.length })}</span></p>
-            <p className="small">{plan.go ? goLine(plan, view.me, t) : t('plan_waiting')}</p>
-            {onPlan ? <button type="button" className="link-button small" onClick={onPlan}>{t('plan_tab_title')}</button> : null}
+        {parsed.criteria.length > 0 ? (
+          <div className="s-fold-part" aria-labelledby="criteria-title">
+            <h3 id="criteria-title" className="card-label">{t('criteria_title')}</h3>
+            <Criteria view={view} t={t} />
           </div>
-        </section>
-      ) : null}
+        ) : null}
+        {plan ? (
+          <div className="s-fold-part" aria-labelledby="plan-title">
+            <h3 id="plan-title" className="card-label">{t('plan_title')}</h3>
+            <div className="plan-short">
+              <p><Confidence plan={plan} t={t} /> <span className="faint small">{t('plan_steps_count', { n: plan.steps.length })}</span></p>
+              <p className="small">{plan.go ? goLine(plan, view.me, t) : t('plan_waiting')}</p>
+              {onPlan ? <button type="button" className="link-button small" onClick={onPlan}>{t('plan_tab_title')}</button> : null}
+            </div>
+          </div>
+        ) : null}
+        {extra}
+        {close ? <div className="s-fold-part">{close}</div> : null}
+      </details>
     </>
   );
 }
 
-// A check, said by its intent when its name is a command, the command folded under.
-function CheckRow({ check, t }: { readonly check: { readonly name: string; readonly state: 'passed' | 'pending' | 'failed' }; readonly t: Translate }) {
-  const head = (name: string) => <><span className={`light ${check.state}`} aria-hidden="true" /><span className="check-name">{name}</span><span className="state">{t(`check_${check.state}`)}</span></>;
-  if (!looksLikeCommand(check.name)) return <li className="check">{head(check.name)}</li>;
+// A check, said by its intent when its name is a command, the commands folded under.
+function CheckRow({ check, t }: { readonly check: ReadCheck; readonly t: Translate }) {
+  const head = <><span className={`light ${check.state}`} aria-hidden="true" /><span className="check-name">{check.name}{check.commands.length > 1 ? <span className="faint small"> {t('checks_times', { n: check.commands.length })}</span> : null}</span><span className="state">{t(`check_${check.state}`)}</span></>;
+  if (!check.commands.some(looksLikeCommand)) return <li className="check">{head}</li>;
   return (
     <li className="check">
       <details>
-        <summary>{head(intentSentence(check.name, t))}<CaretRight className="caret" size={11} aria-hidden="true" /></summary>
-        <CommandLines command={check.name} />
+        <summary>{head}<CaretRight className="caret" size={11} aria-hidden="true" /></summary>
+        {check.commands.map((command) => <CommandLines key={command} command={command} />)}
       </details>
     </li>
   );
@@ -537,10 +544,8 @@ function CheckRow({ check, t }: { readonly check: { readonly name: string; reado
 export function RightCards({ view, t, onFile }: { readonly view: SessionView; readonly t: Translate; readonly onFile?: OpenFile }) {
   const parts = partsOf(view);
   const files = ticketFiles(parts);
-  const checks = ticketChecks(parts);
-  const steps = ticketSteps(parts, view.now.getTime());
-  // A Done ticket's empty lists are facts, not a wait, and its screen card,
-  // which can only say it has no picture, is not drawn (P222).
+  const checks = readChecks(ticketChecks(parts), (name) => (looksLikeCommand(name) ? intentSentence(name, t) : name));
+  // A Done ticket's empty lists are facts, not a wait.
   const done = view.ticket?.status === 'Done';
   return (
     <>
@@ -558,22 +563,59 @@ export function RightCards({ view, t, onFile }: { readonly view: SessionView; re
         <h3 id="checks-title" className="card-label">{t('checks_title')}</h3>
         {checks.length === 0 ? <p className="faint small">{t(done ? 'checks_none_done' : 'checks_none')}</p>
           : <ul className="checks">{checks.map((c) => <CheckRow key={c.name} check={c} t={t} />)}</ul>}
-        {steps.length === 0 ? null : (
-          <>
-            <h4 className="card-label sub-label">{t('steps_title')}</h4>
-            <ul className="steps">
-              {steps.map((step) => (
-                <li key={step.name}>
-                  <span>{t(`step_${step.name}`)}</span>
-                  <span className="faint">{duration(step.ms, t)}{step.count > 1 ? ` · ${t('step_times', { n: step.count })}` : ''}{step.open ? ` · ${t('step_running')}` : ''}</span>
-                </li>
-              ))}
-            </ul>
-          </>
-        )}
       </section>
-      {done ? null : <section className="card" aria-labelledby="screen-title"><h3 id="screen-title" className="card-label">{t('screen_title')}</h3><p className="screen-waiting"><ImageSquare size={20} aria-hidden="true" /><span>{t('screen_waiting')}</span></p></section>}
     </>
+  );
+}
+
+// What the time by step and the screen so far add, kept in the fold.
+export function FoldedFacts({ view, t }: { readonly view: SessionView; readonly t: Translate }) {
+  const steps = ticketSteps(partsOf(view), view.now.getTime());
+  // A Done ticket's screen card can only say it has no picture, and is not drawn (P222).
+  const done = view.ticket?.status === 'Done';
+  return (
+    <>
+      {steps.length === 0 ? null : (
+        <div className="s-fold-part">
+          <h3 className="card-label">{t('steps_title')}</h3>
+          <ul className="steps">
+            {steps.map((step) => (
+              <li key={step.name}>
+                <span>{t(`step_${step.name}`)}</span>
+                <span className="faint">{duration(step.ms, t)}{step.count > 1 ? ` · ${t('step_times', { n: step.count })}` : ''}{step.open ? ` · ${t('step_running')}` : ''}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {done ? null : <div className="s-fold-part"><h3 className="card-label">{t('screen_title')}</h3><p className="screen-waiting"><ImageSquare size={20} aria-hidden="true" /><span>{t('screen_waiting')}</span></p></div>}
+    </>
+  );
+}
+
+// The session in five seconds (the owner's request of 2026-10-30): what it does,
+// what it waits for from the person, where it is.
+export function SessionSummaryStrip({ view, t, onAnswer }: { readonly view: SessionView; readonly t: Translate; readonly onAnswer?: () => void }) {
+  const phase = phaseOf(view);
+  const ended = ENDED.has(phase);
+  const asks = view.thread.pending.length > 0;
+  const question = asks && view.thread.rows.some((row) => row.kind === 'question' && row.requestId === view.thread.pending[0]);
+  const wants = ended ? 'ended' : question ? 'question' : asks ? 'answer' : view.thread.plan?.go === null ? 'go' : 'nothing';
+  const role = t(`role_${view.summary.role}`);
+  const time = duration(Date.now() - Date.parse(view.summary.startedAt), t);
+  return (
+    <dl className="s-summary" data-session-summary="" data-wants={wants}>
+      <div><dt>{t('summary_doing')}</dt><dd>{view.ticket?.title ?? view.summary.ticket}</dd></div>
+      <div className="s-summary-wants">
+        <dt>{t('summary_wants')}</dt>
+        <dd>
+          {wants === 'nothing' || wants === 'ended' ? null : <span className="dot awaiting" aria-hidden="true" />}
+          <span>{t(`summary_wants_${wants}`)}</span>
+          {asks && onAnswer ? <Button className="btn" data-act="summary_answer" onClick={onAnswer}>{t('summary_answer')}</Button> : null}
+        </dd>
+      </div>
+      <div><dt>{t('summary_where')}</dt><dd>{ended ? t('summary_where_ended', { role }) : t('summary_where_role', { role, time })}</dd></div>
+    </dl>
   );
 }
 
@@ -1256,7 +1298,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
       {sessions.map((summary) => <Feed key={summary.id} summary={summary} detail={details.get(summary.id)} open={open(summary)} onThread={onThread} />)}
       <div className="session" ref={root} aria-busy={actingThread ? undefined : 'true'}>
         <SessionHeading view={view} />
-        <aside className="s-left" id="s-left" aria-label={t('left_label')}><LeftCards view={view} t={t} onPlan={() => select('plan', true)} onCaptures={(choice) => void onCaptures(choice)} capturesBusy={capturesBusy} capturesNote={capturesNote} close={closable(view.ticket) ? <CloseTicket ticket={view.summary.ticket} api={context.api} now={context.now} t={t} onClosed={() => context.inboxChanged()} /> : undefined} /></aside>
+        <SessionSummaryStrip view={view} t={t} onAnswer={() => { select('terminal'); requestAnimationFrame(() => document.querySelector('#tab-terminal [data-row="request"], #tab-terminal [data-row="question"]')?.scrollIntoView({ block: 'center' })); }} />
         <section className="panel" aria-label={t('timeline_label')}>
           <TabStrip tab={tab} t={t} onSelect={(next) => select(next)} onKey={onKey} />
           <div className="panel-head" id="status">
@@ -1313,7 +1355,10 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
             {tab === 'browser' ? <BrowserTab view={browser} t={t} /> : null}
           </div>
         </section>
-        <aside className="s-right" id="s-right" aria-label={t('right_label')}><RightCards view={view} t={t} onFile={openFile} /></aside>
+        <aside className="s-side" id="s-left" aria-label={t('left_label')}>
+          <LeftCards view={view} t={t} onPlan={() => select('plan', true)} onCaptures={(choice) => void onCaptures(choice)} capturesBusy={capturesBusy} capturesNote={capturesNote} close={closable(view.ticket) ? <CloseTicket ticket={view.summary.ticket} api={context.api} now={context.now} t={t} onClosed={() => context.inboxChanged()} /> : undefined}
+            after={<div className="s-after" id="s-right"><RightCards view={view} t={t} onFile={openFile} /></div>} extra={<FoldedFacts view={view} t={t} />} />
+        </aside>
       </div>
       <p className="sr-only" role="status" aria-live="polite">{said}</p>
     </>

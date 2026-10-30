@@ -1,27 +1,18 @@
-/* The environment step (lane v2-j5-images): one line per service, its
-   image's state in words in its own column and the bar beside it in the
-   state's colour, as the checks step draws its lines. Colour is never the
-   only sign. Tokens of styles/app.css only. */
-.setup-step .setup-env-summary { font-weight: var(--weight-strong); }
-.setup-env { list-style: none; margin: var(--space-2) 0 var(--space-3); padding: 0; display: flex; flex-direction: column; gap: var(--space-2); max-width: 820px; }
-.setup-env-item { display: grid; grid-template-columns: 104px minmax(0, 1fr); gap: var(--space-1) var(--space-3); padding: 12px 12px; border-radius: var(--radius); box-shadow: inset 2px 0 0 var(--line); }
-.setup-env-item[data-state="ready"] { box-shadow: inset 2px 0 0 var(--success); }
-.setup-env-item[data-state="failed"] { background: var(--danger-fill); box-shadow: inset 2px 0 0 var(--danger); }
-.setup-env-item[data-state="building"], .setup-env-item[data-state="stale"] { box-shadow: inset 2px 0 0 var(--awaiting); }
-.setup-env-state { font-size: var(--text-sm); font-weight: var(--weight-strong); color: var(--text-secondary); line-height: 1.5; }
-.setup-env-item[data-state="failed"] .setup-env-state { color: var(--danger-text); }
-.setup-env-body { min-width: 0; }
-.setup-step .setup-env-name { margin: 0; font-weight: var(--weight-strong); }
-.setup-step .setup-env-text, .setup-step .setup-env-todo { margin: 2px 0 0; max-width: 72ch; overflow-wrap: anywhere; color: var(--text-secondary); font-size: var(--text-sm); }
-.setup-step .setup-env-error { color: var(--text); }
-.setup-env-todo-label { font-weight: var(--weight-strong); }
-
-@media (max-width: 640px) {
-  .setup-env-item { grid-template-columns: minmax(0, 1fr); }
-}
-
-/* The declared check's output, and the setup session's proposal (lane v2-j5-env-setup, C4). */
-.setup-step .setup-env-output { margin: var(--space-2) 0 0; padding: var(--space-2) 12px; max-width: 72ch; max-height: 16em; overflow: auto; background: var(--sunken); border-radius: var(--radius); font-family: var(--mono); font-size: var(--text-sm); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text); }
-.setup-step .setup-env-session { margin: var(--space-2) 0 0; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) 12px; }
-.setup-step .setup-env-session > .setup-env-text { margin: 0; flex: 1 1 32ch; }
-.setup-step p.setup-env-session { display: block; color: var(--text-secondary); font-size: var(--text-sm); max-width: 72ch; }
+/* The environment step (issue #497): one line per service, its name and its state in a word beside its mark, one
+   sentence and one button when it needs them; what is under it in the fold. 1 px soft lines, no coloured side. */
+.setup-env { list-style: none; margin: 0 0 var(--space-3); padding: 0; display: flex; flex-direction: column; gap: var(--space-2); }
+.setup-env-item { padding: 12px var(--space-3); border-radius: var(--radius); box-shadow: inset 0 0 0 1px var(--line); }
+.setup-env-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 2px var(--space-3); }
+.setup-env-name { min-width: 0; font-weight: var(--weight-strong); overflow-wrap: anywhere; }
+.setup-env-state { display: inline-flex; align-items: center; gap: var(--space-2); flex: none; font-size: var(--text-sm); color: var(--text-secondary); }
+.setup-env-state .setup-spinner { margin-right: 0; }
+.setup-env-state .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--placeholder); }
+.setup-env-item[data-tone="ok"] .dot { background: var(--success); }
+.setup-env-item[data-tone="danger"] .dot { background: var(--danger); }
+.setup-env-item[data-tone="danger"] .setup-env-state { color: var(--danger-text); }
+.setup-step p.setup-env-need { margin: var(--space-2) 0 var(--space-3); color: var(--text-secondary); }
+.setup-env-item > .setup-live:last-child, .setup-env-item > div > .setup-live:last-child { margin-bottom: 0; }
+.setup-env-detail + .setup-env-detail { margin-top: var(--space-3); }
+.setup-step .setup-env-output { margin: var(--space-2) 0; padding: var(--space-2) 12px; max-height: 16em; overflow: auto; background: var(--sunken); border-radius: var(--radius); font-family: var(--mono); font-size: var(--text-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
+.setup-env-output:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.setup-step p.setup-env-offer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }

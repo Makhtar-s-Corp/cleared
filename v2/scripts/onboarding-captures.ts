@@ -113,6 +113,7 @@ const inbox = [
     plan: { steps: ['Ajouter une ligne à la fin du README.md'], files: ['README.md'], confidence: 'high', reason: 'Le fichier existe à la racine.', proposedAt: ago(2), go: null },
   },
 ];
+const reviewing = (): readonly unknown[] => [{ ...sessionsOf()[1], phase: 'reviewing', status: 'Reading the diff' }];
 const sessionsOf = (setupPhase = 'waiting_human') => [
   { id: SETUP_SESSION, project: 'guestbook', ticket: 'LOCAL-1', role: 'author', harness: 'claude-code', model: 'claude-opus-5-5', phase: setupPhase, status: 'Waiting for your answer', startedAt: ago(12), updatedAt: ago(9), lastSeq: 40, service: SERVICE },
   { id: PLAN_SESSION, project: 'guestbook', ticket: 'LOCAL-2', role: 'author', harness: 'claude-code', model: 'claude-opus-5-5', phase: 'waiting_human', status: 'Waiting for the Go', startedAt: ago(3), updatedAt: ago(2), lastSeq: 12, service: SERVICE },
@@ -161,7 +162,10 @@ type Stub = { readonly status?: number; readonly body: unknown };
 const json = (route: any, { status = 200, body }: Stub) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
 // The setup routes' answers for a screen of the assistant at `current`.
-function setupRoutes(page: any, current: string, tweak: Record<string, unknown> = {}) {
+async function setupRoutes(page: any, current: string, tweak: Record<string, unknown> = {}) {
+  // No session waits, unless the scene says one does (its later route wins).
+  await page.route('**/api/service/inbox**', (route: any) => json(route, { body: [] }));
+  await page.route('**/api/service/sessions', (route: any) => json(route, { body: [] }));
   return page.route('**/api/service/setup**', (route: any) => {
     const url = new URL(route.request().url());
     const path = url.pathname.replace('/api/service/setup', '');
@@ -193,6 +197,7 @@ function reception(page: any) {
 }
 
 async function shot(page: any, name: string, frame: 'desktop' | 'mobile') {
+  await page.mouse.move(0, 0);
   await page.waitForTimeout(350);
   await page.screenshot({ path: join(folder, `${name}-${frame}.png`), fullPage: true, animations: 'disabled' });
 }
@@ -224,11 +229,19 @@ const SCENES: readonly Scene[] = [
   { name: 'environment', path: '/setup/environment', current: 'environment' },
   {
     name: 'environment-session', path: '/setup/environment', current: 'environment', reception: true,
+    prepare: (page) => page.route('**/api/service/inbox**', (route: any) => json(route, { body: inbox.slice(0, 1) })),
     tweak: { '/environment': { ...environment, services: [{ ...environment.services[0], proposal: null, setupTicket: 'LOCAL-1' }] } },
   },
   { name: 'secrets', path: '/setup/secrets', current: 'secrets' },
   { name: 'checks', path: '/setup/checks', current: 'checks' },
-  { name: 'first-ticket', path: '/setup/first-ticket', current: 'first-ticket', reception: true },
+  {
+    name: 'first-ticket', path: '/setup/first-ticket', current: 'first-ticket',
+    tweak: { '/first-ticket': { ...firstTicket('review'), ticket: { ...firstTicket('review').ticket, pullRequest: { number: 12, url: 'https://example.com/pull/12' } } } },
+    prepare: (page) => Promise.all([
+      page.route('**/api/service/sessions', (route: any) => json(route, { body: reviewing() })),
+      page.route(`**/api/service/sessions/${PLAN_SESSION}/events**`, (route: any) => route.fulfill({ status: 200, contentType: 'text/event-stream', body: `id: 1\nevent: TOOL_CALL_START\ndata: ${JSON.stringify({ seq: 1, at: ago(1), sessionId: PLAN_SESSION, ticket: 'LOCAL-2', event: { type: 'TOOL_CALL_START', toolCallId: 'c1', toolCallName: 'Read' } })}\n\nid: 2\nevent: TOOL_CALL_ARGS\ndata: ${JSON.stringify({ seq: 2, at: ago(1), sessionId: PLAN_SESSION, ticket: 'LOCAL-2', event: { type: 'TOOL_CALL_ARGS', toolCallId: 'c1', delta: JSON.stringify({ kind: 'read', path: '/workspace/README.md' }) } })}\n\n` })),
+    ]),
+  },
   { name: 'reception', path: '/inbox', reception: true },
   { name: 'tour', path: '/' },
   {

@@ -1,0 +1,13 @@
+/* A ticket's text, on the card's own scale: a heading is a quiet line, no larger than the text. */
+.markdown { font-size: var(--text-md); color: var(--text-secondary); overflow-wrap: anywhere; }
+.markdown > * { margin: 0; }
+.markdown > * + * { margin-top: var(--space-2); }
+.markdown .markdown-heading { font-size: var(--text-md); font-weight: var(--weight-strong); color: var(--text); }
+.markdown > * + .markdown-heading { margin-top: var(--space-3); }
+.markdown ul, .markdown ol { padding-left: var(--space-3); }
+.markdown li + li { margin-top: 2px; }
+.markdown code { padding: 0 var(--space-1); border-radius: 4px; background: var(--sunken); font-family: var(--mono); font-size: var(--text-sm); }
+.markdown pre { padding: var(--space-2); border-radius: var(--radius); background: var(--sunken); overflow-x: auto; }
+.markdown pre code { padding: 0; background: transparent; }
+.markdown a { color: var(--link); }
+.markdown a:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }

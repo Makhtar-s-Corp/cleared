@@ -376,3 +376,10 @@ a.btn, a.btn:hover { text-decoration: none; }
 .variant-files { margin: 0; padding: 0; list-style: none; font-size: var(--text-sm); }
 .variant .diff { max-height: 420px; overflow: auto; }
 .variant .btn { align-self: flex-start; }
+
+/* Issue #495: each session's requests under its own name, so that one's plan is never read as the answer to another's request. */
+.session-group + .session-group { margin-top: var(--space-3); padding-top: var(--space-2); border-top: 1px solid var(--line); }
+.session-group-title { margin: 0 0 var(--space-1); padding: var(--space-1) var(--space-3) 0; font-size: var(--text-sm); font-weight: var(--weight-strong); color: var(--text-secondary); overflow-wrap: anywhere; }
+.session-group-title .id { font-family: var(--mono); font-weight: var(--weight-regular); }
+.d-what-for { margin: var(--space-1) 0 0; font-size: var(--text-lg); color: var(--text); overflow-wrap: anywhere; }
+.d-paused { margin: var(--space-1) 0 0; font-size: var(--text-sm); color: var(--text-muted); }

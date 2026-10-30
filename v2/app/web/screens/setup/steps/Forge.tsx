@@ -1,11 +1,11 @@
 // The assistant's forge step's screen (docs/v2/milestone-5-plan.md, sections
-// 5.2 and 11): GitHub or GitLab, two radio buttons of one group, GitHub
-// first and chosen until a GitLab token is saved alone. GitHub: the
-// permissions a fine-grained token needs and a hidden field. GitLab: its
-// address (gitlab.com by default), the scope and the role the token needs,
-// where to make it on that GitLab, and a hidden field. The service checks
-// either on the spot. Once saved, the step says since when and offers
-// Replace; it never shows the value, and the service never sends it back.
+// 5.2 and 11; issue #497): GitHub or GitLab, two radio buttons of one group,
+// GitHub first and chosen until a GitLab token is saved alone. A link that
+// opens the forge's page with the token's name and permissions filled in, a
+// hidden field, one button; the permissions and the rest are in the detail.
+// The service checks the token on the spot. Once saved, the step says it is
+// connected; since when and Replace are in the detail. It never shows the
+// value, and the service never sends it back.
 import { useEffect, useState, type FormEvent } from 'react';
 import { FORGE_RIGHTS, type CredentialView, type ForgeChecked, type ForgeView, type GitLabView } from '../../../../../src/setup/types.ts';
 import { Button } from '@/components/ui/button.tsx';
@@ -15,8 +15,16 @@ import { dayOf, refusal } from '../model.ts';
 import { StepFrame, type StepProps } from '../step.tsx';
 import './forge.css';
 
-// GitHub's page that makes a fine-grained credential.
-const GITHUB_NEW_FINE_GRAINED = 'https://github.com/settings/personal-access-tokens/new';
+// GitHub's page that makes a fine-grained credential, its name and the
+// permissions FORGE_RIGHTS requires filled in (GitHub's "Pre-filling
+// fine-grained personal access token details using URL parameters"). `statuses`
+// is the API's name of what the page calls Commit statuses.
+const FORGE_PARAMETER: Readonly<Record<string, string>> = { commit_statuses: 'statuses' };
+export const githubTokenPage = (): string => {
+  const query = new URLSearchParams({ name: 'Cleared' });
+  for (const right of FORGE_RIGHTS) if (!right.optional) query.set(FORGE_PARAMETER[right.permission] ?? right.permission, right.access);
+  return `https://github.com/settings/personal-access-tokens/new?${query.toString()}`;
+};
 const GITLAB_COM = 'https://gitlab.com';
 const UNSET: GitLabView = { credential: { set: false }, address: GITLAB_COM };
 
@@ -30,10 +38,17 @@ const hostOf = (address: string): string => {
   try { return new URL(address).host; } catch { return address; }
 };
 
+// The one sentence of a saved credential, and what the detail says of it.
 export function credentialLine(t: Translate, prefix: string, credential: CredentialView, values: Record<string, string> = {}): string {
   if (!credential.set) return '';
   if (credential.source === 'environment') return t(`${prefix}_set_environment`, values);
   return credential.at ? t(`${prefix}_set`, { ...values, date: dayOf(credential.at, t) }) : t(`${prefix}_set_undated`, values);
+}
+
+export function credentialDetail(t: Translate, prefix: string, credential: CredentialView): string {
+  if (!credential.set) return '';
+  if (credential.source === 'environment') return t(`${prefix}_set_environment_detail`);
+  return credential.at ? t(`${prefix}_set_detail`, { date: dayOf(credential.at, t) }) : '';
 }
 
 export function checkedLine(t: Translate, checked: ForgeChecked): string {
@@ -43,39 +58,23 @@ export function checkedLine(t: Translate, checked: ForgeChecked): string {
   return checked.repositories === 1 ? t(`${prefix}_ok_one`, { names }) : t(`${prefix}_ok_many`, { count: checked.repositories, names });
 }
 
-// GitLab's fields: its address, what the token needs, where to make it, and the hidden field.
+// GitLab's fields: its address, where to make the token, and the hidden field.
 export function GitLabFields({ t, address, busy, error, onSubmit }: { readonly t: Translate; readonly address: string; readonly busy: boolean; readonly error: string; readonly onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
   const [typed, setTyped] = useState(address);
   let page = gitlabTokenPage(GITLAB_COM);
   try { if (/^https?:\/\//.test(typed)) page = gitlabTokenPage(new URL(typed).href); } catch { /* the address is said wrong when it is checked */ }
   return (
-    <>
-      <p>{t('gitlab_intro')}</p>
-      <h3>{t('gitlab_rights_title')}</h3>
-      <ul className="setup-rights">
-        <li>
-          <span className="setup-right-name">{t('gitlab_scope_name')}</span>
-          <span className="setup-right-access"><code>{t('gitlab_scope_value')}</code></span>
-          <span className="setup-right-use">{t('gitlab_scope_use')}</span>
-        </li>
-        <li>
-          <span className="setup-right-name">{t('gitlab_role_name')}</span>
-          <span className="setup-right-access">{t('gitlab_role_developer')}</span>
-          <span className="setup-right-use">{t('gitlab_role_use')}</span>
-        </li>
-      </ul>
-      <form className="setup-form" onSubmit={onSubmit} aria-busy={busy}>
-        <label htmlFor="setup-gitlab-address">{t('gitlab_address_field')}</label>
-        <Input id="setup-gitlab-address" name="address" type="url" inputMode="url" autoComplete="url" spellCheck={false} required maxLength={300}
-          aria-describedby="setup-gitlab-address-hint" value={typed} onChange={(event) => setTyped(event.currentTarget.value)} />
-        <p className="setup-hint" id="setup-gitlab-address-hint">{t('gitlab_address_hint')}</p>
-        <p className="forge-make"><a className="setup-link" href={page} target="_blank" rel="noreferrer">{t('gitlab_create')}</a></p>
-        <label htmlFor="setup-gitlab-value">{t('gitlab_field')}</label>
-        <Input id="setup-gitlab-value" name="value" type="password" autoComplete="off" spellCheck={false} required maxLength={512} />
-        {error ? <p className="setup-error" role="alert">{error}</p> : null}
-        <Button variant="ink" className="primary" type="submit" data-act="setup_gitlab_check" disabled={busy}>{busy ? t('gitlab_checking') : t('gitlab_check')}</Button>
-      </form>
-    </>
+    <form className="setup-form" onSubmit={onSubmit} aria-busy={busy}>
+      <label htmlFor="setup-gitlab-address">{t('gitlab_address_field')}</label>
+      <Input id="setup-gitlab-address" name="address" type="url" inputMode="url" autoComplete="url" spellCheck={false} required maxLength={300}
+        aria-describedby="setup-gitlab-address-hint" value={typed} onChange={(event) => setTyped(event.currentTarget.value)} />
+      <p className="setup-hint" id="setup-gitlab-address-hint">{t('gitlab_address_hint')}</p>
+      <p className="forge-make"><a className="setup-link" href={page} target="_blank" rel="noreferrer">{t('gitlab_create')}</a></p>
+      <label htmlFor="setup-gitlab-value">{t('gitlab_field')}</label>
+      <Input id="setup-gitlab-value" name="value" type="password" autoComplete="off" spellCheck={false} required maxLength={512} />
+      {error ? <p className="setup-error" role="alert">{error}</p> : null}
+      <Button variant="ink" className="primary" type="submit" data-act="setup_gitlab_check" disabled={busy}>{busy ? t('gitlab_checking') : t('gitlab_check')}</Button>
+    </form>
   );
 }
 
@@ -124,23 +123,22 @@ export function ForgeStep({ t, api, onDone, initial }: StepProps<Initial>) {
   const fromEnvironment = saved?.set === true && saved.source === 'environment';
   const showField = saved !== undefined && !fromEnvironment && (!saved.set || replacing);
   const host = hostOf(gitlab?.address ?? GITLAB_COM);
-  return (
-    <StepFrame t={t} prefix="forge">
-      <fieldset className="forge-choice">
-        <legend>{t('forge_choice')}</legend>
-        <div className="forge-options">
-          {(['github', 'gitlab'] as const).map((forge) => (
-            <label key={forge} className="forge-option" htmlFor={`setup-forge-${forge}`}>
-              <input type="radio" id={`setup-forge-${forge}`} name="forge" value={forge} checked={choice === forge} onChange={() => pick(forge)} disabled={busy} />
-              {t(`forge_choice_${forge}`)}
-            </label>
-          ))}
+  const prefix = choice === 'gitlab' ? 'gitlab' : 'forge';
+  const savedLine = saved?.set ? credentialDetail(t, prefix, saved) : '';
+  const detail = (
+    <>
+      {saved?.set && !replacing ? (
+        <div className="setup-saved">
+          {savedLine ? <p>{savedLine}</p> : null}
+          {fromEnvironment ? null : (
+            <Button className="btn" data-act={choice === 'gitlab' ? 'setup_gitlab_replace' : 'setup_forge_replace'} onClick={() => { setReplacing(true); setChecked(undefined); }}>
+              {t(choice === 'gitlab' ? 'gitlab_replace' : 'forge_replace')}
+            </Button>
+          )}
         </div>
-      </fieldset>
+      ) : null}
       {choice === 'github' ? (
         <>
-          <p>{t('forge_github_intro')}</p>
-          <p><a className="setup-link" href={GITHUB_NEW_FINE_GRAINED} target="_blank" rel="noreferrer">{t('forge_create')}</a></p>
           <h3>{t('forge_rights_title')}</h3>
           <ul className="setup-rights">
             {FORGE_RIGHTS.map((right) => (
@@ -153,21 +151,44 @@ export function ForgeStep({ t, api, onDone, initial }: StepProps<Initial>) {
           </ul>
           <p className="setup-note">{t('forge_classic')}</p>
         </>
-      ) : null}
-      {saved === undefined ? <p className="setup-note" aria-busy="true">{t('setup_loading')}</p> : null}
-      {checked && checked.forge === choice ? <p className="setup-ok" data-forge-result="ok" role="status">{checkedLine(t, checked)}</p> : null}
-      {saved?.set && !replacing ? (
-        <div className="setup-saved">
-          <p>{choice === 'gitlab' ? credentialLine(t, 'gitlab', saved, { host }) : credentialLine(t, 'forge', saved)}</p>
-          {fromEnvironment ? null : (
-            <Button className="btn" data-act={choice === 'gitlab' ? 'setup_gitlab_replace' : 'setup_forge_replace'} onClick={() => { setReplacing(true); setChecked(undefined); }}>
-              {t(choice === 'gitlab' ? 'gitlab_replace' : 'forge_replace')}
-            </Button>
-          )}
+      ) : (
+        <>
+          <h3>{t('gitlab_rights_title')}</h3>
+          <ul className="setup-rights">
+            <li>
+              <span className="setup-right-name">{t('gitlab_scope_name')}</span>
+              <span className="setup-right-access"><code>{t('gitlab_scope_value')}</code></span>
+              <span className="setup-right-use">{t('gitlab_scope_use')}</span>
+            </li>
+            <li>
+              <span className="setup-right-name">{t('gitlab_role_name')}</span>
+              <span className="setup-right-access">{t('gitlab_role_developer')}</span>
+              <span className="setup-right-use">{t('gitlab_role_use')}</span>
+            </li>
+          </ul>
+        </>
+      )}
+    </>
+  );
+  return (
+    <StepFrame t={t} prefix="forge" detail={detail}>
+      <fieldset className="forge-choice">
+        <legend>{t('forge_choice')}</legend>
+        <div className="forge-options">
+          {(['github', 'gitlab'] as const).map((forge) => (
+            <label key={forge} className="forge-option" htmlFor={`setup-forge-${forge}`}>
+              <input type="radio" id={`setup-forge-${forge}`} name="forge" value={forge} checked={choice === forge} onChange={() => pick(forge)} disabled={busy} />
+              {t(`forge_choice_${forge}`)}
+            </label>
+          ))}
         </div>
-      ) : null}
+      </fieldset>
+      {saved === undefined ? <p className="setup-note" aria-busy="true">{t('setup_loading')}</p> : null}
+      {checked && checked.forge === choice ? <p className="setup-ok" data-forge-result="ok" role="status">{checkedLine(t, checked)}</p>
+        : saved?.set && !replacing ? <p className="setup-ok" data-forge-saved role="status">{credentialLine(t, prefix, saved, { host })}</p> : null}
       {showField && choice === 'github' ? (
         <form className="setup-form" onSubmit={submit('github')} aria-busy={busy}>
+          <p className="forge-make"><a className="setup-link" href={githubTokenPage()} target="_blank" rel="noreferrer" data-forge-create>{t('forge_create')}</a></p>
           <label htmlFor="setup-forge-value">{t('forge_field')}</label>
           <Input id="setup-forge-value" name="value" type="password" autoComplete="off" spellCheck={false} required maxLength={512} />
           {error ? <p className="setup-error" role="alert">{error}</p> : null}

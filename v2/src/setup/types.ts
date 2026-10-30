@@ -104,3 +104,7 @@ export type FirstTicketView = {
   readonly proposal: { readonly title: string; readonly body: string };
   readonly ticket: FirstTicket | null;
 };
+
+// GET /api/setup/secrets/expected: the names of the test secrets each service's
+// repository shows it needs, and where one was seen (secrets/expected.ts).
+export type ExpectedSecrets = { readonly services: readonly { readonly service: string; readonly names: readonly { readonly name: string; readonly from: string }[] }[] };
