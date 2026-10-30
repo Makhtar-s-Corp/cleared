@@ -42,7 +42,7 @@
   "environment_detail_started": "Started {age}.",
   "environment_detail_check": "Test command",
   "environment_detail_check_none": "None declared ([session] test_command, or a test script in package.json).",
-  "environment_detail_check_passed": "Passed in {took}.",
+  "environment_detail_check_ok": "Passed in {took}.",
   "environment_detail_error": "What the build said",
   "environment_detail_base": "Built on",
   "environment_detail_proposal": "If the tests need more than the session image, a setup session writes its .devcontainer."

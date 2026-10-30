@@ -96,7 +96,7 @@ function ServiceDetail({ t, service, now, several, sessions, starting, onStart }
       {several ? <h3>{service.name}</h3> : null}
       <dl className="setup-facts">
         <dt>{t('environment_detail_install')}</dt><dd>{service.install ? <code>{service.install}</code> : t('environment_detail_install_none')}</dd>
-        <dt>{t('environment_detail_check')}</dt><dd>{service.checkCommand ? <code>{service.checkCommand}</code> : t('environment_detail_check_none')}{check?.passed ? ` ${t('environment_detail_check_passed', { took: lasted(check.ms, t) })}` : ''}</dd>
+        <dt>{t('environment_detail_check')}</dt><dd>{service.checkCommand ? <code>{service.checkCommand}</code> : t('environment_detail_check_none')}{check?.passed ? ` ${t('environment_detail_check_ok', { took: lasted(check.ms, t) })}` : ''}</dd>
         {service.image ? <><dt>{t('environment_detail_image')}</dt><dd><code>{service.image}</code>{service.buildMs !== null && service.builtAt ? ` ${t('environment_detail_built', { took: lasted(service.buildMs, t), age: ago(service.builtAt, now, t) })}` : ''}</dd></> : null}
         {service.state === 'building' && service.startedAt ? <><dt>{t('environment_detail_image')}</dt><dd>{t('environment_detail_started', { age: ago(service.startedAt, now, t) })}</dd></> : null}
         {service.devcontainer === 'none' ? <><dt>{t('environment_detail_base')}</dt><dd>{t('environment_no_devcontainer')}</dd></> : null}

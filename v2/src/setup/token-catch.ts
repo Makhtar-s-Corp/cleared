@@ -8,8 +8,8 @@
 const ESCAPE = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[@-Z\\^_])/y;
 const OPEN_ESCAPE = /\u001b(?:\[[0-?]*[ -/]*|\][^\u0007\u001b]*)?$/;
 const PREFIX = 'sk-ant-';
-const API_KEY = 'sk-ant-api';                  // an API key is not what the adapter reads (setup/steps/model.ts)
-export const TOKEN_MASK = '••••••••';
+const API_KEY = `${PREFIX}api`;                // an API key is not what the adapter reads (setup/steps/model.ts)
+export const TOKEN_MASK = '•'.repeat(8);
 
 // The text without its escape sequences, each kept character with its place in the text.
 function plainOf(text: string): { readonly plain: string; readonly at: readonly number[] } {
