@@ -3,7 +3,7 @@
   "setup_heading": "Set up Cleared",
   "setup_progress_label": "Setup steps",
   "setup_step_owner": "Your account",
-  "setup_step_forge": "Forge",
+  "setup_step_forge": "Your code",
   "setup_step_model": "Claude Code",
   "setup_step_workspace": "Repositories",
   "setup_step_environment": "Environment",
