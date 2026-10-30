@@ -120,6 +120,16 @@ test('the step runs the command in its own terminal, takes the token from its ou
   });
 });
 
+test('a piece of a token, the output cut in its middle, is not saved', async () => {
+  await withModel(async (service, owner, container) => {
+    assert.equal((await service.call('/api/setup/model/terminal/open', { method: 'POST', user: owner, body: { cols: 40, rows: 30, capture: true } })).status, 200);
+    container.print(`${LOGIN.slice(0, 25)}\r\n\r\nStopped.\r\n`);
+    await new Promise((resolve) => setTimeout(resolve, 30));
+    assert.equal(existsSync(join(service.dir, 'claude.token')), false);
+    await service.call('/api/setup/model/terminal/close', { method: 'POST', user: owner });
+  });
+});
+
 test('a login file the environment names is shown as such and not replaced from the browser', async () => {
   await withModel(async (service, owner) => {
     assert.deepEqual((await service.call('/api/setup/model', { user: owner })).json.credential, { set: true, at: null, source: 'environment' });

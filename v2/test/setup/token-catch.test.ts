@@ -66,3 +66,20 @@ test('a token printed twice, as a screen repaints it, is masked twice', () => {
   assert.deepEqual(tokens, [TOKEN, TOKEN]);
   assert.equal(shown.split(TOKEN_MASK).length, 3);
 });
+
+// As Claude Code 2.1.306 draws it: spaces as moves to the right, lines ended by \r\r\n, a link around nothing here.
+test('the screen of the real command: words drawn with moves, the token wrapped, a blank row after it', () => {
+  const words = (text: string) => text.split(' ').join('\u001b[1C');
+  const screen = [
+    `\u001b[32m\u2713\u001b[1C${words('Long-lived authentication token created successfully!')}\u001b[39m\r\r\n\r\r\n`,
+    `${words('Your OAuth token (valid for 1 year):')}\r\r\n\r\r\n`,
+    `\u001b[33m${TOKEN.slice(0, 40)}\r\r\n${TOKEN.slice(40, 80)}\r\r\n${TOKEN.slice(80)}\u001b[39m\r\r\n\r\r\n`,
+    `\u001b[2m${words('Store this token securely. You won\'t be able to see it again.')}\u001b[22m\r\r\n`,
+  ].join('');
+  const { tokens, shown } = run([screen]);
+  assert.deepEqual(tokens, [TOKEN]);
+  for (const piece of [TOKEN.slice(0, 40), TOKEN.slice(40, 80), TOKEN.slice(80)]) assert.ok(!shown.includes(piece));
+  assert.match(shown, /Store/);
+  const noBlank = run([`${TOKEN}\r\r\n\u001b[2m${words('Store this token')}\u001b[22m\r\r\n`]);
+  assert.deepEqual(noBlank.tokens, [TOKEN], 'a line of words is not the token, even drawn with moves');
+});

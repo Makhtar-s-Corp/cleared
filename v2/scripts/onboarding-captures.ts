@@ -230,8 +230,14 @@ async function accessible(page: any, what: string) {
   await page.evaluate(() => { document.querySelectorAll('details').forEach((fold: any) => { fold.open = true; }); });
   await page.evaluate(axeSource);
   const found: string[] = await page.evaluate(async (tags: string[]) => {
-    // The shell's named controls and the Tour's rows carry the longer name the app's own accessibility test allows them (app/test/a11y-browser.test.ts).
-    const result = await (window as any).axe.run({ include: [document], exclude: [['#palette-open'], ['#person'], ['.tower a'], ['#screen a[data-kind]'], ['#screen a[aria-labelledby]'], ['#screen a[href*="inbox#"]'], ['#screen a[href*="plan"]']] }, { resultTypes: ['violations'], runOnly: { type: 'tag', values: tags } });
+    // As the app's own accessibility test runs it (app/test/a11y-browser.test.ts): the named controls keep their longer name.
+    const LABEL = 'label-content-name-mismatch';
+    const axe = (window as any).axe;
+    const rules = axe.getRules(tags).filter((r: { ruleId: string; tags: string[] }) => r.ruleId !== LABEL && !r.tags.some((tag) => tag === 'experimental' || tag === 'deprecated')).map((r: { ruleId: string }) => r.ruleId);
+    const named = ['#palette-open', '#person', 'a.need.row', 'a.open.row', 'a.open.index-row', '#detail [data-act="approve"]'];
+    const all = await axe.run(document, { resultTypes: ['violations'], runOnly: { type: 'rule', values: rules } });
+    const label = await axe.run({ include: [document], exclude: named.map((selector) => [selector]) }, { resultTypes: ['violations'], runOnly: { type: 'rule', values: [LABEL] } });
+    const result = { violations: [...all.violations, ...label.violations] };
     return result.violations.map((v: { id: string; nodes: { target: string[] }[] }) => `${v.id}: ${v.nodes.map((n) => n.target.join(' ')).join(', ')}`);
   }, TAGS);
   for (const problem of found) problems.push(`${what}: ${problem}`);

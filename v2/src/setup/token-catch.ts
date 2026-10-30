@@ -1,7 +1,8 @@
 // What `claude setup-token` prints, taken out of its terminal's output (issue
-// #490). A terminal wraps the token on two lines or more and colours it, so
-// the output is read without its escape sequences and the token's lines are
-// joined. Nothing of the token goes on: from its first character it is held,
+// #490). In Claude Code 2.1.306 the token is one coloured text of a column with
+// a blank row after it, then "Store this token securely..."; a terminal wraps it
+// on two lines or more, so the output is read without its escape sequences and
+// the token's lines are joined. Nothing of the token goes on: from its first character it is held,
 // then replaced by a mask, so that it reaches no browser and no terminal's
 // kept output. Anything that is not the token passes as it came.
 const ESCAPE = /\u001b(?:\[[0-?]*[ -/]*[@-~]|\][^\u0007\u001b]*(?:\u0007|\u001b\\)|[@-Z\\^_])/y;
@@ -17,7 +18,13 @@ function plainOf(text: string): { readonly plain: string; readonly at: readonly 
   for (let i = 0; i < text.length;) {
     ESCAPE.lastIndex = i;
     const escape = text[i] === '\u001b' ? ESCAPE.exec(text) : null;
-    if (escape) { i += escape[0].length; continue; }
+    if (escape) {
+      // The sign-in screen draws a space as a move to the right, and may go to a new line by a move down.
+      const move = /^\u001b\[[\d;]*([CBEHfd])$/.exec(escape[0])?.[1];
+      if (move) { plain += move === 'C' ? ' ' : '\n'; at.push(i); }
+      i += escape[0].length;
+      continue;
+    }
     plain += text[i];
     at.push(i);
     i += 1;

@@ -51,6 +51,7 @@ function credentialOf(deps: StepDeps): CredentialView {
 
 const SETUP_COMMAND: readonly string[] = ['claude', 'setup-token'];
 const TOKEN_START = 'sk-ant-';
+const CAPTURE_MIN = 40;
 const HOLD_MS = 1_200;                         // the output paused this long: what was held is decided as it stands
 
 // The step's terminals, with the token taken out of their output.
@@ -104,6 +105,8 @@ const model: SetupStep = {
     };
     let opener = '';
     const captured = (token: string): void => {
+      // A piece of a token, if the output stopped in its middle, is never saved: the field stays there.
+      if (token.length < CAPTURE_MIN) return;
       try { save(token); } catch (error) {
         if (!(error instanceof HttpError)) throw error;
         return;
