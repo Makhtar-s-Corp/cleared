@@ -145,6 +145,7 @@ async function sessionRoutes(page: any, failure: { readonly code: string; readon
 // ---------------------------------------------------------------- the quota
 
 const DAYS = Array.from({ length: 7 }, (_, index) => new Date(NOW - (6 - index) * 86_400_000).toISOString().slice(0, 10));
+const SPEND = { sessions: 2, turns: 2, tokens: 35_500, workMs: 22 * 60_000, costUsd: 0.13 };
 const LEVERS = { model: { current: 'claude-opus-5-5', choice: null, options: ['claude-opus-5-5', 'claude-haiku-5-5'], reviewer: 'claude-sonnet-5-5' }, maxLanes: { choice: null, options: [1, 2, 3] }, paused: false };
 const claude = (quotas: readonly unknown[]) => ({
   harness: 'claude-code', sessions: 2, tokens: 35_500, perDay: DAYS.map((day, index) => ({ day, tokens: index === 6 ? 35_500 : 0 })), quotas,
@@ -158,6 +159,7 @@ async function consumptionRoutes(page: any, quotas: readonly unknown[]) {
   await page.route('**/api/service/tickets', (route: any) => json(route, []));
   await page.route('**/api/service/sessions', (route: any) => json(route, []));
   await page.route('**/api/service/consumption?**', (route: any) => json(route, body));
+  await page.route('**/api/service/consumption/week?**', (route: any) => json(route, { at: body.at, timeZone: body.timeZone, days: DAYS, since: `${DAYS[0]}T00:00:00.000Z`, merged: [], spend: SPEND, estimates: { tickets: 0, estimatedMinutes: 0, actualMinutes: 0 }, services: [] }));
 }
 const reported = { window: 'seven_day', usedPercent: 54, resetsAt: new Date(NOW + 3 * 86_400_000).toISOString(), observedAt: ago(90), source: 'session', projection: { kind: 'holds', percentAtReset: 78 } };
 

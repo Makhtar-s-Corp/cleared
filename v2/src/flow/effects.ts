@@ -8,7 +8,8 @@ import { fileURLToPath } from 'node:url';
 import { readApprovalRecord } from '../approval/record.ts';
 import { stateDirectory } from '../approval/service.ts';
 import { flatBriefing, levelContext, readLeveledBriefing, writeBriefing, type MemoryContext, type MemoryLevel } from '../workspace/briefing.ts';
-import { checkBranchName, git, projectCheckout, readTip, ticketBranch, ticketCheckout } from '../workspace/checkout.ts';
+import { checkBranchName, git, projectCheckout, readHead, readTip, ticketBranch, ticketCheckout } from '../workspace/checkout.ts';
+import { isTicketBranch } from './branch-names.ts';
 import { variantFolder } from './variants.ts';
 import { judgeDiff } from './fast-lane.ts';
 import { checkBranch } from './env-setup.ts';
@@ -133,12 +134,15 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
   // `as`: the private ref's own name, for a variant's checkout (issue #271),
   // since the variants of a ticket share its branch's name, and for a
   // resumed ticket's (issue #272); `branch`: a resumed ticket's, else the ticket's own.
-  const fetchBranch = async (ticket: string, service: ServiceConfig, workdir: string, as?: string, branch = ticketBranch(ticket)) => {
+  const fetchBranch = async (ticket: string, service: ServiceConfig, workdir: string, as?: string, named?: string) => {
     const { dir, base } = of(service);
     const gitDir = join(workdir, '.git');
     if (!lstatSync(gitDir, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`the ticket's checkout of ${service.name} has no .git folder of its own`);
     for (const parts of [['commondir'], ['objects', 'info', 'alternates']])
       if (lstatSync(join(gitDir, ...parts), { throwIfNoEntry: false })) throw new Error(`the ticket's checkout of ${service.name} cannot be read safely: .git/${parts.join('/')} is present`);
+    // The checkout's own branch when it is one of the ticket's names (flow/branch-names.ts).
+    const head = named ? undefined : readHead(workdir);
+    const branch = named ?? (head && isTicketBranch(ticket, head) ? head : ticketBranch(ticket));
     // Per service: two folder services of one repository share its checkout.
     const ref = as ?? `refs/cleared/step/${service.name}/${branch}`;
     await git(dir, ['-c', 'protocol.file.allow=always', '-c', 'transfer.fsckObjects=true', '-c', 'fetch.fsckObjects=true',
@@ -213,6 +217,20 @@ export function realEffects(config: FlowConfig, options: EffectsOptions = {}): F
     // base has it; a provider that cannot be fetched is left out of the
     // briefing, never in the way of the session.
     // A variant (issue #271) has its own clone, <workdirs>/<ticket>.variant-<round>-<position>, on the ticket branch.
+    // What the remote holds under this ticket's names (issues #508 and #510), and
+    // the branch of a checkout the ticket already has. Read with the forge's
+    // credential, and nothing else is asked of the remote.
+    async remoteBranches({ ticket, service }) {
+      const { dir } = of(service);
+      if (!existsSync(dir)) await refresh(service);
+      const own = ticketBranch(ticket);
+      const listed = await git(dir, ['ls-remote', '--heads', 'origin', `refs/heads/${own}`, `refs/heads/${own}.*`, `refs/heads/${own}/*`], (await forge(service)).git);
+      const names = listed.split('\n').flatMap((line) => /\trefs\/heads\/(\S+)$/.exec(line)?.[1] ?? []);
+      const folder = service ? join(config.workdirRoot, ticket, service.name) : join(config.workdirRoot, ticket);
+      const checkout = lstatSync(join(folder, '.git'), { throwIfNoEntry: false })?.isDirectory() ? readHead(folder) ?? null : null;
+      return { names, checkout };
+    },
+
     async prepareWorkdir({ ticket, role, service, variant, branch }) {
       if (role === 'author') await refresh(service);
       const { dir, base } = of(service);

@@ -169,7 +169,7 @@ export function gitPath(workdir: string, parts: readonly string[], kind: 'file' 
 }
 
 // The branch the checkout is on, read from .git/HEAD without running git.
-function readHead(workdir: string): string | undefined {
+export function readHead(workdir: string): string | undefined {
   const path = gitPath(workdir, ['HEAD'], 'file');
   if (!existsSync(path)) return undefined;
   const head = readFileSync(path, 'utf8');
