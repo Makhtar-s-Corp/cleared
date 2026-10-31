@@ -13,11 +13,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { DatabaseSync } from 'node:sqlite';
 import { Docker } from '../../src/container/docker.ts';
+import { proofTargets } from '../../src/flow/proof-capture.ts';
+import { parseWorkspace } from '../../src/workspace/config.ts';
 import { PreparedImages } from '../../src/container/prepared.ts';
 import type { EnvironmentView } from '../../src/container/types.ts';
 import { ENVIRONMENT_LABEL } from '../../src/flow/env-setup.ts';
@@ -93,6 +95,49 @@ test('the step is filled, may be skipped, and its file is the registry\'s', () =
   assert.equal(ENVIRONMENT.id, 'environment');
   assert.equal(ENVIRONMENT.filled, true);
   assert.equal(ENVIRONMENT.skippable, true);
+});
+
+test('the receipt\'s addresses: found in the repository, confirmed by the owner, written with no restart, and read by the running flow (issue #505)', async () => {
+  const made = project({ '.cleared/agents.conf': '[release]\nhealth_url = https://exemple.org/health\n', Dockerfile: 'FROM node:24\nEXPOSE 8793\n' });
+  const env = workspace({ api: made });
+  const running = parseWorkspace(readFileSync(env.CLEARED_V2_WORKSPACE as string, 'utf8'), { file: env.CLEARED_V2_WORKSPACE as string, authorModel: 'claude-opus-5-5', stateDir: env.CLEARED_V2_STATE_DIR as string });
+  const { flow } = fakeFlow(['api']);
+  const applied: string[] = [];
+  const live: SetupFlow = { ...flow, applyTargets: (name, targets) => { applied.push(name); Object.assign(running.services.find((service) => service.name === name) as object, targets); } };
+  await serve(env, new FakeDocker(), async (call) => {
+    const seen = (await call('GET', '/api/setup/environment')).json as EnvironmentView;
+    assert.deepEqual(seen.services[0]?.proof, { healthUrl: null, run: null, detected: { healthUrl: 'https://exemple.org/health', run: 'Dockerfile:8793' } }, 'proposed, and nothing written yet');
+    assert.doesNotMatch(readFileSync(env.CLEARED_V2_WORKSPACE as string, 'utf8'), /health_url|run =/);
+    assert.equal((await call('POST', '/api/setup/environment/targets', 'someone', { service: 'api', healthUrl: 'https://exemple.org/health', run: 'Dockerfile:8793' })).status, 403);
+
+    const saved = await call('POST', '/api/setup/environment/targets', 'owner', { service: 'api', healthUrl: 'https://exemple.org/health', run: 'Dockerfile:8793' });
+    assert.equal(saved.status, 200, JSON.stringify(saved.json));
+    assert.deepEqual(saved.json.services[0].proof.healthUrl, 'https://exemple.org/health');
+    assert.deepEqual(saved.json.services[0].proof.run, 'Dockerfile:8793');
+    const file = readFileSync(env.CLEARED_V2_WORKSPACE as string, 'utf8');
+    assert.match(file, /health_url = https:\/\/exemple\.org\/health/);
+    assert.match(file, /run = Dockerfile:8793/);
+    assert.deepEqual(applied, ['api'], 'the running flow is told: no restart');
+    assert.deepEqual(proofTargets(running.services[0] as never, undefined).before, { url: 'https://exemple.org/' });
+    assert.deepEqual(running.services[0]?.run, { dockerfile: 'Dockerfile', port: 8793 });
+  }, live);
+});
+
+test('the receipt\'s addresses: what the file could not hold is refused and nothing is written', async () => {
+  const env = workspace({ api: project() });
+  const before = readFileSync(env.CLEARED_V2_WORKSPACE as string, 'utf8');
+  await serve(env, new FakeDocker(), async (call) => {
+    const said = async (body: unknown) => { const answer = await call('POST', '/api/setup/environment/targets', 'owner', body); return [answer.status, answer.json.error]; };
+    assert.deepEqual(await said({ service: 'api', healthUrl: 'ftp://exemple.org', run: '' }), [400, 'invalid_address']);
+    assert.deepEqual(await said({ service: 'api', healthUrl: ['https://u:p', 'exemple.org/'].join('@'), run: '' }), [400, 'invalid_address']);
+    assert.deepEqual(await said({ service: 'api', healthUrl: '', run: '../Dockerfile:80' }), [400, 'invalid_run']);
+    assert.deepEqual(await said({ service: 'api', healthUrl: '', run: 'Dockerfile' }), [400, 'invalid_run']);
+    assert.deepEqual(await said({ service: 'api', healthUrl: 'https://exemple.org/\n[service evil]', run: '' }), [400, 'invalid_address']);
+    assert.deepEqual(await said({ service: 'nope', healthUrl: '', run: '' }), [400, 'unknown_service']);
+    assert.equal(readFileSync(env.CLEARED_V2_WORKSPACE as string, 'utf8'), before);
+    // Emptied by a person: a service with no screen has none, and that is its right.
+    assert.equal((await call('POST', '/api/setup/environment/targets', 'owner', { service: 'api', healthUrl: '', run: '' })).status, 200);
+  });
 });
 
 test('no workspace yet: the view says so, and a build is refused', async () => {

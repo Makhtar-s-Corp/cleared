@@ -105,5 +105,10 @@
   "checkout_other": "{dir} is a clone of another repository than {url}.",
   "checkout_other_todo": "Fix url in the workspace file, or move that folder away so that the first ticket clones {service} there.",
   "checkout_no_base": "The checkout of {service} at {dir} has no origin/{base}.",
-  "checkout_no_base_todo": "Check base in the workspace file; the next ticket fetches the checkout."
+  "checkout_no_base_todo": "Check base in the workspace file; the next ticket fetches the checkout.",
+  "repository_write_refused": "{repo} is reached, but the token may not write there: Cleared pushes branches and opens pull requests there.",
+  "repository_write_both_todo": "Give the token itself Contents and Pull requests, read and write, on {repo}. If an organisation owns it, it must approve the token too.",
+  "repository_write_contents_todo": "Give the token itself Contents, read and write, on {repo}. If an organisation owns it, it must approve the token too.",
+  "repository_write_pulls_todo": "Give the token itself Pull requests, read and write, on {repo}. If an organisation owns it, it must approve the token too.",
+  "repository_write_unknown": "{repo} is reached; GitHub did not answer what the token may write there."
 }

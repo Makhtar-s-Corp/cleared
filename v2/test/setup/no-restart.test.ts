@@ -19,6 +19,7 @@ import type { AddressInfo } from 'node:net';
 import { join, posix } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { fakeGh } from '../forge/fake-gh.ts';
+import { FakeForge } from './fakes/github.ts';
 import { remote, tempDir } from '../workspace/git.ts';
 
 const EXAMPLES = fileURLToPath(new URL('../../../examples/', import.meta.url));
@@ -55,6 +56,7 @@ test('the assistant, then a first ticket and a Tower ticket, with no restart: ea
   const readme = files(`${EXAMPLES}guestbook`)['README.md'] as string;
   const repository = (name: string) => ({ repo: `example-org/${name}`, url: remote(files(`${EXAMPLES}${name}`)), base: 'main', private: false, archived: false });
   const gh = fakeGh({ repositories: [repository('guestbook'), repository('filter-api')], pulls: [] });
+  const github = new FakeForge({ [CREDENTIAL]: ['example-org/guestbook', 'example-org/filter-api'] });
 
   // The docker stand-in: every call is written down and refused.
   const stub = join(state, 'stub');
@@ -81,7 +83,7 @@ test('the assistant, then a first ticket and a Tower ticket, with no restart: ea
   Object.assign(process.env, {
     HOME: join(state, 'home'),
     CLEARED_STATE_DIR: state, CLEARED_V2_STATE_DIR: state,
-    PATH: `${stub}:${gh.env.PATH as string}`, GH_TOKEN: CREDENTIAL,
+    PATH: `${stub}:${gh.env.PATH as string}`, GH_TOKEN: CREDENTIAL, CLEARED_V2_FORGE_GITHUB_API: await github.listen(),
     CLEARED_V2_ADAPTER: 'fake', CLEARED_V2_FAKE_SCRIPT: script,
     CLEARED_V2_QUOTA_MINUTES: '0', CLEARED_V2_MAP_MINUTES: '0', CLEARED_V2_APP_LANGUAGE: 'en',
     CLEARED_V2_MIRROR_GITHUB_TOKEN_FILE: trackerToken, CLEARED_V2_MIRROR_GITHUB_API: trackerApi,
@@ -208,6 +210,7 @@ test('the assistant, then a first ticket and a Tower ticket, with no restart: ea
     const engine = flowRuntime.engine(app.registry);
     await Promise.all([engine?.close(), leadRuntime.lead(app.registry)?.close(), plansOf(app.registry)?.close(), schedulesOf(app.registry)?.close(), notify.dispatcher()?.close()]);
     await app.stop?.();
+    await github.close();
     server.closeAllConnections();
     await new Promise<void>((resolve) => server.close(() => resolve()));
     tracker.closeAllConnections();

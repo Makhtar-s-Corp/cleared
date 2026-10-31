@@ -7,9 +7,11 @@
 // link. What is under it (the commands, the image, the tests' last lines) is in
 // the detail. The page reads the view again while a build runs; the step is
 // done once every image is ready.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import type { EnvironmentService, EnvironmentView, SetupSessionAnswer, SetupSessionBody } from '../../../../../src/container/types.ts';
+import type { ReceiptTargets } from '../../../../../src/workspace/receipt-targets.ts';
 import { Button } from '@/components/ui/button.tsx';
+import { Input } from '@/components/ui/input.tsx';
 import { catalogOf, type Language } from '@/lib/catalogs.ts';
 import type { Translate } from '@/lib/i18n.ts';
 import { ago, lasted } from '@/lib/time.ts';
@@ -53,9 +55,57 @@ function needLine(t: Translate, service: EnvironmentService): string {
 const stateWord = (t: Translate, service: EnvironmentService): string => t(checkFailed(service) ? 'environment_state_check_failed' : `environment_state_${service.state}`);
 const stateTone = (service: EnvironmentService): string => (service.state === 'failed' || checkFailed(service) ? 'danger' : service.state === 'ready' ? 'ok' : service.state === 'building' ? 'working' : 'idle');
 
-function ServiceLine({ t, service, sessions, starting, onStart }: {
+// What the receipt will be able to show, from what is saved.
+export function receiptLine(t: Translate, targets: ReceiptTargets): string {
+  if (targets.healthUrl && targets.run) return t('environment_targets_both');
+  if (targets.healthUrl) return t('environment_targets_before');
+  return t(targets.run ? 'environment_targets_after' : 'environment_targets_none');
+}
+
+// The receipt's addresses (issue #505): what the repository proposes, prefilled for
+// the owner to confirm or correct; once saved, a sentence, and the form on a gesture.
+function ReceiptTargetsForm({ t, service, onSaved }: { readonly t: Translate; readonly service: EnvironmentService; readonly onSaved: (name: string, targets: ReceiptTargets) => Promise<string> }) {
+  const proof = service.proof as NonNullable<EnvironmentService['proof']>;
+  const saved = proof.healthUrl !== null || proof.run !== null;
+  const found = proof.detected.healthUrl !== null || proof.detected.run !== null;
+  const [changing, setChanging] = useState(false);
+  const [url, setUrl] = useState(proof.healthUrl ?? proof.detected.healthUrl ?? '');
+  const [run, setRun] = useState(proof.run ?? proof.detected.run ?? '');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  if (saved && !changing) {
+    return (
+      <div className="setup-targets" data-targets="saved">
+        <p className="setup-env-need">{receiptLine(t, proof)}</p>
+        <Button variant="ghost" className="btn quiet" data-act="setup_targets_change" onClick={() => setChanging(true)}>{t('environment_targets_change')}</Button>
+      </div>
+    );
+  }
+  const submit = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setError('');
+    void onSaved(service.name, { healthUrl: url, run }).then((said) => { setError(said); if (!said) setChanging(false); }).finally(() => setBusy(false));
+  };
+  return (
+    <form className="setup-form setup-targets" onSubmit={submit} aria-busy={busy} data-targets={saved ? 'changing' : found ? 'proposed' : 'missing'}>
+      <p className="setup-env-need">{t(found || saved ? 'environment_targets_proposed' : 'environment_targets_missing')}</p>
+      <label htmlFor={`setup-targets-url-${service.name}`}>{t('environment_targets_url')}</label>
+      <Input id={`setup-targets-url-${service.name}`} name="healthUrl" type="url" inputMode="url" autoComplete="off" spellCheck={false} maxLength={300} value={url} aria-describedby={`setup-targets-url-hint-${service.name}`} onChange={(event) => setUrl(event.currentTarget.value)} />
+      <p className="setup-hint" id={`setup-targets-url-hint-${service.name}`}>{t('environment_targets_url_hint')}</p>
+      <label htmlFor={`setup-targets-run-${service.name}`}>{t('environment_targets_run')}</label>
+      <Input id={`setup-targets-run-${service.name}`} name="run" autoComplete="off" spellCheck={false} maxLength={200} value={run} aria-describedby={`setup-targets-run-hint-${service.name}`} onChange={(event) => setRun(event.currentTarget.value)} />
+      <p className="setup-hint" id={`setup-targets-run-hint-${service.name}`}>{t('environment_targets_run_hint')}</p>
+      {error ? <p className="setup-error" role="alert">{error}</p> : null}
+      <Button className="btn" type="submit" data-act="setup_targets_save" disabled={busy}>{busy ? t('environment_targets_saving') : t(found && !saved ? 'environment_targets_confirm' : 'environment_targets_save')}</Button>
+    </form>
+  );
+}
+
+function ServiceLine({ t, service, sessions, starting, onStart, onTargets }: {
   readonly t: Translate; readonly service: EnvironmentService; readonly sessions: EnvironmentView['sessions'];
   readonly starting: boolean; readonly onStart: (service: string) => void;
+  readonly onTargets: (name: string, targets: ReceiptTargets) => Promise<string>;
 }) {
   const need = needLine(t, service);
   return (
@@ -81,6 +131,7 @@ function ServiceLine({ t, service, sessions, starting, onStart }: {
           </Button>
         ) : <p className="setup-env-need">{t('environment_session_restart')}</p>
       ) : null}
+      {service.proof ? <ReceiptTargetsForm t={t} service={service} onSaved={onTargets} /> : null}
     </li>
   );
 }
@@ -161,6 +212,14 @@ export function EnvironmentStep({ t, api, onDone, initial, onOwnAction }: StepPr
     }, () => setError(t('environment_error_other'))).finally(() => setStarting(false));
   };
 
+  // The receipt's addresses: an empty answer is saved; what the service refuses is said in the form.
+  const saveTargets = (name: string, targets: ReceiptTargets): Promise<string> =>
+    api.post<EnvironmentView>('/environment/targets', { service: name, healthUrl: targets.healthUrl ?? '', run: targets.run ?? '' }).then((answer) => {
+      if (answer.status !== 200) return refusal(t, 'environment', answer.body);
+      setView(answer.body);
+      return '';
+    }, () => t('environment_error_other'));
+
   // The one action of the moment: nothing else is indigo while a session is proposed.
   const proposed = view?.services.some(needsSession) ?? false;
   useEffect(() => { onOwnAction?.(proposed); }, [onOwnAction, proposed]);
@@ -184,7 +243,7 @@ export function EnvironmentStep({ t, api, onDone, initial, onOwnAction }: StepPr
       <div data-environment-step>
         {error ? <p className="setup-error" role="alert">{error}</p> : null}
         <ul className="setup-env" aria-busy={building}>
-          {view.services.map((service) => <ServiceLine key={service.name} t={t} service={service} sessions={view.sessions} starting={starting} onStart={start} />)}
+          {view.services.map((service) => <ServiceLine key={service.name} t={t} service={service} sessions={view.sessions} starting={starting} onStart={start} onTargets={saveTargets} />)}
         </ul>
         {toPrepare ? <Button variant="ink" className="primary" data-act="setup_environment_build" onClick={build} disabled={asking}>{t('environment_build')}</Button> : null}
       </div>

@@ -15,6 +15,12 @@
 //             after a reading that worked), as the scheduler says a schedule
 //             that fails again for the same reason once. The plans and the
 //             schedules go on with the newest figure they have.
+//   refused   a login the endpoint will not read (HTTP 403, seen on a login made by
+//             `claude setup-token`; its cause is not established, issue #509): no
+//             failure to alarm about. No notification, the screen says the reading
+//             is unavailable, and it is asked again once a day, or as soon as the
+//             login changes, not each hour. A session's report is then the only
+//             source of the figure, so a lane's stop rests on the last one reported.
 //   alerts    at 75 and 85 percent of a window, once per window cycle (its
 //             reset time), kept in quota_alerts so a restart does not alert
 //             again: a health notification each.
@@ -23,7 +29,7 @@
 //             its reset passed. The plans' stop, the schedules' week share
 //             and the Consumption screen read it, so no lane starts above the
 //             stop (85 by default) even when no session ran since.
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import type { DatabaseSync } from 'node:sqlite';
 import { NotifyQueue, type Occurrence } from '../notify/queue.ts';
 import type { Harness } from '../session/contract.ts';
@@ -32,6 +38,9 @@ export type QuotaWindow = 'five_hour' | 'seven_day';
 export const QUOTA_WINDOWS: readonly QuotaWindow[] = ['seven_day', 'five_hour'];
 export const ALERT_PERCENTS: readonly number[] = [75, 85];
 export const READ_MINUTES = 60;
+const REFUSED_RETRY_MS = 24 * 60 * 60_000;
+// The row's reason for a login the endpoint will not read; a row keeps no other mark of it.
+export const READING_UNAVAILABLE = 'the endpoint refused the login (HTTP 403)';
 
 export const QUOTA_TABLES: readonly string[] = [
   `CREATE TABLE IF NOT EXISTS quota_readings (
@@ -71,6 +80,8 @@ export type QuotaSource = {
   readonly harness: Harness;
   readonly source: string;                      // what the row and the screen name
   read(signal: AbortSignal): Promise<readonly WindowReading[]>;
+  // When the login last changed, in milliseconds; a refused login is asked again from then on.
+  loginChangedAt?(): number | undefined;
 };
 
 // ---------------------------------------------------------------- the source
@@ -137,6 +148,9 @@ export function claudeCodeQuotaSource(options: {
   return {
     harness: 'claude-code',
     source: 'claude-code /api/oauth/usage',
+    loginChangedAt() {
+      try { return statSync(options.loginFile).mtimeMs; } catch { return undefined; }
+    },
     async read(signal) {
       const token = loginToken(readFile(options.loginFile));
       if (!token) throw new QuotaReadError('no token in the login file');
@@ -211,7 +225,7 @@ function hasReadings(db: DatabaseSync): boolean {
   return db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'quota_readings'").get() !== undefined;
 }
 
-export type LastReading = { readonly at: string; readonly source: string; readonly ok: boolean; readonly error?: string };
+export type LastReading = { readonly at: string; readonly source: string; readonly ok: boolean; readonly error?: string; readonly unavailable?: true };
 
 // The last attempt of a harness, whatever its outcome: the screen says a failure.
 export function lastReading(db: DatabaseSync, project: string, harness: Harness): LastReading | undefined {
@@ -219,7 +233,7 @@ export function lastReading(db: DatabaseSync, project: string, harness: Harness)
   const row = db.prepare('SELECT at, source, ok, error FROM quota_readings WHERE project = ? AND harness = ? ORDER BY at DESC, id DESC LIMIT 1')
     .get(project, harness) as { at: string; source: string; ok: number; error: string | null } | undefined;
   if (!row) return undefined;
-  return { at: row.at, source: row.source, ok: row.ok === 1, ...(row.ok === 1 || row.error === null ? {} : { error: row.error }) };
+  return { at: row.at, source: row.source, ok: row.ok === 1, ...(row.ok === 1 || row.error === null ? {} : { error: row.error }), ...(row.ok !== 1 && row.error === READING_UNAVAILABLE ? { unavailable: true as const } : {}) };
 }
 
 // ---------------------------------------------------------------- the hourly reading
@@ -284,8 +298,18 @@ export class QuotaReader {
     }
   }
 
+  // A login the endpoint refused is asked again once a day, or once it changed.
+  #waits(source: QuotaSource): boolean {
+    const last = lastReading(this.#deps.db, this.#deps.project, source.harness);
+    if (!last?.unavailable) return false;
+    const at = Date.parse(last.at);
+    if (this.#now().getTime() - at >= REFUSED_RETRY_MS) return false;
+    return !((source.loginChangedAt?.() ?? 0) > at);
+  }
+
   async #read(source: QuotaSource): Promise<QuotaEvent[]> {
     const { db, project } = this.#deps;
+    if (this.#waits(source)) return [];
     const signal = AbortSignal.timeout(this.#deps.timeoutMs ?? 30_000);
     let windows: readonly WindowReading[];
     try {
@@ -296,7 +320,7 @@ export class QuotaReader {
       const message = this.#deps.clean ? this.#deps.clean(said) : said;
       // One notification for a run of failures: the first, after a reading that worked or none.
       const before = lastReading(db, project, source.harness);
-      const notified = before === undefined || before.ok;
+      const notified = said !== READING_UNAVAILABLE && (before === undefined || before.ok);
       db.prepare('INSERT INTO quota_readings (project, harness, source, at, ok, error) VALUES (?, ?, ?, ?, 0, ?)').run(project, source.harness, source.source, at, message);
       if (notified) this.#notify({ key: `quota:failed:${source.harness}:${at}`, kind: 'health', ticket: null, group: 'health:quota_read_failed', title: '', code: 'quota_read_failed', link: '/consumption', from: null, at });
       return [{ type: 'quota_read_failed', harness: source.harness, at, error: message, notified }];

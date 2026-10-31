@@ -152,7 +152,9 @@ export function projectionLines(quota: Quota, h: Pick<HarnessConsumption, 'harne
 // Where the figure comes from and when it was read, and the harness's last
 // quota reading when it failed (issue #270): a failure is said, with its
 // reason as the service gives it, and never hides the figure read before it.
-export type ReadingLine = { readonly kind: 'seen' | 'failed'; readonly text: string };
+// A login the reading refuses (issue #509) is not a failure: it says that the
+// sessions' reports are the only source, in the screen's own words.
+export type ReadingLine = { readonly kind: 'seen' | 'failed' | 'unavailable'; readonly text: string };
 
 export function readingLines(h: Pick<HarnessConsumption, 'lastReading'>, quota: Quota | undefined, zone: string, language: Language, t: Translate): ReadingLine[] {
   const out: ReadingLine[] = [];
@@ -161,7 +163,8 @@ export function readingLines(h: Pick<HarnessConsumption, 'lastReading'>, quota: 
     out.push({ kind: 'seen', text: t('consumption_quota_seen', { when: moment(quota.observedAt, zone, language), source }) });
   }
   const last = h.lastReading;
-  if (last && !last.ok) out.push({ kind: 'failed', text: t('consumption_reading_failed', { when: moment(last.at, zone, language), reason: last.error ?? '' }) });
+  if (last?.unavailable) out.push({ kind: 'unavailable', text: t('consumption_reading_unavailable') });
+  else if (last && !last.ok) out.push({ kind: 'failed', text: t('consumption_reading_failed', { when: moment(last.at, zone, language), reason: last.error ?? '' }) });
   return out;
 }
 
@@ -169,7 +172,7 @@ export const resetIn = (quota: Pick<Quota, 'resetsAt'>, now: Date, t: Translate)
 
 // The sentence above the quotas: the first harness to reach 100 % before its
 // reset, else that none does, else that nothing is measured yet.
-export function headline(data: Consumption, language: Language, t: Translate): { readonly kind: 'hit' | 'ok' | 'none'; readonly text: string; readonly harness?: string } {
+export function headline(data: Consumption, language: Language, t: Translate): { readonly kind: 'hit' | 'ok' | 'none' | 'unavailable'; readonly text: string; readonly harness?: string } {
   const week = data.harnesses.flatMap((h) => h.quotas.filter((q) => q.window === 'seven_day').map((quota) => ({ h, quota })));
   const hits = week.flatMap((entry) => (entry.quota.projection.kind === 'before_reset' ? [{ ...entry, at: entry.quota.projection.hitsAt }] : []))
     .sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
@@ -178,6 +181,7 @@ export function headline(data: Consumption, language: Language, t: Translate): {
     return { kind: 'hit', harness: first.h.harness, text: t('consumption_headline_hit', { harness: harnessName(first.h.harness, t), when: moment(first.at, data.timeZone, language), reset: moment(first.quota.resetsAt, data.timeZone, language) }) };
   }
   if (week.length > 0) return { kind: 'ok', text: t('consumption_headline_ok') };
+  if (data.harnesses.some((h) => h.lastReading?.unavailable)) return { kind: 'unavailable', text: t('consumption_headline_unavailable') };
   return { kind: 'none', text: t('consumption_headline_none') };
 }
 

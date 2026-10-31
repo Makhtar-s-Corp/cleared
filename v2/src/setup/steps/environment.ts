@@ -17,11 +17,16 @@
 //   GET  /api/setup/environment          -> EnvironmentView
 //   POST /api/setup/environment/build    -> 202 EnvironmentView
 //   POST /api/setup/environment/session  { service, title, body } -> SetupSessionAnswer
+//   POST /api/setup/environment/targets  { service, healthUrl, run } -> EnvironmentView
+//        what the receipt's captures need (issue #505), written to the workspace
+//        file once the owner confirms them, read by the running flow at once;
+//        400 { error }: invalid_address, invalid_run; 409: environment
 //   400 { error }: invalid, unknown_service
 //   409 { error }: no_workspace, invalid_workspace, no_flow, restart
 //
 // Reading the view asks Docker nothing: the builds' records, the checks'
 // and the services' base branches say it.
+import { readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { Docker } from '../../container/docker.ts';
 import { PreparedError, PreparedImages, readRecord, stateDirOf, type PreparedInputs, type PreparedSource } from '../../container/prepared.ts';
@@ -33,6 +38,9 @@ import type { Registry } from '../../modules/registry.ts';
 import { cleanText, secretValues } from '../../session/clean.ts';
 import type { UserId } from '../../session/contract.ts';
 import type { Ticket, TicketId, TicketStore } from '../../tickets/contract.ts';
+import { parseWorkspace, WorkspaceError, type ServiceConfig } from '../../workspace/config.ts';
+import { writeWhole } from '../../workspace/connect.ts';
+import { detectReceiptTargets, usableAddress, withReceiptTargets, type ReceiptTargets } from '../../workspace/receipt-targets.ts';
 import { answer, guarded, HttpError, readBody } from '../http.ts';
 import type { SetupStep, StepDeps } from '../step.ts';
 
@@ -43,6 +51,8 @@ export type SetupFlow = {
   readonly services: readonly string[];
   readonly tickets: TicketStore;
   begin(ticket: TicketId, by: UserId): void;
+  // The running flow reads a service's address and trial from now on, with no restart (issue #505).
+  applyTargets?(service: string, targets: Pick<ServiceConfig, 'healthUrl' | 'run'>): void;
 };
 
 const runtimeFlow = (registry: Registry): SetupFlow | undefined => {
@@ -50,10 +60,11 @@ const runtimeFlow = (registry: Registry): SetupFlow | undefined => {
   return engine && {
     project: engine.config.project, services: workspaceOf(engine.config).services.map((service) => service.name),
     tickets: engine.registry.ticketStore, begin: (ticket, by) => { void engine.begin(ticket, by); },
+    applyTargets: (service, targets) => { engine.applyServiceTargets(service, targets); },
   };
 };
 
-function sources(deps: StepDeps): PreparedSource[] | undefined {
+function configured(deps: StepDeps): readonly ServiceConfig[] | undefined {
   let config: ReturnType<typeof loadFlowConfig>;
   try {
     config = loadFlowConfig(deps.env);
@@ -61,8 +72,13 @@ function sources(deps: StepDeps): PreparedSource[] | undefined {
     if (error instanceof FlowConfigError) throw new HttpError(409, 'invalid_workspace');
     throw error;
   }
-  return config ? workspaceOf(config).services.map((service) => ({ service: service.name, dir: service.dir, base: service.base, path: service.path })) : undefined;
+  return config ? workspaceOf(config).services : undefined;
 }
+
+const sourceOf = (service: ServiceConfig): PreparedSource => ({ service: service.name, dir: service.dir, base: service.base, path: service.path });
+const sources = (deps: StepDeps): PreparedSource[] | undefined => configured(deps)?.map(sourceOf);
+const runText = (run: ServiceConfig['run']): string | null => (run ? `${run.dockerfile}:${run.port}` : null);
+const proofOf = async (service: ServiceConfig): Promise<NonNullable<EnvironmentService['proof']>> => ({ healthUrl: service.healthUrl, run: runText(service.run), detected: await detectReceiptTargets(sourceOf(service)) });
 
 // The open setup session of each service: a ticket of the environment
 // template not done yet, on that service, or on the only one.
@@ -135,14 +151,17 @@ export function environmentStep(
       let running: Promise<void> | undefined;
 
       const view = async (registry: Registry): Promise<EnvironmentView> => {
-        const list = sources(deps);
+        const list = configured(deps);
         const flow = flowOf(registry);
-        const sessions = !flow ? 'no_flow' : list && list.some((source) => !flow.services.includes(source.service)) ? 'restart' : 'ready';
+        const sessions = !flow ? 'no_flow' : list && list.some((service) => !flow.services.includes(service.name)) ? 'restart' : 'ready';
         if (!list) return { workspace: false, services: [], sessions };
         const images = made(stateDirOf(deps.env));
         const open = await openSessions(flow);
         const services: EnvironmentService[] = [];
-        for (const source of list) services.push(await serviceView(images, source, queued.has(source.service), open.get(source.service) ?? null));
+        for (const service of list) {
+          const source = sourceOf(service);
+          services.push({ ...await serviceView(images, source, queued.has(source.service), open.get(source.service) ?? null), proof: await proofOf(service) });
+        }
         return { workspace: true, services, sessions };
       };
 
@@ -192,6 +211,37 @@ export function environmentStep(
               running = build(list).finally(() => { running = undefined; });
             }
             answer(context, 202, await view(context.registry));
+          }),
+        },
+        // The receipt's addresses, as the owner confirms them: read back as the
+        // service would read the file, then written, then told to the running flow.
+        {
+          method: 'POST', path: '/api/setup/environment/targets',
+          handle: guarded(deps, async (context) => {
+            const body = await readBody(context.request);
+            if (deps.fromEnvironment.has('CLEARED_V2_WORKSPACE')) throw new HttpError(409, 'environment');
+            const file = deps.env.CLEARED_V2_WORKSPACE;
+            const list = configured(deps);
+            if (!list || !file) throw new HttpError(409, 'no_workspace');
+            const { service, healthUrl, run } = body;
+            if (typeof service !== 'string' || !list.some((one) => one.name === service)) throw new HttpError(400, 'unknown_service');
+            if (typeof healthUrl !== 'string' || typeof run !== 'string') throw new HttpError(400, 'invalid');
+            const address = healthUrl.trim();
+            if (address && !usableAddress(address)) throw new HttpError(400, 'invalid_address');
+            const targets: ReceiptTargets = { healthUrl: address || null, run: run.trim() || null };
+            let text: string;
+            let parsed: ServiceConfig | undefined;
+            try {
+              text = withReceiptTargets(readFileSync(file, 'utf8'), service, targets);
+              parsed = parseWorkspace(text, { file, authorModel: deps.env.CLEARED_V2_AUTHOR_MODEL || 'claude-opus-5-5', stateDir: stateDirOf(deps.env) }).services.find((one) => one.name === service);
+            } catch (error) {
+              if (error instanceof WorkspaceError || (error instanceof Error && /line break/.test(error.message))) throw new HttpError(400, 'invalid_run');
+              throw error;
+            }
+            if (!parsed) throw new HttpError(400, 'unknown_service');
+            writeWhole(file, text);
+            flowOf(context.registry)?.applyTargets?.(service, { healthUrl: parsed.healthUrl, run: parsed.run });
+            answer(context, 200, await view(context.registry));
           }),
         },
         // A setup session for one service: a ticket of the environment

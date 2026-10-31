@@ -72,5 +72,22 @@
   "forge_set_detail": "Token saved on {date}. It is never shown again.",
   "forge_set_environment_detail": "The token comes from the GH_TOKEN variable of Cleared's environment. Change it there.",
   "gitlab_set_detail": "Token saved on {date}. It is never shown again.",
-  "gitlab_set_environment_detail": "The token comes from the file CLEARED_V2_GITLAB_TOKEN_FILE names in Cleared's environment. Change it there."
+  "gitlab_set_environment_detail": "The token comes from the file CLEARED_V2_GITLAB_TOKEN_FILE names in Cleared's environment. Change it there.",
+  "forge_access_repository": "Repository to check",
+  "forge_access_pick": "Choose a repository",
+  "forge_access_checking": "Checking what the token may do on {repository}.",
+  "forge_access_ok": "The token can push branches and open pull requests on {repository}.",
+  "forge_access_refused_both": "This token can neither push a branch nor open a pull request on {repository}: on GitHub, give it the right to write on this repository, then check again.",
+  "forge_access_refused_contents": "This token cannot push a branch on {repository}: on GitHub, give it the right to write this repository's contents, then check again.",
+  "forge_access_refused_pull_requests": "This token cannot open a pull request on {repository}: on GitHub, give it the right to write this repository's pull requests, then check again.",
+  "forge_access_unknown": "GitHub did not answer about the token's rights on {repository}: try again in a moment.",
+  "forge_access_again": "Check again",
+  "forge_access_detail_title": "What the token may do on {repository}",
+  "forge_access_right_ok": "Granted",
+  "forge_access_right_refused": "Refused",
+  "forge_access_right_unknown": "No answer",
+  "forge_access_detail_note": "Cleared asks GitHub without writing anything on the repository. If an organisation owns this repository, it must approve the token too.",
+  "forge_access_edit": "Change the token on GitHub",
+  "forge_error_invalid_repository": "This repository is not in the token's list.",
+  "forge_error_no_forge": "Paste a token first."
 }

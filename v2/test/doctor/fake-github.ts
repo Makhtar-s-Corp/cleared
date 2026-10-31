@@ -25,6 +25,7 @@ export class FakeGitHubForChecks {
       const repos = this.#repos.get((request.headers.authorization ?? '').replace(/^Bearer /, ''));
       if (!repos) return send(401, { message: 'Bad credentials' });
       if (url.pathname === '/user') return send(200, { login: 'cleared-bot' });
+      if (request.method === 'POST') return send(422, { message: 'Validation Failed' });
       if (url.pathname === '/user/repos') return send(200, repos.map((name) => ({ full_name: name })));
       const repo = url.pathname.replace(/^\/repos\//, '');
       if (repos.includes(repo)) return send(200, { full_name: repo, permissions: { push: true } });

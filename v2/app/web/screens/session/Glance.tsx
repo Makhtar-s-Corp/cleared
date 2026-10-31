@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { commandParts } from '@/lib/intent.ts';
 import { requestAsk, requestFold, requestFoldOpen, requestReason } from '@/lib/request.ts';
-import { doingNow, humanSteps, planStepOf, type Capture, type PendingAction, type HumanStep, type PullRequest, type Result, type Stage, type StageView } from './glance.ts';
+import { doingNow, humanSteps, planStepOf, publishFailureOf, type Capture, type PendingAction, type HumanStep, type PullRequest, type Result, type Stage, type StageView } from './glance.ts';
 import { phaseOf, questionStatus, statusTone, target, type RequestState, type SessionView, type ToolRow } from './model.ts';
 import { partsOf } from './ticket.ts';
 
@@ -43,8 +43,8 @@ export function SessionHead({ view, t, onTicket }: { readonly view: SessionView;
         <button type="button" className="link-button id" data-act="open_ticket" aria-label={t('glance_ticket_open', { ticket: view.summary.ticket })} onClick={onTicket}>{view.summary.ticket}</button>
         {service ? <span className="s-ticket-service">{service}</span> : null}
       </p>
-      <p className="s-now" id="status" data-tone={statusTone(view)}><span className="dot" aria-hidden="true" /><span>{doingNow(view, t)}</span></p>
-      {phaseOf(view) === 'failed' && view.ticket?.status === 'Todo' ? <p className="s-now-next">{t('glance_back_todo')}</p> : null}
+      <p className="s-now" id="status" data-tone={publishFailureOf(view) ? 'failed' : statusTone(view)}><span className="dot" aria-hidden="true" /><span>{doingNow(view, t)}</span></p>
+      {(phaseOf(view) === 'failed' || publishFailureOf(view)) && view.ticket?.status === 'Todo' ? <p className="s-now-next">{t('glance_back_todo')}</p> : null}
     </header>
   );
 }
@@ -87,12 +87,15 @@ function PullRequestLink({ pr, t }: { readonly pr: PullRequest; readonly t: Tran
 }
 
 // The one thing expected of the person, at the top, never another session's.
-export function ActionCard({ action, view, t, plan, giveback, onAnswer, onQuestion }: {
+export function ActionCard({ action, view, t, plan, giveback, onAnswer, onQuestion, onRestart, restarting = false, restartNote = '' }: {
   readonly action: PendingAction; readonly view: SessionView; readonly t: Translate;
   readonly plan?: ReactNode;          // the plan's gate (Tabs.tsx PlanGate), with its own state
   readonly giveback?: ReactNode;      // Give back, with its own gesture
   readonly onAnswer?: (requestId: string, kind: string, session: string) => void;
   readonly onQuestion?: (requestId: string, answers: Answers, chosen: readonly string[], session: string) => void;
+  readonly onRestart?: () => void;    // the ticket runs again, after a publication that failed
+  readonly restarting?: boolean;
+  readonly restartNote?: string;      // why it could not
 }) {
   const heading = useId();
   const parts = partsOf(view);
@@ -125,6 +128,26 @@ export function ActionCard({ action, view, t, plan, giveback, onAnswer, onQuesti
             </div>
           </div>
         );
+      case 'publish': {
+        const { code, detail, service } = action.failure;
+        // What the token may do comes first when it is the cause: then the ticket can run again.
+        const token = code === 'write_denied' || code === 'pull_request';
+        return (
+          <div data-publish-failure={code}>
+            <p className="s-action-title">{t(`glance_publish_${code}_title`)}</p>
+            <p className="s-action-why">{t(`glance_publish_${code}_todo`)}</p>
+            <div className="s-action-buttons">
+              {token ? <Button asChild variant="ink" className="btn primary"><a href="/setup/forge" data-act="publish_token">{t('glance_publish_open_forge')}</a></Button> : null}
+              <Button variant={token ? 'outline' : 'ink'} className={token ? 'btn' : 'btn primary'} data-act="publish_restart" disabled={restarting} onClick={onRestart}>{t(restarting ? 'glance_publish_restarting' : 'glance_publish_restart')}</Button>
+            </div>
+            {restartNote ? <p className="s-action-why" role="alert">{restartNote}</p> : null}
+            <Detail t={t}>
+              {service ? <p className="s-action-note">{t('glance_publish_service', { service })}</p> : null}
+              <pre className="command"><code>{detail}</code></pre>
+            </Detail>
+          </div>
+        );
+      }
       case 'giveback':
         return (
           <div>

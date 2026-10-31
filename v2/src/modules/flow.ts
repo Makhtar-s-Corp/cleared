@@ -36,6 +36,7 @@ import { ENV_CHECKS_TABLE } from '../flow/env-setup.ts';
 import { filesRoutes } from '../flow/files.ts';
 import { planGateRoutes } from '../flow/plan-gate.ts';
 import { proofRoutes } from '../flow/proof-routes.ts';
+import { BRANCH_NAMES_TABLE } from '../flow/branch-names.ts';
 import { REPLAYS_TABLE, replayRoutes } from '../flow/replay.ts';
 import type { FlowEngine } from '../flow/engine.ts';
 import { runtime } from '../flow/runtime.ts';
@@ -140,7 +141,7 @@ function humanOf(registry: Registry): HumanSide | undefined {
 }
 
 const flow: Module = {
-  tables: [TRAIN_TABLE, STEPS_TABLE, VARIANTS_TABLE, REPLAYS_TABLE, ...BATCH_TABLES, ...CHAT_TABLES, FAST_LANES_TABLE, CAPTURE_CHOICES_TABLE, ENV_CHECKS_TABLE],
+  tables: [TRAIN_TABLE, STEPS_TABLE, VARIANTS_TABLE, REPLAYS_TABLE, BRANCH_NAMES_TABLE, ...BATCH_TABLES, ...CHAT_TABLES, FAST_LANES_TABLE, CAPTURE_CHOICES_TABLE, ENV_CHECKS_TABLE],
   routes: [
     ...runtime.routes((path) => path.startsWith('/api/tickets')),
     ...planGateRoutes({ engine: (registry) => runtime.engine(registry), proof: () => runtime.proof() }),

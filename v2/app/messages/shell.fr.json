@@ -259,5 +259,7 @@
   "proof_reason_exposed": "son fichier de preuve peut être lu par d'autres comptes.",
   "proof_reason_foreign": "son fichier de preuve appartient à un autre compte.",
   "proof_reason_unreadable": "son fichier de preuve ne peut pas être lu.",
-  "proof_reason_unmade": "son fichier de preuve ne peut pas être créé."
+  "proof_reason_unmade": "son fichier de preuve ne peut pas être créé.",
+  "quota_unavailable": "Indisponible",
+  "quota_name_unavailable": "Quota de la semaine indisponible avec cette connexion"
 }

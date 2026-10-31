@@ -9,7 +9,8 @@ import { verdictOf, type Verdict } from '../screens/consumption/model.ts';
 
 export type WeeklyQuota =
   | { readonly kind: 'measured'; readonly percent: number; readonly verdict: Verdict; readonly resetsAt: string }
-  | { readonly kind: 'none' };
+  | { readonly kind: 'none' }
+  | { readonly kind: 'unavailable' };   // no figure, and the hourly reading refuses this login (issue #509)
 
 const reachAt = (quota: Quota): number => (quota.projection.kind === 'reached' ? -Infinity : quota.projection.kind === 'before_reset' ? Date.parse(quota.projection.hitsAt) : Infinity);
 
@@ -17,7 +18,7 @@ export function weeklyQuota(data: Pick<Consumption, 'harnesses'> | null): Weekly
   const week = (data?.harnesses ?? []).flatMap((h) => h.quotas.filter((q) => q.window === 'seven_day'));
   const hits = week.filter((q) => verdictOf(q.projection) === 'hit').sort((a, b) => reachAt(a) - reachAt(b));
   const shown = hits[0] ?? [...week].sort((a, b) => b.usedPercent - a.usedPercent)[0];
-  if (!shown) return { kind: 'none' };
+  if (!shown) return (data?.harnesses ?? []).some((h) => h.lastReading?.unavailable) ? { kind: 'unavailable' } : { kind: 'none' };
   return { kind: 'measured', percent: shown.usedPercent, verdict: verdictOf(shown.projection), resetsAt: shown.resetsAt };
 }
 

@@ -13,6 +13,7 @@
 //   POST /api/setup/workspace           { repositories, whole?, services, links, contracts } -> WorkspaceWritten
 //   400 { error }: invalid, too_many, unknown_repository, changed, cycle, invalid_workspace;
 //   409: environment (CLEARED_V2_WORKSPACE is the environment's), no_forge, busy, checkout_other;
+//   409 { error: cannot_write, repository }: the token may not write on it, said before anything is cloned (issues #503, #506);
 //   502: unreachable (the forge), clone_failed; 503: no state folder
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -24,6 +25,7 @@ import { parseConf } from '../../workspace/config.ts';
 import type { ConnectedService, WorkspaceProposal, WorkspaceView, WorkspaceWritten } from '../../workspace/types.ts';
 import { answer, guarded, HttpError, readBody } from '../http.ts';
 import { readSettings, settingsPath, stateFolder } from '../settings.ts';
+import { writeAccess } from './forge.ts';
 import type { SetupStep, StepDeps } from '../step.ts';
 
 const STATUS: Readonly<Record<string, number>> = { environment: 409, no_forge: 409, busy: 409, checkout_other: 409, unreachable: 502, clone_failed: 502 };
@@ -110,12 +112,18 @@ const workspace: SetupStep = {
           const body = await readBody(context.request);
           const proposal = await work(async () => {
             const repositories = pick((await listed(deps)).repositories, body.repositories);
+            // A GitHub failure says nothing of the token, and stops nothing here.
+            for (const { repo } of repositories) {
+              const access = await writeAccess(deps, repo);
+              if (access.contents === 'refused' || access.pullRequests === 'refused') return { refused: repo };
+            }
             const started = Date.now();
             const made = await propose({ repositories, whole: body.whole, stateDir: paths(deps).state, env: deps.env });
             const machineMs = Date.now() - started;
             deps.records.machine('workspace', machineMs);
             return { ...made, machineMs } satisfies WorkspaceProposal;
           });
+          if ('refused' in proposal) return answer(context, 409, { error: 'cannot_write', repository: proposal.refused });
           answer(context, 200, proposal);
         }),
       },

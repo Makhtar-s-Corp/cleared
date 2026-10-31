@@ -259,5 +259,7 @@
   "proof_reason_exposed": "its proof file can be read by other accounts.",
   "proof_reason_foreign": "its proof file belongs to another account.",
   "proof_reason_unreadable": "its proof file cannot be read.",
-  "proof_reason_unmade": "its proof file cannot be created."
+  "proof_reason_unmade": "its proof file cannot be created.",
+  "quota_unavailable": "Unavailable",
+  "quota_name_unavailable": "Weekly quota unavailable with this login"
 }

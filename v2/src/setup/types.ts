@@ -74,6 +74,11 @@ export type ForgeView = { readonly credential: CredentialView; readonly rights: 
 // POST /api/setup/forge { forge?: 'github' | 'gitlab', value, address? }.
 export type ForgeChecked = { readonly forge: 'github' | 'gitlab'; readonly credential: CredentialView; readonly repositories: number; readonly more: boolean; readonly sample: readonly string[] };
 
+// GET /api/setup/forge/access: the repositories the token lists, and those the
+// workspace already connects. POST { repository } -> WriteAccess
+// (forge/write-access.ts), or 400 { error: invalid_repository }, 409 { error: no_forge }.
+export type ForgeRepositories = { readonly repositories: readonly string[]; readonly more: boolean; readonly connected: readonly string[] };
+
 export type ModelView = { readonly credential: CredentialView; readonly terminal: boolean };
 
 // The first ticket (section 14): where it stands, from its state in the

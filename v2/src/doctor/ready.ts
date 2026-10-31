@@ -1,7 +1,8 @@
 // The ready section of `cleared doctor` (docs/v2/milestone-5-plan.md,
 // section 7, issue #415): is this install ready for a first ticket. Read
 // only: Docker is asked its version and lists filtered on cleared.dev=v2,
-// nothing is built, made or started; GitHub is read; git reads the
+// nothing is built, made or started; GitHub is read, and asked what the token
+// may do with two requests that can never succeed (forge/write-access.ts); git reads the
 // checkouts and fetches nothing; the ledger is opened read only, for the
 // orphans line; no session, no model call. The model login
 // is looked at (its kind, owner, mode and size) and never opened; the forge
@@ -12,6 +13,7 @@
 // Thresholds: the address pool needs two free subnets (one session's two
 // networks); the state folder's disk fails under 5 GB and is a notice under
 // 20 GB (the session image alone is several gigabytes).
+import { checkWriteAccess } from '../forge/write-access.ts';
 import { readFileSync, statSync, statfsSync, lstatSync, type Stats } from 'node:fs';
 import { networkInterfaces } from 'node:os';
 import { join } from 'node:path';
@@ -214,7 +216,14 @@ export async function readyChecks(input: { readonly env: NodeJS.ProcessEnv; read
       else if (answer.status < 200 || answer.status >= 300) say('repository', 'fail', 'repository_refused', values, 'repository_refused_todo');
       else if (!permissions) say('repository', 'notice', 'repository_unsaid', values);
       else if (!PUSHERS.some((role) => permissions[role] === true)) say('repository', 'fail', 'repository_read_only', values, 'repository_read_only_todo');
-      else say('repository', 'ok', 'repository_ok', values);
+      else {
+        // `permissions` may be the account's: the token's own rights decide (issue #506).
+        const access = await checkWriteAccess({ fetch: probes.fetch, api, token: credential, repository: repo, agent: 'cleared-v2-doctor' }).catch(() => undefined);
+        const missing = access ? [access.contents === 'refused' ? 'contents' : '', access.pullRequests === 'refused' ? 'pulls' : ''].filter(Boolean) : [];
+        if (missing.length > 0) say('repository', 'fail', 'repository_write_refused', values, `repository_write_${missing.length === 2 ? 'both' : missing[0]}_todo`);
+        else if (!access || access.contents === 'unknown' || access.pullRequests === 'unknown') say('repository', 'notice', 'repository_write_unknown', values);
+        else say('repository', 'ok', 'repository_ok', values);
+      }
     }
   }
 

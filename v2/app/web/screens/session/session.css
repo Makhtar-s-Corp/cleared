@@ -17,6 +17,7 @@
 .s-now .dot { width: 6px; height: 6px; border-radius: 50%; align-self: center; background: var(--stage-progress); }
 .s-now[data-tone="waiting"] .dot { background: var(--awaiting); }
 .s-now[data-tone="review"] .dot { background: var(--stage-review); }
+.s-now[data-tone="failed"] .dot { background: var(--danger); }
 .s-now[data-tone="ended"] .dot, .s-now[data-tone="paused"] .dot { background: var(--placeholder); }
 
 /* The one action: a 1 px line, the screen's one accent on its button. */

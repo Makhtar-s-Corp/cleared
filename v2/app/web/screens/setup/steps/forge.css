@@ -11,6 +11,13 @@
 .forge-option input:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .setup-step .forge-make { margin: 0 0 var(--space-3); font-size: var(--text-md); }
 
+/* The repository whose rights the step reads (issues #503 and #506). */
+.forge-repository { display: grid; gap: var(--space-1); margin: 0 0 var(--space-3); }
+.forge-repository label { font-weight: var(--weight-strong); }
+.forge-select { width: 100%; min-height: 32px; padding: 0 var(--space-2); border: 1px solid var(--input); border-radius: var(--radius); background: var(--theme-base); color: var(--text); font: inherit; }
+.forge-select:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
 @media (max-width: 640px) {
+  .forge-select { min-height: 44px; font-size: var(--text-input); }
   .forge-option { min-height: 44px; flex: 1; }
 }

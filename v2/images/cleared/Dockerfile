@@ -56,5 +56,22 @@ RUN npm ci --no-audit --no-fund \
  && chmod 755 src/cli/cleared.ts \
  && ln -s /opt/cleared/v2/src/cli/cleared.ts /usr/local/bin/cleared
 
+# The receipt's captures (P210, flow/proof-capture.ts, issue #504): Playwright's
+# headless Chromium and its ffmpeg, the builds the lockfile's playwright-core
+# names, so that this image's version moves only with that lockfile. They are
+# downloaded by that version of Playwright, which checks nothing beyond its own
+# build numbers. The shell rather than the full browser, its libraries with no
+# recommended package and no X server. Outside any home folder, since each role
+# runs as the owner of the state folder.
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends \
+      fonts-liberation libasound2 libatk-bridge2.0-0 libatk1.0-0 libatspi2.0-0 libcairo2 libcups2 libdbus-1-3 libdrm2 \
+      libgbm1 libglib2.0-0 libnspr4 libnss3 libpango-1.0-0 libx11-6 libxcb1 libxcomposite1 libxdamage1 libxext6 libxfixes3 \
+      libxkbcommon0 libxrandr2 \
+ && rm -rf /var/lib/apt/lists/* \
+ && node_modules/.bin/playwright-core install chromium-headless-shell ffmpeg \
+ && chmod -R a+rX /opt/playwright
+
 WORKDIR /opt/cleared
 ENTRYPOINT ["node", "/opt/cleared/v2/images/cleared/entrypoint.ts"]

@@ -74,7 +74,7 @@ function QuotaRow({ h, quota, data, now, t, language }: { readonly h: HarnessCon
     return (
       <div className="quota" data-quota={h.harness} data-verdict="unknown">
         <p className="quota-name">{name}</p>
-        <p className="quota-note">{t('consumption_quota_none')}</p>
+        <p className="quota-note">{t(h.lastReading?.unavailable ? 'consumption_quota_unavailable' : 'consumption_quota_none')}</p>
         <Readings h={h} quota={undefined} data={data} t={t} language={language} />
       </div>
     );
@@ -262,7 +262,7 @@ export function ConsumptionView({ data, t, language, now, busy = false, note = '
             <header className="panel-head">
               <h2 id="limits-title">{t('consumption_limits_title')}</h2>
               {summary.kind === 'hit' ? <span className="chip warn">{t('consumption_chip_hit', { harness: harnessName(summary.harness ?? '', t) })}</span>
-                : <span className="chip">{summary.kind === 'ok' ? t('consumption_chip_ok') : t('consumption_chip_none')}</span>}
+                : <span className="chip">{t(summary.kind === 'ok' ? 'consumption_chip_ok' : summary.kind === 'unavailable' ? 'consumption_chip_unavailable' : 'consumption_chip_none')}</span>}
             </header>
             <p className="headline" data-headline={summary.kind}>{summary.text}</p>
             <div className="quotas">

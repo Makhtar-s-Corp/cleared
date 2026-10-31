@@ -57,5 +57,6 @@
   "workspace_change": "En choisir d'autres",
   "workspace_write_one": "Connecter ce dépôt",
   "workspace_connected_detail": "Connecté le {date}.",
-  "workspace_environment_detail": "La variable CLEARED_V2_WORKSPACE les nomme."
+  "workspace_environment_detail": "La variable CLEARED_V2_WORKSPACE les nomme.",
+  "workspace_error_cannot_write": "Le jeton ne peut pas écrire sur {repository} : revenez à l'étape Votre code pour lui donner ce droit."
 }

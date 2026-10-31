@@ -34,6 +34,7 @@ import { WORKSPACE_FILE } from '../../../src/workspace/connect.ts';
 import { serviceSource } from '../../src/proxy.ts';
 import { SESSION_TABLES } from '../../src/session-cookie.ts';
 import { fakeGh } from '../../../test/forge/fake-gh.ts';
+import { FakeForge } from '../../../test/setup/fakes/github.ts';
 import { remote } from '../../../test/workspace/git.ts';
 import { FAST, PASSWORD, startSetup } from '../../../test/setup/support.ts';
 import { startApp } from '../support.ts';
@@ -89,7 +90,8 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     ],
     pulls: [],
   });
-  const service = await startSetup({ env: { PATH: gh.env.PATH as string, GH_TOKEN: GOOD } });
+  const github = new FakeForge({ [GOOD]: ['example-org/filter-api', 'example-org/guestbook', 'example-org/both'] });
+  const service = await startSetup({ env: { PATH: gh.env.PATH as string, GH_TOKEN: GOOD, CLEARED_V2_FORGE_GITHUB_API: await github.listen() } });
   await service.directory.add('alex', PASSWORD);
   const db = new DatabaseSync(join(service.dir, 'ledger.db'));
   applyTables(db, [...users.tables, ...SESSION_TABLES, ...SETUP_TABLES]);
@@ -180,6 +182,7 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await app.close();
     db.close();
     await service.close();
+    await github.close();
   }
 }
 

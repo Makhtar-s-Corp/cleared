@@ -833,6 +833,21 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     try { setTicketNow(await context.api<Ticket>(`/tickets/${encodeURIComponent(ticketId)}`)); }
     catch { /* the next change tries again */ }
   }, [context, ticketId]);
+  // After a publication that failed (issue #507): the service starts a ticket moved to Todo.
+  const [restarting, setRestarting] = useState(false);
+  const [restartNote, setRestartNote] = useState('');
+  const restartTicket = useCallback(async () => {
+    setRestarting(true);
+    setRestartNote('');
+    try {
+      await context.api<Ticket>(`/tickets/${encodeURIComponent(ticketId)}/move`, { method: 'POST', body: { status: 'Todo' } });
+      await readTicket();
+    } catch {
+      setRestartNote(t('glance_publish_restart_failed'));
+    } finally {
+      setRestarting(false);
+    }
+  }, [context, readTicket, t, ticketId]);
   const refresh = useCallback(async () => {
     void readSteps();
     void readInbox();
@@ -1256,7 +1271,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
         <div className="s-read">
           <SessionHead view={view} t={t} onTicket={() => { setDetail(true); requestAnimationFrame(() => document.getElementById('ticket-title')?.scrollIntoView({ block: 'start' })); }} />
           {action ? (
-            <ActionCard action={action} view={view} t={t}
+            <ActionCard action={action} view={view} t={t} onRestart={() => void restartTicket()} restarting={restarting} restartNote={restartNote}
               onAnswer={(requestId, kind, session) => void answer(requestId, kind, session)}
               onQuestion={(requestId, given, chosen, session) => void answerQuestion(requestId, given, chosen, session)}
               giveback={<TakeoverButton t={t} takeover={takeover} busy={gesture} onTakeover={() => void takeOver()} onGiveback={() => void giveBack()} />}

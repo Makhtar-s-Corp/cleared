@@ -86,6 +86,7 @@ export function setupApi(csrf: string, fetcher: typeof fetch = (url, init) => fe
 // A refusal's sentence: the step's own word for the service's code, else its generic one.
 export function refusal(t: Translate, prefix: string, body: unknown): string {
   const code = typeof (body as { error?: unknown } | null)?.error === 'string' ? (body as { error: string }).error : '';
-  const said = /^[a-z_]+$/.test(code) ? t(`${prefix}_error_${code}`) : '';
+  const repository = (body as { repository?: unknown } | null)?.repository;
+  const said = /^[a-z_]+$/.test(code) ? t(`${prefix}_error_${code}`, typeof repository === 'string' ? { repository } : {}) : '';
   return said && !hasMark(said) ? said : t(`${prefix}_error_other`);
 }

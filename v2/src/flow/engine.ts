@@ -123,6 +123,9 @@ import { skillPath } from '../knowledge/skill.ts';
 import { DEFAULT_SAFE_COMMANDS, learnedPatterns, type Policy } from '../session/policy.ts';
 import type { Store } from '../store/db.ts';
 import type { Actor, Ticket, TicketId } from '../tickets/contract.ts';
+import { recordWorkspace } from '../tickets/local-store.ts';
+import { BranchNames, freeBranch, isTicketBranch } from './branch-names.ts';
+import { publishFailureCode, publishHint, type PublishFailureCode } from './publish-failure.ts';
 import { replayBranch, ticketBranch } from '../workspace/checkout.ts';
 import type { Published } from '../workspace/publish.ts';
 import { serviceLocks } from '../approval/service.ts';
@@ -188,8 +191,12 @@ export type FlowEffects = {
   refreshProject(service?: ServiceConfig): Promise<void>;         // projectCheckout: fetch the forge, so publish sees the base as it is now (issue 141)
   // The ticket's checkout: <workdirs>/<ticket>, or <workdirs>/<ticket>/<service> for a service of a workspace of several,
   // or <workdirs>/<ticket>.variant-<round>-<position> for a variant (flow/variants.ts variantFolder).
-  // `branch`: the branch of a ticket resumed from a step (issue #272); ticketBranch's by default.
+  // `branch`: the ticket's name (flow/branch-names.ts) or its resume's (issue #272); ticketBranch's by default.
   prepareWorkdir(input: { readonly ticket: Ticket; readonly role: Role; readonly service?: ServiceConfig; readonly variant?: VariantKey; readonly branch?: string }): Promise<{ readonly workdir: string; readonly briefing: Briefing }>;
+  // What the service's remote holds under this ticket's names, and the branch of
+  // a checkout the ticket already has (issues #508 and #510); read when the
+  // ticket first starts. Absent: the ticket keeps ticketBranch's name.
+  remoteBranches?(input: { readonly ticket: TicketId; readonly service?: ServiceConfig }): Promise<{ readonly names: readonly string[]; readonly checkout: string | null }>;
   // `contract`: the service whose contract a step builds against, when its session has one: its lessons for the contract are filed there.
   captureHandover(input: { readonly workdir: string; readonly role: Role; readonly model: string; readonly ticket: TicketId; readonly sessionId: SessionId; readonly contract?: string }): Promise<string | null>;
   // `receipt`: the facts of the proof receipt at the top of the body (P210, flow/receipt.ts).
@@ -468,6 +475,7 @@ export class FlowEngine {
   #repairing = new Set<TicketId>();                                 // tickets whose failed checks are being read or a repair started
   #repairs = new Map<TicketId, CiRepair>();                         // the repair a ticket's flow runs for, until its card is published
   #replays: ReplayStore;                                            // the tickets resumed from a step (issue #272)
+  #branchNames: BranchNames;                                        // the name each ticket took when it first started (issues #508, #510)
   #replaying = new Set<TicketId>();                                 // tickets whose resume is under way
   #tips = new Map<SessionId, string>();                             // the last commit journaled as an author's checkpoint
   #fastLanes: FastLaneStore;                                        // the Quick tickets the rules kept fast or sent back (B2.2)
@@ -494,6 +502,7 @@ export class FlowEngine {
     this.#steps = new StepStore(deps.store.db, this.#now);
     this.#variants = new VariantStore(deps.store.db, this.#now);
     this.#replays = new ReplayStore(deps.store.db, this.#now);
+    this.#branchNames = new BranchNames(deps.store.db);
     this.#fastLanes = new FastLaneStore(deps.store.db);
     this.#captureChoices = new CaptureChoiceStore(deps.store.db);
     this.#envChecks = new EnvCheckStore(deps.store.db);
@@ -542,16 +551,44 @@ export class FlowEngine {
     this.#workdirs.set(ticket.id, workdirs);
     let first: { readonly workdir: string; readonly briefing: Briefing } | undefined;
     for (const service of services) {
-      const prepared = await this.#effects.prepareWorkdir({ ticket, role, service });
+      const prepared = await this.#effects.prepareWorkdir({ ticket, role, service, branch: this.#branchOf(ticket.id) });
       workdirs.set(service.name, prepared.workdir);
       first ??= prepared;
     }
     return first as { readonly workdir: string; readonly briefing: Briefing };
   }
 
-  // The branch of a one-service ticket: its newest resume's (issue #272), else its own.
+  // The branch of a ticket: its newest resume's (issue #272), else the name it took when it first started.
   #branchOf(ticket: TicketId): string {
-    return this.#replays.latest(ticket)?.branch ?? ticketBranch(ticket);
+    return this.#replays.latest(ticket)?.branch ?? this.#branchNames.get(ticket) ?? ticketBranch(ticket);
+  }
+
+  // The ticket's name, once, before anything is prepared: what its services'
+  // remotes hold is another install's work, not this ticket's. A remote that
+  // cannot be asked stops nothing: the ticket keeps its own name, kept nowhere,
+  // so that its next start asks again, and a refused push says why (issue #507).
+  async #claimBranch(ticket: Ticket): Promise<void> {
+    const read = this.#effects.remoteBranches;
+    if (!read || this.#branchNames.get(ticket.id) || this.#replays.latest(ticket.id)) return;
+    const own = ticketBranch(ticket.id);
+    try {
+      const services = this.#several ? this.#servicesOf(ticket) : [undefined];
+      const answers = await Promise.all(services.map((service) => read.call(this.#effects, { ticket: ticket.id, ...(service ? { service } : {}) })));
+      // A checkout or a pull request from before this name was kept: the branch on the remote is its own.
+      const checkout = answers.map((answer) => answer.checkout).find((branch) => branch !== null && isTicketBranch(ticket.id, branch));
+      const published = ticket.services?.some((service) => service.pr !== null) ?? false;
+      this.#branchNames.keep(ticket.id, this.config.project, checkout ?? (published ? own : freeBranch(ticket.id, answers.flatMap((answer) => answer.names))));
+    } catch (error) {
+      console.error(`cleared-v2: the remote branches of ${ticket.id} could not be read, so it keeps ${own} (${error instanceof Error ? error.name : typeof error})`);
+    }
+  }
+
+  // The next resume of a ticket (issue #272), past a resume's name another install left on the remote.
+  async #nextReplay(ticket: TicketId): Promise<{ readonly n: number; readonly branch: string }> {
+    let n = (this.#replays.latest(ticket)?.n ?? 0) + 1;
+    const names = await this.#effects.remoteBranches?.({ ticket }).then((answer) => answer.names, () => []) ?? [];
+    while (names.includes(replayBranch(ticket, n))) n += 1;
+    return { n, branch: replayBranch(ticket, n) };
   }
 
   // A ticket whose variant was chosen works in that variant's checkout from then on.
@@ -1040,6 +1077,19 @@ export class FlowEngine {
     return row ? { id: row.id, ticket: row.ticket, project: row.project } : undefined;
   }
 
+  // What the receipt's captures need of a service, confirmed on the assistant's
+  // environment step (issue #505): the effects and the plans of the siblings read
+  // these same objects each time they need them, so the next ticket has them with
+  // no restart, and the registry's row says the same.
+  applyServiceTargets(name: string, targets: Pick<ServiceConfig, 'healthUrl' | 'run'>): void {
+    const service = this.#workspace.services.find((one) => one.name === name);
+    if (!service) return;
+    Object.assign(service, targets);
+    // The row is what the configuration says; a ledger with no such table has none to keep in step.
+    try { recordWorkspace(this.#store.db, this.#workspace, this.#at()); }
+    catch (error) { console.error(`cleared-v2: the service row of ${name} was not updated (${error instanceof Error ? error.name : typeof error})`); }
+  }
+
   // ---- starting a ticket --------------------------------------------------
 
   // Starts the flow of a ticket in Todo: the workspace, then the author.
@@ -1074,6 +1124,7 @@ export class FlowEngine {
     const began = this.#now();
     try {
       await tickets.move(ticketId, tickets.states.progress, SERVICE);
+      await this.#claimBranch(ticket);
       if (count > 1) {
         await this.#startVariants(ticket, by, origin, typeof variants === 'object' ? variants : count);
         return;
@@ -1189,9 +1240,8 @@ export class FlowEngine {
       await this.#stopAll(ticket.id, by, 'The owner resumed the ticket from an earlier step: this session was stopped.', 'replayed', `The owner resumed the ticket from a step of ${id}.`);
       this.#channels.delete(ticket.id);
       this.#finishing.delete(ticket.id);
-      const n = (this.#replays.latest(ticket.id)?.n ?? 0) + 1;
       const previous = this.#branchOf(ticket.id);
-      const branch = replayBranch(ticket.id, n);
+      const { n, branch } = await this.#nextReplay(ticket.id);
       let made: { readonly previousHead: string; readonly aside: string };
       try {
         made = await this.#effects.replay({ ticket: ticket.id, n, commit: step.commit, branch, previous });
@@ -1291,7 +1341,7 @@ export class FlowEngine {
     const began = this.#now();
     const scoped = this.#several ? service : undefined;
     const settings = await this.#effects.settings(scoped);
-    const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author', ...(scoped ? { service: scoped } : { branch: this.#branchOf(id) }) });
+    const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author', ...(scoped ? { service: scoped } : {}), branch: this.#branchOf(id) });
     const workdirs = this.#workdirs.get(id) ?? new Map<string, string>();
     this.#workdirs.set(id, workdirs);
     workdirs.set(service.name, prepared.workdir);
@@ -1838,7 +1888,7 @@ export class FlowEngine {
     const ticket = await this.#ticketOf(id);
     const began = this.#now();
     const settings = await this.#settings(ticket);
-    const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author', variant: { round: variant.round, position: variant.position } });
+    const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author', variant: { round: variant.round, position: variant.position }, branch: this.#branchOf(ticket.id) });
     const workspaceDone = this.#now();
     // A Codex or Cursor author has no host tools (their adapters take none), as in a handover.
     const tools = this.config.authorTools === true && variant.harness === HARNESS;
@@ -2717,7 +2767,7 @@ export class FlowEngine {
       if (!adapter) throw new FlowError('unavailable', `no adapter for ${harness} is registered`);
       const settings = await this.#settings(ticket);
       const prepared = this.#several
-        ? await this.#effects.prepareWorkdir({ ticket, role: 'reviewer', service: this.#servicesOf(ticket)[0] as ServiceConfig })
+        ? await this.#effects.prepareWorkdir({ ticket, role: 'reviewer', service: this.#servicesOf(ticket)[0] as ServiceConfig, branch: this.#branchOf(ticket.id) })
         : await this.#effects.prepareWorkdir({ ticket, role: 'reviewer', ...this.#chosenVariant(ticket.id), branch: this.#branchOf(ticket.id) });
       // The files a person changed in the author's checkouts (decision 33): every author session of the flow, a ticket in steps having several.
       const edits = this.#flowRows(ticket.id).filter((row) => row.role === 'author').flatMap((row) => humanEdits({ events: this.#store.events.after(row.id) }));
@@ -3121,6 +3171,11 @@ export class FlowEngine {
 
   // ---- a pass: publish, record, ask the lock -------------------------------
 
+  // What the session screen says of a publication that failed (issue #507).
+  #publishFailed(session: { readonly id: SessionId; readonly ticket: TicketId; readonly project: string }, code: PublishFailureCode, service: string | null, detail: string): void {
+    this.#journal(session, { type: 'CUSTOM', name: 'cleared.publish_failed', value: { code, service, detail: this.#clean(detail).slice(0, 2000) } });
+  }
+
   async #publishAndAsk(reviewer: Live, report: string, round: number): Promise<void> {
     const { ticket: id, project, workdir, model } = reviewer.input;
     const session = { id: reviewer.id, ticket: id, project };
@@ -3137,7 +3192,9 @@ export class FlowEngine {
       published = await this.#effects.publish({ ticket: id, workdir, branch: this.#branchOf(id), report, receipt: this.#receipt(id, reviewer) });
     } catch (error) {
       this.#step(session, 'STEP_FINISHED', 'release');
-      await this.#putBack(id, `The branch was not published: ${name(error)}`, 'publish_refused');
+      const code = publishFailureCode(error);
+      this.#publishFailed(session, code, null, name(error));
+      await this.#putBack(id, `The branch was not published: ${name(error)}.${publishHint(code)}`, 'publish_refused');
       return;
     }
     const reviewedAt = this.#now().toISOString();
@@ -3337,15 +3394,21 @@ export class FlowEngine {
       try {
         await this.#effects.refreshProject(service);
         const workdir = this.#workdirs.get(id)?.get(service.name) ?? posix.join(this.config.workdirRoot, id, service.name);
-        const pr = await this.#effects.publish({ ticket: id, workdir, branch: ticketBranch(id), report, service, receipt });
+        const pr = await this.#effects.publish({ ticket: id, workdir, branch: this.#branchOf(id), report, service, receipt });
         const changed = await this.#changes(id, pr.head, service);
         published.push({ service, pr, files: changed?.files ?? null, diff: changed?.diff ?? '' });
       } catch (error) {
         if ((error as { code?: unknown }).code === 'empty') { skipped.push(service.name); continue; }
-        return fail(`The branch was not published on ${service.name}: ${name(error)}`, 'publish_refused');
+        const code = publishFailureCode(error);
+        this.#publishFailed(session, code, service.name, name(error));
+        return fail(`The branch was not published on ${service.name}: ${name(error)}.${publishHint(code)}`, 'publish_refused');
       }
     }
-    if (published.length === 0) return fail(`The branch was not published: no service of the ticket (${order.map((s) => s.name).join(', ')}) has a commit of its own.`, 'publish_refused');
+    if (published.length === 0) {
+      const said = `no service of the ticket (${order.map((s) => s.name).join(', ')}) has a commit of its own.`;
+      this.#publishFailed(session, 'no_commit', null, said);
+      return fail(`The branch was not published: ${said}`, 'publish_refused');
+    }
     // A ticket of one service of several publishes one pull request, whose head is judged as a one-service ticket's.
     const lane = await this.#judgeFast(ticket, published.length === 1 ? { head: (published[0] as (typeof published)[number]).pr.head } : undefined);
     const announcement = [

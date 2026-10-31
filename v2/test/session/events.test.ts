@@ -50,6 +50,7 @@ test('the measured steps and the custom names are the plan\'s', () => {
     'cleared.prepared_image',
     // Issue #501: the step of its plan the author says it has reached.
     'cleared.plan_step',
+    'cleared.publish_failed',
     // Milestone 6: the session's container recreated after it stopped (issue #453).
     'cleared.container_recreated',
   ]);
