@@ -43,8 +43,8 @@ test('a ticket of one step shows no steps card', () => {
 });
 
 test('the ticket card says which step this session is', () => {
-  assert.match(html(<LeftCards view={viewOf({ steps: steps(AUTHOR_ID) })} t={en} />), /on filter-api · step 2 of 4/);
-  assert.match(html(<LeftCards view={viewOf({ steps: steps(AUTHOR_ID) })} t={fr} />), /sur filter-api · étape 2 sur 4/);
+  assert.match(html(<LeftCards view={viewOf({ steps: steps(AUTHOR_ID) })} t={en} />), /on filter-api, step 2 of 4/);
+  assert.match(html(<LeftCards view={viewOf({ steps: steps(AUTHOR_ID) })} t={fr} />), /sur filter-api, étape 2 sur 4/);
   assert.doesNotMatch(html(<LeftCards view={viewOf()} t={en} />), /step \d of/);
 });
 

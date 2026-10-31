@@ -10,7 +10,7 @@ import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
 import { loadCatalog } from '../../../src/catalog.ts';
 import { translator } from '../../lib/i18n.ts';
 import { applyAll, emptyModel, questionStatus, threadOf, type QuestionRow, type SessionModel, type SessionView } from '../../screens/session/model.ts';
-import { renderTimeline, visibleText } from '../render.tsx';
+import { renderAction, renderTimeline, visibleText } from '../render.tsx';
 
 const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
 const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
@@ -34,8 +34,9 @@ test('the waiting question is drawn from the thread\'s interrupt: its three opti
   const view = viewOf(modelWith());
   assert.deepEqual(view.thread.interrupts.map((i) => i.id), [QUESTION_REQUEST_ID]);
   assert.deepEqual(questionStatus(rowOf(view), view, en), { kind: 'waiting', busy: false });
-  const html = renderTimeline(view, en);
+  const html = renderAction(view, en);
   assert.match(html, /<div class="request question waits" data-row="question" data-request-id="question-161">/);
+  assert.doesNotMatch(renderTimeline(view, en), /data-answer=/, 'one place answers it: the action at the top');
   assert.deepEqual([...html.matchAll(/<button[^>]*data-answer="([^"]*)"/g)].map((m) => m[1]), MONTH_QUESTION.options?.map((o) => o.label.replace(/'/g, '&#39;')));
   assert.match(html, /<span class="choice-rec">Recommended<\/span>/);
   assert.match(html, /data-free="0"/);
@@ -82,7 +83,7 @@ test('answered elsewhere, cancelled by an interrupt, settled without the person,
 });
 
 test('in French the question\'s words come from the French catalog', () => {
-  const text = visibleText(renderTimeline(viewOf(modelWith(), { language: 'fr' }), fr));
+  const text = visibleText(renderAction(viewOf(modelWith(), { language: 'fr' }), fr));
   for (const english of ['Recommended', 'Or answer in your own words', 'Send the answer']) assert.ok(!text.includes(english), english);
   assert.ok(text.includes('Recommandé'));
 });

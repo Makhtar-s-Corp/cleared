@@ -122,10 +122,14 @@ export type SessionModel = {
   readonly questions: Map<string, QuestionRow>;
   plan: SessionPlan | null;                         // the last cleared.session_plan: the proposal, or its Go
   readonly checkpoints: Checkpoint[];               // the author's branch at each move (issue #272)
+  readonly proofs: ProofCaptured[];                 // the proof receipt's captures, a service at a time (P210)
 };
 
+// The proof receipt's captures of a service, as the flow journals them (P210).
+export type ProofCaptured = Pick<CustomValue['cleared.proof_captured'], 'service' | 'before' | 'after' | 'video'>;
+
 export function emptyModel(): SessionModel {
-  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], turns: [], pending: [], steps: [], tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map(), plan: null, checkpoints: [] };
+  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], turns: [], pending: [], steps: [], tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map(), plan: null, checkpoints: [], proofs: [] };
 }
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -313,6 +317,11 @@ function custom(model: SessionModel, stored: SessionEvent, at: string, event: Ex
     case 'cleared.container_recreated':
       model.rows.push({ kind: 'recreated', at, ...event.value });
       break;
+    case 'cleared.proof_captured': {
+      const { service, before, after, video } = event.value;
+      model.proofs.push({ service, ...(before ? { before } : {}), ...(after ? { after } : {}), ...(video ? { video } : {}) });
+      break;
+    }
     case 'cleared.replay': {
       const { seq: step, ...value } = event.value;
       model.rows.push({ kind: 'replay', at, side: stored.sessionId === value.from ? 'left' : 'resumed', step, ...value });
@@ -444,6 +453,7 @@ export type SessionThread = {
   readonly steps: readonly Step[];
   readonly plan: SessionPlan | null;
   readonly checkpoints: readonly Checkpoint[];
+  readonly proofs?: readonly ProofCaptured[];
 };
 
 export function interruptsOf(model: SessionModel): QuestionInterrupt[] {
@@ -456,7 +466,7 @@ export function interruptsOf(model: SessionModel): QuestionInterrupt[] {
 export function threadOf(model: SessionModel): SessionThread {
   return {
     lastSeq: model.lastSeq, lastAt: model.lastAt, state: model.state, rows: timeline(model), turns: [...model.turns], pending: [...model.pending], interrupts: interruptsOf(model), steps: [...model.steps], plan: model.plan,
-    checkpoints: [...model.checkpoints],
+    checkpoints: [...model.checkpoints], proofs: [...model.proofs],
   };
 }
 

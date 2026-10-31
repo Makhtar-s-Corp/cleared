@@ -21,6 +21,7 @@ import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { createPreviewHandler, type PreviewUpstream } from '../../src/preview.ts';
 import type { DataSource } from '../../src/proxy.ts';
 import { PASSWORD, signedIn, startApp, type Running } from '../support.ts';
+import { openDetails } from './fold.ts';
 
 const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
@@ -78,6 +79,7 @@ test('the four tabs switch, and the Go of a waiting plan calls its route', { ski
   const fixture = sessionFixture(FIXTURE_NOW, { plan: 'waiting' });
   const source = sessionSource(fixture);
   const seen = await browse(source, `/sessions/${AUTHOR_ID}`, async (page) => {
+    await openDetails(page);
     await page.locator('#timeline [data-row]').first().waitFor();
     const selected = async () => page.locator('[role="tab"][aria-selected="true"]').getAttribute('aria-controls');
     assert.equal(await selected(), 'tab-terminal');
@@ -86,8 +88,8 @@ test('the four tabs switch, and the Go of a waiting plan calls its route', { ski
     assert.ok(await page.locator('#tab-plan').isVisible());
     assert.ok(!(await page.locator('#tab-terminal').isVisible()));
     assert.match(page.url(), /#plan$/);
-    await page.locator('#tab-plan [data-act="plan_go"]').click();
-    await page.locator('#tab-plan [data-act="plan_go"]').waitFor({ state: 'detached' });
+    await page.locator('#session-action [data-act="plan_go"]').click();
+    await page.locator('#session-action [data-act="plan_go"]').waitFor({ state: 'detached' });
     assert.match(await page.locator('#tab-plan').innerText(), /Go given by you at/);
 
     // Nothing is changed before the Go: the Editor says so.
@@ -135,13 +137,14 @@ test('Hand over to Codex calls its route, the screen follows the Codex author, a
   const fixture = sessionFixture(FIXTURE_NOW);
   const source = sessionSource(fixture);
   const seen = await browse(source, `/sessions/${AUTHOR_ID}`, async (page) => {
+    await openDetails(page);
     await page.locator('#timeline [data-row]').first().waitFor();
     assert.equal((await page.locator('#handover').innerText()).trim(), 'Hand over to Codex');
     assert.equal(await page.locator('#handover').getAttribute('data-to'), 'codex');
     await page.locator('#handover').click();
     await page.locator('#handover[data-to="claude-code"]').waitFor();
     assert.equal((await page.locator('#handover').innerText()).trim(), 'Hand back to Claude Code');
-    assert.match(await page.locator('#status').innerText(), /gpt-6-luna/, 'the screen follows the Codex author');
+    assert.match(await page.locator('#detail-head').innerText(), /gpt-6-luna/, 'the screen follows the Codex author');
     await page.locator('#handover').click();
     await page.locator('#handover[data-to="codex"]').waitFor();
   });
@@ -206,4 +209,52 @@ test('a page planted in the preview has an opaque origin, no cookie and a refuse
   }, withProbe);
   assert.deepEqual(seen.errors, []);
   assert.deepEqual(seen.away, []);
+});
+
+// The session in five seconds (issue #499): its one action, never another ticket's, the rest folded until it is
+// asked for, and what the ticket has become said without a reload.
+const reviewCard = (ticket: string, id: string, project: string) => ({ kind: 'release', id, ticket, project, since: FIXTURE_NOW.toISOString(), state: 'waiting', title: 't', announcement: 'a', pr: { number: 12, url: 'https://forge.example/o/r/pull/12', checks: 'passed' }, heads: [], requestedAt: FIXTURE_NOW.toISOString(), captures: { before: { desktop: null, phone: null }, after: { desktop: null, phone: null } }, sessions: [] });
+
+test('the one action is answered at the top, the thread only says it waits, and another ticket\'s card stays out', { skip }, async () => {
+  const fixture = sessionFixture(FIXTURE_NOW);
+  (fixture as unknown as { inbox: unknown[] }).inbox.push(reviewCard('LOCAL-999', 'release:other', fixture.project));
+  const seen = await browse(sessionSource(fixture), `/sessions/${AUTHOR_ID}`, async (page) => {
+    const action = page.locator('#session-action');
+    await action.locator('[data-answer="allow_once"]').waitFor();
+    assert.equal(await action.getAttribute('data-action'), 'permission');
+    assert.equal(await page.locator('[data-act="open_review"]').count(), 0, 'another ticket\'s review is not this session\'s');
+    assert.ok(!(await page.locator('#timeline').isVisible()), 'the thread is in the fold');
+    await openDetails(page);
+    await page.locator('#timeline [data-row="waits"]').waitFor();
+    assert.equal(await page.locator('#timeline [data-answer]').count(), 0, 'the thread holds no answer');
+  });
+  assert.deepEqual(seen.errors, []);
+});
+
+test('an open screen follows its ticket without a reload: the review to decide, then the result', { skip }, async () => {
+  const fixture = sessionFixture(FIXTURE_NOW, { review: 'later' });
+  const source = sessionSource(fixture);
+  const mutable = fixture as unknown as { ticket: Record<string, unknown>; inbox: unknown[] };
+  const seen = await browse(source, `/sessions/${AUTHOR_ID}`, async (page) => {
+    await page.locator('.session:not([aria-busy]) #status').waitFor();
+    assert.equal(await page.locator('#session-result').count(), 0);
+
+    mutable.ticket = { ...mutable.ticket, status: 'Needs Approval' };
+    mutable.inbox.push(reviewCard(TICKET_ID, 'release:this', fixture.project));
+    source.changed('ticket', TICKET_ID);
+    source.changed('inbox', null);
+    await page.locator('#session-action [data-act="open_review"]').waitFor();
+    assert.equal(await page.locator('#session-action [data-act="open_review"]').getAttribute('href'), '/inbox#release%3Athis');
+    await page.waitForFunction(() => document.querySelector('#status')?.textContent === 'The work is ready: it is waiting for your review.');
+    assert.match(await page.locator('.s-stage-count').innerText(), /Stage 4 of 5/);
+
+    mutable.ticket = { ...mutable.ticket, status: 'Done' };
+    mutable.inbox.length = 0;
+    source.changed('ticket', TICKET_ID);
+    source.changed('inbox', null);
+    await page.locator('#session-result').waitFor();
+    assert.equal(await page.locator('#session-action').count(), 0, 'nothing is expected of the person any more');
+    assert.equal(await page.locator('#status').innerText(), 'This ticket is finished.');
+  });
+  assert.deepEqual(seen.errors, []);
 });

@@ -19,6 +19,7 @@ import { FIXTURE_NOW } from '../fixtures/tower.ts';
 import { leadFixture, leadSource, waitingForAnswer } from '../fixtures/lead.ts';
 import type { DataSource } from '../src/proxy.ts';
 import { PASSWORD, startApp } from './support.ts';
+import { openDetails } from './session/fold.ts';
 
 const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
@@ -62,12 +63,16 @@ test('a click on an option of the session\'s question calls the session answer r
   const source = sessionSource(fixture);
   const label = MONTH_QUESTION.options?.[1]?.label as string;
   const seen = await browse(source, `/sessions/${AUTHOR_ID}`, async (page) => {
-    const question = page.locator(`#timeline [data-row="question"][data-request-id="${QUESTION_REQUEST_ID}"]`);
+    const question = page.locator(`#session-action [data-row="question"][data-request-id="${QUESTION_REQUEST_ID}"]`);
     await question.locator('[data-answer]').first().waitFor();
     assert.equal(await question.locator('[data-answer]').count(), 3);
     await question.locator(`[data-answer="${label}"]`).click();
-    await question.locator('[data-choices-state="answered"]').waitFor();
-    assert.match(await question.innerText(), new RegExp(`Answered by you: ${label}`));
+    // The action is gone from the top, and the thread keeps what was answered.
+    await question.waitFor({ state: 'detached' });
+    await openDetails(page);
+    const answered = page.locator(`#timeline [data-row="question"][data-request-id="${QUESTION_REQUEST_ID}"]`);
+    await answered.locator('[data-choices-state="answered"]').waitFor();
+    assert.match(await answered.innerText(), new RegExp(`Answered by you: ${label}`));
   });
   const answers = source.calls.filter((c) => c.path.endsWith('/answer'));
   assert.deepEqual(answers.map((c) => [c.path, c.body]), [

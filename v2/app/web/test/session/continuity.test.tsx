@@ -17,7 +17,8 @@ import { loadCatalog } from '../../../src/catalog.ts';
 import { translator, type Translate } from '../../lib/i18n.ts';
 import { SessionAgent } from '../../screens/session/agent.ts';
 import { applyAll, emptyModel, threadOf, type SessionView, type StreamLike } from '../../screens/session/model.ts';
-import { LeftCards, RightCards, SessionHeading, StatusHead, Timeline } from '../../screens/session/Session.tsx';
+import { LeftCards, RightCards, StatusHead, Timeline } from '../../screens/session/Session.tsx';
+import { SessionHead } from '../../screens/session/Glance.tsx';
 import { EditorTab, TakeoverButton } from '../../screens/session/Tabs.tsx';
 import { takeoverOf } from '../../screens/session/tabs.ts';
 import { actingSession, type TicketPart } from '../../screens/session/ticket.ts';
@@ -64,7 +65,7 @@ test('one thread of the ticket: the author\'s steps, the handover row, the revie
   assert.ok(visibleText(html(<Timeline view={view} t={fr} />)).includes('Sonnet a commencé la relecture à 09:37. Le travail de l\'auteur est au-dessus.'));
   const status = visibleText(html(<StatusHead view={view} t={en} />));
   assert.deepEqual(status.slice(0, 1), ['Reading the diff of src/screens/Envelope.jsx']);
-  assert.deepEqual([status[1], /^4\u00a0min/.test(status[2] ?? '')], ['Reviewer · Sonnet ·', true], 'the status says whose it is when the ticket has two');
+  assert.match(status[1] ?? '', /^Reviewer \(Sonnet\) · 4\u00a0min/, 'the status says whose it is when the ticket has two');
 });
 
 test('each step opens its detail: a command said by its intent, the command folded one a line; two edits of one file as one row', () => {
@@ -96,15 +97,18 @@ test('the checks: a check named by its command is said by its intent, the comman
   assert.ok(visibleText(markup).includes('Review'), 'the time by step adds up the review');
 });
 
-test('the session view has one heading for the screen: its ticket\'s number and title, read out (lane 38\'s art director, item 5)', () => {
-  assert.match(html(<SessionHeading view={ticketView()} />), /^<h1 class="sr-only">LOCAL-152 · Envelope sheet shows its previous months<\/h1>$/);
+test('the session view has one heading for the screen, its ticket\'s title, and its number beside it', () => {
+  const head = html(<SessionHead view={ticketView()} t={en} />);
+  assert.match(head, /<h1 class="s-title">Envelope sheet shows its previous months<\/h1>/);
+  assert.match(head, /data-act="open_ticket"[^>]*>LOCAL-152</);
+  assert.equal([...head.matchAll(/<h1/g)].length, 1);
 });
 
 test('a card with nothing to say is not drawn: no criteria, no plan, the ticket card alone', () => {
   const view = ticketView();
   const left = html(<LeftCards view={view} t={en} />);
   assert.equal([...left.matchAll(/<section class="card"/g)].length, 1, 'the ticket; its criteria in the fold');
-  assert.match(left, /<details class="card s-fold"[\s\S]*criteria-title/);
+  assert.match(left, /s-facts-card[\s\S]*criteria-title/);
   assert.ok(!left.includes('plan-title'), 'no session plan on this ticket');
   const bare = html(<LeftCards view={{ ...view, ticket: { ...view.ticket!, body: 'Only words.' } }} t={en} />);
   assert.equal([...bare.matchAll(/<section class="card"/g)].length, 1);
@@ -185,13 +189,13 @@ test('the whole ticket folds an ended session a later one followed into one row,
   const markup = html(<Timeline view={view} t={en} />);
   const fold = /<details class="earlier" data-session="([^"]+)"><summary>[\s\S]*?<span>([^<]+)<\/span><\/summary>/.exec(markup);
   assert.equal(fold?.[1], ENVELOPE_AUTHOR_ID);
-  assert.match(fold?.[2] ?? '', /^Author · Opus · \d+ steps$/);
+  assert.match(fold?.[2] ?? '', /^Author \(Opus\), \d+ steps$/);
   assert.ok(markup.indexOf('class="earlier"') < markup.indexOf('data-row="handover"'), 'folded above the handover row');
   // The handover row says whose session starts, for a reader of the page (the proof scripts, lane 38).
   assert.match(markup, /<p class="handover" data-row="handover" data-session="[^"]+" data-role="reviewer">/);
   assert.doesNotMatch(html(<Timeline view={{ ...view, unfolded: new Set([ENVELOPE_AUTHOR_ID]) }} t={en} />), /class="earlier"/, 'seen live: never folded under the person\'s eyes');
   assert.doesNotMatch(html(<Timeline view={{ ...view, filter: 'author' }} t={en} />), /class="earlier"/);
-  assert.match(html(<Timeline view={view} t={fr} />), /Auteur · Opus · \d+ étapes/);
+  assert.match(html(<Timeline view={view} t={fr} />), /Auteur \(Opus\), \d+ étapes/);
 });
 
 test('the sessions index has one card per ticket: the session its view acts on', () => {

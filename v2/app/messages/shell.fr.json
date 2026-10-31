@@ -128,7 +128,7 @@
   "key_cap_enter": "Entrée",
   "key_cap_esc": "Échap",
   "cmd_ask_code": "Interroger le code",
-  "intent_git_read": "lire l'historique et le diff du dépôt",
+  "intent_git_read": "lire l'historique et les changements du dépôt",
   "intent_read_files": "lire des fichiers",
   "intent_search": "chercher dans le code",
   "intent_list": "lister des fichiers",

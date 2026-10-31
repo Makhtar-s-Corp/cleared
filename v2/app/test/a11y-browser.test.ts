@@ -124,9 +124,11 @@ const PLACES: readonly Place[] = [
   { name: 'command menu', ready: '#palette [cmdk-input]', step: async (page) => { await page.keyboard.press('Control+k'); } },
   { name: 'inbox, a release open', path: '/inbox#release-158', ready: '#detail [data-act="approve"]' },
   { name: 'sessions', path: '/sessions', ready: '.index a.open' },
-  { name: 'a session', path: '/sessions/fixture-1', ready: '.view-tabs [aria-selected="true"]' },
+  { name: 'a session', path: '/sessions/fixture-1', ready: '.session:not([aria-busy]) #status' },
+  { name: 'a session, its detail open', ready: '.view-tabs [aria-selected="true"]', step: async (page) => { await page.click('[data-session-details] > summary'); } },
   { name: 'a session, Plan tab', ready: '#tab-plan:not([hidden]) .plan-tab', step: async (page) => { await page.click('#tab-plan-button'); } },
-  { name: 'a resolved ticket', path: `/sessions/${RESOLVED_AUTHOR_ID}`, ready: '#s-left [data-ticket-cost]' },
+  { name: 'a resolved ticket', path: `/sessions/${RESOLVED_AUTHOR_ID}`, ready: '#session-result' },
+  { name: 'a resolved ticket, its detail open', ready: '#s-left [data-ticket-cost]', step: async (page) => { await page.click('[data-session-details] > summary'); } },
   { name: 'plans', path: '/lead', ready: '[data-plan-action]' },
   { name: 'consumption', path: '/consumption', ready: '.consumption-grid' },
   // Picked without scrolling the page, as the other places are read from its top: a scroll puts the head under the phone's top bar.

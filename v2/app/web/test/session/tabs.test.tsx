@@ -10,7 +10,7 @@ import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
 import { loadCatalog } from '../../../src/catalog.ts';
 import { translator, type Translate } from '../../lib/i18n.ts';
 import { applyAll, emptyModel, parseCriteria, threadOf, type SessionView } from '../../screens/session/model.ts';
-import { BrowserTab, EditorTab, PlanTab, TabStrip, TakeoverButton, TakeoverNotice } from '../../screens/session/Tabs.tsx';
+import { BrowserTab, EditorTab, PlanGate, PlanTab, TabStrip, TakeoverButton, TakeoverNotice } from '../../screens/session/Tabs.tsx';
 import { LeftCards, StatusHead } from '../../screens/session/Session.tsx';
 import { browserView } from '../../screens/session/tabs.ts';
 import { html, strings, visibleText } from '../render.tsx';
@@ -37,7 +37,7 @@ test('the tab strip: four tabs, one selected, each naming its panel; Take over, 
   assert.deepEqual(tabs.map((tab) => /tabindex="(-?\d)"/.exec(tab)?.[1]), ['-1', '0', '-1', '-1'], 'one tab in the page\'s order');
   assert.match(markup, /role="tablist"/);
   assert.match(markup, /<button[^>]*id="takeover"/);
-  for (const word of ['Plan', 'Terminal', 'Editor', 'Browser', 'Take over']) assert.ok(visibleText(markup).includes(word), word);
+  for (const word of ['Plan', 'Activity', 'Files', 'Preview', 'Take over']) assert.ok(visibleText(markup).includes(word), word);
   assert.equal(html(<TakeoverButton t={en} takeover={{ kind: 'free', can: false }} />), '', 'no Take over for a lead\'s or an ended session');
   assert.equal(html(<TakeoverButton t={en} takeover={{ kind: 'other', at: FIXTURE_NOW.toISOString() }} />), '', 'nothing to give back of a teammate\'s');
   const mine = html(<TakeoverButton t={en} takeover={{ kind: 'mine', at: FIXTURE_NOW.toISOString() }} />);
@@ -46,21 +46,23 @@ test('the tab strip: four tabs, one selected, each naming its panel; Take over, 
   assert.doesNotMatch(mine, /id="takeover"/);
 });
 
-test('the Plan tab: the confidence, the reason, the steps and the files; Go and Change while the plan waits', () => {
+test('the Plan tab: the confidence, the reason, the steps and the files; Go and Change are the action at the top of the screen', () => {
   const waiting: SessionPlan = { ...SESSION_PLAN, go: null };
   const markup = html(<PlanTab view={viewOf()} plan={waiting} t={en} />);
   const text = visibleText(markup);
-  for (const expected of ['Session plan', 'High confidence', SESSION_PLAN.reason, ...SESSION_PLAN.steps, ...SESSION_PLAN.files, 'Waiting for your Go', 'Go', 'Change', 'Done when'])
+  for (const expected of ['Session plan', 'High confidence', SESSION_PLAN.reason, ...SESSION_PLAN.steps, ...SESSION_PLAN.files, 'Waiting for your Go', 'Done when'])
     assert.ok(text.includes(expected), `missing: ${expected}`);
-  assert.match(markup, /<button[^>]*data-act="plan_go"/);
-  assert.match(markup, /<button[^>]*data-act="plan_change"/);
+  assert.doesNotMatch(markup, /data-act="plan_go"/, 'one place answers it');
+  const gate = html(<PlanGate plan={waiting} t={en} />);
+  assert.match(gate, /<button[^>]*data-act="plan_go"/);
+  assert.match(gate, /<button[^>]*data-act="plan_change"/);
   assert.match(markup, /class="confidence high"/);
 
   const given = html(<PlanTab view={viewOf()} plan={SESSION_PLAN} t={en} />);
   assert.doesNotMatch(given, /data-act="plan_go"/, 'no Go once given');
   assert.ok(visibleText(given).some((line) => line.startsWith('Go given by you at')));
 
-  const changing = html(<PlanTab view={viewOf()} plan={waiting} t={en} changing />);
+  const changing = html(<PlanGate plan={waiting} t={en} changing />);
   assert.match(changing, /<textarea[^>]*id="plan-change"[^>]*maxlength="2000"/);
   assert.match(changing, /<button[^>]*data-act="plan_change_send"/);
 
@@ -143,5 +145,5 @@ test('the tabs\' words come from the catalog, French included, and nothing is st
     for (const text of visibleText(markup)) assert.ok(/^«[a-z_]+»/.test(text) || allowed.has(text) || /^[+−]\d+$/.test(text), `not from the catalog: ${text}`);
   }
   const french = parts(fr).flatMap(visibleText).join('\n');
-  for (const word of ['Plan', 'Terminal', 'Éditeur', 'Navigateur', 'Prendre la main']) assert.ok(french.includes(word), word);
+  for (const word of ['Plan', 'Journal', 'Fichiers', 'Aperçu', 'Prendre la main']) assert.ok(french.includes(word), word);
 });

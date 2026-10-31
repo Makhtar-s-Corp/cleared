@@ -79,7 +79,17 @@ The screen's centre piece (the owner's request of 2026-10-28, inspired by Devin'
 
 - **A step** is a title, one sentence, its one action, and the rest behind "Show details" (`screens/setup/step.tsx`). No file or setting name in a sentence: those are in the fold. Continue is indigo only when the step shows no action of its own.
 - **No coloured side on anything.** A state is a word beside its mark, in a box with the soft 1 px line.
-- **A session** reads in five seconds: a line with what it does, what it needs from the person and where it is, then the thread beside one column of the ticket, its changes and its checks; the rest in a fold. Two columns, not three.
+
+## The session (the owner's direction of 2026-10-31, issue #499)
+
+A person who opens a session understands it in five seconds. What they read comes from `screens/session/Glance.tsx`, its rules from `glance.ts`; what is behind them is in the [references](../session/REFERENCES.md).
+
+- **One column of reading, 720 px at most,** with a side panel of 200 px on a computer; one column under 960 px of screen.
+- **In this order:** the ticket's title (the screen's one heading, 20 px) and its number; one sentence of what the agent does now (16 px, regular); the one action expected of the person, if any; the stage out of five with the agent's plan under it, or the result once done; the field to write to the agent. Cost and duration are in the side panel.
+- **The sentence comes from the catalog alone:** never a path, a command, a harness's status or an agent's own words.
+- **One action, one place to answer.** A 1 px line, no tint, the screen's one indigo button. It is never another ticket's. The thread says that a request waits and holds no button. A review opens in Reception, where it is signed.
+- **"Show details" holds everything else:** the thread and its tabs (Plan, Journal, Files, Preview), the ticket's text, changes, checks, timings, criteria, the session's facts, take over, hand over, Close. It opens by itself when the address names a tab, when a file is opened and when the person has control. The thread flows in the page, with no scroll area of its own.
+- **Amber** is a 6 px dot beside a sentence that waits. A question's tags are grey in the action.
 
 ## Motion and access
 

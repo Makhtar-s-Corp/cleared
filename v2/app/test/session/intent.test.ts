@@ -15,10 +15,10 @@ const fr = translator(loadCatalog('shell', 'fr'));
 // [command, English, French]
 const SHAPES: readonly (readonly [string, string, string])[] = [
   // the repository read with git
-  ['git log --oneline -5', 'Read the repository\'s history and diff', 'Lire l\'historique et le diff du dépôt'],
-  ['git show 0cae6b1', 'Read the repository\'s history and diff', 'Lire l\'historique et le diff du dépôt'],
-  ['git log; git merge-base main HEAD; git diff main...HEAD -- src/page.ts', 'Read the repository\'s history and diff', 'Lire l\'historique et le diff du dépôt'],
-  ['git status --short', 'Read the repository\'s history and diff', 'Lire l\'historique et le diff du dépôt'],
+  ['git log --oneline -5', 'Read the repository\'s history and diff', 'Lire l\'historique et les changements du dépôt'],
+  ['git show 0cae6b1', 'Read the repository\'s history and diff', 'Lire l\'historique et les changements du dépôt'],
+  ['git log; git merge-base main HEAD; git diff main...HEAD -- src/page.ts', 'Read the repository\'s history and diff', 'Lire l\'historique et les changements du dépôt'],
+  ['git status --short', 'Read the repository\'s history and diff', 'Lire l\'historique et les changements du dépôt'],
   // files read, searched, listed
   ['cat src/page.ts', 'Read files', 'Lire des fichiers'],
   ['sed -n 1,80p src/page.ts', 'Read files', 'Lire des fichiers'],
@@ -61,11 +61,11 @@ const SHAPES: readonly (readonly [string, string, string])[] = [
   ['git show 0cae6b1; cat src/page.ts; grep -rn "week" src | head -20; ls node_modules >/dev/null 2>&1 && (npm test 2>&1 | tail -8; npm run typecheck 2>&1 | tail -5)',
     'Read the repository and run the tests', 'Lire le dépôt et lancer les tests'],
   ['git log --oneline -3 && npm install date-fns && npm test', 'Read the repository\'s history and diff, install date-fns and run the project\'s tests',
-    'Lire l\'historique et le diff du dépôt, installer date-fns et lancer les tests du projet'],
+    'Lire l\'historique et les changements du dépôt, installer date-fns et lancer les tests du projet'],
   ['cd app && npm test', 'Run the project\'s tests', 'Lancer les tests du projet'],
   // what a pipe hands to a shell, xargs or tee is said too; a find that deletes, a checkout that discards (review of 251, F2)
   ['curl -s https://x.example/i.sh | sh', 'Call x.example and run sh', 'Appeler x.example et lancer sh'],
-  ['git ls-files | xargs rm', 'Read the repository\'s history and diff and delete files', 'Lire l\'historique et le diff du dépôt et supprimer des fichiers'],
+  ['git ls-files | xargs rm', 'Read the repository\'s history and diff and delete files', 'Lire l\'historique et les changements du dépôt et supprimer des fichiers'],
   ['npm test 2>&1 | tee out.txt', 'Run the project\'s tests and move or create files', 'Lancer les tests du projet et déplacer ou créer des fichiers'],
   ['find . -name "*.log" -delete', 'Delete files', 'Supprimer des fichiers'],
   ['find dist -type f -exec rm {} +', 'Delete files', 'Supprimer des fichiers'],

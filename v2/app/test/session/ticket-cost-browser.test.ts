@@ -14,6 +14,7 @@ import { RESOLVED_AUTHOR_ID, RESOLVED_TICKET } from '../../fixtures/cost.ts';
 import { fixtureSource } from '../../fixtures/source.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { PASSWORD, startApp } from '../support.ts';
+import { openDetails } from './fold.ts';
 
 const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
@@ -38,6 +39,7 @@ async function withBrowser(options: { language: 'en' | 'fr'; width?: number }, r
     await page.click('button[type=submit]');
     await page.waitForURL(`${app.base}/`);
     await page.goto(`${app.base}/sessions/${RESOLVED_AUTHOR_ID}`);
+    await openDetails(page);
     await page.locator('#s-left [data-ticket-cost]').waitFor();
     await run(page);
     assert.deepEqual(errors, [], 'no page error');

@@ -88,7 +88,7 @@ test('the sidebar: a live session\'s title starts where a screen\'s name starts'
   });
 });
 
-test('a session on a computer: the thread is the one framed surface; its composer is a field over one row, Send at its right edge', { skip }, async () => {
+test('a session on a computer: no side section is a card; its composer is one row, Send at the right edge of the reading column', { skip }, async () => {
   await signedIn(1440, async (page, base) => {
     await authorSession(page, base);
     const framed = await page.locator('.s-left > section, .s-right > section').evaluateAll((sections: any[]) => sections
@@ -99,11 +99,12 @@ test('a session on a computer: the thread is the one framed surface; its compose
     const form = await box(page, '#composer');
     const send = await box(page, '#composer #send');
     const interrupt = await box(page, '#composer #interrupt');
-    const handover = await box(page, '#composer #handover');
-    assert.ok(Math.abs(field.width - form.width) <= 1, `the field is ${field.width} px of the composer's ${form.width}`);
-    assert.ok(send.top > field.bottom, 'the buttons are under the field');
-    assert.ok(Math.abs(send.top - interrupt.top) <= 1 && Math.abs(send.top - handover.top) <= 1, `one row: Send at ${send.top}, Interrupt at ${interrupt.top}, the hand over at ${handover.top}`);
-    assert.ok(Math.abs(send.right - field.right) <= 1, `Send ends at ${send.right}, the field at ${field.right}`);
+    const reading = await box(page, '.s-read');
+    assert.ok(Math.abs(form.right - reading.right) <= 1, `the composer ends at ${form.right}, the column at ${reading.right}`);
+    assert.ok(field.right < interrupt.left && interrupt.right < send.left, 'the field, then Interrupt, then Send');
+    assert.ok(Math.abs((send.top + send.bottom) - (field.top + field.bottom)) <= 2, `one row: Send at ${send.top}, the field at ${field.top}`);
+    assert.ok(Math.abs(send.right - form.right) <= 1, `Send ends at ${send.right}, the composer at ${form.right}`);
+    assert.equal(await page.locator('#composer #handover').count(), 0, 'the hand over is in the fold');
   });
 });
 

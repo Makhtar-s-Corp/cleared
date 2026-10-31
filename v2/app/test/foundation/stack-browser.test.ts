@@ -27,6 +27,7 @@ import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { createPreviewHandler } from '../../src/preview.ts';
 import { sendJson, type DataSource } from '../../src/proxy.ts';
 import { PASSWORD, startApp, type Running } from '../support.ts';
+import { openDetails } from '../session/fold.ts';
 
 const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
@@ -70,6 +71,7 @@ test('a message comes back when refused; a session\'s terminal and editor live t
   const app = await startApp({ source });
   try {
     await signedInPage(app, async (page, errors) => {
+      await openDetails(page);
       await page.locator('#timeline [data-row]').first().waitFor();
 
       // A message: the composer empties before the route answers, and the text comes back on a refusal.
@@ -222,6 +224,7 @@ test('two sessions visited A, B, A, B: neither moves, the frame is not loaded ag
       const view = (id: string) => `[data-session-view="${id}"]`;
 
       await go(`/sessions/${a}`);
+      await openDetails(page, view(a));
       await page.locator(`${view(a)} [role="tab"][aria-controls="tab-browser"]`).click();
       await page.locator(`${view(a)} iframe`).waitFor();
       await page.waitForFunction(() => true);
@@ -230,6 +233,7 @@ test('two sessions visited A, B, A, B: neither moves, the frame is not loaded ag
       await page.evaluate((selector: string) => { (document.querySelector(selector) as unknown as { kept: string }).kept = 'frame'; }, `${view(a)} iframe`);
 
       await go(`/sessions/${b}`);
+      await openDetails(page, view(b));
       await page.locator(`${view(b)} #takeover`).click();
       await page.locator(`${view(b)} .xterm`).waitFor();
       await page.evaluate((selector: string) => { (document.querySelector(selector) as unknown as { kept: string }).kept = 'terminal'; }, `${view(b)} .xterm`);

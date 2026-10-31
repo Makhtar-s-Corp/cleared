@@ -24,7 +24,7 @@ declare const document: any;
 declare const window: any;
 
 const WIDTHS = [{ width: 1440, height: 900 }, { width: 1280, height: 800 }, { width: 768, height: 1024 }, { width: 390, height: 844 }] as const;
-const QUESTION = 'Autoriser le relecteur à lire l\'historique et le diff du dépôt puis à lancer les tests du projet\u202f?';
+const QUESTION = 'Autoriser le relecteur à lire l\'historique et les changements du dépôt puis à lancer les tests du projet\u202f?';
 const REASON = '«\u00a0git merge-base\u00a0» n\'est pas une commande que la politique autorise seule.';
 
 async function withInbox(run: (page: any, base: string, open: (viewport: { width: number; height: number }) => Promise<string>) => Promise<void>): Promise<void> {
