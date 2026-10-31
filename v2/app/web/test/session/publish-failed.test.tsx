@@ -67,7 +67,7 @@ test('every cause has its own words in both languages, and an action', () => {
       const failed = view([failure(code)]);
       const markup = html(<ActionCard action={pendingAction(failed, []) as never} view={failed} t={t} />);
       assert.doesNotMatch(markup, /⟦/, `${code}: no missing key`);
-      assert.doesNotMatch(markup, /—/, `${code}: no em dash`);
+      assert.doesNotMatch(markup, /\u2014/, `${code}: no em dash`);
       assert.match(markup, /data-act="publish_restart"/, code);
     }
   }

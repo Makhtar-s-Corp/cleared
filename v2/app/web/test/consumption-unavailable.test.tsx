@@ -54,6 +54,6 @@ test('the headline and the sidebar\'s gauge agree', () => {
 test('every word in both catalogs, no em dash', () => {
   for (const [t, language] of [[fr, 'fr'], [en, 'en']] as const) {
     const markup = drawn(t, language, []);
-    assert.doesNotMatch(markup, /⟦|—/);
+    assert.doesNotMatch(markup, /⟦|\u2014/);
   }
 });

@@ -711,3 +711,40 @@ This delivers questions 1 and 3 of the entry on the session screen above, each a
 
 - Pull request: against `v2`, closes #501.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j7-plan-step`.
+
+## 2026-10-31: the bugs the real tickets found, fixed (the owner's direction, lane `v2-j7-real-fixes`, issues #503 to #510, P273)
+
+The owner asked for the real bugs of wave 4 to be fixed in `v2`. Each has a failing test first, then its fix, and its own commit.
+
+**The token's right to write (#503, #506).**
+- **How it is asked.** GitHub has no page that says a fine-grained token's own rights, and a repository's `permissions` may be the account's. So Cleared sends the two requests it needs in a form that cannot succeed: a branch at a commit that does not exist and a pull request with no branch. 422 (409 on an empty repository) says the token may, 401, 403 and 404 say it may not, and a rate limit, a failure of GitHub or no network says nothing of the token. `src/forge/write-access.ts`.
+- **Where.** The repository is chosen after the token step, so the author's default, for the owner to overrule: the token step gets a list of the token's repositories and checks the one picked at once, the only one or a connected one without asking. The workspace step checks each repository picked before cloning and refuses with its name. `cleared doctor` makes the same check, so its header no longer says GitHub is only read.
+- **A token that may not write stays saved and the step stays done.** The same token can be given the right on GitHub, and the step checks again. The workspace step is the gate.
+- **Seen and not seen.** The granted answers were seen on GitHub: both requests were sent once on this repository with the owner's `gh` account, answered 422, and the branch was then read back as absent. The refusal was never seen on GitHub, since this lane holds no restricted token: 403 is taken from what GitHub is reported to answer and from the fake.
+- **GitLab** is not covered: its step already checks the token's `api` scope.
+
+**A browser in the image (#504).** Playwright's headless shell and its ffmpeg, the builds the lockfile's `playwright-core` 1.64.0 names, in `/opt/playwright`. Playwright downloads them and no checksum of ours checks them, as the Dockerfile says. The shell rather than the full browser, no `--with-deps`, no X server. **Size: the step adds 315 MB to an image of 3.21 GB** (273 MB the shell, 5 MB ffmpeg, the rest libraries and fonts), read from `docker history` on an image of this lane. `test/install/image-browser.test.ts` ran in a container of that image as a person who is not root: a page, a capture and a video. It is gated by `CLEARED_V2_IMAGE_TEST`, so CI runs only its reading of the Dockerfile.
+
+**The receipt's addresses (#505).** The environment step proposes `health_url` from the repository's `[release] health_url` and `run` from the first `EXPOSE` of its Dockerfile, prefilled for the owner to confirm or correct; nothing is written before that. The file is read back as the service reads it, then written, and the running engine's service objects are updated, so the next ticket has them with no restart. Not delivered, though #505 names them: a ticket that says in advance whether its receipt can carry captures (the environment step says it per service), and `CLEARED_NOTIFY_LINK_BASE`, which Compose still does not set. A `[release] health_url` on loopback is the host's and may not open from the service's container: that is why it is a proposal.
+
+**A publication that failed (#507).** The error is read into a code and journaled on the reviewer's session as `cleared.publish_failed`, its words cleaned. The screen says "La relecture a réussi, mais la publication a échoué.", the cause and what to do in human words, the words as they came behind "Voir le détail". The stages say the review done and "Publication de la pull request" stopped, in the place of "Votre décision"; a session ended on a ticket back in Todo no longer stays "en cours". The note on the ticket now says the refusal is the token's, not the account's, for the Lead's sake (#506).
+- **A new gesture.** The action needed a way to start the ticket again, and the web had none: "Relancer le ticket" calls the existing move to Todo. The ticket's sessions run again and are paid again.
+
+**Branch names (#508, #510).** At a ticket's first start the service's remote is asked (`git ls-remote`) for this ticket's names; the first free one is kept in the ledger: `cleared/LOCAL-5`, else `cleared/LOCAL-5.2`, and so on, free on each service of the ticket. Later rounds and restarts read it back, so a repair reuses its branch and its pull request. Nothing is forced, and a test shows the other install's branch unmoved after a publish. A resume skips a name already taken too.
+- **Limits.** The numbers themselves are unchanged. A remote that cannot be asked stops nothing: the ticket keeps its own name, kept nowhere, and asks again at its next start. **A ticket that already has a checkout or a pull request keeps its branch, even a taken one**, which is the state of the rehearsal install's LOCAL-3 to LOCAL-5: its publication fails and #507 says what to do. A branch created between the check and the push fails the same way.
+
+**The quota reading on 403 (#509).** No notification, no red line: the screen and the sidebar say "Indisponible", and that the sessions' reports are the only source. It is asked again once a day or as soon as the login file changes, each attempt kept as a row. 401 stays a failure. **The cause of the 403 is not established**: the login was not read and no other login tried. With no reading and no session report, no figure exists, so the plans' stop has nothing to stop on: the guarantee in `quota.ts` was narrower than it read, and its header now says so.
+
+**Captures.** `docs/v2/real-fixes/before/` and `after/`, by `v2/scripts/real-fixes-captures.ts` on the app's fixtures and made-up answers, four states at 1440x900 and 390x844, each under 500 KB, plus the states an old screen did not have, in `after/` only. Its two gestures were made in the browser against recorded answers: the restart and the confirmation ask what they should.
+
+**Checks** are in the pull request, with the merge of `origin/v2`. sloplint in Chrome's render tier on the nine states: 0 FAIL, with REFLEX and WARN lines that mostly read the app's whole sheet, as in the entries above. axe with the folds open at 1440 and 390: no violation.
+
+**Resources.** The temporary instance was the script's own app on a free port of 9800 to 9899, stopped with each run. An image `cleared-v2-j7-real-fixes:image` was built with the label and its containers named for this lane, then removed. `node:24` was not on this machine and was pulled for the build; it carries no label, so it was left there, and this lane ran one labelled container of it to read its Debian version. `cleared-v2-e2e` was not touched. No secret was read and no Claude login.
+
+**Not done here.**
+- **No real session ran.** Everything is proven on fakes, fixtures and that one image; no real ticket reached a real receipt with captures.
+- **The weekly quota.** This session has no way to read it, so the 90 % stop could not be checked.
+- **The progress dashboard.** The owner's rule asks a sub-agent to build it and this brief forbids sub-agents, so the author kept `.dashboard/index.html` by hand, outside git. The session's built-in advisor tool, a reviewer model, was consulted on the plan.
+
+- Pull request: against `v2`, closes #503, #504, #505, #506, #507, #508, #509 and #510.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j7-real-fixes`.

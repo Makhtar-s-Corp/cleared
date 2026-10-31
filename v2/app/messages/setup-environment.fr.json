@@ -46,8 +46,8 @@
   "environment_detail_error": "Ce que la construction a dit",
   "environment_detail_base": "Construite sur",
   "environment_detail_proposal": "Si les tests demandent plus que l'image de session, une session de mise en place écrit son .devcontainer.",
-  "environment_targets_proposed": "Cleared a trouvé ces réglages dans le dépôt pour les captures du reçu : confirmez-les ou corrigez-les.",
-  "environment_targets_missing": "Sans ces réglages, le reçu de ce service restera sans capture : indiquez-les s'il a un écran.",
+  "environment_targets_proposed": "Cleared a trouvé ces réglages dans le dépôt pour les captures du reçu : confirmez-les ou corrigez-les.",
+  "environment_targets_missing": "Sans ces réglages, le reçu de ce service restera sans capture : indiquez-les s'il a un écran.",
   "environment_targets_both": "Le reçu de ce service portera une capture avant et une capture après.",
   "environment_targets_before": "Le reçu de ce service portera une capture avant, mais pas de capture après.",
   "environment_targets_after": "Le reçu de ce service portera une capture après, mais pas de capture avant.",
@@ -61,6 +61,6 @@
   "environment_targets_saving": "Enregistrement",
   "environment_targets_change": "Modifier",
   "environment_error_invalid_address": "Donnez une adresse http ou https, sans nom ni mot de passe.",
-  "environment_error_invalid_run": "Donnez le fichier et le port sous cette forme : Dockerfile:3000.",
-  "environment_error_environment": "Les dépôts viennent des réglages de Cleared : changez-les là."
+  "environment_error_invalid_run": "Donnez le fichier et le port sous cette forme : Dockerfile:3000.",
+  "environment_error_environment": "Les dépôts viennent des réglages de Cleared : changez-les là."
 }

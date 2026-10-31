@@ -25,7 +25,7 @@ test('a token that cannot write: one sentence that names the repository and what
       assert.match(line, words);
       assert.ok(line.includes(REPO));
       assert.equal(line.split(/[.!?](?:\s|$)/).filter(Boolean).length, 1, `one sentence: ${line}`);
-      assert.doesNotMatch(line, /⟦|—/);
+      assert.doesNotMatch(line, /⟦|\u2014/);
     }
   }
   assert.notEqual(accessLine(fr, { repository: REPO, contents: 'refused', pullRequests: 'ok' }), accessLine(fr, { repository: REPO, contents: 'ok', pullRequests: 'refused' }), 'it says which right is missing');

@@ -197,7 +197,9 @@ For each repository of the workspace, the doctor asks GitHub whether the token r
 - **What to do:** Run the doctor again; check that this machine reaches {api}.
 
 - **failed:** {repo} is reached, but the token may not write there: Cleared pushes branches and opens pull requests there.
-- **What to do:** Give the token itself Contents, Pull requests or both, read and write, on {repo}. If an organisation owns it, it must approve the token too.
+- **What to do:** Give the token itself Contents and Pull requests, read and write, on {repo}. If an organisation owns it, it must approve the token too.
+- **What to do:** Give the token itself Contents, read and write, on {repo}. If an organisation owns it, it must approve the token too.
+- **What to do:** Give the token itself Pull requests, read and write, on {repo}. If an organisation owns it, it must approve the token too.
 
 - **note:** {repo} is reached; GitHub did not say what the token may do there.
 

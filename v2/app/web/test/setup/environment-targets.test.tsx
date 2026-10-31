@@ -57,7 +57,7 @@ test('the sentence says what is true of each capture', () => {
     const after = receiptLine(t, { healthUrl: null, run: 'Dockerfile:1' });
     const none = receiptLine(t, { healthUrl: null, run: null });
     assert.equal(new Set([both, before, after, none]).size, 4);
-    for (const line of [both, before, after, none]) assert.doesNotMatch(line, /⟦|—/);
+    for (const line of [both, before, after, none]) assert.doesNotMatch(line, /⟦|\u2014/);
   }
 });
 

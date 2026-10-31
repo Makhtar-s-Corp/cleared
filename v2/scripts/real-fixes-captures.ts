@@ -42,6 +42,7 @@ async function pickPort(): Promise<number> {
   throw new Error('no free port in 9800 to 9899');
 }
 
+const problems: string[] = [];
 const USER = 'demo';
 const PHRASE = ['made', 'up', 'for', 'the', 'captures'].join('-');
 const FAKE_TOKEN = ['not', 'a', 'real', 'token'].join('-');
@@ -163,9 +164,27 @@ async function consumptionRoutes(page: any, quotas: readonly unknown[]) {
 }
 const reported = { window: 'seven_day', usedPercent: 54, resetsAt: new Date(NOW + 3 * 86_400_000).toISOString(), observedAt: ago(90), source: 'session', projection: { kind: 'holds', percentAtReset: 78 } };
 
+// ---------------------------------------------------------------- the gestures
+
+// Under REAL_FIXES_EXTRA, a new screen's gesture is made once, after its capture: what it asks of the service.
+async function asked(page: any, pattern: string, click: string, answer: unknown): Promise<unknown> {
+  let body: unknown;
+  await page.route(pattern, (route: any) => {
+    if (route.request().method() !== 'POST') return route.fallback();
+    body = route.request().postDataJSON();
+    return json(route, answer);
+  });
+  await page.click(click);
+  await page.waitForTimeout(300);
+  return body;
+}
+const same = (what: string, seen: unknown, wanted: unknown) => {
+  if (JSON.stringify(seen) !== JSON.stringify(wanted)) problems.push(`${what}: asked ${JSON.stringify(seen)}, not ${JSON.stringify(wanted)}`);
+};
+
 // ---------------------------------------------------------------- the scenes
 
-type Scene = { readonly name: string; readonly path: string; routes(page: any): Promise<unknown>; act?(page: any): Promise<unknown> };
+type Scene = { readonly name: string; readonly path: string; routes(page: any): Promise<unknown>; act?(page: any): Promise<unknown>; check?(page: any): Promise<unknown> };
 const pasteToken = async (page: any) => {
   await page.fill('#setup-forge-value', FAKE_TOKEN);
   await page.click('[data-act="setup_forge_check"]');
@@ -179,6 +198,17 @@ const SCENES: readonly Scene[] = [
   { name: 'session-publish-failed', path: `/sessions/${REVIEWER}`, routes: (page) => sessionRoutes(page, { code: 'token_denied', detail: REFUSED }) },
   { name: 'quota-unavailable', path: '/consumption', routes: (page) => consumptionRoutes(page, []) },
   ...(process.env.REAL_FIXES_EXTRA ? [
+    {
+      name: 'session-publish-restart', path: `/sessions/${REVIEWER}`, routes: (page: any) => sessionRoutes(page, { code: 'token_denied', detail: REFUSED }),
+      check: async (page: any) => same('restart', await asked(page, `**/api/service/tickets/${TICKET}/move`, '[data-act="publish_restart"]', ticket), { status: 'Todo' }),
+    },
+    {
+      name: 'health-run-step-confirm', path: '/setup/environment', routes: (page: any) => environmentRoutes(page, { healthUrl: null, run: null, detected: DETECTED }),
+      check: async (page: any) => {
+        same('confirm', await asked(page, '**/api/service/setup/environment/targets', '[data-act="setup_targets_save"]', { workspace: true, services: [{ ...preparedService, proof: { ...DETECTED, detected: DETECTED } }], sessions: 'ready' }), { service: SERVICE, ...DETECTED });
+        if ((await page.locator('[data-targets="saved"]').count()) !== 1) problems.push('confirm: the sentence did not replace the form');
+      },
+    },
     { name: 'token-step-ok', path: '/setup/forge', routes: (page: any) => tokenRoutes(page, { contents: 'ok', pullRequests: 'ok' }), act: pasteToken },
     { name: 'health-run-step-saved', path: '/setup/environment', routes: (page: any) => environmentRoutes(page, { ...DETECTED, detected: DETECTED }) },
     { name: 'health-run-step-none', path: '/setup/environment', routes: (page: any) => environmentRoutes(page, { healthUrl: null, run: null, detected: { healthUrl: null, run: null } }) },
@@ -213,7 +243,6 @@ async function snapshot(page: any, name: string) {
 
 const TAGS = ['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa', 'wcag22a', 'wcag22aa'];
 const axeSource = readFileSync(require.resolve('axe-core/axe.min.js'), 'utf8');
-const problems: string[] = [];
 async function accessible(page: any, what: string) {
   await page.evaluate(() => { document.querySelectorAll('details').forEach((fold: any) => { fold.open = true; }); });
   await page.waitForTimeout(100);
@@ -263,6 +292,7 @@ try {
       await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => undefined);
       await scene.act?.(page);
       await shot(page, scene.name, frame);
+      await scene.check?.(page);
       if (process.env.REAL_FIXES_AXE) await accessible(page, `${scene.name} ${frame}`);
       for (const error of errors) problems.push(`${scene.name} ${frame}: page error: ${error}`);
       await page.close();
