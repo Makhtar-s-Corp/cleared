@@ -26,12 +26,16 @@ export class FakeGitHubReads {
   readonly requests: { path: string; auth: string | null }[] = [];
   user: GitHubAnswer = { status: 200, body: { login: 'cleared-bot' } };
   repos = new Map<string, GitHubAnswer>([[REPO, { status: 200, body: { full_name: REPO, permissions: { admin: false, push: true, pull: true } } }]]);
+  // What GitHub answers the two requests that say the token's own rights (forge/write-access.ts).
+  branches: GitHubAnswer = { status: 422 };
+  pulls: GitHubAnswer = { status: 422 };
 
   readonly fetch: typeof fetch = async (input, init) => {
     const url = new URL(String(input));
     const auth = new Headers(init?.headers).get('authorization');
     this.requests.push({ path: url.pathname, auth });
-    const answer = url.pathname === '/user' ? this.user : this.repos.get(url.pathname.replace(/^\/repos\//, '')) ?? { status: 404, body: { message: 'Not Found' } };
+    const write = init?.method === 'POST' ? (/\/git\/refs$/.test(url.pathname) ? this.branches : /\/pulls$/.test(url.pathname) ? this.pulls : undefined) : undefined;
+    const answer = write ?? (url.pathname === '/user' ? this.user : this.repos.get(url.pathname.replace(/^\/repos\//, '')) ?? { status: 404, body: { message: 'Not Found' } });
     if (answer === 'silent') throw new DOMException('The operation was aborted due to timeout', 'TimeoutError');
     if (auth !== `Bearer ${FORGE_VALUE}`) return Response.json({ message: 'Bad credentials' }, { status: 401 });
     return Response.json(answer.body ?? {}, { status: answer.status });

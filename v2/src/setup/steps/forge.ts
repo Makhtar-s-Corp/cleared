@@ -24,14 +24,26 @@
 //        or 400 { error }: invalid, address, refused (401), forbidden (403),
 //        scope, unreachable, empty; 409 { error: environment } when the
 //        environment gives GH_TOKEN, or CLEARED_V2_GITLAB_TOKEN_FILE for GitLab
+//
+// What the GitHub token may do on a repository (issues #503 and #506,
+// forge/write-access.ts): the repository is picked on the step, among those the
+// token lists, and the workspace step asks again for each one it connects. A
+// token that may not write stays saved: the same token can be given the right on
+// GitHub, and the step asks again.
+//   GET  /api/setup/forge/access                 -> ForgeRepositories
+//   POST /api/setup/forge/access  { repository } -> WriteAccess
+//        or 400 { error: invalid_repository }, 409 { error: no_forge }
+import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { checkWriteAccess, type WriteAccess } from '../../forge/write-access.ts';
+import { parseConf } from '../../workspace/config.ts';
 import { GITLAB_COM, GitLabClient, GitLabError } from '../../../../lib/gitlab.ts';
 import { ForgeError } from '../../forge/contract.ts';
 import { GITLAB_FILE_SETTING, GITLAB_URL, GitLabForge, gitlabAddress } from '../../forge/gitlab.ts';
 import { readCredential, readSettings, settingsPath, stateFolder, writeCredential, writeSettings } from '../settings.ts';
 import { answer, guarded, HttpError, readBody } from '../http.ts';
 import type { SetupStep, StepDeps } from '../step.ts';
-import { FORGE_RIGHTS, type CredentialView, type ForgeChecked, type ForgeView, type GitLabView } from '../types.ts';
+import { FORGE_RIGHTS, type CredentialView, type ForgeChecked, type ForgeRepositories, type ForgeView, type GitLabView } from '../types.ts';
 
 export const FORGE_FILE = 'forge-github.token';
 export const GITLAB_FILE = 'forge-gitlab.token';
@@ -127,6 +139,25 @@ async function check(deps: StepDeps, value: string): Promise<Checked> {
   return { ok: true, names, more: /rel="next"/.test(response.headers.get('link') ?? '') };
 }
 
+// The GitHub token in use, whichever way it was given.
+const tokenOf = (env: NodeJS.ProcessEnv): string | undefined => env.GH_TOKEN || env.GITHUB_TOKEN || undefined;
+
+// What the token may do on a repository, for this step and the workspace step's.
+export const writeAccess = (deps: Pick<StepDeps, 'env' | 'fetch'>, repository: string): Promise<WriteAccess> =>
+  checkWriteAccess({ fetch: deps.fetch, api: forgeApi(deps.env), token: tokenOf(deps.env) ?? '', repository, agent: 'cleared-v2-setup' });
+
+// The repositories the workspace file connects, read when the settings name it.
+function connectedRepositories(deps: StepDeps): string[] {
+  const path = settingsPath(deps.env);
+  const file = path ? readSettings(path).env.CLEARED_V2_WORKSPACE : undefined;
+  if (!file || !existsSync(file)) return [];
+  try {
+    return [...new Set(Object.entries(parseConf(readFileSync(file, 'utf8'))).flatMap(([section, keys]) => (section.startsWith('service ') && keys.repository ? [keys.repository] : [])))];
+  } catch {
+    return [];
+  }
+}
+
 async function saveGitLab(deps: StepDeps, context: Parameters<typeof answer>[0], value: string, given: unknown): Promise<void> {
   if (given !== undefined && typeof given !== 'string') throw new HttpError(400, 'address');
   let address: string;
@@ -181,6 +212,34 @@ const forge: SetupStep = {
         deps.env.GH_TOKEN = value;
         deps.records.done('forge');
         answer(context, 200, { forge: 'github', credential: credentialOf(deps), repositories: checked.names.length, more: checked.more, sample: checked.names.slice(0, SAMPLE) } satisfies ForgeChecked);
+      }),
+    },
+    {
+      method: 'GET', path: '/api/setup/forge/access',
+      handle: guarded(deps, async (context) => {
+        const token = tokenOf(deps.env);
+        if (!token) throw new HttpError(409, 'no_forge');
+        const checked = await check(deps, token);
+        if (!checked.ok) throw new HttpError(502, checked.error);
+        answer(context, 200, { repositories: checked.names, more: checked.more, connected: connectedRepositories(deps) } satisfies ForgeRepositories);
+      }),
+    },
+    {
+      method: 'POST', path: '/api/setup/forge/access',
+      handle: guarded(deps, async (context) => {
+        const token = tokenOf(deps.env);
+        if (!token) throw new HttpError(409, 'no_forge');
+        const { repository } = await readBody(context.request);
+        if (typeof repository !== 'string') throw new HttpError(400, 'invalid_repository');
+        const checked = await check(deps, token);
+        // Asked of a repository the token lists or the workspace connects: never of any address a browser sends.
+        const known = (checked.ok && (checked.names.includes(repository) || checked.more)) || connectedRepositories(deps).includes(repository);
+        if (!known) throw new HttpError(400, 'invalid_repository');
+        try {
+          answer(context, 200, await writeAccess(deps, repository));
+        } catch {
+          throw new HttpError(400, 'invalid_repository');
+        }
       }),
     },
   ],

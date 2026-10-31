@@ -57,5 +57,6 @@
   "workspace_change": "Choose others",
   "workspace_write_one": "Connect this repository",
   "workspace_connected_detail": "Connected on {date}.",
-  "workspace_environment_detail": "The CLEARED_V2_WORKSPACE variable names them."
+  "workspace_environment_detail": "The CLEARED_V2_WORKSPACE variable names them.",
+  "workspace_error_cannot_write": "The token cannot write on {repository}: go back to the Your code step to give it that right."
 }

@@ -114,3 +114,35 @@ test('a credential the environment gives (GH_TOKEN) is shown as such and not rep
     assert.equal(refused.json.error, 'environment');
   }, { GH_TOKEN: ['set', 'from', 'the', 'environment'].join('-') });
 });
+
+test('the token step says what the token may do on the repository picked there, each right apart, and writes nothing (issues #503 and #506)', async () => {
+  await withForge(async (service, fake, owner) => {
+    const saved = await service.call('/api/setup/forge', { method: 'POST', user: owner, body: { value: GOOD } });
+    assert.equal(saved.status, 200);
+    const listed = await service.call('/api/setup/forge/access', { user: owner });
+    assert.equal(listed.status, 200, listed.text);
+    assert.deepEqual(listed.json.repositories, ['org/guestbook', 'org/filter-api']);
+    assert.deepEqual(listed.json.connected, []);
+    const can = await service.call('/api/setup/forge/access', { method: 'POST', user: owner, body: { repository: 'org/guestbook' } });
+    assert.deepEqual(can.json, { repository: 'org/guestbook', contents: 'ok', pullRequests: 'ok' });
+    fake.denied.set(GOOD, new Set(['contents']));
+    const cannot = await service.call('/api/setup/forge/access', { method: 'POST', user: owner, body: { repository: 'org/guestbook' } });
+    assert.equal(cannot.status, 200);
+    assert.deepEqual(cannot.json, { repository: 'org/guestbook', contents: 'refused', pullRequests: 'ok' });
+    assert.ok(!cannot.text.includes(GOOD));
+    assert.ok(fake.requests.filter((request) => request.method === 'POST').every((request) => request.auth === `Bearer ${GOOD}`));
+  });
+});
+
+test('the check asks only of a repository the token lists, and only once a token is there', async () => {
+  await withForge(async (service, _fake, owner) => {
+    assert.equal((await service.call('/api/setup/forge/access', { user: owner })).status, 409);
+    assert.equal((await service.call('/api/setup/forge/access', { method: 'POST', user: owner, body: { repository: 'org/guestbook' } })).status, 409);
+    await service.call('/api/setup/forge', { method: 'POST', user: owner, body: { value: GOOD } });
+    for (const repository of ['../../user', 'org/other', 7, undefined]) {
+      const refused = await service.call('/api/setup/forge/access', { method: 'POST', user: owner, body: { repository } });
+      assert.equal(refused.status, 400, String(repository));
+      assert.equal(refused.json.error, 'invalid_repository');
+    }
+  });
+});

@@ -135,6 +135,9 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     await page.fill('#setup-forge-value', GOOD);
     await page.click('[data-act="setup_forge_check"]');
     await page.locator('[data-forge-result="ok"]').waitFor();
+    // The token's rights on a repository picked here (issues #503 and #506).
+    await page.selectOption('#setup-forge-repository', 'org/guestbook');
+    await page.locator('[data-forge-access="ok"]').waitFor();
     assert.match(await page.locator('[data-forge-result="ok"]').innerText(), /2/);
     assert.equal(await page.locator('#setup-forge-value').count(), 0, 'once set, the field is gone: nothing to read back');
     await checked(page, 'forge done');
@@ -175,7 +178,9 @@ async function run(language: 'en' | 'fr'): Promise<void> {
     const settings = readFileSync(join(service.dir, 'settings.conf'), 'utf8');
     assert.ok(!settings.includes(GOOD) && !settings.includes(LOGIN), 'no credential in the settings');
     assert.equal(readSettings(join(service.dir, 'settings.conf')).env.CLEARED_V2_OWNER_ID, 'alex');
-    assert.equal(fake.requests.filter((r) => r.path.startsWith('/user/repos')).length, 1, 'the forge step read GitHub once');
+    // The token, the list of the repository picker, and that list again to check the repository picked.
+    assert.equal(fake.requests.filter((r) => r.path.startsWith('/user/repos')).length, 3, 'the forge step read the list three times');
+    assert.deepEqual(fake.requests.filter((r) => r.method === 'POST').map((r) => r.path), ['/repos/org/guestbook/git/refs', '/repos/org/guestbook/pulls'], 'and asked what the token may write on the repository picked');
   } finally {
     await browser.close();
     await app.close();

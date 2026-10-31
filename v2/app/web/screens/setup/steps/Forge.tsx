@@ -5,9 +5,12 @@
 // hidden field, one button; the permissions and the rest are in the detail.
 // The service checks the token on the spot. Once saved, the step says it is
 // connected; since when and Replace are in the detail. It never shows the
-// value, and the service never sends it back.
-import { useEffect, useState, type FormEvent } from 'react';
-import { FORGE_RIGHTS, type CredentialView, type ForgeChecked, type ForgeView, type GitLabView } from '../../../../../src/setup/types.ts';
+// value, and the service never sends it back. Once GitHub has the token, the step
+// says what it may do on the repository picked there (issues #503 and #506): one
+// sentence, the rights behind the detail.
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
+import type { WriteAccess } from '../../../../../src/forge/write-access.ts';
+import { FORGE_RIGHTS, type CredentialView, type ForgeChecked, type ForgeRepositories, type ForgeView, type GitLabView } from '../../../../../src/setup/types.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
 import type { Translate } from '@/lib/i18n.ts';
@@ -78,10 +81,44 @@ export function GitLabFields({ t, address, busy, error, onSubmit }: { readonly t
   );
 }
 
-// What the step is first drawn with: GitLab's part may be left out.
-type Initial = { readonly credential: CredentialView; readonly gitlab?: GitLabView };
+// A right the token does not have, or that GitHub did not say.
+export const accessFailed = (access: WriteAccess): boolean => access.contents === 'refused' || access.pullRequests === 'refused';
+const accessUnknown = (access: WriteAccess): boolean => !accessFailed(access) && (access.contents === 'unknown' || access.pullRequests === 'unknown');
 
-export function ForgeStep({ t, api, onDone, initial }: StepProps<Initial>) {
+// The one sentence of what the token may do on the repository.
+export function accessLine(t: Translate, access: WriteAccess): string {
+  const { repository, contents, pullRequests } = access;
+  if (contents === 'refused' && pullRequests === 'refused') return t('forge_access_refused_both', { repository });
+  if (contents === 'refused') return t('forge_access_refused_contents', { repository });
+  if (pullRequests === 'refused') return t('forge_access_refused_pull_requests', { repository });
+  return t(accessUnknown(access) ? 'forge_access_unknown' : 'forge_access_ok', { repository });
+}
+
+// What the sentence comes from, right by right, under the detail.
+function AccessDetail({ t, access }: { readonly t: Translate; readonly access: WriteAccess }) {
+  const rights = [['contents', access.contents], ['pull_requests', access.pullRequests]] as const;
+  return (
+    <>
+      <h3>{t('forge_access_detail_title', { repository: access.repository })}</h3>
+      <ul className="setup-rights">
+        {rights.map(([permission, right]) => (
+          <li key={permission} data-access-right={permission} data-right={right}>
+            <span className="setup-right-name">{t(`forge_permission_${permission}`)}</span>
+            <span className="setup-right-access">{t('forge_access_write')}</span>
+            <span className="setup-right-use">{t(`forge_access_right_${right}`)}</span>
+          </li>
+        ))}
+      </ul>
+      <p className="setup-note">{t('forge_access_detail_note')}</p>
+      <p className="forge-make"><a className="setup-link" href="https://github.com/settings/personal-access-tokens" target="_blank" rel="noreferrer">{t('forge_access_edit')}</a></p>
+    </>
+  );
+}
+
+// What the step is first drawn with: GitLab's part and the token's rights may be left out.
+type Initial = { readonly credential: CredentialView; readonly gitlab?: GitLabView; readonly repositories?: readonly string[]; readonly access?: WriteAccess };
+
+export function ForgeStep({ t, api, onDone, initial, onOwnAction }: StepProps<Initial>) {
   const [credential, setCredential] = useState<CredentialView | undefined>(initial?.credential);
   const [gitlab, setGitlab] = useState<GitLabView | undefined>(initial ? initial.gitlab ?? UNSET : undefined);
   // GitLab is chosen when its token is saved and GitHub's is not.
@@ -90,6 +127,22 @@ export function ForgeStep({ t, api, onDone, initial }: StepProps<Initial>) {
   const [replacing, setReplacing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
+  const [repositories, setRepositories] = useState<readonly string[]>(initial?.repositories ?? []);
+  const [chosen, setChosen] = useState(initial?.access?.repository ?? '');
+  const [access, setAccess] = useState<WriteAccess | undefined>(initial?.access);
+  const [asking, setAsking] = useState(false);
+  const [accessError, setAccessError] = useState('');
+  const ask = useCallback((repository: string) => {
+    setChosen(repository);
+    setAccess(undefined);
+    setAccessError('');
+    if (!repository) return;
+    setAsking(true);
+    void api.post<WriteAccess>('/forge/access', { repository }).then((answer) => {
+      if (answer.status !== 200) return setAccessError(refusal(t, 'forge', answer.body));
+      setAccess(answer.body);
+    }, () => setAccessError(t('forge_error_unreachable'))).finally(() => setAsking(false));
+  }, [api, t]);
   useEffect(() => {
     if (initial) return;
     void api.get<ForgeView>('/forge').then((answer) => {
@@ -99,6 +152,23 @@ export function ForgeStep({ t, api, onDone, initial }: StepProps<Initial>) {
       if (answer.body.gitlab.credential.set && !answer.body.credential.set) setChoice('gitlab');
     });
   }, [api, initial]);
+
+  // Once GitHub has the token: the repositories it lists, and at once the rights
+  // on the one the workspace connects, or on its only one.
+  const github = choice === 'github' && credential?.set === true && !replacing;
+  useEffect(() => {
+    if (initial || !github) return;
+    let live = true;
+    void api.get<ForgeRepositories>('/forge/access').then((answer) => {
+      if (!live || answer.status !== 200) return;
+      setRepositories(answer.body.repositories);
+      const first = answer.body.connected[0] ?? (answer.body.repositories.length === 1 ? answer.body.repositories[0] : undefined);
+      if (first) ask(first);
+    }, () => undefined);
+    return () => { live = false; };
+  }, [api, ask, github, initial]);
+  const refused = github && access !== undefined && accessFailed(access);
+  useEffect(() => { onOwnAction?.(refused); }, [onOwnAction, refused]);
 
   const send = (forge: Forge, body: Record<string, string>) => {
     setBusy(true);
@@ -127,6 +197,7 @@ export function ForgeStep({ t, api, onDone, initial }: StepProps<Initial>) {
   const savedLine = saved?.set ? credentialDetail(t, prefix, saved) : '';
   const detail = (
     <>
+      {github && access ? <AccessDetail t={t} access={access} /> : null}
       {saved?.set && !replacing ? (
         <div className="setup-saved">
           {savedLine ? <p>{savedLine}</p> : null}
@@ -186,6 +257,23 @@ export function ForgeStep({ t, api, onDone, initial }: StepProps<Initial>) {
       {saved === undefined ? <p className="setup-note" aria-busy="true">{t('setup_loading')}</p> : null}
       {checked && checked.forge === choice ? <p className="setup-ok" data-forge-result="ok" role="status">{checkedLine(t, checked)}</p>
         : saved?.set && !replacing ? <p className="setup-ok" data-forge-saved role="status">{credentialLine(t, prefix, saved, { host })}</p> : null}
+      {github && repositories.length > 1 ? (
+        <div className="forge-repository">
+          <label htmlFor="setup-forge-repository">{t('forge_access_repository')}</label>
+          <select id="setup-forge-repository" className="forge-select" value={chosen} disabled={asking} onChange={(event) => ask(event.currentTarget.value)}>
+            <option value="">{t('forge_access_pick')}</option>
+            {repositories.map((repository) => <option key={repository} value={repository}>{repository}</option>)}
+          </select>
+        </div>
+      ) : null}
+      {github && asking ? <p className="setup-note" aria-busy="true" role="status">{t('forge_access_checking', { repository: chosen })}</p> : null}
+      {github && accessError ? <p className="setup-error" role="alert">{accessError}</p> : null}
+      {github && access && !accessFailed(access) && !accessUnknown(access) ? <p className="setup-ok" data-forge-access="ok" role="status">{accessLine(t, access)}</p> : null}
+      {github && access && accessUnknown(access) ? <p className="setup-note" data-forge-access="unknown" role="status">{accessLine(t, access)}</p> : null}
+      {github && access && accessFailed(access) ? <p className="setup-error" data-forge-access="refused" role="alert">{accessLine(t, access)}</p> : null}
+      {github && access && (accessFailed(access) || accessUnknown(access)) ? (
+        <Button variant={accessFailed(access) ? 'ink' : 'outline'} className={accessFailed(access) ? 'primary' : 'btn'} data-act="setup_forge_access" disabled={asking} onClick={() => ask(access.repository)}>{t('forge_access_again')}</Button>
+      ) : null}
       {showField && choice === 'github' ? (
         <form className="setup-form" onSubmit={submit('github')} aria-busy={busy}>
           <p className="forge-make"><a className="setup-link" href={githubTokenPage()} target="_blank" rel="noreferrer" data-forge-create>{t('forge_create')}</a></p>

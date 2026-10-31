@@ -72,5 +72,22 @@
   "forge_set_detail": "Jeton enregistré le {date}. Il n'est plus jamais affiché.",
   "forge_set_environment_detail": "Le jeton vient de la variable GH_TOKEN de l'environnement de Cleared. Modifiez-le là.",
   "gitlab_set_detail": "Jeton enregistré le {date}. Il n'est plus jamais affiché.",
-  "gitlab_set_environment_detail": "Le jeton vient du fichier que nomme CLEARED_V2_GITLAB_TOKEN_FILE dans l'environnement de Cleared. Changez-le là."
+  "gitlab_set_environment_detail": "Le jeton vient du fichier que nomme CLEARED_V2_GITLAB_TOKEN_FILE dans l'environnement de Cleared. Changez-le là.",
+  "forge_access_repository": "Dépôt à vérifier",
+  "forge_access_pick": "Choisissez un dépôt",
+  "forge_access_checking": "Vérification des droits du jeton sur {repository}.",
+  "forge_access_ok": "Le jeton peut pousser des branches et ouvrir des pull requests sur {repository}.",
+  "forge_access_refused_both": "Ce jeton ne peut ni pousser de branche ni ouvrir de pull request sur {repository} : sur GitHub, donnez-lui le droit d'écrire sur ce dépôt, puis vérifiez à nouveau.",
+  "forge_access_refused_contents": "Ce jeton ne peut pas pousser de branche sur {repository} : sur GitHub, donnez-lui le droit d'écrire le contenu de ce dépôt, puis vérifiez à nouveau.",
+  "forge_access_refused_pull_requests": "Ce jeton ne peut pas ouvrir de pull request sur {repository} : sur GitHub, donnez-lui le droit d'écrire les pull requests de ce dépôt, puis vérifiez à nouveau.",
+  "forge_access_unknown": "GitHub n'a pas répondu sur les droits du jeton pour {repository} : réessayez dans un instant.",
+  "forge_access_again": "Vérifier à nouveau",
+  "forge_access_detail_title": "Ce que le jeton peut faire sur {repository}",
+  "forge_access_right_ok": "Accordé",
+  "forge_access_right_refused": "Refusé",
+  "forge_access_right_unknown": "Sans réponse",
+  "forge_access_detail_note": "Cleared pose la question à GitHub sans rien écrire sur le dépôt. Si une organisation possède ce dépôt, elle doit aussi approuver le jeton.",
+  "forge_access_edit": "Modifier le jeton sur GitHub",
+  "forge_error_invalid_repository": "Ce dépôt n'est pas dans la liste du jeton.",
+  "forge_error_no_forge": "Collez d'abord un jeton."
 }

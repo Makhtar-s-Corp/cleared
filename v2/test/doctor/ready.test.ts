@@ -45,13 +45,13 @@ test('an install that is well: every check passes, in the documented order, in E
   assert.match(one(fr, 'disk').text, /120\s?Go/);
 });
 
-test('read only: Docker is asked its version and labelled lists, nothing is built, made or started; GitHub is read twice', async () => {
+test('read only: Docker is asked its version and labelled lists, nothing is built, made or started; GitHub is read twice, and asked what the token may write with two requests it refuses', async () => {
   const made = install();
   await run(made);
   const verbs = made.docker.calls.map((call) => (['image', 'network', 'volume'].includes(call.args[0] ?? '') ? `${call.args[0]} ${call.args[1]}` : call.args[0]));
   for (const verb of verbs) assert.ok(['version', 'ps', 'image ls', 'image inspect', 'network ls', 'network inspect', 'volume ls'].includes(verb ?? ''), `only reads: ${verb}`);
   for (const call of made.docker.calls.filter((c) => ['ps', 'ls'].includes(c.args[0] === 'ps' ? 'ps' : c.args[1] ?? ''))) assert.ok(call.args.includes('label=cleared.dev=v2'), call.args.join(' '));
-  assert.deepEqual(made.github.requests.map((r) => r.path), ['/user', `/repos/${REPO}`]);
+  assert.deepEqual(made.github.requests.map((r) => r.path), ['/user', `/repos/${REPO}`, `/repos/${REPO}/git/refs`, `/repos/${REPO}/pulls`]);
   assert.ok(made.github.requests.every((r) => r.auth === `Bearer ${FORGE_VALUE}`), 'the credential travels in the authorization header only');
 });
 
@@ -230,6 +230,26 @@ test('each repository of the workspace: not seen or read only fails, rights GitH
   assert.match(read.todo ?? '', /Contents/);
   made.github.repos.set(REPO, { status: 200, body: {} });
   assert.equal(one(await run(made), 'repository').level, 'notice');
+});
+
+test('an account that may push with a token that may not: the token\'s own rights decide, and the line says it is the token (issue #506)', async () => {
+  const made = install();
+  made.github.branches = { status: 403 };
+  const refused = one(await run(made), 'repository');
+  assert.equal(refused.level, 'fail');
+  assert.match(refused.text, /token/);
+  assert.match(refused.todo ?? '', /Contents/);
+  made.github.branches = { status: 422 };
+  made.github.pulls = { status: 403 };
+  const pulls = one(await run(made), 'repository');
+  assert.equal(pulls.level, 'fail');
+  assert.match(pulls.todo ?? '', /Pull requests/);
+  assert.doesNotMatch(pulls.todo ?? '', /Contents/);
+  made.github.pulls = { status: 500 };
+  assert.equal(one(await run(made), 'repository').level, 'notice', 'a failure of GitHub says nothing of the token');
+  made.github.pulls = { status: 422 };
+  assert.equal(one(await run(made), 'repository').level, 'ok');
+  assert.ok(made.github.requests.some((request) => /\/git\/refs$/.test(request.path)));
 });
 
 test('the checkouts: none yet is said, another repository, no base or not a checkout fails; nothing is fetched', async () => {

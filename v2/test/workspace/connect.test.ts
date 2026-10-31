@@ -17,6 +17,7 @@ import { cloneEnvironment, confirm, ConnectError, listChoices, pick, propose, re
 import { parseWorkspace } from '../../src/workspace/config.ts';
 import { FakeForge } from '../forge/fake.ts';
 import { fakeGh } from '../forge/fake-gh.ts';
+import { FakeForge as FakeGitHub } from '../setup/fakes/github.ts';
 import { PASSWORD, startSetup } from '../setup/support.ts';
 import { gitIn, remote, tempDir } from './git.ts';
 
@@ -278,18 +279,31 @@ test('git asks gh for GitHub\'s credential, which reads GH_TOKEN itself: the val
 });
 
 // The step's routes, through the setup module, with a fake gh on PATH.
-async function withStep(run: (call: (path: string, body?: unknown) => Promise<{ status: number; json: any; text: string }>, at: { dir: string; env: NodeJS.ProcessEnv; listed: ForgeRepository[] }) => Promise<void>, env: Record<string, string> = {}): Promise<void> {
+async function withStep(run: (call: (path: string, body?: unknown) => Promise<{ status: number; json: any; text: string }>, at: { dir: string; env: NodeJS.ProcessEnv; listed: ForgeRepository[]; github: FakeGitHub }) => Promise<void>, env: Record<string, string> = {}): Promise<void> {
   const listed = world();
   const gh = fakeGh({ repositories: listed, pulls: [] });
-  const service = await startSetup({ env: { PATH: gh.env.PATH as string, GH_TOKEN: GOOD, ...env } });
+  const github = new FakeGitHub({ [GOOD]: listed.map((r) => r.repo) });
+  const service = await startSetup({ env: { PATH: gh.env.PATH as string, GH_TOKEN: GOOD, CLEARED_V2_FORGE_GITHUB_API: await github.listen(), ...env } });
   try {
     const owner = await service.directory.add('alex', PASSWORD);
     const call = (path: string, body?: unknown) => service.call(path, { user: owner.id, ...(body === undefined ? {} : { method: 'POST', body }) });
-    await run(call, { dir: service.dir, env: service.env, listed });
+    await run(call, { dir: service.dir, env: service.env, listed, github });
   } finally {
     await service.close();
+    await github.close();
   }
 }
+
+test('a repository the token cannot write on is refused before anything is cloned, and named (issues #503 and #506)', async () => {
+  await withStep(async (call, { dir, github }) => {
+    github.denied.set(GOOD, new Set(['contents']));
+    const refused = await call('/api/setup/workspace/propose', { repositories: ['example-org/guestbook'] });
+    assert.deepEqual([refused.status, refused.json], [409, { error: 'cannot_write', repository: 'example-org/guestbook' }]);
+    assert.ok(!existsSync(join(dir, 'repositories')), 'nothing was cloned');
+    github.denied.clear();
+    assert.equal((await call('/api/setup/workspace/propose', { repositories: ['example-org/guestbook'] })).status, 200);
+  });
+});
 
 test('the step: the list, the proposal, then the file from the ticks, the step done with the machine\'s time', async () => {
   await withStep(async (call, { dir }) => {
