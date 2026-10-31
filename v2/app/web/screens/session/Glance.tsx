@@ -152,7 +152,10 @@ export function StageCard({ stage, view, t }: { readonly stage: StageView; reado
   const now = stage.stages[stage.current - 1];
   return (
     <section className="s-stage" aria-labelledby="s-stage-title">
-      <h2 className="s-section-title" id="s-stage-title">{t('glance_stage_title')}<span className="s-stage-count">{t('glance_stage_count', { n: stage.current, total: stage.total })}</span></h2>
+      <div className="s-stage-head">
+        <h2 className="s-section-title" id="s-stage-title">{t('glance_stage_title')}</h2>
+        <p className="s-stage-count">{t('glance_stage_count', { n: stage.current, total: stage.total })}</p>
+      </div>
       <ol className="s-stages">
         {stage.stages.map((one) => {
           const Mark = MARK[one.state];

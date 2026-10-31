@@ -13,7 +13,7 @@
 .s-ticket .link-button { font-family: var(--mono); font-size: var(--text-sm); }
 .s-ticket-service { padding-left: var(--space-2); border-left: 1px solid var(--line); }
 .s-now { display: grid; grid-template-columns: 6px minmax(0, 1fr); align-items: baseline; column-gap: var(--space-2); margin-top: var(--space-2); font-size: var(--text-xl); line-height: 1.45; color: var(--text); }
-.s-now-next { margin-left: 14px; font-size: var(--text-md); color: var(--text-secondary); }
+.s-now-next { padding-left: calc(6px + var(--space-2)); font-size: var(--text-md); color: var(--text-secondary); }
 .s-now .dot { width: 6px; height: 6px; border-radius: 50%; align-self: center; background: var(--stage-progress); }
 .s-now[data-tone="waiting"] .dot { background: var(--awaiting); }
 .s-now[data-tone="review"] .dot { background: var(--stage-review); }
@@ -41,13 +41,18 @@
 .s-action-note span { display: block; }
 .s-action .request.question { margin: 0; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
 .s-action .plan-note:empty { display: none; }
+/* One accent: a question's tag and its recommendation are grey here, its word says what it is. */
+.s-action .choice-header { background: var(--tab-fill); color: var(--text-secondary); }
+.s-action .choice-rec { border-bottom-color: var(--line); color: var(--text-secondary); }
 
 /* Links out: the pull request, the receipt. */
 .s-link { display: inline-flex; align-items: center; gap: 2px; min-height: 28px; color: var(--link); font-size: var(--text-md); }
 .s-link:hover { text-decoration: underline; }
 
 /* Where the ticket is. */
-.s-section-title { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 var(--space-2); margin-bottom: var(--space-2); font-size: var(--text-lg); font-weight: var(--weight-strong); }
+.s-stage-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 0 var(--space-2); margin-bottom: var(--space-2); }
+.s-result .s-section-title { margin-bottom: var(--space-2); }
+.s-section-title { font-size: var(--text-lg); font-weight: var(--weight-strong); }
 .s-stage-count { font-size: var(--text-md); font-weight: var(--weight-regular); color: var(--text-muted); font-variant-numeric: tabular-nums; }
 .s-stages { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; font-size: var(--text-md); }
 .s-stage-line { display: flex; align-items: center; gap: var(--space-2); min-height: 24px; }
@@ -59,7 +64,7 @@
 .s-stages > li[data-state="current"] { font-weight: var(--weight-strong); }
 .s-stages > li[data-state="current"] svg { color: var(--theme-accent); }
 .s-stages > li[data-state="failed"] { font-weight: var(--weight-strong); color: var(--danger-text); }
-.s-plan { margin: var(--space-1) 0 var(--space-2) 22px; font-weight: var(--weight-regular); color: var(--text-secondary); }
+.s-plan { margin: var(--space-1) 0 var(--space-2); padding-left: calc(14px + var(--space-2)); font-weight: var(--weight-regular); color: var(--text-secondary); }
 .s-plan-title { margin-bottom: var(--space-1); font-size: var(--text-sm); color: var(--text-muted); }
 .s-plan-steps { display: grid; gap: 2px; margin: 0; padding-left: 20px; }
 .s-plan-steps li::marker { color: var(--text-muted); font-size: var(--text-sm); }
@@ -147,7 +152,7 @@
 .panel-head .dot { width: 6px; height: 6px; border-radius: 50%; }
 .panel-head .meta { font-size: var(--text-sm); color: var(--text-muted); }
 .panel-head .takeover-button { min-height: 30px; padding: 0 12px; }
-.timeline { flex: 1; min-height: 160px; max-height: 60vh; overflow-y: auto; padding: var(--space-2) var(--space-3); font-size: var(--text-md); }
+.timeline { flex: 1; padding: var(--space-2) var(--space-3); font-size: var(--text-md); }
 .row { display: grid; grid-template-columns: 44px 20px minmax(0, 1fr); gap: var(--space-2); padding: var(--space-2) 0; }
 .row time { padding-top: 1px; font-size: var(--text-sm); color: var(--text-faint); }
 .glyph { color: var(--text-faint); text-align: center; }
@@ -444,7 +449,7 @@ details.row .what > .sub { margin: 0 0 0 auto; }
   .s-action-buttons .btn { flex: 1 1 100%; }
   .s-action-fold > summary, .s-detail > summary { min-height: 44px; }
   .s-link { min-height: 44px; }
-  .timeline { overflow: visible; max-height: none; padding: var(--space-2) 12px; }
+  .timeline { padding: var(--space-2) 12px; }
   .row { grid-template-columns: 40px 16px minmax(0, 1fr); gap: var(--space-2); }
   details.row > summary { grid-template-columns: 40px 16px minmax(0, 1fr) 12px; gap: var(--space-2); }
   details.row > summary { min-height: 44px; align-items: start; }

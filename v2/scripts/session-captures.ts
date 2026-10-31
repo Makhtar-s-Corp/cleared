@@ -318,6 +318,7 @@ try {
         await page.evaluate(() => { document.querySelectorAll('details').forEach((fold: any) => { fold.open = true; }); });
         await page.waitForTimeout(150);
         await page.screenshot({ path: join(folder, `${scene.name}-${frame}-open.png`), fullPage: true, animations: 'disabled' });
+        if (process.env.SESSION_SNAPSHOTS && frame === 'desktop') await snapshot(page, `${scene.name}-open`);
       }
       await accessible(page, `${scene.name} ${frame}`);
       for (const error of errors) problems.push(`${scene.name} ${frame}: page error: ${error}`);

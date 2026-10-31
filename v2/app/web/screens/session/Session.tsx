@@ -542,7 +542,7 @@ export function FoldedFacts({ view, t }: { readonly view: SessionView; readonly 
             {steps.map((step) => (
               <li key={step.name}>
                 <span>{t(`step_${step.name}`)}</span>
-                <span className="faint">{duration(step.ms, t)}{step.count > 1 ? ` · ${t('step_times', { n: step.count })}` : ''}{step.open ? ` · ${t('step_running')}` : ''}</span>
+                <span className="faint"><Facts text={[duration(step.ms, t), ...(step.count > 1 ? [t('step_times', { n: step.count })] : []), ...(step.open ? [t('step_running')] : [])].join(' · ')} /></span>
               </li>
             ))}
           </ul>
@@ -802,9 +802,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const [said, setSaid] = useState('');
   const editingNow = useRef(editing);
   editingNow.current = editing;
-  const timeline = useRef<HTMLDivElement | null>(null);
   const message = useRef<HTMLInputElement | null>(null);
-  const atEnd = useRef(true);
   const missed = useRef(false);                                // something changed while the view was hidden
 
   const acting = actingSession(sessions, viewId) ?? loaded.detail;
@@ -982,16 +980,6 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const pullRequest = result ? undefined : pullRequestOf(view.ticket, homes, inbox);
   // An author's live session, not another account's: the service checks the rest at the save.
   const sessionOpen = acting.role === 'author' && !ended && takeover.kind !== 'other';
-
-  // The thread follows the newest row while the person is at its end.
-  const onScroll = () => {
-    const el = timeline.current;
-    if (el) atEnd.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-  };
-  useLayoutEffect(() => {
-    const el = timeline.current;
-    if (el && atEnd.current) el.scrollTop = el.scrollHeight;
-  }, [parts, tab, filter, detail]);
 
   // The tab is in the address, so a reload keeps it.
   const select = (next: Tab, focus = false) => {
@@ -1298,7 +1286,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
             ) : (
               <>
                 <ThreadFilter view={view} t={t} onFilter={setFilter} />
-                <div className="timeline" id="timeline" tabIndex={0} ref={timeline} onScroll={onScroll}>
+                <div className="timeline" id="timeline">
                   <TakeoverNotice view={view} t={t} why={terminal.kind === 'notice' ? terminal.why : undefined} />
                   <Timeline view={view} t={t} onFile={openFile} onResume={resumeFrom} />
                 </div>
