@@ -859,14 +859,15 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   // The ticket's cost from the ledger (P211): once for a resolved ticket, whose sessions spend nothing more; each
   // minute while it runs, not at each change, since it reads every event of the ticket.
   const readCost = useCallback(() => {
-    void context.api<TicketCost>(`/tickets/${encodeURIComponent(ticketId)}/cost`).then(setCost, () => {});
+    void context.api<TicketCost>(`/tickets/${encodeURIComponent(ticketId)}/cost`).then((answer) => setCost(typeof answer?.tokens === 'number' || answer?.tokens === null ? answer : null), () => {});
   }, [context, ticketId]);
   useEffect(() => { readCost(); }, [readCost]);
   useEvery(COST_MS, readCost, shown && !resolved);
   // Its production page's checks (P218), read again at each change: the
   // check is filed a little after the ticket is Done, once the page opened.
   const readProduction = useCallback(async () => {
-    try { setProduction(await context.api<ProductionCheck[]>(`/tickets/${encodeURIComponent(ticketId)}/production`)); }
+    // A list, or nothing: a secondary read never brings the screen down, as readSteps.
+    try { const answer = await context.api<unknown>(`/tickets/${encodeURIComponent(ticketId)}/production`); setProduction(Array.isArray(answer) ? answer as ProductionCheck[] : null); }
     catch { /* the next change tries again */ }
   }, [context, ticketId]);
   useEffect(() => { if (resolved) void readProduction(); }, [resolved, readProduction]);
