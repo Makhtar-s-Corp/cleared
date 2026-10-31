@@ -272,7 +272,8 @@ test('a ticket done with no pull request says so, rather than draw an empty resu
 
 const TOP_NAMES = /npm|docker|sudo|web\/|\.tsx|\.json|`|\*\*|##/;
 
-test('what is read first holds no path, no command and no Markdown while the agent works', () => {
+// The plan's steps are the agent's own words: their Markdown goes, a command or a file they name stays (question 3 of the decisions log).
+test('the sentence, the stage and the facts hold no path and no command, and the plan\'s steps no Markdown', () => {
   const v = view([custom('cleared.session_plan', { ...PLAN, steps: ['Lire **le** composant', 'Ajouter la `date`'], go: { by: 'delay', at: at(1) } }), ...toolCall('c', 'Bash', { kind: 'execute', command: 'npm test' })], { ticket: ticket({ body: 'x' }) }, { status: 'Running npm test' });
   const top = html(<><SessionHead view={v} t={fr} /><StageCard stage={stageOf(v, [])!} view={v} t={fr} /><SideFacts facts={sessionFacts(v, fr)} t={fr} /></>);
   assert.doesNotMatch(visibleText(top).join('\n'), TOP_NAMES);
