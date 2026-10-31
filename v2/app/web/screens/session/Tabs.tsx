@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea.tsx';
 import { Empty } from '@/shell/Empty.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { quantity } from '@/lib/time.ts';
+import { plainLine, planSteps } from './glance.ts';
 import { ENDED, clock, parseCriteria, phaseOf, takenOverOf, type SessionView } from './model.ts';
 import { QUESTION_MAX } from '@/screens/ask/model.ts';
 import {
@@ -83,7 +84,7 @@ export function Criteria({ view, t }: { readonly view: SessionView; readonly t: 
       {parsed.criteria.map((c, index) => (
         <li key={index} className={c.done ? 'crit-done' : 'crit-open'}>
           <span className="mark" aria-hidden="true">{c.done ? <Check size={13} /> : <Circle size={13} />}</span>
-          <span>{c.text}</span>
+          <span>{plainLine(c.text)}</span>
           <span className="sr-only">{t(c.done ? 'criterion_done' : 'criterion_open')}</span>
         </li>
       ))}
@@ -146,14 +147,43 @@ export function PlanAskCard({ service, t, ask = { text: '', busy: false, status:
   );
 }
 
-// The Plan tab: the session plan with its confidence, Go and Change while it
-// waits, who gave the Go after; the ticket's steps across services; the
-// ticket's criteria; then a question to the code.
-export function PlanTab({ view, plan, t, changing = false, change = '', busy = false, note = '', ask, onGo, onChangeOpen, onChangeText, onChangeSend, onChangeCancel, onAskText, onAskSend }: {
-  readonly view: SessionView; readonly plan: SessionPlan | null; readonly t: Translate;
-  readonly changing?: boolean; readonly change?: string; readonly busy?: boolean; readonly note?: string; readonly ask?: PlanAsk;
+// The plan's Go and Change, the one action at the top of the screen while it
+// waits (Glance.tsx ActionCard): the steps are on the screen under it.
+export function PlanGate({ plan, t, changing = false, change = '', busy = false, note = '', onGo, onChangeOpen, onChangeText, onChangeSend, onChangeCancel }: {
+  readonly plan: SessionPlan; readonly t: Translate;
+  readonly changing?: boolean; readonly change?: string; readonly busy?: boolean; readonly note?: string;
   readonly onGo?: () => void; readonly onChangeOpen?: () => void; readonly onChangeText?: (text: string) => void;
   readonly onChangeSend?: (event: FormEvent<HTMLFormElement>) => void; readonly onChangeCancel?: () => void;
+}) {
+  return (
+    <div className="plan-gate" data-plan-state="waiting">
+      <p className="s-action-title">{t('glance_plan_title', { n: plan.steps.length })}</p>
+      <p className="s-action-why">{t('plan_waiting_note')}</p>
+      {changing ? (
+        <form className="plan-change" onSubmit={onChangeSend}>
+          <label htmlFor="plan-change" className="small">{t('plan_change_label')}</label>
+          <Textarea id="plan-change" maxLength={CHANGE_MAX} rows={3} value={change} disabled={busy} onChange={(event) => onChangeText?.(event.target.value)} />
+          <div className="s-action-buttons">
+            <Button variant="ink" className="btn primary" type="submit" data-act="plan_change_send" disabled={busy}>{t('plan_change_send')}</Button>
+            <Button className="btn" data-act="plan_change_cancel" disabled={busy} onClick={onChangeCancel}>{t('plan_change_cancel')}</Button>
+          </div>
+        </form>
+      ) : (
+        <div className="s-action-buttons">
+          <Button variant="ink" className="btn primary" data-act="plan_go" disabled={busy} onClick={onGo}>{t('plan_go')}</Button>
+          <Button className="btn" data-act="plan_change" disabled={busy} onClick={onChangeOpen}>{t('plan_change')}</Button>
+        </div>
+      )}
+      <p className="plan-note" role="status">{note}</p>
+    </div>
+  );
+}
+
+// The Plan tab, in the fold: the session plan with its confidence, its reason
+// and its files, who let it start; the ticket's steps across services; the
+// ticket's criteria; then a question to the code. Its Go and Change are PlanGate's.
+export function PlanTab({ view, plan, t, ask, onAskText, onAskSend }: {
+  readonly view: SessionView; readonly plan: SessionPlan | null; readonly t: Translate; readonly ask?: PlanAsk;
   readonly onAskText?: (text: string) => void; readonly onAskSend?: (event: FormEvent<HTMLFormElement>) => void;
 }) {
   const takenOver = takenOverOf(view) !== null;
@@ -169,31 +199,11 @@ export function PlanTab({ view, plan, t, changing = false, change = '', busy = f
           <>
             <p className="plan-reason">{shown.plan.reason}</p>
             <h4 className="card-label sub-label">{t('plan_steps_title')}</h4>
-            <ol className="plan-steps">{shown.plan.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>
+            <ol className="plan-steps">{planSteps(shown.plan).map((step, index) => <li key={index}>{step}</li>)}</ol>
             <h4 className="card-label sub-label">{t('plan_files_title')}</h4>
             <ul className="plan-files">{shown.plan.files.map((file) => <li key={file} className="path">{file}</li>)}</ul>
             {shown.waiting ? (
-              <div className="plan-go" data-plan-state="waiting">
-                <p className="plan-waiting"><span className="dot waiting" aria-hidden="true" />{t('plan_waiting')}</p>
-                <p className="faint small">{t(takenOver ? 'plan_waiting_taken_over' : 'plan_waiting_note')}</p>
-                {shown.canAct && !changing ? (
-                  <div className="plan-actions">
-                    <Button variant="ink" className="btn primary" data-act="plan_go" disabled={busy} onClick={onGo}>{t('plan_go')}</Button>
-                    <Button className="btn" data-act="plan_change" disabled={busy} onClick={onChangeOpen}>{t('plan_change')}</Button>
-                  </div>
-                ) : null}
-                {shown.canAct && changing ? (
-                  <form className="plan-change" onSubmit={onChangeSend}>
-                    <label htmlFor="plan-change" className="small">{t('plan_change_label')}</label>
-                    <Textarea id="plan-change" maxLength={CHANGE_MAX} rows={3} value={change} disabled={busy} onChange={(event) => onChangeText?.(event.target.value)} />
-                    <div className="plan-actions">
-                      <Button variant="ink" className="btn primary" type="submit" data-act="plan_change_send" disabled={busy}>{t('plan_change_send')}</Button>
-                      <Button className="btn" data-act="plan_change_cancel" disabled={busy} onClick={onChangeCancel}>{t('plan_change_cancel')}</Button>
-                    </div>
-                  </form>
-                ) : null}
-                <p className="plan-note" role="status">{note}</p>
-              </div>
+              <p className="plan-waiting faint small">{t(takenOver ? 'plan_waiting_taken_over' : 'plan_waiting')}</p>
             ) : <p className="go-line" data-plan-state="go"><Check size={14} aria-hidden="true" />{goLine(shown.plan, view.me, t)}</p>}
           </>
         )}

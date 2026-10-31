@@ -1,41 +1,98 @@
-/* The session screen (session.png; Workbench, lane j6-ui-pro). Loaded with the screen's chunk, on top of
-   styles/app.css: same tokens, flat colours, nothing inline. The ticket on the left, the thread the one panel (a 1px
-   line, its status on a light band, its tabs an underline tab bar), the changes and the checks on the right under
-   quiet heads. The editor's code colours
-   are the app's tokens (--code-*). */
+/* The session screen (Workbench, lane j6-ui-pro; the owner's direction of 2026-10-31, issue #499). Loaded with the
+   screen's chunk, on top of styles/app.css: same tokens, flat colours, nothing inline. One column of reading and a narrow
+   side panel on a computer, one column on a phone; a white page, 1 px soft lines, the one accent on the one action.
+   The rest is in one fold under them. The editor's code colours are the app's tokens (--code-*). */
 .session { --ok-text: var(--success-text); --add-fill: var(--success-fill); --del-fill: var(--danger-fill); }
+.session { display: grid; grid-template-columns: minmax(0, 720px) 200px; justify-content: start; gap: var(--space-4) var(--space-5); padding: var(--space-5) var(--space-5) var(--space-6); align-items: start; }
+.s-read { display: grid; gap: var(--space-4); min-width: 0; }
 
+/* The ticket, and what the agent does now. */
+.s-head { display: grid; gap: var(--space-1); min-width: 0; }
+.s-title { font-size: var(--text-display); font-weight: var(--weight-heavy); line-height: 1.3; overflow-wrap: break-word; min-width: 0; text-wrap: balance; }
+.s-ticket { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-2); font-size: var(--text-sm); color: var(--text-muted); }
+.s-ticket .link-button { font-family: var(--mono); font-size: var(--text-sm); }
+.s-ticket-service { padding-left: var(--space-2); border-left: 1px solid var(--line); }
+.s-now { display: grid; grid-template-columns: 6px minmax(0, 1fr); align-items: baseline; column-gap: var(--space-2); margin-top: var(--space-2); font-size: var(--text-xl); line-height: 1.45; color: var(--text); }
+.s-now-next { margin-left: 14px; font-size: var(--text-md); color: var(--text-secondary); }
+.s-now .dot { width: 6px; height: 6px; border-radius: 50%; align-self: center; background: var(--stage-progress); }
+.s-now[data-tone="waiting"] .dot { background: var(--awaiting); }
+.s-now[data-tone="review"] .dot { background: var(--stage-review); }
+.s-now[data-tone="ended"] .dot, .s-now[data-tone="paused"] .dot { background: var(--placeholder); }
 
-.session { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: var(--space-3) var(--space-4); padding: var(--space-3) var(--space-4) var(--space-5); align-items: start; }
-/* The session in five seconds: what it does, what it waits for from the person, where it is. */
-.s-summary { grid-column: 1 / -1; display: grid; grid-template-columns: minmax(0, 2fr) minmax(0, 2fr) minmax(0, 1fr); gap: var(--space-2) var(--space-4); margin: 0; padding-bottom: var(--space-3); border-bottom: 1px solid var(--line); }
-.s-summary > div { min-width: 0; }
-.s-summary dt { margin-bottom: 2px; font-size: var(--text-sm); color: var(--text-muted); }
-.s-summary dd { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); margin: 0; font-size: var(--text-lg); font-weight: var(--weight-strong); overflow-wrap: anywhere; }
-.s-summary[data-wants="answer"] .s-summary-wants dd, .s-summary[data-wants="question"] .s-summary-wants dd, .s-summary[data-wants="go"] .s-summary-wants dd { color: var(--awaiting-text); }
+/* The one action: a 1 px line, the screen's one accent on its button. */
+.s-action { display: grid; gap: var(--space-2); padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-panel); background: var(--surface); }
+.s-action-label { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 var(--space-2); font-size: var(--text-sm); font-weight: var(--weight-regular); color: var(--text-muted); }
+.s-action-count { color: var(--text-muted); }
+.s-action-title { font-size: var(--text-lg); font-weight: var(--weight-strong); line-height: 1.4; overflow-wrap: anywhere; }
+.s-action-why { margin-top: var(--space-1); font-size: var(--text-md); color: var(--text-secondary); }
+.s-action-buttons { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
+.s-action-buttons a.btn { text-decoration: none; }
+.s-action-buttons a.btn.primary:hover { color: var(--on-ink); }
+.s-action-fold, .s-detail { font-size: var(--text-md); }
+.s-action-fold { margin-top: var(--space-2); }
+.s-action-fold > summary, .s-detail > summary { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 28px; color: var(--text-secondary); font-weight: var(--weight-strong); cursor: pointer; list-style: none; border-radius: var(--radius); }
+.s-action-fold > summary::-webkit-details-marker, .s-detail > summary::-webkit-details-marker { display: none; }
+.s-action-fold > summary:hover, .s-detail > summary:hover { color: var(--text); }
+.s-action-fold > summary:focus-visible, .s-detail > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.s-action-fold > summary .caret, .s-detail > summary .caret { transition: transform var(--motion) var(--ease); }
+.s-action-fold[open] > summary .caret, .s-detail[open] > summary .caret { transform: rotate(90deg); }
+.s-action-fold .command { margin-top: var(--space-2); }
+.s-action-note { margin-top: var(--space-2); font-size: var(--text-sm); color: var(--text-secondary); }
+.s-action-note span { display: block; }
+.s-action .request.question { margin: 0; padding: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.s-action .plan-note:empty { display: none; }
+
+/* Links out: the pull request, the receipt. */
+.s-link { display: inline-flex; align-items: center; gap: 2px; min-height: 28px; color: var(--link); font-size: var(--text-md); }
+.s-link:hover { text-decoration: underline; }
+
+/* Where the ticket is. */
+.s-section-title { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0 var(--space-2); margin-bottom: var(--space-2); font-size: var(--text-lg); font-weight: var(--weight-strong); }
+.s-stage-count { font-size: var(--text-md); font-weight: var(--weight-regular); color: var(--text-muted); font-variant-numeric: tabular-nums; }
+.s-stages { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; font-size: var(--text-md); }
+.s-stage-line { display: flex; align-items: center; gap: var(--space-2); min-height: 24px; }
+.s-stage-line svg { flex: none; }
+.s-stages > li[data-state="todo"] { color: var(--text-muted); }
+.s-stages > li[data-state="todo"] svg { color: var(--placeholder); }
+.s-stages > li[data-state="done"] { color: var(--text-secondary); }
+.s-stages > li[data-state="done"] svg { color: var(--success-text); }
+.s-stages > li[data-state="current"] { font-weight: var(--weight-strong); }
+.s-stages > li[data-state="current"] svg { color: var(--theme-accent); }
+.s-stages > li[data-state="failed"] { font-weight: var(--weight-strong); color: var(--danger-text); }
+.s-plan { margin: var(--space-1) 0 var(--space-2) 22px; font-weight: var(--weight-regular); color: var(--text-secondary); }
+.s-plan-title { margin-bottom: var(--space-1); font-size: var(--text-sm); color: var(--text-muted); }
+.s-plan-steps { display: grid; gap: 2px; margin: 0; padding-left: 20px; }
+.s-plan-steps li::marker { color: var(--text-muted); font-size: var(--text-sm); }
+
+/* The result. */
+.s-result-none { font-size: var(--text-md); color: var(--text-secondary); }
+.s-receipt { margin-top: var(--space-3); }
+.s-receipt ul { display: flex; flex-wrap: wrap; gap: 0 var(--space-3); margin: 0; padding: 0; list-style: none; }
+
+/* Writing to the agent. */
+.s-composer { padding-top: var(--space-3); border-top: 1px solid var(--line); }
+
+/* Cost and duration, small and calm. */
+.s-side { min-width: 0; padding-top: var(--space-1); }
+.s-facts { display: grid; gap: var(--space-3); margin: 0; }
+.s-facts dt { font-size: var(--text-sm); color: var(--text-muted); }
+.s-facts dd { margin: 0; font-size: var(--text-md); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+
+/* Everything else, in one fold across the page. */
+.s-detail { grid-column: 1 / -1; min-width: 0; padding-top: var(--space-3); border-top: 1px solid var(--line); }
+.s-detail-body { display: grid; gap: var(--space-4); margin-top: var(--space-3); }
+.s-left { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-4); align-items: start; }
+.s-after { display: contents; }
+.s-facts-card { grid-column: 1 / -1; columns: 3 260px; column-gap: var(--space-4); }
+.s-facts-card > * { break-inside: avoid; }
+.s-facts-card .s-fold-part:first-of-type { margin-top: 0; }
+.s-left .card { padding: 0; border-radius: var(--radius); background: transparent; box-shadow: none; }
 .s-ticket-line { margin-bottom: var(--space-2); font-size: var(--text-sm); color: var(--text-muted); }
 .s-ticket-line .service { margin-left: var(--space-2); padding-left: var(--space-2); border-left: 1px solid var(--line); }
-.s-summary .btn { min-height: 28px; padding: 0 12px; }
-.s-side { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; padding-top: var(--space-2); }
-.s-after { display: contents; }
-.s-side .card { padding: 0; border-radius: var(--radius); background: transparent; box-shadow: none; }
-.s-side .card + .card, .s-side > .s-after + .card { padding-top: var(--space-3); border-top: 1px solid var(--line); }
-/* The title is in the summary above: the card keeps it for a screen reader. */
-.s-side > .card:first-child .card-title { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-.s-fold > summary { display: flex; align-items: center; gap: var(--space-1); min-height: 28px; width: fit-content; font-size: var(--text-md); font-weight: var(--weight-strong); color: var(--text-secondary); cursor: pointer; list-style: none; border-radius: 4px; }
-.s-fold > summary::-webkit-details-marker { display: none; }
-.s-fold > summary:hover { color: var(--text); }
-.s-fold > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
-.s-fold[open] > summary .caret { transform: rotate(90deg); }
-.s-fold[open] > summary { margin-bottom: var(--space-2); }
 .s-fold-part { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--line); }
-/* The screen's own width decides the columns, since the sidebar (lane 35) takes
-   its share of the window, open or folded: three from 1160 px, then two. */
+/* The screen's own width decides the columns, since the sidebar (lane 35) takes its share of the window, open or folded. */
 #screen:has(> [data-session-view] .session, > .session) { container: screen / inline-size; }
 .card { padding: var(--space-3); border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-outline); }
-/* Beside the thread, the ticket and its facts lie on the page, as a review pane's sections: a hairline parts them,
-   and the thread is the one framed surface (lane j3-visual-redesign, P227). */
-.eyebrow { margin-bottom: var(--space-1); font-size: var(--text-sm); color: var(--text-muted); }
 .card-title { text-wrap: balance; margin-bottom: var(--space-2); font-size: var(--text-md); font-weight: var(--weight-heavy); line-height: 1.4; overflow-wrap: anywhere; }
 /* A resolved ticket's cost (P211): a fact a line, none cut, no separator left at a line's end. */
 .ticket-cost .fact { display: block; } .desc + .ticket-cost { margin-top: var(--space-2); }
@@ -75,7 +132,7 @@
 .changes .link-button:hover { color: var(--link); }
 
 /* the conversation */
-.session .panel { container: panel / inline-size; display: flex; flex-direction: column; min-height: 520px; height: calc(100vh - var(--top-bar) - var(--space-5) - 96px); border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--e-card); overflow: hidden; }
+.session .panel { container: panel / inline-size; display: flex; flex-direction: column; border-radius: var(--radius-panel); background: var(--surface); box-shadow: var(--e-card); overflow: hidden; }
 .session .panel-head { display: grid; grid-template-columns: 6px minmax(0, 1fr) auto; align-items: center; column-gap: 12px; row-gap: 2px; padding: 12px var(--space-3); border-bottom: 1px solid var(--line); background: var(--surface-muted); flex: none; }
 /* The status's phrase, its meta under it, Take over beside both (lane 36's art director). */
 .panel-head .phrase-title { min-width: 0; }
@@ -84,15 +141,13 @@
 .panel-head .open-editor-button { min-height: 30px; padding: 0 12px; }
 .open-editor-links { position: absolute; top: calc(100% + 6px); right: 0; z-index: 5; display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); padding: 12px; width: max-content; max-width: min(320px, 80vw); background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-panel); }
 .open-editor-links a.btn { text-decoration: none; min-height: 30px; padding: 0 12px; display: inline-flex; align-items: center; }
-/* A narrow thread gives the message its own row, and the hand over, Interrupt and Send the next. */
-@container panel (max-width: 640px) { .composer { flex-wrap: wrap; } .composer input { flex: 1 1 100%; } }
 .panel-head .dot.waiting { background: var(--awaiting); } .panel-head .dot.progress { background: var(--stage-progress); }
 .panel-head .dot.review { background: var(--stage-review); } .panel-head .dot.ended { background: var(--placeholder); }
 .phrase-title { font-size: var(--text-lg); font-weight: var(--weight-heavy); }
 .panel-head .dot { width: 6px; height: 6px; border-radius: 50%; }
 .panel-head .meta { font-size: var(--text-sm); color: var(--text-muted); }
 .panel-head .takeover-button { min-height: 30px; padding: 0 12px; }
-.timeline { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-2) var(--space-3); font-size: var(--text-md); }
+.timeline { flex: 1; min-height: 160px; max-height: 60vh; overflow-y: auto; padding: var(--space-2) var(--space-3); font-size: var(--text-md); }
 .row { display: grid; grid-template-columns: 44px 20px minmax(0, 1fr); gap: var(--space-2); padding: var(--space-2) 0; }
 .row time { padding-top: 1px; font-size: var(--text-sm); color: var(--text-faint); }
 .glyph { color: var(--text-faint); text-align: center; }
@@ -103,6 +158,8 @@
 .sub { margin-top: 2px; font-size: var(--text-sm); color: var(--text-faint); }
 .sub .ok, .sub .bad, .sub .add, .sub .del { font-weight: var(--weight-strong); }
 .sub .decided { color: var(--text-secondary); }
+.sub { display: flex; flex-wrap: wrap; gap: 0 var(--space-2); }
+.sub-part { margin-left: var(--space-2); }
 .row.refused .glyph { color: var(--danger-text); }
 /* A step of the thread (lane 36, a worklog's row): the row is its summary,
    the detail opens under its text column. */
@@ -115,7 +172,7 @@ details.row > summary:hover { background: var(--tab-fill); }
 details.row > summary .caret { margin-top: var(--space-1); color: var(--text-faint); transition: transform var(--motion) var(--ease); }
 details.row > summary:hover .caret, details.row > summary:focus-visible .caret, details.row[open] > summary .caret { color: var(--text-muted); }
 details.row[open] > summary .caret { transform: rotate(90deg); }
-@media (prefers-reduced-motion: reduce) { details.row > summary .caret, .checks summary .caret, .earlier > summary .caret { transition: none; } }
+@media (prefers-reduced-motion: reduce) { details.row > summary .caret, .checks summary .caret, .earlier > summary .caret, .s-action-fold > summary .caret, .s-detail > summary .caret { transition: none; } }
 /* A step on one line: what it did, then its result or its counts as an accessory. */
 details.row .what { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; }
 details.row .what > .sub { margin: 0 0 0 auto; }
@@ -147,25 +204,9 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .bubble { margin: var(--space-2) 0; padding: 12px 12px; border-radius: var(--radius); max-width: 560px; white-space: pre-wrap; overflow-wrap: anywhere; }
 .row[data-row="message"] .prose { white-space: pre-wrap; color: var(--text); }
 .bubble.user { margin-left: auto; width: fit-content; max-width: 420px; background: var(--tab-fill); color: var(--text); }
-.request { margin: 12px 0 var(--space-1) 72px; padding: 12px var(--space-3); border-radius: var(--radius-panel); background: var(--awaiting-surface); box-shadow: inset 0 0 0 1px var(--awaiting-pill); }
-.request.question.waits { background: var(--awaiting-surface); }
-/* amber only while the question waits */
+.request { margin: 12px 0 var(--space-1) 72px; padding: 12px var(--space-3); border-radius: var(--radius-panel); }
 .request.question:not(.waits) { background: var(--surface-muted); box-shadow: var(--e-outline); }
 .request .choice-text { font-size: var(--text-md); }
-.request-title { margin-bottom: var(--space-1); font-weight: var(--weight-strong); overflow-wrap: anywhere; }
-.request-why { margin-bottom: 12px; font-size: var(--text-md); color: var(--text-secondary); }
-.request-why span { display: block; }
-.request-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; }
-/* the command folded under the answers (lane 37), as the inbox folds it */
-.request-fold { margin-top: var(--space-2); font-size: var(--text-sm); }
-.request-fold > summary { display: flex; align-items: baseline; gap: var(--space-1); min-height: 28px; color: var(--text-muted); cursor: pointer; }
-.request-fold > summary code { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.request-fold[open] > summary code, .request-fold[open] .fold-more { display: none; }
-.request-fold .fold-label { flex: none; font-weight: var(--weight-strong); }
-.request-fold .fold-more { flex: none; color: var(--text-faint); }
-.request-fold .request-why { margin: var(--space-2) 0 0; }
-@media (max-width: 767px) { .request-fold > summary { min-height: 44px; align-items: center; } }
-.request-actions .btn { flex: 1 1 auto; }
 .btn { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 12px; border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-control); color: var(--text); font-size: var(--text-md); font-weight: var(--weight-strong); cursor: pointer; white-space: nowrap; }
 .btn:hover:not(:disabled) { background: var(--surface-muted); }
 .btn:active:not(:disabled) { background: var(--tab-fill); }
@@ -177,10 +218,8 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .btn.primary:disabled { background: var(--surface-muted); box-shadow: inset 0 0 0 1px var(--line); color: var(--text-faint); }
 .btn[aria-disabled="true"] { color: var(--text-secondary); cursor: default; }
 .btn[aria-disabled="true"]:hover { background: var(--surface); }
-.panel-foot { padding: var(--space-3) var(--space-4); border-top: 1px solid var(--line); background: var(--sunken); flex: none; }
-.composer { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
-.composer input { flex: 1 1 100%; min-width: 0; height: 44px; padding: 0 12px; border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); }
-#send { margin-left: auto; }
+.composer { display: flex; gap: var(--space-2); align-items: center; }
+.composer input { flex: 1 1 auto; min-width: 0; height: 36px; padding: 0 12px; border: 0; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); }
 .composer input::placeholder { color: var(--placeholder); }   /* 4.5:1 at least (lane 36's audit) */
 .composer input:focus { outline: 2px solid transparent; box-shadow: var(--e-field), 0 0 0 3px var(--halo-progress); }
 .composer input:disabled { background: var(--sunken); }
@@ -221,9 +260,7 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .plan-steps { display: grid; gap: var(--space-1); margin: 0; padding-left: 20px; font-size: var(--text-md); }
 .plan-steps li::marker { color: var(--text-faint); font-size: var(--text-sm); }
 .plan-files { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
-.plan-tab .plan-go { margin-top: 12px; padding: 12px var(--space-3); border-radius: var(--radius-panel); background: var(--awaiting-surface); box-shadow: inset 0 0 0 1px var(--awaiting-pill); }
-.plan-waiting { display: flex; align-items: center; gap: var(--space-2); margin-bottom: 2px; font-weight: var(--weight-strong); }
-.plan-waiting .dot { width: 8px; height: 8px; border-radius: 50%; flex: none; background: var(--awaiting); }
+.plan-waiting { margin-top: var(--space-3); }
 .plan-actions { display: flex; gap: var(--space-2); flex-wrap: wrap; margin-top: 12px; }
 .plan-change { display: grid; gap: var(--space-2); margin-top: 12px; }
 .plan-change textarea { min-height: 76px; padding: var(--space-2) 12px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--e-field); resize: vertical; }
@@ -247,7 +284,6 @@ details.row .what > .sub { margin: 0 0 0 auto; }
 .plan-short p { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 .link-button { justify-self: start; padding: 0; border: 0; background: none; color: var(--link); cursor: pointer; }
 .link-button:hover { text-decoration: underline; }
-.eyebrow .service { color: var(--text-secondary); }
 
 /* Terminal, taken over */
 /* Pinned to the timeline's top (its 8px padding) while the rows scroll under it. */
@@ -298,7 +334,7 @@ details.row .what > .sub { margin: 0 0 0 auto; }
    notice above, then what runs (the session's harness, or the shell) with
    the other as a quiet button, then the terminal (white, a 1px line:
    Terminal.tsx gives xterm the same), then its state and Open again. */
-.term-wrap { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 0; padding: 12px var(--space-3); overflow-y: auto; }
+.term-wrap { display: flex; flex-direction: column; gap: 12px; flex: 1; min-height: 520px; padding: 12px var(--space-3); overflow-y: auto; }
 .takeover.web { position: static; margin: 0; padding: 12px var(--space-3); box-shadow: var(--e-outline); }
 .term-head { display: flex; align-items: center; justify-content: space-between; gap: var(--space-2) 12px; flex-wrap: wrap; }
 .term-mode { min-width: 0; font-size: var(--text-md); font-weight: var(--weight-strong); }
@@ -390,49 +426,40 @@ details.row .what > .sub { margin: 0 0 0 auto; }
   .file-pick .counts { flex-basis: auto; }
   .file-pick { box-shadow: inset 0 0 0 1px var(--hairline); }
 }
-@container screen (max-width: 1159px) {
-  .session { grid-template-columns: minmax(0, 1fr) 260px; }
-}
-/* Under 760 px of screen (a tablet beside the folded sidebar, a phone): one column, the summary, the thread, the rest. */
-@container screen (max-width: 759px) {
-  .session { grid-template-columns: minmax(0, 1fr); }
-  .s-summary { grid-template-columns: minmax(0, 1fr); }
+/* Under 960 px of screen (a tablet beside the sidebar, a phone): one column, the facts a row under the reading. */
+@container screen (max-width: 959px) {
+  .session { grid-template-columns: minmax(0, 1fr); padding: var(--space-4) var(--space-3) var(--space-5); }
+  .s-facts { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); }
 }
 @media (max-width: 1100px) {
   .btn, .composer .btn, .panel-head .takeover-button, .panel-head .open-editor-button, .open-editor-links a.btn { min-height: 44px; }
   .view-tab, .file-pick, .thread-filter .filter, .checks summary, .checks > li:not(:has(details)) { min-height: 44px; }
-  /* The thread is pinned to the window down to 1101 px; below, the panel is a column of the page. */
-  .panel { height: auto; max-height: calc(100vh - 132px); }
   .view-tabs { flex: 0 1 auto; }
   .link-button { display: inline-flex; align-items: center; min-height: 44px; }
   .mode button { min-height: 36px; }
   .composer input { height: 44px; flex-basis: 100%; }
 }
 @media (max-width: 767px) {
-  .session { grid-template-columns: minmax(0, 1fr); grid-template-areas: "panel" "left" "right"; padding: 12px var(--space-3) 28px; }
-  .panel { max-height: none; min-height: 0; }
-  .timeline { overflow: visible; padding: var(--space-2) 12px; }
+  .session { padding: var(--space-3) var(--space-3) var(--space-5); }
+  .s-action-buttons .btn { flex: 1 1 100%; }
+  .s-action-fold > summary, .s-detail > summary { min-height: 44px; }
+  .s-link { min-height: 44px; }
+  .timeline { overflow: visible; max-height: none; padding: var(--space-2) 12px; }
   .row { grid-template-columns: 40px 16px minmax(0, 1fr); gap: var(--space-2); }
   details.row > summary { grid-template-columns: 40px 16px minmax(0, 1fr) 12px; gap: var(--space-2); }
   details.row > summary { min-height: 44px; align-items: start; }
   .step-detail { margin-left: 0; }
-  .bubble.assistant, .request { margin-left: 0; }
+  .request { margin-left: 0; }
   .bubble.user { max-width: 86%; }
   .btn { min-height: 44px; }
-  /* One row each (lane 34's art director): the tabs, the status with Take
-     over, the filter, the composer; the hand over that is not there yet
-     stays off a phone. */
-  .composer { flex-wrap: nowrap; }
+  /* The field on its row, then Interrupt as an icon, its word read out, and Send. */
+  .composer { flex-wrap: wrap; }
+  .composer input { flex-basis: 100%; height: 44px; }
   .composer .btn { min-height: 44px; padding: 0 12px; }
+  .composer #send { flex: 1 1 0; }
   .composer #interrupt { width: 44px; padding: 0; }
   .composer #interrupt svg { display: block; }
   .composer #interrupt .btn-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
-  .composer input { height: 44px; flex: 1 1 0; }
-  .composer { flex-wrap: wrap; }
-  .composer input { flex-basis: 100%; }
-  .composer #handover { flex: 1 1 auto; }
-  #send { margin-left: 0; }
-  .request-actions .btn { flex: 1 1 100%; }
   .panel-tabs { padding: var(--space-2) 12px; }
   .view-tabs { width: 100%; }
   .view-tab { flex: 1; justify-content: center; padding: var(--space-1) var(--space-2); }
@@ -487,9 +514,11 @@ details.row .what > .sub { margin: 0 0 0 auto; }
   .ticket-step .step-this { display: block; margin: 2px 0 0; }
 }
 
-/* Touch: the file links and the step details' links are 44 px tall, the rows kept tight (lane 38's art director). */
+/* Touch: the file links and the step details' links are 44 px tall, the rows kept tight (lane 38's art director);
+   a list of them keeps its own height, or their targets overlap (axe's target-size). */
 @media (pointer: coarse) {
   .link-button { display: inline-flex; align-items: center; min-height: 44px; margin-block: -12px; }
+  .read-paths .link-button, .file-detail .link-button { min-height: 44px; margin-block: 0; }
   /* A touch screen at any width: the computer's 32 px buttons are 44 (P227, the art director). */
   .btn, .composer .btn { min-height: 44px; }
 }

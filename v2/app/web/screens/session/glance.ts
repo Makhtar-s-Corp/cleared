@@ -165,6 +165,8 @@ export function stageOf(view: SessionView, inbox: readonly NextInboxItem[]): Sta
 }
 
 const plainRuns = (runs: readonly Run[]): string => runs.map((run) => (run.kind === 'text' || run.kind === 'code' ? run.text : plainRuns(run.runs))).join('');
+// One line of Markdown as the sentence it says: a criterion, a step.
+export const plainLine = (line: string): string => plainRuns(runsOf(line));
 
 // A step of the agent's plan as a sentence, whatever Markdown it came in.
 function plainStep(step: string): string {

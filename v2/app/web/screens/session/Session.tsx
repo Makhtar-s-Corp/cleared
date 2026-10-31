@@ -1,8 +1,10 @@
-// The session screen (session.png): the ticket and its criteria on the
-// left, the thread in the middle with what waits for the human and the
-// composer, the changes, checks and steps on the right. Each session's
-// timeline is its CopilotKit agent (agent.ts): this screen draws what the
-// agents hold, and answers through the service's routes.
+// The session screen, one reading column (the owner's request of 2026-10-31,
+// issue #499): the ticket, what the agent does now, the one action expected of
+// the person, where the ticket is, then its result; cost and duration in a narrow
+// side panel (Glance.tsx, the rules in glance.ts). Everything else is folded under
+// "Show details": the thread, the four tabs, the ticket's text, its changes and
+// checks. Each session's timeline is its CopilotKit agent (agent.ts): this screen
+// draws what the agents hold, and answers through the service's routes.
 //
 // The view follows the ticket, not the session id (lane 36, U6; ticket.ts):
 // one thread of the ticket's sessions, a handover row where the reviewer
@@ -13,20 +15,20 @@
 // lands on the live one. A view kept hidden (lib/stack.tsx) holds no
 // stream and reads nothing until it is shown again.
 //
-// The middle panel has four tabs (decision 30, lane 20; Tabs.tsx): Plan,
-// Terminal (the thread and the composer, opened first), Editor and
-// Browser. Once the signed-in account took the session over, on the app's
-// loopback address, the Terminal tab holds the web terminal in place of the
-// thread (decision 32); the Editor tab holds the ticket's diff and opens a
+// The fold's panel has four tabs (decision 30, lane 20; Tabs.tsx): Plan, the
+// thread (opened first), Files and Preview. Once the signed-in account took the
+// session over, on the app's loopback address, the thread's tab holds the web
+// terminal (decision 32); the Files tab holds the ticket's diff and opens a
 // changed file for editing (decision 33). Both packages load by a dynamic
-// import (lane 32).
+// import (lane 32). A tab named by the address, a file opened and a take over
+// open the fold.
 import {
-  ArrowCounterClockwise, ArrowRight, ArrowsClockwise, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, ImageSquare, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, Terminal, WarningCircle, X, type Icon,
+  ArrowCounterClockwise, ArrowRight, ArrowsClockwise, ArrowUpRight, CaretRight, ChatText, Check, DotOutline, Eye, HandPalm, ImageSquare, ListChecks, MagnifyingGlass, PencilSimple, Play, Prohibit, Stop, Terminal, WarningCircle, X, type Icon,
 } from '@phosphor-icons/react';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode, type Ref } from 'react';
-import type { CaptureChoice, ConfirmableRule, EditorLinks, ProductionCheck, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketCost, TicketStep, Workspace } from '../../../../src/api/types.ts';
+import type { CaptureChoice, ConfirmableRule, EditorLinks, NextInboxItem, ProductionCheck, SessionDetail, SessionFile, SessionFiles, SessionSummary, TakenOver, TicketCost, TicketStep, Workspace } from '../../../../src/api/types.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
-import { Choices, OwnChoices } from '@/components/choices/Choices.tsx';
+import { Choices } from '@/components/choices/Choices.tsx';
 import { sentText, type Answers } from '@/components/choices/model.ts';
 import { Button } from '@/components/ui/button.tsx';
 import { Input } from '@/components/ui/input.tsx';
@@ -42,10 +44,9 @@ import { Facts } from '@/components/facts/Facts.tsx';
 import { Markdown } from '@/components/markdown/Markdown.tsx';
 import { Empty } from '@/shell/Empty.tsx';
 import { stateOf, type SessionState } from '@/shell/model.ts';
-import { commandParts, intentSentence, looksLikeCommand } from '@/lib/intent.ts';
+import { intentSentence, looksLikeCommand } from '@/lib/intent.ts';
 import { sessionStatus } from '@/lib/status.ts';
 import { ago, since } from '@/lib/time.ts';
-import { requestAsk, requestFold, requestFoldOpen, requestReason } from '@/lib/request.ts';
 import { useKept, useLive } from '@/lib/query.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { forgetView, keepWith, viewOf } from '@/lib/routes.ts';
@@ -54,10 +55,12 @@ import { formatModel, harnessSquare, liveDot } from '../tower/model.ts';
 import { isSessionThread, SessionAgent, sessionAgentId } from './agent.ts';
 import {
   ENDED, REPLAY_MAX, answerBody, answerLine, clock, decisionOf, duration, family, parseCriteria, phaseOf, phrase, questionStatus, refusal, resultSummary, shortCommit, statusMeta, statusTone, stepCommit, takenOverOf, target, verb, who,
-  type EditsRow, type LocalAnswer, type QuestionRow, type ReadRow, type ReplayRow, type RequestState, type Row, type SessionThread, type SessionView, type StreamLike, type ToolRow,
+  type EditsRow, type LocalAnswer, type QuestionRow, type ReadRow, type ReplayRow, type Row, type SessionThread, type SessionView, type StreamLike, type ToolRow,
 } from './model.ts';
 import { CloseTicket } from './CloseTicket.tsx';
-import { BrowserTab, Confidence, Criteria, EditorTab, OpenInEditor, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown, type PlanAsk } from './Tabs.tsx';
+import { BrowserTab, Confidence, Criteria, EditorTab, OpenInEditor, PlanGate, PlanTab, TabStrip, TakeoverButton, TakeoverNotice, type EditorShown, type PlanAsk } from './Tabs.tsx';
+import { ActionCard, CommandLines, ResultCard, SessionHead, SideFacts, StageCard } from './Glance.tsx';
+import { pendingAction, pullRequestOf, resultOf, sessionFacts, stageOf, type ServiceHome } from './glance.ts';
 import { browserView, changeProblem, CHANGE_MAX, editorOffer, goLine, handoverFor, nextTab, planAskBody, planAskProblem, serviceLine, stepsView, tabOf, takeoverOf, type Tab } from './tabs.ts';
 import {
   CAPTURE_CHOICES, actingSession, captureChoiceOf, chooseCaptures, editsOf, viewSessions, filterOptions, handoverLine, isLive, partsOf, ticketChecks, readChecks, type ReadCheck, ticketCostFacts, productionFacts, ticketFiles, ticketPlan, ticketSessions, ticketSteps, ticketThread,
@@ -105,14 +108,7 @@ function Step({ kind, at, icon, refused = false, line, detail, resume }: {
 
 const Code = ({ text, title }: { readonly text: string; readonly title?: string | undefined }) => <code title={title || undefined}>{text}</code>;
 
-// A command as it ran, one command a line, the operator before each.
-export function CommandLines({ command }: { readonly command: string }) {
-  return (
-    <pre className="command"><code>{commandParts(command).map((part, index) => (
-      <span key={index} className="command-line">{part.op ? <span className="op">{part.op} </span> : null}{part.text}{'\n'}</span>
-    ))}</code></pre>
-  );
-}
+export { CommandLines };
 
 // The last lines a command printed: enough to see how it ended.
 const OUTPUT_LINES = 8;
@@ -121,46 +117,17 @@ const tail = (text: string) => text.replace(/\s+$/, '').split('\n').slice(-OUTPU
 export function StatusHead({ view, t }: { readonly view: SessionView; readonly t: Translate }) {
   const several = (view.parts?.length ?? 1) > 1;
   const who = several && (view.summary.role === 'author' || view.summary.role === 'reviewer') ? `${t(`tab_${view.summary.role}`, { model: family(view.summary.model) })} · ` : '';
-  return <><span className={`dot ${statusTone(view)}`} aria-hidden="true" /><h2 className="phrase-title">{phrase(view, t)}</h2><span className="meta">{who ? <span className="who">{who}</span> : null}{statusMeta(view, t)}</span></>;
+  return <><span className={`dot ${statusTone(view)}`} aria-hidden="true" /><h3 className="phrase-title">{phrase(view, t)}</h3><span className="meta"><Facts text={`${who}${statusMeta(view, t)}`} /></span></>;
 }
 
-// A request waiting in the thread, as the inbox says it (lib/request.ts, lane
-// 37): the question naming who asks, why in the person's words, the three
-// answers, then the command folded, open by itself when it must be read.
-function RequestCard({ row, request, view, t, onAnswer }: { readonly row: ToolRow; readonly request: RequestState; readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer }) {
-  const input = row.input;
-  const asked = input ? { input, tool: row.name } : undefined;
-  const title = asked ? requestAsk(asked, view.summary.role, t) : t('wants_other', { tool: row.name });
-  const why = asked ? requestReason(asked, request.suggestion, t) : {};
-  const description = input?.kind === 'execute' && input.description ? input.description : '';
-  const fold = input ? requestFold(input) : [];
-  const off = view.busy?.has(request.requestId) ?? false;
-  const answer = (kind: string) => onAnswer?.(request.requestId, kind, view.summary.id);
-  return (
-    <div className="request" data-row="request" data-request-id={request.requestId} data-command={input ? target(input) : undefined} role="group" aria-label={t('request_group')}>
-      <p className="request-title">{title}</p>
-      {why.said ? <p className="request-why"><span>{why.said}</span></p> : null}
-      <div className="request-actions">
-        <Button variant="ink" className="btn primary" data-answer="allow_once" disabled={off} onClick={() => answer('allow_once')}>{t('allow_once')}</Button>
-        <Button className="btn" data-answer="allow_always" disabled={off} onClick={() => answer('allow_always')}>{t('allow_always')}</Button>
-        <Button className="btn" data-answer="reject_once" disabled={off} onClick={() => answer('reject_once')}>{t('deny')}</Button>
-      </div>
-      {fold.length > 0 ? (
-        <details className="request-fold" open={asked ? requestFoldOpen(asked) : false}>
-          <summary><span className="fold-label">{t(input?.kind === 'execute' ? 'fold_command' : 'fold_target')}</span> <Code text={fold[0]?.text ?? ''} />{fold.length > 1 ? <span className="fold-more"> {t(fold.length === 2 ? 'fold_more_one' : 'fold_more_other', { n: fold.length - 1 })}</span> : null}</summary>
-          {input?.kind === 'execute' ? <CommandLines command={input.command} /> : null}
-          {description || why.raw ? (
-            <p className="request-why">{description ? <span>{description}</span> : null}{why.raw ? <span>{why.raw}</span> : null}</p>
-          ) : null}
-        </details>
-      ) : null}
-    </div>
-  );
+// What waits for the person, in the thread: the answer is the one action at the top of the screen.
+function Waits({ at, t }: { readonly at: string; readonly t: Translate }) {
+  return <Frame kind="waits" at={at} icon={HandPalm}><div>{t('glance_row_waits')}</div></Frame>;
 }
 
-function ToolLine({ row, view, t, onAnswer, onFile, resume }: { readonly row: ToolRow; readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer; readonly onFile?: OpenFile; readonly resume?: ReactNode }) {
+function ToolLine({ row, view, t, onFile, resume }: { readonly row: ToolRow; readonly view: SessionView; readonly t: Translate; readonly onFile?: OpenFile; readonly resume?: ReactNode }) {
   const request = row.request;
-  if (request?.state === 'waiting') return <RequestCard row={row} request={request} view={view} t={t} onAnswer={onAnswer} />;
+  if (request?.state === 'waiting') return <Waits at={row.at} t={t} />;
   const input = row.input;
   const kind = verb(input);
   const summary = resultSummary(row.output);
@@ -177,7 +144,7 @@ function ToolLine({ row, view, t, onAnswer, onFile, resume }: { readonly row: To
   const shown = target(input);
   const frameKind = kind === 'read' || kind === 'edit' ? kind : kind === 'execute' ? 'run' : 'tool';
   const refused = request?.decision === 'reject_once' || request?.decision === 'reject_always';
-  const sub = subs.length ? <div className="sub">{subs.flatMap((part, index) => (index === 0 ? [part] : [' · ', part]))}</div> : null;
+  const sub = subs.length ? <div className="sub">{subs}</div> : null;
   // A command says what it means to do; the command itself, and how it ended, in the detail.
   if (input?.kind === 'execute') {
     const output = row.output?.kind === 'execute' ? tail(row.output.output) : '';
@@ -204,7 +171,7 @@ function FileDetail({ path, added, removed, count, t, onFile }: { readonly path:
   return (
     <p className="file-detail">
       <span className="path">{path}</span>
-      <span className="counts"><Counts added={added} removed={removed} t={t} />{count > 1 ? ` · ${t('edits_count', { n: count })}` : null}</span>
+      <span className="counts"><Counts added={added} removed={removed} t={t} />{count > 1 ? <span className="sub-part">{t('edits_count', { n: count })}</span> : null}</span>
       {onFile ? <button type="button" className="link-button" data-act="open_diff" onClick={() => onFile(path, 'diff')}>{t('step_show_diff')}</button> : null}
     </p>
   );
@@ -213,7 +180,7 @@ function FileDetail({ path, added, removed, count, t, onFile }: { readonly path:
 function EditsLine({ row, t, onFile, resume }: { readonly row: EditsRow; readonly t: Translate; readonly onFile?: OpenFile | undefined; readonly resume?: ReactNode }) {
   return (
     <Step kind="edit" at={row.at} icon={PencilSimple} resume={resume}
-      line={<><div>{t('verb_edit')} <Code text={row.path} /></div><div className="sub"><Counts added={row.added} removed={row.removed} t={t} />{` · ${t('edits_count', { n: row.count })}`}</div></>}
+      line={<><div>{t('verb_edit')} <Code text={row.path} /></div><div className="sub"><Counts added={row.added} removed={row.removed} t={t} /><span className="sub-part">{t('edits_count', { n: row.count })}</span></div></>}
       detail={<FileDetail path={row.path} added={row.added} removed={row.removed} count={row.count} t={t} onFile={onFile} />} />
   );
 }
@@ -235,24 +202,23 @@ function ReadLine({ row, t, onFile, resume }: { readonly row: ReadRow; readonly 
   );
 }
 
+// A question of the session, once answered; while it waits, the answer is the
+// one action at the top of the screen.
+function QuestionView({ row, view, t }: { readonly row: QuestionRow; readonly view: SessionView; readonly t: Translate }) {
+  const status = questionStatus(row, view, t);
+  if (status.kind === 'waiting') return <Waits at={row.at} t={t} />;
+  const questions = view.thread.interrupts.find((i) => i.id === row.requestId)?.metadata.questions ?? row.questions;
+  return (
+    <div className="request question" data-row="question" data-request-id={row.requestId}>
+      <Choices questions={questions} status={status} t={t} requestId={row.requestId} />
+    </div>
+  );
+}
+
 // A permission's answer, and the session it is asked of.
 type Answer = (requestId: string, kind: string, session: string) => void;
 // A question's answer: the answers keyed by question text, and the labels picked.
 type QuestionAnswer = (requestId: string, answers: Answers, chosen: readonly string[], session: string) => void;
-
-// A question of the session, answered here through the session answer
-// route: the questions the interrupt carries while it waits, else the row's.
-function QuestionView({ row, view, t, onQuestion }: { readonly row: QuestionRow; readonly view: SessionView; readonly t: Translate; readonly onQuestion?: QuestionAnswer }) {
-  const status = questionStatus(row, view, t);
-  const questions = view.thread.interrupts.find((i) => i.id === row.requestId)?.metadata.questions ?? row.questions;
-  return (
-    <div className={status.kind === 'waiting' ? 'request question waits' : 'request question'} data-row="question" data-request-id={row.requestId}>
-      {status.kind === 'waiting'
-        ? <OwnChoices questions={questions} t={t} requestId={row.requestId} busy={status.busy ?? false} onAnswer={(answers, chosen) => onQuestion?.(row.requestId, answers, chosen, view.summary.id)} />
-        : <Choices questions={questions} status={status} t={t} requestId={row.requestId} />}
-    </div>
-  );
-}
 
 // Resume from here (issue #272): what the service answered.
 export type ResumeOutcome = 'resumed' | 'owner' | 'failed';
@@ -313,8 +279,8 @@ function ReplayLine({ row, view, t }: { readonly row: ReplayRow; readonly view: 
 // other shows the service's message.
 const ERROR_KEYS: Readonly<Record<string, string>> = { container_lost: 'row_container_lost', container_failed: 'row_container_failed' };
 
-function RowView({ row, view, t, onAnswer, onQuestion, onFile, resume }: {
-  readonly row: Row; readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer; readonly onQuestion?: QuestionAnswer; readonly onFile?: OpenFile | undefined;
+function RowView({ row, view, t, onFile, resume }: {
+  readonly row: Row; readonly view: SessionView; readonly t: Translate; readonly onFile?: OpenFile | undefined;
   readonly resume?: ReactNode;
 }) {
   switch (row.kind) {
@@ -323,7 +289,7 @@ function RowView({ row, view, t, onAnswer, onQuestion, onFile, resume }: {
     case 'edits':
       return <EditsLine row={row} t={t} onFile={onFile} resume={resume} />;
     case 'tool':
-      return <ToolLine row={row} view={view} t={t} onAnswer={onAnswer} onFile={onFile} resume={resume} />;
+      return <ToolLine row={row} view={view} t={t} onFile={onFile} resume={resume} />;
     // The session's prose is a row of the worklog, flat (lane 36's art
     // director); the person's own message keeps a quiet bubble.
     case 'message':
@@ -331,7 +297,7 @@ function RowView({ row, view, t, onAnswer, onQuestion, onFile, resume }: {
         ? <Frame kind="message" at={row.at} icon={ChatText}><div className="prose">{row.text}</div></Frame>
         : <div className={`bubble ${row.role}`} data-row="message">{row.text}</div>;
     case 'question':
-      return <QuestionView row={row} view={view} t={t} onQuestion={onQuestion} />;
+      return <QuestionView row={row} view={view} t={t} />;
     case 'denied':
       return <Frame kind="denied" at={row.at} icon={Prohibit} refused><div>{refusal(row.rule, t)}</div></Frame>;
     case 'interrupted':
@@ -361,8 +327,8 @@ export function HandoverRow({ handover, t }: { readonly handover: Handover; read
 
 // The thread of the ticket: each session's rows under its own view (its
 // requests answer it, its questions wait in it), a handover row between.
-export function Timeline({ view, t, onAnswer, onQuestion, onFile, onResume }: {
-  readonly view: SessionView; readonly t: Translate; readonly onAnswer?: Answer; readonly onQuestion?: QuestionAnswer; readonly onFile?: OpenFile; readonly onResume?: Resume;
+export function Timeline({ view, t, onFile, onResume }: {
+  readonly view: SessionView; readonly t: Translate; readonly onFile?: OpenFile; readonly onResume?: Resume;
 }) {
   const parts = partsOf(view);
   const filter = view.filter ?? 'all';
@@ -378,7 +344,7 @@ export function Timeline({ view, t, onAnswer, onQuestion, onFile, onResume }: {
     const left = own.thread.rows.reduce((first, r) => (r.kind === 'replay' && r.side === 'left' ? Math.min(first, r.step) : first), Infinity);
     const commit = own.summary.role === 'author' && entry.row.seq !== undefined && entry.row.seq < left ? stepCommit(own.thread.checkpoints ?? [], entry.row.seq) : undefined;
     const resume = commit && entry.row.seq !== undefined ? <ResumeFrom session={entry.session} seq={entry.row.seq} commit={commit.commit} t={t} onResume={onResume} /> : undefined;
-    return <RowView key={key} row={entry.row} view={own} t={t} onAnswer={onAnswer} onQuestion={onQuestion} onFile={onFile} resume={resume} />;
+    return <RowView key={key} row={entry.row} view={own} t={t} onFile={onFile} resume={resume} />;
   };
   // The whole ticket: an ended session a later one followed is folded into
   // one row (who, how many steps), unless the view saw it live.
@@ -424,11 +390,6 @@ export function ThreadFilter({ view, t, onFilter }: { readonly view: SessionView
       ))}
     </div>
   );
-}
-
-// The screen's one heading: the ticket's number and title, read out; the top bar draws them (lane 38).
-export function SessionHeading({ view }: { readonly view: SessionView }) {
-  return <h1 className="sr-only">{view.summary.ticket} · {view.ticket?.title ?? view.summary.ticket}</h1>;
 }
 
 // A ticket that shipped, or is approved, is not closed.
@@ -477,7 +438,7 @@ export function LeftCards({ view, t, onPlan, close, onCaptures, capturesBusy, ca
   return (
     <>
       <section className="card" aria-labelledby="ticket-title">
-        <h2 id="ticket-title" className="card-title">{view.ticket?.title ?? view.summary.ticket}</h2>
+        <h3 id="ticket-title" className="card-label">{t('glance_ticket_text')}</h3>
         <p className="s-ticket-line">{t('ticket_label')} <span className="id">{view.summary.ticket}</span>{service ? <span className="service">{service}</span> : null}</p>
         {parsed.description.length > 0 ? <Markdown className="desc" text={parsed.description.join('\n\n')} /> : null}
         {cost.length > 0 ? <p className="ticket-cost faint small" data-ticket-cost="">{cost.map((fact) => <span key={fact} className="fact">{fact}</span>)}</p> : null}
@@ -490,9 +451,8 @@ export function LeftCards({ view, t, onPlan, close, onCaptures, capturesBusy, ca
         ) : null}
       </section>
       {after}
-      {/* The rest is one click away (the owner's request of 2026-10-30): a session reads in five seconds. */}
-      <details className="card s-fold" data-session-details="">
-        <summary className="s-fold-title"><CaretRight className="caret" size={11} aria-hidden="true" />{t('details_title')}</summary>
+      <section className="card s-facts-card" aria-labelledby="session-facts-title">
+        <h3 id="session-facts-title" className="card-label">{t('glance_session_title')}</h3>
         {/* The session that works it, in facts (the project lead's review of #462): its role, its agent and model, since when. */}
         <dl className="ticket-facts" data-session-facts="">
           <dt>{t('facts_role')}</dt><dd>{t(`role_${view.summary.role}`)}</dd>
@@ -522,7 +482,7 @@ export function LeftCards({ view, t, onPlan, close, onCaptures, capturesBusy, ca
         ) : null}
         {extra}
         {close ? <div className="s-fold-part">{close}</div> : null}
-      </details>
+      </section>
     </>
   );
 }
@@ -593,55 +553,30 @@ export function FoldedFacts({ view, t }: { readonly view: SessionView; readonly 
   );
 }
 
-// The session in five seconds (the owner's request of 2026-10-30): what it does,
-// what it waits for from the person, where it is.
-export function SessionSummaryStrip({ view, t, onAnswer }: { readonly view: SessionView; readonly t: Translate; readonly onAnswer?: () => void }) {
-  const phase = phaseOf(view);
-  const ended = ENDED.has(phase);
-  const asks = view.thread.pending.length > 0;
-  const question = asks && view.thread.rows.some((row) => row.kind === 'question' && row.requestId === view.thread.pending[0]);
-  const wants = ended ? 'ended' : question ? 'question' : asks ? 'answer' : view.thread.plan?.go === null ? 'go' : 'nothing';
-  const role = t(`role_${view.summary.role}`);
-  const time = duration(view.now.getTime() - Date.parse(view.summary.startedAt), t);
-  return (
-    <dl className="s-summary" data-session-summary="" data-wants={wants}>
-      <div><dt>{t('summary_doing')}</dt><dd>{view.ticket?.title ?? view.summary.ticket}</dd></div>
-      <div className="s-summary-wants">
-        <dt>{t('summary_wants')}</dt>
-        <dd>
-          <span>{t(`summary_wants_${wants}`)}</span>
-          {asks && onAnswer ? <Button className="btn" data-act="summary_answer" onClick={onAnswer}>{t('summary_answer')}</Button> : null}
-        </dd>
-      </div>
-      <div><dt>{t('summary_where')}</dt><dd>{ended ? t('summary_where_ended', { role }) : t('summary_where_role', { role, time })}</dd></div>
-    </dl>
-  );
+// Hand over (flow/takeover.ts, B6.3), in the fold: the other harness named on the button, drawn only where one is offered.
+export function HandoverButton({ view, t, handing = false, onHandover }: { readonly view: SessionView; readonly t: Translate; readonly handing?: boolean; readonly onHandover?: () => void }) {
+  const offer = handoverFor({ takenOver: takenOverOf(view), me: view.me, role: view.summary.role, harness: view.summary.harness, ended: ENDED.has(phaseOf(view)), dormant: view.summary.dormant === true, planWaits: view.thread.plan?.go === null });
+  if (offer.kind !== 'offer') return null;
+  return <Button className="btn" id="handover" data-to={offer.to} title={t('handover_note')} disabled={handing} onClick={onHandover}>{t(offer.to === 'codex' ? 'handover_to_codex' : 'handover_to_claude_code')}</Button>;
 }
 
-export function Composer({ view, t, text = '', sending = false, interrupting = false, handing = false, note = '', input, onText, onSend, onInterrupt, onHandover }: {
-  readonly view: SessionView; readonly t: Translate; readonly text?: string; readonly sending?: boolean; readonly interrupting?: boolean; readonly handing?: boolean; readonly note?: string;
+export function Composer({ view, t, text = '', sending = false, interrupting = false, note = '', input, onText, onSend, onInterrupt }: {
+  readonly view: SessionView; readonly t: Translate; readonly text?: string; readonly sending?: boolean; readonly interrupting?: boolean; readonly note?: string;
   readonly input?: Ref<HTMLInputElement>;
-  readonly onText?: (value: string) => void; readonly onSend?: (event: FormEvent<HTMLFormElement>) => void; readonly onInterrupt?: () => void; readonly onHandover?: () => void;
+  readonly onText?: (value: string) => void; readonly onSend?: (event: FormEvent<HTMLFormElement>) => void; readonly onInterrupt?: () => void;
 }) {
   // A session taken over is written to by nobody until it is given back.
   const off = ENDED.has(phaseOf(view)) || takenOverOf(view) !== null;
   const role = view.summary.role === 'reviewer' ? 'reviewer' : 'author';
-  // Hand over (flow/takeover.ts, B6.3): the other harness named on the button; where none is offered, the button says why it is off.
-  const ended = ENDED.has(phaseOf(view));
-  const offer = handoverFor({ takenOver: takenOverOf(view), me: view.me, role: view.summary.role, harness: view.summary.harness, ended, dormant: view.summary.dormant === true, planWaits: view.thread.plan?.go === null });
   const placeholder = takenOverOf(view) !== null && !ENDED.has(phaseOf(view)) ? t('composer_taken_over') : t(`composer_${role}`);
   return (
     <>
       <form className="composer" id="composer" autoComplete="off" onSubmit={onSend}>
         <Input id="message" name="text" ref={input} placeholder={placeholder} aria-label={placeholder} disabled={off} value={text} onChange={(event) => onText?.(event.target.value)} />
-        {offer.kind === 'offer'
-          ? <Button className="btn" id="handover" data-to={offer.to} aria-describedby="handover-note" title={t('handover_note')} disabled={handing} onClick={onHandover}>{t(offer.to === 'codex' ? 'handover_to_codex' : 'handover_to_claude_code')}</Button>
-          : <Button className="btn" id="handover" aria-disabled="true" aria-describedby="handover-note" title={t('handover_none')}>{t('handover_to_codex')}</Button>}
         <Button className="btn" id="interrupt" disabled={off || interrupting} onClick={onInterrupt}><Stop size={16} aria-hidden="true" /><span className="btn-label">{t('interrupt')}</span></Button>
-        {/* Send waits for a message (lane 38, the critique): one ink button at a time, the screen's own gesture first. */}
-        <Button variant="ink" className="btn primary" id="send" type="submit" disabled={off || sending || text.trim() === ''}>{t('send')}</Button>
+        {/* Send is a quiet button: the screen's one accent is the action at its top. */}
+        <Button className="btn" id="send" type="submit" disabled={off || sending || text.trim() === ''}>{t('send')}</Button>
       </form>
-      <span className="sr-only" id="handover-note">{t(offer.kind === 'offer' ? 'handover_note' : 'handover_none')}</span>
       <p className="composer-note" id="composer-note" role="status">{note}</p>
     </>
   );
@@ -710,6 +645,7 @@ export function SessionIndex({ sessions, tickets, now, t, onNew }: { readonly se
 }
 
 const TICK_MS = 20_000;
+const COST_MS = 60_000;
 
 function useEvery(ms: number, run: () => void, on = true): void {
   const latest = useRef(run);
@@ -833,6 +769,10 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const [interrupting, setInterrupting] = useState(false);
   const [note, setNote] = useState('');
   const [tab, setTab] = useState<Tab>(() => tabOf(window.location.hash));
+  // The fold: open when the address names a tab, and by what needs it (a file, a take over, the ticket's text).
+  const [detail, setDetail] = useState(() => window.location.hash !== '' && window.location.hash === `#${tabOf(window.location.hash)}`);
+  const [inbox, setInbox] = useState<readonly NextInboxItem[]>([]);
+  const [homes, setHomes] = useState<readonly ServiceHome[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
   // What a gesture of this tab knows, newer than the list; `list`, the list the cache held when the service accepted it.
   const [taken, setTaken] = useState<{ readonly id: string; readonly by: TakenOver | null; readonly list: unknown } | null>(null);
@@ -884,8 +824,14 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   }, [context, ticketId]);
   // A resolved ticket's cost (P211), read from the ledger by the service
   // once: a Done ticket's sessions spend nothing more.
+  // What waits for this ticket in the inbox: pendingAction takes its own and no other's.
+  const readInbox = useCallback(async () => {
+    try { setInbox(await context.api<NextInboxItem[]>('/inbox')); }
+    catch { /* the next change tries again */ }
+  }, [context]);
   const refresh = useCallback(async () => {
     void readSteps();
+    void readInbox();
     try {
       const all = await context.api<SessionSummary[]>('/sessions');
       setSessions((before) => {
@@ -896,15 +842,22 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
       // a redraw for another resource reads the list held before it (issue #376).
       setTaken((local) => (local && !gestureNow.current && (all !== local.list || (all.find((s) => s.id === local.id)?.takenOver?.by ?? null) === (local.by?.by ?? null)) ? null : local));
     } catch { /* the next change tries again */ }
-  }, [context, loaded.detail, readSteps]);
-  useEffect(() => { void readSteps(); }, [readSteps]);
-  const resolved = loaded.ticket?.status === 'Done';
+  }, [context, loaded.detail, readSteps, readInbox]);
+  useEffect(() => { void readSteps(); void readInbox(); }, [readSteps, readInbox]);
+  // The addresses a pull request is built from (glance.ts pullRequestOf), read once with the view.
   useEffect(() => {
-    if (!resolved) return;
     let live = true;
-    void context.api<TicketCost>(`/tickets/${encodeURIComponent(ticketId)}/cost`).then((answer) => { if (live) setCost(answer); }, () => {});
+    void context.api<Workspace>('/workspace').then((answer) => { if (live) setHomes(answer.services.map((service) => ({ name: service.name, url: service.url }))); }, () => {});
     return () => { live = false; };
-  }, [context, ticketId, resolved]);
+  }, [context]);
+  const resolved = loaded.ticket?.status === 'Done';
+  // The ticket's cost from the ledger (P211): once for a resolved ticket, whose sessions spend nothing more; each
+  // minute while it runs, not at each change, since it reads every event of the ticket.
+  const readCost = useCallback(() => {
+    void context.api<TicketCost>(`/tickets/${encodeURIComponent(ticketId)}/cost`).then(setCost, () => {});
+  }, [context, ticketId]);
+  useEffect(() => { readCost(); }, [readCost]);
+  useEvery(COST_MS, readCost, shown && !resolved);
   // Its production page's checks (P218), read again at each change: the
   // check is filed a little after the ticket is Done, once the page opened.
   const readProduction = useCallback(async () => {
@@ -1018,8 +971,15 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     return () => { current = false; };
   }, [context, id, ended]);
   const takeover = takeoverOf({ takenOver: actingTaken, me: view.me, role: acting.role, ended });
+  // The web terminal is what a take over is for.
+  const mineNow = takeover.kind === 'mine';
+  useEffect(() => { if (mineNow) setDetail(true); }, [mineNow]);
   const terminal = terminalChoice({ offered: context.me.terminal, takeover });
   const handover = handoverFor({ takenOver: actingTaken, me: view.me, role: acting.role, harness: acting.harness, ended, dormant: acting.dormant === true, planWaits: view.thread.plan?.go === null });
+  const action = pendingAction(view, inbox);
+  const stage = stageOf(view, inbox);
+  const result = resultOf(view, homes, inbox);
+  const pullRequest = result ? undefined : pullRequestOf(view.ticket, homes, inbox);
   // An author's live session, not another account's: the service checks the rest at the save.
   const sessionOpen = acting.role === 'author' && !ended && takeover.kind !== 'other';
 
@@ -1031,11 +991,12 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   useLayoutEffect(() => {
     const el = timeline.current;
     if (el && atEnd.current) el.scrollTop = el.scrollHeight;
-  }, [parts, tab, filter]);
+  }, [parts, tab, filter, detail]);
 
   // The tab is in the address, so a reload keeps it.
   const select = (next: Tab, focus = false) => {
     setTab(next);
+    setDetail(true);
     window.history.replaceState(window.history.state, '', `#${next}`);
     if (focus) document.getElementById(`tab-${next}-button`)?.focus();
   };
@@ -1296,15 +1257,36 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     <>
       {sessions.map((summary) => <Feed key={summary.id} summary={summary} detail={details.get(summary.id)} open={open(summary)} onThread={onThread} />)}
       <div className="session" ref={root} aria-busy={actingThread ? undefined : 'true'}>
-        <SessionHeading view={view} />
-        <SessionSummaryStrip view={view} t={t} onAnswer={() => { select('terminal'); requestAnimationFrame(() => document.querySelector('#tab-terminal [data-row="request"], #tab-terminal [data-row="question"]')?.scrollIntoView({ block: 'center' })); }} />
+        <div className="s-read">
+          <SessionHead view={view} t={t} onTicket={() => { setDetail(true); requestAnimationFrame(() => document.getElementById('ticket-title')?.scrollIntoView({ block: 'start' })); }} />
+          {action ? (
+            <ActionCard action={action} view={view} t={t}
+              onAnswer={(requestId, kind, session) => void answer(requestId, kind, session)}
+              onQuestion={(requestId, given, chosen, session) => void answerQuestion(requestId, given, chosen, session)}
+              giveback={<TakeoverButton t={t} takeover={takeover} busy={gesture} onTakeover={() => void takeOver()} onGiveback={() => void giveBack()} />}
+              plan={action.kind === 'plan' ? <PlanGate plan={action.plan} t={t} changing={changing} change={change} busy={gesture} note={planNote}
+                onGo={go} onChangeOpen={() => { setChanging(true); setPlanNote(''); }} onChangeText={setChange} onChangeSend={(event) => void sendChange(event)} onChangeCancel={() => { setChanging(false); setPlanNote(''); }} /> : undefined} />
+          ) : null}
+          {result ? <ResultCard result={result} t={t} /> : stage ? <StageCard stage={stage} view={view} t={t} /> : null}
+          {ended ? null : (
+            <div className="s-composer">
+              <Composer view={view} t={t} text={text} sending={sending} interrupting={interrupting} note={note} input={message} onText={setText}
+                onSend={(event) => void send(event)} onInterrupt={() => void interrupt()} />
+            </div>
+          )}
+        </div>
+        <SideFacts facts={sessionFacts(view, t)} pr={pullRequest} t={t} />
+        <details className="s-detail" data-session-details="" open={detail} onToggle={(event) => setDetail(event.currentTarget.open)}>
+          <summary><CaretRight className="caret" size={12} aria-hidden="true" />{t('details_title')}</summary>
+          <div className="s-detail-body">
         <section className="panel" aria-label={t('timeline_label')}>
           <TabStrip tab={tab} t={t} onSelect={(next) => select(next)} onKey={onKey} />
-          <div className="panel-head" id="status">
+          <div className="panel-head" id="detail-head">
             <StatusHead view={view} t={t} />
             <div className="head-actions">
+              <HandoverButton view={view} t={t} handing={gesture} onHandover={() => void handOver()} />
               <OpenInEditor t={t} offer={editor} expanded={editorOpen} onToggle={() => setEditorOpen((open) => !open)} />
-              <TakeoverButton t={t} takeover={takeover} busy={gesture} onTakeover={() => void takeOver()} onGiveback={() => void giveBack()} />
+              {takeover.kind === 'free' ? <TakeoverButton t={t} takeover={takeover} busy={gesture} onTakeover={() => void takeOver()} onGiveback={() => void giveBack()} /> : null}
             </div>
           </div>
           <div className="tab-panel" {...panel('terminal')}>
@@ -1318,20 +1300,13 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
                 <ThreadFilter view={view} t={t} onFilter={setFilter} />
                 <div className="timeline" id="timeline" tabIndex={0} ref={timeline} onScroll={onScroll}>
                   <TakeoverNotice view={view} t={t} why={terminal.kind === 'notice' ? terminal.why : undefined} />
-                  <Timeline view={view} t={t} onFile={openFile} onResume={resumeFrom}
-                    onAnswer={(requestId, kind, session) => void answer(requestId, kind, session)}
-                    onQuestion={(requestId, given, chosen, session) => void answerQuestion(requestId, given, chosen, session)} />
+                  <Timeline view={view} t={t} onFile={openFile} onResume={resumeFrom} />
                 </div>
               </>
             )}
-            <div className="panel-foot">
-              <Composer view={view} t={t} text={text} sending={sending} interrupting={interrupting} note={note} input={message} onText={setText} handing={gesture}
-                onSend={(event) => void send(event)} onInterrupt={() => void interrupt()} onHandover={() => void handOver()} />
-            </div>
           </div>
           <div className="tab-panel scroll" {...panel('plan')}>
-            <PlanTab view={view} plan={ticketPlan(parts) ?? view.thread.plan} t={t} changing={changing} change={change} busy={gesture} note={planNote}
-              onGo={go} onChangeOpen={() => { setChanging(true); setPlanNote(''); }} onChangeText={setChange} onChangeSend={(event) => void sendChange(event)} onChangeCancel={() => { setChanging(false); setPlanNote(''); }}
+            <PlanTab view={view} plan={ticketPlan(parts) ?? view.thread.plan} t={t}
               ask={ask} onAskText={(text) => setAsk((before) => ({ ...before, text }))} onAskSend={(event) => void askCode(event)} />
           </div>
           <div className="tab-panel scroll" {...panel('editor')}>
@@ -1354,10 +1329,12 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
             {tab === 'browser' ? <BrowserTab view={browser} t={t} /> : null}
           </div>
         </section>
-        <aside className="s-side" id="s-left" aria-label={t('left_label')}>
+        <div className="s-left" id="s-left" role="group" aria-label={t('left_label')}>
           <LeftCards view={view} t={t} onPlan={() => select('plan', true)} onCaptures={(choice) => void onCaptures(choice)} capturesBusy={capturesBusy} capturesNote={capturesNote} close={closable(view.ticket) ? <CloseTicket ticket={view.summary.ticket} api={context.api} now={context.now} t={t} onClosed={() => context.inboxChanged()} /> : undefined}
             after={<div className="s-after" id="s-right"><RightCards view={view} t={t} onFile={openFile} /></div>} extra={<FoldedFacts view={view} t={t} />} />
-        </aside>
+        </div>
+          </div>
+        </details>
       </div>
       <p className="sr-only" role="status" aria-live="polite">{said}</p>
     </>

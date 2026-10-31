@@ -51,7 +51,7 @@ export function firstReads(place: Place): string[] {
   switch (place.screen) {
     case 'tower': return ['/sessions', '/inbox', '/tickets', '/lead', '/plans', '/workspace', '/recipes', '/schedules'];
     case 'inbox': return ['/inbox', '/tickets', '/sessions', '/plans'];
-    case 'session': return place.session ? [`/sessions/${encodeURIComponent(place.session)}`, '/sessions', '/tickets'] : ['/sessions', '/tickets'];
+    case 'session': return place.session ? [`/sessions/${encodeURIComponent(place.session)}`, '/sessions', '/tickets', '/inbox'] : ['/sessions', '/tickets'];
     case 'lead': return ['/lead', '/lead/messages', '/plans', '/inbox'];
     case 'consumption': return ['/sessions'];
     case 'services': return ['/service-map'];

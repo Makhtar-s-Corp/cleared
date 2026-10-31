@@ -200,8 +200,8 @@ test('a session outside a ticket\'s path (the lead\'s, a reader\'s) has no stage
 });
 
 test('the plan\'s steps are read as sentences, never as raw Markdown', () => {
-  assert.deepEqual(planSteps({ ...PLAN, go: null, confidence: 'high' }), ['Lire Message', 'Ajouter la date']);
-  assert.deepEqual(planSteps({ ...PLAN, steps: ['- [ ] Voir [la doc](https://example.org)', '1. Puis *tester*', '## Finir'], go: null, confidence: 'high' }), ['Voir la doc', 'Puis tester', 'Finir']);
+  assert.deepEqual(planSteps(PLAN), ['Lire Message', 'Ajouter la date']);
+  assert.deepEqual(planSteps({ steps: ['- [ ] Voir [la doc](https://example.org)', '1. Puis *tester*', '## Finir'] }), ['Voir la doc', 'Puis tester', 'Finir']);
 });
 
 // -------------------------------------------------------------- cost, duration
