@@ -3,13 +3,13 @@
 // handlers run before anything is journaled.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { AUTHOR_TOOLS, OTHER_CHANGES, bindAuthorTools, readChangesReport, readSessionPlan } from '../../src/flow/author-tools.ts';
+import { AUTHOR_TOOLS, OTHER_CHANGES, bindAuthorTools, readChangesReport, readPlanStep, readSessionPlan } from '../../src/flow/author-tools.ts';
 import { HostToolRefused } from '../../src/session/contract.ts';
 
 const refused = (pattern: RegExp) => (error: unknown) => error instanceof HostToolRefused && pattern.test(error.message);
 
-test('the author has two host tools, declared as data, each an object schema the runner can give the model', () => {
-  assert.deepEqual(AUTHOR_TOOLS.map((tool) => tool.name), ['propose_session_plan', 'report_changes']);
+test('the author has three host tools, declared as data, each an object schema the runner can give the model', () => {
+  assert.deepEqual(AUTHOR_TOOLS.map((tool) => tool.name), ['propose_session_plan', 'report_plan_step', 'report_changes']);
   for (const tool of AUTHOR_TOOLS) {
     assert.equal(tool.inputSchema.type, 'object');
     assert.ok(tool.description.length > 20, `${tool.name} says what it is for`);
@@ -18,6 +18,31 @@ test('the author has two host tools, declared as data, each an object schema the
   const plan = AUTHOR_TOOLS[0]!.inputSchema;
   assert.deepEqual([...plan.required ?? []].sort(), ['confidence', 'files', 'reason', 'steps']);
   assert.deepEqual((plan.properties.confidence as { enum?: readonly string[] }).enum, ['low', 'medium', 'high']);
+});
+
+test('report_plan_step takes the number of a step, not its words, and its schema says so (issue #501)', () => {
+  const tool = AUTHOR_TOOLS.find((one) => one.name === 'report_plan_step')!;
+  assert.deepEqual(tool.inputSchema.required, ['step']);
+  assert.equal((tool.inputSchema.properties.step as { type?: string }).type, 'integer');
+  assert.match(tool.description, /each time you start/i);
+});
+
+test('a reported step is a whole number of the plan, from one; anything else is refused with what the plan holds (issue #501)', () => {
+  assert.equal(readPlanStep({ step: 1 }, 5), 1);
+  assert.equal(readPlanStep({ step: 5 }, 5), 5);
+  for (const step of [0, 6, -1, 2.5, '2', null, undefined, Number.NaN]) {
+    assert.throws(() => readPlanStep({ step }, 5), refused(/5 steps/), String(step));
+  }
+  assert.throws(() => readPlanStep(null, 1), refused(/1 step\b/));
+});
+
+test('the plan\'s steps are asked for a person: no command, file name or path, in the schema the model reads (issue #501)', () => {
+  const steps = AUTHOR_TOOLS[0]!.inputSchema.properties.steps as { description?: string };
+  assert.match(steps.description ?? '', /person/);
+  assert.match(steps.description ?? '', /no command/i);
+  assert.match(steps.description ?? '', /file name/i);
+  assert.match(steps.description ?? '', /path/i);
+  assert.match(steps.description ?? '', /language your first message names/);
 });
 
 test('bindAuthorTools gives the tools of the handlers given, in the contract\'s order', async () => {

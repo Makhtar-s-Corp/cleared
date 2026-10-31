@@ -48,6 +48,8 @@ test('the measured steps and the custom names are the plan\'s', () => {
     'cleared.production_checked',
     // Milestone 5: a session waits for its service's prepared image (C15, issue #422).
     'cleared.prepared_image',
+    // Issue #501: the step of its plan the author says it has reached.
+    'cleared.plan_step',
     // Milestone 6: the session's container recreated after it stopped (issue #453).
     'cleared.container_recreated',
   ]);
@@ -97,6 +99,7 @@ test('the events of lane 17 and lane 31 carry what their readers need, and never
   const events: AgUiEvent[] = [
     { type: 'CUSTOM', name: 'cleared.session_plan', value: { steps: ['Sort'], files: ['src/entries.ts'], confidence: 'high', reason: 'One function.', proposedAt: at, go: { by: 'delay', at } } },
     { type: 'CUSTOM', name: 'cleared.changes', value: { groups: [{ intent: 'Sort', files: ['src/entries.ts'] }, { intent: 'Other changes', files: ['README.md'] }] } },
+    { type: 'CUSTOM', name: 'cleared.plan_step', value: { step: 2, total: 5 } },
     { type: 'CUSTOM', name: 'cleared.terminal_opened', value: { by: 'u1', cols: 120, rows: 32 } },
     { type: 'CUSTOM', name: 'cleared.terminal_input', value: { by: 'u1', line: 'git status' } },
     { type: 'CUSTOM', name: 'cleared.terminal_closed', value: { by: 'u1', reason: 'give_back', outputBytes: 2048 } },

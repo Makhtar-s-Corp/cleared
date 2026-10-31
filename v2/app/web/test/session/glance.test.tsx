@@ -9,7 +9,7 @@ import type { Ticket } from '../../../../src/tickets/contract.ts';
 import { loadCatalog } from '../../../src/catalog.ts';
 import { translator, type Translate } from '../../lib/i18n.ts';
 import { applyAll, emptyModel, threadOf, type SessionThread, type SessionView } from '../../screens/session/model.ts';
-import { doingNow, pendingAction, planSteps, pullRequestOf, resultOf, sessionFacts, stageOf } from '../../screens/session/glance.ts';
+import { doingNow, humanSteps, pendingAction, planStepOf, planSteps, pullRequestOf, resultOf, sessionFacts, stageOf } from '../../screens/session/glance.ts';
 import { ActionCard, ResultCard, SessionHead, SideFacts, StageCard } from '../../screens/session/Glance.tsx';
 import { Criteria } from '../../screens/session/Tabs.tsx';
 import { html, visibleText } from '../render.tsx';
@@ -211,6 +211,121 @@ test('a session outside a ticket\'s path (the lead\'s, a reader\'s) has no stage
 test('the plan\'s steps are read as sentences, never as raw Markdown', () => {
   assert.deepEqual(planSteps(PLAN), ['Lire Message', 'Ajouter la date']);
   assert.deepEqual(planSteps({ steps: ['- [ ] Voir [la doc](https://example.org)', '1. Puis *tester*', '## Finir'] }), ['Voir la doc', 'Puis tester', 'Finir']);
+});
+
+// ------------------------------------------------- the step the agent reports (issue #501)
+
+const STEPS = ['Lire le composant', 'Ajouter la date', 'Formater la date', 'Écrire le test', 'Lancer les tests du projet'];
+const going = { ...PLAN, steps: STEPS, go: { by: 'delay', at: at(10) } };
+const reported = (step: unknown, total: unknown = STEPS.length) => custom('cleared.plan_step', { step, total });
+const stageCard = (v: SessionView, inbox: readonly NextInboxItem[] = []) => html(<StageCard stage={stageOf(v, inbox)!} view={v} t={fr} />);
+
+test('the step the agent reported is the step, its last report winning', () => {
+  assert.deepEqual(planStepOf(view([custom('cleared.session_plan', going), reported(1), reported(3)])), { step: 3, total: 5 });
+  assert.deepEqual(planStepOf(view([custom('cleared.session_plan', going), reported(4), reported(2)])), { step: 2, total: 5 }, 'it may go back');
+});
+
+test('no report, or one the plan does not hold, is no step: the screen stays on the ticket\'s stage', () => {
+  assert.equal(planStepOf(view([custom('cleared.session_plan', going)])), null, 'it never reported');
+  assert.equal(planStepOf(view([reported(2)])), null, 'it has no plan');
+  assert.equal(planStepOf(view([custom('cleared.session_plan', { ...going, go: null }), reported(2)])), null, 'its plan has no Go');
+  for (const step of [0, 6, 2.5, '2', null]) assert.equal(planStepOf(view([custom('cleared.session_plan', going), reported(step)])), null, String(step));
+  assert.equal(planStepOf(view([custom('cleared.session_plan', going), reported(2, 9)])), null, 'it was reported on a plan of another length');
+});
+
+test('a new plan and a review\'s request drop the step reported before them', () => {
+  assert.equal(planStepOf(view([custom('cleared.session_plan', going), reported(2), custom('cleared.session_plan', { ...going, proposedAt: at(1), go: null })])), null);
+  assert.equal(planStepOf(view([custom('cleared.session_plan', going), reported(5), custom('cleared.review_channel', { round: 1, limit: 3, from: 'reviewer', text: 'Encore' })])), null);
+  assert.deepEqual(planStepOf(view([custom('cleared.session_plan', going), reported(5), custom('cleared.review_channel', { round: 1, limit: 3, from: 'reviewer', text: 'Encore' }), reported(2)])), { step: 2, total: 5 });
+});
+
+test('a later author with no plan of its own does not inherit the step of the one before it', () => {
+  const first = summary({ id: 's-1', phase: 'done' });
+  const next = summary({ id: 's-2' });
+  const threadOne = threadFrom('s-1', [custom('cleared.session_plan', going), reported(4)]);
+  const threadTwo = threadFrom('s-2', []);
+  const v: SessionView = { summary: next, thread: threadTwo, ticket: ticket(), siblings: [first, next], me: 'me', language: 'fr', now: NOW, parts: [{ summary: first, thread: threadOne }, { summary: next, thread: threadTwo }] };
+  assert.equal(planStepOf(v), null);
+});
+
+test('where it is says the exact step, and marks what is done, what runs and what comes', () => {
+  const card = stageCard(view([custom('cleared.session_plan', going), reported(3)]));
+  const text = visibleText(card);
+  assert.ok(text.includes('Étape 3 sur 5 du plan'));
+  assert.ok(!text.includes('Étape 2 sur 5'), 'the stage is not what the count says any more');
+  const list = /<ol class="s-plan-steps"[^>]*>[\s\S]*?<\/ol>/.exec(card)?.[0] ?? '';
+  assert.deepEqual([...list.matchAll(/data-state="(\w+)"/g)].map((m) => m[1]), ['done', 'done', 'current', 'todo', 'todo']);
+  assert.match(list, /aria-current="step"[^>]*>(?:(?!<\/li>)[\s\S])*Formater la date/);
+  assert.equal([...list.matchAll(/aria-current="step"/g)].length, 1);
+  assert.match(card, /data-plan-step="3"/);
+});
+
+test('the same step reads in English, and a screen reader is told each step\'s state', () => {
+  const v = view([custom('cleared.session_plan', going), reported(1)]);
+  const card = html(<StageCard stage={stageOf(v, [])!} view={v} t={en} />);
+  assert.ok(visibleText(card).includes('Step 1 of 5 of the plan'));
+  assert.match(card, /sr-only">in progress</);
+  assert.match(card, /sr-only">to come</);
+});
+
+test('without a report the card is what it was: the stage out of five, the plan unmarked', () => {
+  const card = stageCard(view([custom('cleared.session_plan', going)]));
+  assert.ok(visibleText(card).includes('Étape 2 sur 5'));
+  assert.doesNotMatch(card, /data-plan-step/);
+  assert.doesNotMatch(/<ol class="s-plan-steps"[^>]*>[\s\S]*?<\/ol>/.exec(card)?.[0] ?? '', /aria-current|data-state/);
+});
+
+test('an unknown step falls back to the stage too, rather than mark a step at random', () => {
+  const card = stageCard(view([custom('cleared.session_plan', going), reported(9)]));
+  assert.ok(visibleText(card).includes('Étape 2 sur 5'));
+  assert.doesNotMatch(card, /du plan/);
+});
+
+test('a stop marks the step it stopped at; past the author\'s stages the count is the ticket\'s again', () => {
+  const failed = stageCard(view([custom('cleared.session_plan', going), reported(2)], { ticket: ticket({ status: 'Todo' }) }, { phase: 'failed' }));
+  assert.deepEqual([...(/<ol class="s-plan-steps"[^>]*>[\s\S]*?<\/ol>/.exec(failed)?.[0] ?? '').matchAll(/data-state="(\w+)"/g)].map((m) => m[1]), ['done', 'failed', 'todo', 'todo', 'todo']);
+  const later = stageCard(view([custom('cleared.session_plan', going), reported(5)], { ticket: ticket({ status: 'Needs Approval' }) }, { phase: 'done' }));
+  assert.ok(visibleText(later).includes('Étape 4 sur 5'));
+  assert.doesNotMatch(later, /du plan/);
+});
+
+test('a report is not a row, so the sentence still says what the agent does', () => {
+  const edit = toolCall('e', 'Edit', { kind: 'edit', path: 'web/Message.tsx', added: 1, removed: 0 }, { kind: 'edit', ok: true });
+  const v = view([custom('cleared.session_plan', going), ...edit, ...toolCall('r', 'mcp__cleared__report_plan_step', { kind: 'other', name: 'mcp__cleared__report_plan_step', raw: { step: 3 } }, { kind: 'other' }), reported(3)]);
+  assert.ok(!v.thread.rows.some((row) => row.kind === 'tool' && row.name.includes('report_plan_step')));
+  assert.match(doingNow(v, fr), /modifie/i);
+});
+
+// ---------------------------------------------- a plan written for a person (issue #501)
+
+test('a step a person can read is shown, its Markdown gone; a command or a path is folded, its words kept for the fold', () => {
+  const steps = humanSteps({ steps: ['Lire le **composant** `Message`', 'Lancer `npm test` et corriger', 'Modifier web/Message.tsx'] });
+  assert.deepEqual(steps.map((step) => step.text), ['Lire le composant Message', null, null]);
+  assert.deepEqual(steps.map((step) => step.raw), ['Lire le composant Message', 'Lancer npm test et corriger', 'Modifier web/Message.tsx']);
+});
+
+test('the top of the screen says a technical step in the person\'s words, the command behind Show details', () => {
+  const v = view([custom('cleared.session_plan', { ...PLAN, steps: ['Lire le composant', 'Lancer `npm test` et corriger'], go: { by: 'delay', at: at(1) } })]);
+  const card = stageCard(v);
+  const shown = /<ol class="s-plan-steps"[^>]*>[\s\S]*?<\/ol>/.exec(card)?.[0] ?? '';
+  assert.doesNotMatch(shown, /npm/);
+  assert.match(shown, /Une étape technique/);
+  const fold = /<details[^>]*>[\s\S]*?<\/details>/.exec(card)?.[0] ?? '';
+  assert.match(fold, /Voir le détail/);
+  assert.match(fold, /Lancer npm test et corriger/);
+  assert.doesNotMatch(/<details/.test(fold) ? fold : '', /open=""/, 'the fold starts closed');
+  const english = html(<StageCard stage={stageOf(v, [])!} view={v} t={en} />);
+  assert.match(english, /A technical step/);
+  assert.match(english, /Show details/);
+});
+
+test('a plan a person can read has no fold of its own', () => {
+  assert.doesNotMatch(stageCard(view([custom('cleared.session_plan', going)])), /<details/);
+});
+
+test('a technical step keeps its place: the agent\'s report still marks the right line', () => {
+  const card = stageCard(view([custom('cleared.session_plan', { ...going, steps: ['Lire le composant', 'Lancer npm test', 'Corriger'] }), reported(3)]));
+  assert.match(/<ol class="s-plan-steps"[^>]*>[\s\S]*?<\/ol>/.exec(card)?.[0] ?? '', /aria-current="step"[^>]*>(?:(?!<\/li>)[\s\S])*Corriger/);
 });
 
 // -------------------------------------------------------------- cost, duration

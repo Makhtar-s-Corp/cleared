@@ -229,3 +229,6 @@ export function resultOf(view: SessionView, services: readonly ServiceHome[], in
   const pr = pullRequestOf(view.ticket, services, inbox);
   return { ...(pr ? { pr } : {}), captures: [...kept.values()] };
 }
+
+export const planStepOf = (_view: SessionView): { step: number; total: number } | null => null;
+export const humanSteps = (_plan: Pick<SessionPlan, 'steps'>): { text: string | null; raw: string }[] => [];

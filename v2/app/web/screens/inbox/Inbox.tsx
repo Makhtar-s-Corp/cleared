@@ -1099,3 +1099,5 @@ export default function Inbox() {
 }
 
 export type { Answers };
+
+export const PlanStepList = (_props: { readonly steps: readonly string[]; readonly t: Translate }) => null;

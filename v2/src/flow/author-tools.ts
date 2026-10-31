@@ -151,3 +151,5 @@ export function readChangesReport(input: unknown, changed: readonly string[]): C
   const rest = unique(changed).filter((file) => !owner.has(file));
   return { groups: rest.length > 0 ? [...groups, { intent: OTHER_CHANGES, files: rest }] : groups };
 }
+
+export const readPlanStep = (_input: unknown, _total: number): number => 0;
