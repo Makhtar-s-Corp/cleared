@@ -23,7 +23,7 @@ import { TrainStore, type Stop } from '../../src/release/store.ts';
 import { applyTables } from '../../src/store/db.ts';
 import { LocalTicketStore, TICKET_TABLES } from '../../src/tickets/local-store.ts';
 import type { ServiceConfig, WorkspaceConfig } from '../../src/workspace/config.ts';
-import { CLEARED_HOME, OWNER, lockBox, lockConf } from '../approval/harness.ts';
+import { CLEARED_HOME, OWNER, lockBox, lockConf, watchersIn } from '../approval/harness.ts';
 import { FakeTimers, PROOF } from '../approval/support.ts';
 
 async function startBroker(env: NodeJS.ProcessEnv, socket: string): Promise<ChildProcess> {
@@ -205,6 +205,9 @@ test('two brokers on one shared ledger: each finds the ticket and its own review
     assert.equal(provider.git(provider.repo, 'ls-tree', '--name-only', 'origin/main', 'src/check.ts').trim(), '', 'its change is undone');
     consumer.git(consumer.repo, 'fetch', '-q', 'origin', 'main');
     assert.equal(consumer.git(consumer.repo, 'rev-parse', 'origin/main').trim(), consumerMerge, 'the guestbook\'s base is untouched');
+    // The rollback asks for its verification's watch: asked of the fake, so no process outlives this test and writes in the folder its hook removes.
+    assert.match(readFileSync(join(provider.fake, 'systemd-run.log'), 'utf8'), /release\.ts watch \d+/);
+    assert.deepEqual(watchersIn(provider.dir), []);
   } finally {
     for (const broker of brokers) await stop(broker);
     db.close();

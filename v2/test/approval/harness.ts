@@ -1,10 +1,10 @@
 // A lock to run the real v1 scripts against: merge-pr.ts, ask-validation.ts,
 // tracker.ts and the release broker, on a temporary state directory, a
-// temporary repository with a bare origin, and a fake gh and docker first on
-// the PATH. Nothing here reaches GitHub, Docker or the machine's own state.
+// temporary repository with a bare origin, and a fake gh, docker and systemd
+// first on the PATH. Nothing here reaches GitHub, Docker or the machine's own state.
 import { execFileSync, spawnSync, type SpawnSyncReturns } from 'node:child_process';
 import { generateKeyPairSync, randomBytes } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, readlinkSync, rmSync, writeFileSync } from 'node:fs';
 import { userInfo, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { after } from 'node:test';
@@ -83,6 +83,30 @@ const FAKE_GH = [
   '',
 ].join('\n');
 
+// lib/release.ts starts its watch through the user's systemd, else as a detached
+// process. Either would outlive a test: a detached one writes in the folder the
+// hook above removes (ENOTEMPTY, seen on CI), and a transient unit restarts for
+// as long as its machine runs, its folder gone. So the box's PATH answers both:
+// the watch is asked for and written down, and nothing starts.
+const FAKE_SYSTEMD_RUN = [
+  `#!${process.execPath}`,
+  "process.getBuiltinModule('node:fs').appendFileSync(process.env.FAKE_DIR + '/systemd-run.log', process.argv.slice(2).join(' ') + '\\n');",
+  '',
+].join('\n');
+const FAKE_SYSTEMCTL = `#!${process.execPath}\nprocess.stdout.write('inactive\\n');\n`;
+
+// The watches running from a box's folder, read from /proc: none, once the fakes above answer.
+export function watchersIn(dir: string): string[] {
+  return readdirSync('/proc').filter((name) => /^\d+$/.test(name)).flatMap((pid) => {
+    try {
+      const line = readFileSync(`/proc/${pid}/cmdline`, 'utf8').replaceAll('\0', ' ');
+      return /release\.ts watch /.test(line) && readlinkSync(`/proc/${pid}/cwd`).startsWith(dir) ? [line.trim()] : [];
+    } catch {
+      return [];   // It ended while it was read, or it is another account's.
+    }
+  });
+}
+
 export type Lock = ReturnType<typeof lockBox>;
 
 export function lockBox(options: { socket?: boolean } = {}) {
@@ -95,6 +119,8 @@ export function lockBox(options: { socket?: boolean } = {}) {
   for (const path of [state, fake, join(dir, 'bin'), home, join(dir, 'proc-none')]) mkdirSync(path, { recursive: true, mode: 0o700 });
   writeFileSync(join(dir, 'bin', 'gh'), FAKE_GH, { mode: 0o755 });
   writeFileSync(join(dir, 'bin', 'docker'), `#!${process.execPath}\n`, { mode: 0o755 });
+  writeFileSync(join(dir, 'bin', 'systemd-run'), FAKE_SYSTEMD_RUN, { mode: 0o755 });
+  writeFileSync(join(dir, 'bin', 'systemctl'), FAKE_SYSTEMCTL, { mode: 0o755 });
   writeFileSync(join(fake, 'github-status.json'), JSON.stringify({ components: ['Git Operations', 'Pull Requests', 'Actions', 'API Requests', 'Webhooks'].map((name) => ({ name, status: 'operational' })) }));
   const keys = keyPair();
   const keyFile = join(dir, 'approval.key');
