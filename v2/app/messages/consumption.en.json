@@ -108,5 +108,9 @@
   "consumption_lever_failed": "The change did not go through. Try again.",
   "consumption_read_failed": "The service does not answer for now. This page tries again by itself.",
   "consumption_down": "Consumption is not available: the service runs no project.",
-  "consumption_footer_data": "Figures come from this project's sessions. When an agent reports both windows, the seven-day one is shown."
+  "consumption_footer_data": "Figures come from this project's sessions. When an agent reports both windows, the seven-day one is shown.",
+  "consumption_reading_unavailable": "The hourly reading is not available with this login: only the sessions' reports give this figure.",
+  "consumption_quota_unavailable": "Quota unavailable for now",
+  "consumption_chip_unavailable": "Unavailable",
+  "consumption_headline_unavailable": "The quota is unavailable with this login, until the next session reports it."
 }

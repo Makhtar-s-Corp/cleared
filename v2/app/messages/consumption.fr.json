@@ -54,7 +54,7 @@
   "consumption_not_used": "Aucune session n'a encore tourné sur cet agent.",
   "consumption_quiet": "Aucune session ces 7 derniers jours.",
   "consumption_chart_label": "Volume par jour, {harness}",
-  "consumption_day_usage": "{day}\u00a0: {tokens} jetons",
+  "consumption_day_usage": "{day} : {tokens} jetons",
   "consumption_limits_title": "Anticiper les limites",
   "consumption_chip_hit": "{harness} à surveiller",
   "consumption_chip_ok": "Dans les limites",
@@ -108,5 +108,9 @@
   "consumption_lever_failed": "Le changement n'a pas abouti. Réessayez.",
   "consumption_read_failed": "Le service ne répond pas pour l'instant. Cette page réessaie d'elle-même.",
   "consumption_down": "La consommation n'est pas disponible : le service n'a pas de projet.",
-  "consumption_footer_data": "Les chiffres viennent des sessions de ce projet. Quand un agent indique les deux fenêtres, celle de 7 jours est affichée."
+  "consumption_footer_data": "Les chiffres viennent des sessions de ce projet. Quand un agent indique les deux fenêtres, celle de 7 jours est affichée.",
+  "consumption_reading_unavailable": "Le relevé horaire n'est pas disponible avec cette connexion : seuls les rapports des sessions donnent ce chiffre.",
+  "consumption_quota_unavailable": "Quota indisponible pour l'instant",
+  "consumption_chip_unavailable": "Indisponible",
+  "consumption_headline_unavailable": "Le quota est indisponible avec cette connexion, jusqu'au rapport de la prochaine session."
 }

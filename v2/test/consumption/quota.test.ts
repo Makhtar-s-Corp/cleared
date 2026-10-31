@@ -14,7 +14,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { NO_LEVERS } from '../../src/consumption/levers.ts';
 import {
-  QuotaReadError, QuotaReader, USAGE_URL, claudeCodeQuotaSource, latestQuota, lastReading, loginToken, parseUsage,
+  QuotaReadError, QuotaReader, USAGE_URL, claudeCodeQuotaSource, latestQuota, lastReading, loginToken, parseUsage, quotaStop,
   type QuotaSource, type UsageFetch, type WindowReading,
 } from '../../src/consumption/quota.ts';
 import { consumption } from '../../src/consumption/usage.ts';
@@ -239,4 +239,98 @@ test('CLEARED_V2_QUOTA_MINUTES: 60 by default, 0 turns the reading off, a wrong 
   const original = console.error;
   console.error = () => undefined;
   try { assert.equal(quotaMinutes('soon'), 60); } finally { console.error = original; }
+});
+
+// ---------------------------------------------------------------- a login the endpoint will not read (issue #509)
+
+const refusedSource = (attempts: { n: number }, changedAt?: () => number | undefined): QuotaSource => ({
+  harness: 'claude-code', source: 'claude-code test source',
+  async read() { attempts.n += 1; throw new QuotaReadError('the endpoint refused the login (HTTP 403)'); },
+  ...(changedAt ? { loginChangedAt: changedAt } : {}),
+});
+
+test('403 is no failure to alarm about: said as unavailable, with no notification, and no error loop', async () => {
+  const store = ledger();
+  let now = NOW;
+  const notified: unknown[] = [];
+  const attempts = { n: 0 };
+  const reader = new QuotaReader({ db: store.db, project: 'guestbook', sources: [refusedSource(attempts)], now: () => new Date(now), notify: (one) => notified.push(one) });
+  const first = await reader.tick();
+  assert.equal(first[0]?.type, 'quota_read_failed');
+  assert.deepEqual(lastReading(store.db, 'guestbook', 'claude-code'), { at: iso(NOW), source: 'claude-code test source', ok: false, error: 'the endpoint refused the login (HTTP 403)', unavailable: true });
+  assert.deepEqual(notified, [], 'no health notification: nothing is broken');
+  for (let hour = 1; hour < 24; hour += 1) {
+    now = NOW + hour * HOUR;
+    assert.deepEqual(await reader.tick(), [], `hour ${hour}: not asked again`);
+  }
+  assert.equal(attempts.n, 1, 'one attempt in a day, not one an hour');
+  assert.equal(rows(store).length, 1);
+  now = NOW + 24 * HOUR;
+  await reader.tick();
+  assert.equal(attempts.n, 2, 'asked again the next day, and that attempt is kept');
+  assert.equal(rows(store).length, 2);
+  assert.deepEqual(notified, []);
+});
+
+test('a new login is asked at once, whatever the hour, and across a restart', async () => {
+  const store = ledger();
+  let now = NOW;
+  let changed = NOW - HOUR;
+  const attempts = { n: 0 };
+  const reader = () => new QuotaReader({ db: store.db, project: 'guestbook', sources: [refusedSource(attempts, () => changed)], now: () => new Date(now), notify: () => undefined });
+  await reader().tick();
+  now = NOW + HOUR;
+  await reader().tick();
+  assert.equal(attempts.n, 1, 'the same login, a new process: not asked');
+  changed = NOW + 30 * 60_000;
+  await reader().tick();
+  assert.equal(attempts.n, 2, 'the login changed since the last attempt');
+});
+
+test('a reading that works ends it, and another failure still alarms as before', async () => {
+  const store = ledger();
+  let now = NOW;
+  let answer: 'refused' | 'works' | 'broken' = 'refused';
+  const notified: unknown[] = [];
+  const source: QuotaSource = {
+    harness: 'claude-code', source: 'claude-code test source',
+    async read() {
+      if (answer === 'refused') throw new QuotaReadError('the endpoint refused the login (HTTP 403)');
+      if (answer === 'broken') throw new QuotaReadError('the endpoint answered HTTP 500');
+      return [{ window: 'seven_day', usedPercent: 12, resetsAt: iso(NOW + 96 * HOUR) }];
+    },
+  };
+  const reader = new QuotaReader({ db: store.db, project: 'guestbook', sources: [source], now: () => new Date(now), notify: (one) => notified.push(one) });
+  await reader.tick();
+  now += 25 * HOUR;
+  answer = 'works';
+  await reader.tick();
+  assert.equal(lastReading(store.db, 'guestbook', 'claude-code')?.ok, true);
+  now += HOUR;
+  answer = 'broken';
+  await reader.tick();
+  assert.equal(notified.length, 1, 'a real failure after a reading that worked');
+  assert.equal(lastReading(store.db, 'guestbook', 'claude-code')?.unavailable, undefined);
+});
+
+test('401 stays a failure: a login that no longer works is a thing to say, and it is asked each hour', async () => {
+  const store = ledger();
+  let now = NOW;
+  const notified: unknown[] = [];
+  const attempts = { n: 0 };
+  const source: QuotaSource = { harness: 'claude-code', source: 's', async read() { attempts.n += 1; throw new QuotaReadError('the endpoint refused the login (HTTP 401)'); } };
+  const reader = new QuotaReader({ db: store.db, project: 'guestbook', sources: [source], now: () => new Date(now), notify: (one) => notified.push(one) });
+  await reader.tick();
+  now += HOUR;
+  await reader.tick();
+  assert.equal(attempts.n, 2);
+  assert.equal(notified.length, 1);
+});
+
+test('only refused readings in the ledger: no figure, no projection, so nothing wrong to read', async () => {
+  const store = ledger();
+  const reader = new QuotaReader({ db: store.db, project: 'guestbook', sources: [refusedSource({ n: 0 })], now: () => new Date(NOW), notify: () => undefined });
+  await reader.tick();
+  for (const window of ['seven_day', 'five_hour'] as const) assert.equal(latestQuota(store.db, { project: 'guestbook', window, now: new Date(NOW) }), undefined);
+  assert.equal(quotaStop(store.db, { project: 'guestbook', now: new Date(NOW), limit: 85 }), undefined);
 });

@@ -59,14 +59,14 @@ export type SidebarProps = {
 // of 12:20), in the top bar: the percent alone over the bar, a 44 px target; the gauge's icon when nothing is measured.
 export function QuotaGauge({ t, quota, zone, current, onPick }: { readonly t: Translate; readonly quota: WeeklyQuota; readonly zone: string; readonly current: boolean; readonly onPick?: (href: string) => void }) {
   const when = quota.kind === 'measured' ? weekdayClock(quota.resetsAt, zone, t) : '';
-  const name = quota.kind === 'measured' ? t('quota_name', { percent: quota.percent, when }) : t('quota_name_none');
+  const name = quota.kind === 'measured' ? t('quota_name', { percent: quota.percent, when }) : t(quota.kind === 'unavailable' ? 'quota_name_unavailable' : 'quota_name_none');
   return (
     <a className="quota-gauge" id="quota-gauge" href="/consumption" data-verdict={quota.kind === 'measured' ? quota.verdict : 'none'} data-level={quota.kind === 'measured' ? quotaLevel(quota.percent) : undefined} aria-label={name} data-tip={name}
       aria-current={current ? 'page' : undefined} onClick={() => onPick?.('/consumption')}>
       {/* Its words are its name's own, in the same order (WCAG 2.5.3, label in name). */}
       <span className="quota-gauge-head" aria-hidden="true">
         <span className="quota-gauge-label">{t('quota_label')}</span>{' '}
-        <span className="quota-gauge-percent">{quota.kind === 'measured' ? t('quota_percent', { percent: quota.percent }) : t('quota_none')}</span>
+        <span className="quota-gauge-percent">{quota.kind === 'measured' ? t('quota_percent', { percent: quota.percent }) : t(quota.kind === 'unavailable' ? 'quota_unavailable' : 'quota_none')}</span>
       </span>
       {quota.kind === 'measured'
         ? <span className="quota-gauge-short" aria-hidden="true">{t('quota_short', { percent: quota.percent })}</span>
