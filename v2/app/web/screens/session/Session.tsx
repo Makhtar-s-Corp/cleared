@@ -772,6 +772,8 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   // The fold: open when the address names a tab, and by what needs it (a file, a take over, the ticket's text).
   const [detail, setDetail] = useState(() => window.location.hash !== '' && window.location.hash === `#${tabOf(window.location.hash)}`);
   const [inbox, setInbox] = useState<readonly NextInboxItem[]>([]);
+  // The ticket as it is now: its stage, its sentence and its result follow its state without a reload.
+  const [ticketNow, setTicketNow] = useState<Ticket | undefined>(loaded.ticket);
   const [homes, setHomes] = useState<readonly ServiceHome[]>([]);
   const [filter, setFilter] = useState<Filter>('all');
   // What a gesture of this tab knows, newer than the list; `list`, the list the cache held when the service accepted it.
@@ -827,9 +829,14 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     try { setInbox(await context.api<NextInboxItem[]>('/inbox')); }
     catch { /* the next change tries again */ }
   }, [context]);
+  const readTicket = useCallback(async () => {
+    try { setTicketNow(await context.api<Ticket>(`/tickets/${encodeURIComponent(ticketId)}`)); }
+    catch { /* the next change tries again */ }
+  }, [context, ticketId]);
   const refresh = useCallback(async () => {
     void readSteps();
     void readInbox();
+    void readTicket();
     try {
       const all = await context.api<SessionSummary[]>('/sessions');
       setSessions((before) => {
@@ -840,7 +847,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
       // a redraw for another resource reads the list held before it (issue #376).
       setTaken((local) => (local && !gestureNow.current && (all !== local.list || (all.find((s) => s.id === local.id)?.takenOver?.by ?? null) === (local.by?.by ?? null)) ? null : local));
     } catch { /* the next change tries again */ }
-  }, [context, loaded.detail, readSteps, readInbox]);
+  }, [context, loaded.detail, readSteps, readInbox, readTicket]);
   useEffect(() => { void readSteps(); void readInbox(); }, [readSteps, readInbox]);
   // The addresses a pull request is built from (glance.ts pullRequestOf), read once with the view.
   useEffect(() => {
@@ -848,7 +855,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
     void context.api<Workspace>('/workspace').then((answer) => { if (live) setHomes(answer.services.map((service) => ({ name: service.name, url: service.url }))); }, () => {});
     return () => { live = false; };
   }, [context]);
-  const resolved = loaded.ticket?.status === 'Done';
+  const resolved = ticketNow?.status === 'Done';
   // The ticket's cost from the ledger (P211): once for a resolved ticket, whose sessions spend nothing more; each
   // minute while it runs, not at each change, since it reads every event of the ticket.
   const readCost = useCallback(() => {
@@ -955,10 +962,10 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const actingThread = threads.get(id);
   const actingDetail = details.get(id);
   const view: SessionView = useMemo(() => ({
-    summary: acting, ticket: loaded.ticket, siblings: sessions, me: context.me.user.id, language: context.me.language, now, busy, answers, takenOver: actingTaken, steps, cost, production, captures,
+    summary: acting, ticket: ticketNow, siblings: sessions, me: context.me.user.id, language: context.me.language, now, busy, answers, takenOver: actingTaken, steps, cost, production, captures,
     thread: actingThread ?? { lastSeq: 0, lastAt: undefined, state: actingDetail?.state, rows: [], turns: [], pending: [], interrupts: [], steps: [], plan: null, checkpoints: [] },
     parts, filter, unfolded,
-  }), [acting, loaded.ticket, sessions, context.me, now, busy, answers, actingTaken, steps, cost, production, captures, actingThread, actingDetail, parts, filter, unfolded]);
+  }), [acting, ticketNow, sessions, context.me, now, busy, answers, actingTaken, steps, cost, production, captures, actingThread, actingDetail, parts, filter, unfolded]);
   const ended = ENDED.has(phaseOf(view));
   // Asked again when the session changes or ends; 403, 409 and the rest: no button.
   useEffect(() => {
@@ -1256,6 +1263,8 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
                 onGo={go} onChangeOpen={() => { setChanging(true); setPlanNote(''); }} onChangeText={setChange} onChangeSend={(event) => void sendChange(event)} onChangeCancel={() => { setChanging(false); setPlanNote(''); }} /> : undefined} />
           ) : null}
           {result ? <ResultCard result={result} t={t} /> : stage ? <StageCard stage={stage} view={view} t={t} /> : null}
+          {/* The composer says what failed while it is drawn; an ended session still answers (a dormant one), so the note stays. */}
+          {ended && note ? <p className="composer-note" role="status">{note}</p> : null}
           {ended ? null : (
             <div className="s-composer">
               <Composer view={view} t={t} text={text} sending={sending} interrupting={interrupting} note={note} input={message} onText={setText}

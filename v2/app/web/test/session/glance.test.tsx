@@ -111,6 +111,12 @@ test('a session taken over by the person asks them to give it back, before anyth
   assert.equal(action?.kind, 'giveback');
 });
 
+test('a question this tab already answered, or that the service says is settled, is not asked again', () => {
+  const asked = [custom('cleared.question', { requestId: 'q1', questions: [{ question: 'Quel format ?', header: 'f', multiSelect: false, options: [] }] })];
+  assert.equal(pendingAction(view(asked, { answers: new Map([['q1', { kind: 'sent', sent: 'a', chosen: [] }]]) }), []), null);
+  assert.equal(pendingAction(view(asked, { answers: new Map([['q1', { kind: 'settled' }]]) }), []), null);
+});
+
 // --------------------------------------------------------------- the sentence
 
 const NAMES = /npm|docker|sudo|web\/|\.tsx|\.json|Running|Reading|Paused|Bash/;

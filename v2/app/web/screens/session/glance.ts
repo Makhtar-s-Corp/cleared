@@ -55,7 +55,7 @@ export function pendingAction(view: SessionView, inbox: readonly NextInboxItem[]
   const parts = partsOf(view);
   const asked = parts.filter(answers).flatMap((part) => (part.thread?.pending ?? []).flatMap((id) => {
     const row = part.thread?.rows.find((candidate) => (candidate.kind === 'question' && candidate.requestId === id) || (candidate.kind === 'tool' && candidate.request?.requestId === id && candidate.request.state === 'waiting'));
-    if (!row || view.answers?.get(id)?.kind === 'sent') return [];
+    if (!row || view.answers?.has(id)) return [];
     return [{ part, id, row: row as ToolRow | QuestionRow }];
   })).sort((a, b) => Date.parse(a.row.at) - Date.parse(b.row.at));
   const first = asked[0];
