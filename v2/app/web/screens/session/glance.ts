@@ -1,5 +1,5 @@
 // The session in five seconds (the owner's request of 2026-10-31, issue #499).
-// Written after its tests' first run: test/session/glance.test.ts.
+// Written after its tests' first run: test/session/glance.test.tsx.
 import type { NextInboxItem, SessionPlan } from '../../../../src/api/types.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
 import type { Translate } from '../../lib/i18n.ts';
