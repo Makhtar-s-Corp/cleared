@@ -1263,7 +1263,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
             </div>
           )}
         </div>
-        <SideFacts facts={sessionFacts(view, t)} pr={pullRequest} t={t} />
+        <SideFacts facts={sessionFacts(view, t)} pr={action?.kind === 'review' && action.pr ? undefined : pullRequest} t={t} />
         <details className="s-detail" data-session-details="" open={detail} onToggle={(event) => setDetail(event.currentTarget.open)}>
           <summary><CaretRight className="caret" size={12} aria-hidden="true" />{t('details_title')}</summary>
           <div className="s-detail-body">

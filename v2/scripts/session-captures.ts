@@ -314,6 +314,17 @@ try {
       await page.goto(`${origin}/sessions/${scene.opens}`);
       await page.waitForLoadState('networkidle', { timeout: 4000 }).catch(() => undefined);
       await shot(page, scene.name, frame);
+      // What a person can reach: the fold's summary clears the phone's bar once the page is scrolled to its end.
+      const reach = await page.evaluate(async () => {
+        window.scrollTo(0, document.documentElement.scrollHeight);
+        await new Promise((done_) => setTimeout(done_, 100));
+        const fold = document.querySelector('[data-session-details] > summary')?.getBoundingClientRect();
+        const bar = document.querySelector('.bottom-bar, #tabs, .side-nav, nav.mobile-nav')?.getBoundingClientRect();
+        window.scrollTo(0, 0);
+        return { foldBottom: fold?.bottom ?? 0, barTop: bar && bar.top > 0 && bar.bottom >= window.innerHeight - 1 ? bar.top : window.innerHeight, scroll: document.documentElement.scrollHeight };
+      });
+      if (reach.foldBottom > reach.barTop) problems.push(`${scene.name} ${frame}: Show details ends at ${reach.foldBottom}, under the bar at ${reach.barTop}`);
+      if (process.env.SESSION_MEASURE) console.log(scene.name, frame, JSON.stringify(reach));
       if (process.env.SESSION_LOOK) {
         await page.evaluate(() => { document.querySelectorAll('details').forEach((fold: any) => { fold.open = true; }); });
         await page.waitForTimeout(150);

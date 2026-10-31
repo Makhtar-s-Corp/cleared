@@ -617,3 +617,51 @@ Each ticket went back to Todo after its publish with "The release could not be r
 
 - Pull request: against `v2`, closes #490 to #497 as it says.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j7-onboarding`.
+
+## 2026-10-31: the session screen redone, read in five seconds (the owner's direction, lane `v2-j7-session`, issue #499, P271)
+
+**The need.** The owner found the session screen "difficile à comprendre" and said the previous pass (#498) changed little. A person who opens a session must understand in five seconds which ticket it is, what the agent does now, where it is, what it expects from them, its cost and duration, and its result, with the rest folded behind "Voir le détail". The quality bar is Devin, Codex and Linear. What was taken from them, each with its link, is in [session/REFERENCES.md](session/REFERENCES.md). [ui-pro/DESIGN.md](ui-pro/DESIGN.md) stays the system and has a new section on this screen.
+
+**What the screen said wrong before this pass**, read in the captures of `docs/v2/session/before/`, each now a case of `app/web/test/session/glance.test.tsx`:
+- "Ce qu'elle fait" was the ticket's title, not what the agent did.
+- With a release of the ticket waiting, "Ce qu'elle attend de vous" said "Rien, elle est terminée". The screen never read the inbox, so a review could not appear.
+- A ticket with a pull request showed no link to it.
+- "Où elle en est" was a role and a time.
+- A refusal naming docker or sudo sat in the main thread, and the same checks came back as "3 fois".
+
+**Decisions of the owner, applied as given.**
+1. **One column of reading** with a narrow side panel on a computer, one column on a phone: the title, one sentence, the one action, the stage or the result, the field to write to the agent. Cost and duration are small, in the side panel.
+2. **The sentence** comes from the catalog alone (`glance.ts` `doingNow`). A command the table cannot say whole, or one run as root, is "lance une commande", so it holds no path, no command name and none of the harness's words.
+3. **One action, one place to answer** (`pendingAction`): the person's own take over first, then the oldest request or question of the ticket's sessions with how many wait, then the plan, then what waits in the inbox for this ticket. Another ticket's is never taken. The thread's row says it waits and holds no button. A release opens in Reception, since its approval is signed and bound to the heads of the pull request.
+4. **Everything else in one fold:** the thread and its tabs, the ticket's text, changes, checks, timings, criteria, facts, take over, hand over, Close. It opens by itself for a tab named by the address, a file opened and a session the person has taken over.
+5. **French.** "Go" became "Lancer" and "votre accord", "Terminal" "Journal", "Éditeur" "Fichiers", "Navigateur" "Aperçu", "diff" "les changements" in the shared intent, which Reception says too. No middle dot is left on this screen.
+
+**The author's choices, to be read by the owner.**
+- **Stages rather than plan steps,** question 1 below. The stage is the ticket's, out of five: Préparation, Écriture du code, Relecture automatique, Votre décision, Mise en production.
+- **The agent's description of a command is not used in the sentence,** although it is written in the interface's language since #496. An older session or a disobedient agent would put English or a path at the top of the screen. It stays in the fold.
+- **The cost is read from the ledger for an open ticket too,** once a minute while the view is shown, since it reads every event of the ticket. It counts finished turns only; before the first, the sentence is the tokens the session's state reports, and with none the line is not drawn.
+- **The thread has no scroll area of its own any more.** sloplint's render tier failed the rows it clipped, and a long thread now makes a long page once the fold is open, with the ticket's number as a link to its text below it. The code that kept the thread at its end is gone.
+- **The top bar says the ticket's number alone,** since the title is now the screen's heading. The window's title keeps both.
+- **The ticket has no page of its own in the app,** so its link opens the fold at its text.
+- **The owner's direction won over Hallmark's flow:** DESIGN.md is the locked system, so no theme was dealt and no scaffold written.
+
+**Questions for the owner**, each with what this lane applied.
+1. **Which step of its own plan the agent has reached.** No event says it: `TodoWrite` is reduced to `think` in the Claude Code adapter, and Codex's `todo_list` is not mapped. "Étape 3 sur 5" over the plan's steps would be a made-up figure. (a) The ticket's stage out of five, the plan listed under it without a mark (applied). (b) A small author tool that reports the step it starts, as Linear's agents report each step's status, which also gives the plan's steps their ticks. Recommended: (b), as a lane of its own, since it changes the service, the prompt and what each session does, and this lane's brief is the screen.
+2. **"Pull request" in French.** It is the forge's own word, and seven French catalogs use it. (a) Kept (applied, `session.glance_fact_pr` listed as a shared word in `app/web/test/i18n-audit.test.tsx`). (b) "Demande de fusion", in all seven at once, not on one screen. Recommended: (a), unless the owner reads it as franglais.
+3. **An agent's plan may name a file.** The screen removes its Markdown but not its words, so "Lancer npm test" is read at the top. (a) As the agent wrote it (applied). (b) Ask for plain words without file names in `propose_session_plan`'s description. Recommended: (b), with question 1.
+
+**Not done here.**
+- **A real session.** Everything is proven on made-up answers and the app's fixtures; nothing ran on `cleared-v2-e2e` or on a live service.
+- **The weekly quota.** This session had no way to read it, so the 90 % stop could not be checked. The lane started no sub-agent and no model call from Cleared.
+- **The progress dashboard.** The owner's rule asks a sub-agent to build it and this brief forbids sub-agents, so the author kept `.dashboard/index.html` by hand, outside git.
+
+**Tests first, and what that means here.** The derivations' tests were committed before their code and run on a stub: 24 of 24 failed. The first commit of them was named `.test.ts`, which vitest does not collect, so it proved nothing; the author saw that in the raw output and renamed them in the next commit before the run that counts. The cards' tests came with the cards, so they have no such run. Tests that read the old layout were changed to the owner's direction, in `app/web/test/session/`, `app/web/test/inbox/permission.test.tsx`, `app/web/test/i18n-audit.test.tsx`, `app/web/test/i18n-milestone3.test.tsx`, `app/web/test/render.tsx`, `app/test/session/`, `app/test/inbox/permission.test.ts`, `app/test/inbox/inbox-browser.test.ts`, `app/test/choices-browser.test.ts`, `app/test/foundation/stack-browser.test.ts`, `app/test/shell/shell-browser.test.ts`, `app/test/redesign/redesign-browser.test.ts` and `app/test/a11y-browser.test.ts`. The browser tests that read what is now folded open it through `app/test/session/fold.ts`. One failure was a real defect and was fixed in the code: two landmarks named "La session".
+
+**Checks** are in the pull request, run on this branch after merging `origin/v2`.
+
+**Captures.** `docs/v2/session/before/` and `after/`, made by `v2/scripts/session-captures.ts` on the app's fixtures and made-up answers, five states at 1440x900 and 390x844, each under 500 KB. The script runs axe with the folds open and checks that "Voir le détail" clears the phone's bar. A phone's capture draws its fixed bar in the middle of a page taller than the screen; that is the capture, not the layout.
+
+**Resources.** The temporary instance was the script's own app on a port it found free in 9800 to 9899, stopped with each run, so `ss -ltn` shows none left. No container was started and nothing else of Docker was touched. Network: `npm ci`, puppeteer-core into a scratch folder for sloplint's render tier, the sources of the references, GitHub for this lane's issue and pull request. No secret, no Claude login read.
+
+- Pull request: against `v2`, closes #499.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j7-session`.
