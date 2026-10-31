@@ -13,6 +13,7 @@ import { authorPrompt, stepPrompt } from '../../src/flow/prompts.ts';
 import { parseRehearsalScript, type AuthorRule } from '../../src/session/adapters/index.ts';
 import { END_TERMINAL, SHELL_COMMAND, giveCommand, readCommand, takeCommand, terminalCommand, writeCommand } from '../../src/terminal/container.ts';
 import { loadWorkspace } from '../../src/workspace/config.ts';
+import { isTechnical } from '../../src/flow/plan-words.ts';
 import { MULTI_TICKETS, T3_QUESTION, breaksHealth, dockerStub, multiScript, rehearsalWorkspace, seedEarlierRun, shellAnswer, type StubContext } from '../../scripts/proof-rehearsal-multi.ts';
 import { DatabaseSync } from 'node:sqlite';
 import { INBOX_TABLE, InboxStore } from '../../src/inbox/store.ts';
@@ -188,4 +189,17 @@ test('ticket 3\'s author asks a question whose recommended option is not the fir
   assert.deepEqual(chooseAnswers(asked).map((c) => [c.answer, c.how]), [['From 0 (Recommended)', 'recommended']]);
   const rule = multiScript().authorRules?.find((r) => r.steps.some((step) => step === T3_QUESTION));
   assert.ok(rule, 'a rule of ticket 3 asks it');
+});
+
+// Issue #501: the flow refuses a plan's step that names a command or a path, and
+// a scripted author never proposes again, so its session would stop on it.
+test('every step a scripted author proposes is one the flow takes', () => {
+  const proposed: string[] = [];
+  JSON.stringify(multiScript(), (key, value: unknown) => {
+    const call = value as { name?: string; input?: { steps?: string[] } } | null;
+    if (key === 'hostCall' && call?.name === 'propose_session_plan') proposed.push(...(call.input?.steps ?? []));
+    return value;
+  });
+  assert.ok(proposed.length > 10, 'the walk found the script\'s plans');
+  assert.deepEqual(proposed.filter(isTechnical), []);
 });

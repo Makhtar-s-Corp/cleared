@@ -10,7 +10,7 @@ import { Button } from '@/components/ui/button.tsx';
 import type { Translate } from '@/lib/i18n.ts';
 import { commandParts } from '@/lib/intent.ts';
 import { requestAsk, requestFold, requestFoldOpen, requestReason } from '@/lib/request.ts';
-import { doingNow, planSteps, type Capture, type PendingAction, type PullRequest, type Result, type StageView } from './glance.ts';
+import { doingNow, humanSteps, planStepOf, type Capture, type PendingAction, type HumanStep, type PullRequest, type Result, type Stage, type StageView } from './glance.ts';
 import { phaseOf, questionStatus, statusTone, target, type RequestState, type SessionView, type ToolRow } from './model.ts';
 import { partsOf } from './ticket.ts';
 
@@ -145,21 +145,55 @@ export function ActionCard({ action, view, t, plan, giveback, onAnswer, onQuesti
 
 const MARK = { done: Check, current: CircleDashed, failed: X, todo: Circle } as const;
 
-// Where the ticket is, out of its stages; the agent's own plan under the stage it is written for.
+// The agent's plan: a sentence a step, a command or a path behind "Show details",
+// and the step it reported marked, what is before it done and what is after it to come.
+function PlanSteps({ steps, reached, stopped, t }: { readonly steps: readonly HumanStep[]; readonly reached: number | null; readonly stopped: boolean; readonly t: Translate }) {
+  const folded = steps.flatMap((step, index) => (step.text === null ? [{ number: index + 1, raw: step.raw }] : []));
+  const stateOf = (number: number, at: number): Stage['state'] => (number < at ? 'done' : number > at ? 'todo' : stopped ? 'failed' : 'current');
+  return (
+    <div className="s-plan">
+      <p className="s-plan-title">{t('glance_plan_steps', { n: steps.length })}</p>
+      <ol className="s-plan-steps" data-marked={reached === null ? undefined : ''}>
+        {steps.map((step, index) => {
+          const said = step.text ?? t('glance_plan_step_technical');
+          if (reached === null) return <li key={index}>{said}</li>;
+          const state = stateOf(index + 1, reached);
+          const Mark = MARK[state];
+          return (
+            <li key={index} data-state={state} aria-current={state === 'current' ? 'step' : undefined}>
+              <span className="s-plan-step"><Mark size={12} aria-hidden="true" /><span>{said}<span className="sr-only">{t(`glance_stage_is_${state}`)}</span></span></span>
+            </li>
+          );
+        })}
+      </ol>
+      {folded.length > 0 ? (
+        <Detail t={t}>
+          <ol className="s-plan-raw">{folded.map((step) => <li key={step.number} value={step.number}>{step.raw}</li>)}</ol>
+        </Detail>
+      ) : null}
+    </div>
+  );
+}
+
+// Where the ticket is, out of its stages; the agent's own plan under the stage it
+// is written for, with the step it reported when it reported one.
 export function StageCard({ stage, view, t }: { readonly stage: StageView; readonly view: SessionView; readonly t: Translate }) {
   const planned = partsOf(view).filter((part) => part.summary.role === 'author').map((part) => part.thread?.plan).findLast(Boolean) ?? view.thread.plan;
-  const steps = planned ? planSteps(planned) : [];
+  const steps = planned ? humanSteps(planned) : [];
   const now = stage.stages[stage.current - 1];
+  const reads = (now?.key === 'prepare' || now?.key === 'write') && steps.length > 0;
+  const reached = reads ? planStepOf(view) : null;
   return (
     <section className="s-stage" aria-labelledby="s-stage-title">
       <div className="s-stage-head">
         <h2 className="s-section-title" id="s-stage-title">{t('glance_stage_title')}</h2>
-        <p className="s-stage-count">{t('glance_stage_count', { n: stage.current, total: stage.total })}</p>
+        {reached
+          ? <p className="s-stage-count" data-plan-step={reached.step}>{t('glance_plan_step_count', { n: reached.step, total: reached.total })}</p>
+          : <p className="s-stage-count">{t('glance_stage_count', { n: stage.current, total: stage.total })}</p>}
       </div>
       <ol className="s-stages">
         {stage.stages.map((one) => {
           const Mark = MARK[one.state];
-          const reads = one === now && (one.key === 'prepare' || one.key === 'write') && steps.length > 0;
           return (
             <li key={one.key} data-stage={one.key} data-state={one.state} aria-current={one === now ? 'step' : undefined}>
               <span className="s-stage-line">
@@ -167,12 +201,7 @@ export function StageCard({ stage, view, t }: { readonly stage: StageView; reado
                 <span>{t(`glance_stage_${one.key}`)}</span>
                 <span className="sr-only">{t(`glance_stage_is_${one.state}`)}</span>
               </span>
-              {reads ? (
-                <div className="s-plan">
-                  <p className="s-plan-title">{t('glance_plan_steps', { n: steps.length })}</p>
-                  <ol className="s-plan-steps">{steps.map((step, index) => <li key={index}>{step}</li>)}</ol>
-                </div>
-              ) : null}
+              {reads && one === now ? <PlanSteps steps={steps} reached={reached?.step ?? null} stopped={one.state === 'failed'} t={t} /> : null}
             </li>
           );
         })}

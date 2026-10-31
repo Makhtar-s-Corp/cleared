@@ -225,6 +225,7 @@
   "confidence_waits": "Waits for your Go.",
   "confidence_starts": "Starts by itself when the delay passes.",
   "plan_steps": "Steps",
+  "plan_step_technical": "A technical step",
   "plan_files": "Files",
   "facts_proposed": "Proposed",
   "session_plan_line": "{ticket} · {confidence} · {steps}",

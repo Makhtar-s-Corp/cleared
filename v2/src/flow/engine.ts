@@ -132,7 +132,8 @@ import { compatibility, landingOrder } from '../release/order.ts';
 import { TrainStore, view, type Stop } from '../release/store.ts';
 import { TrainRunner } from '../release/train.ts';
 import type { ServiceConfig, WorkspaceConfig } from '../workspace/config.ts';
-import { AUTHOR_TOOLS, bindAuthorTools, readChangesReport, readSessionPlan } from './author-tools.ts';
+import { AUTHOR_TOOLS, bindAuthorTools, readChangesReport, readPlanStep, readSessionPlan } from './author-tools.ts';
+import { technicalSteps } from './plan-words.ts';
 import { STEP_NOTE_TOOL, notesLeft, notesRead, notesText, readStepNote, type StepNote } from './notes.ts';
 import { PLAN_GO_MINUTES, QUESTION_LEAD_MINUTES, QUESTION_TIMEOUT_MINUTES, workspaceOf, type FlowConfig, type ProjectSettings } from './config.ts';
 import { answerLines, asked, defaultAnswers } from './questions.ts';
@@ -140,7 +141,7 @@ import { duration } from '../lead/plans/estimates.ts';
 import { ledgerEvent } from '../store/ledger-events.ts';
 import type { FlowEvent, FlowListener, Origin, PutBackReason } from './events.ts';
 import { atOrAfter, landingOf, type Landing } from './ledger.ts';
-import { NOT_AGAIN, NOT_NOW, PROPOSED, changeMessage, goMessage, noPlanNote, type Gate, type GoBy } from './plan-gate.ts';
+import { NOT_AGAIN, NOT_NOW, NO_STEP_YET, PROPOSED, changeMessage, goMessage, noPlanNote, plainWordsMessage, stepKept, type Gate, type GoBy } from './plan-gate.ts';
 import type { LeverReader } from '../consumption/levers.ts';
 import { QUOTA_WINDOWS, latestQuota } from '../consumption/quota.ts';
 import { sessionsCost } from '../consumption/ticket-cost.ts';
@@ -2303,6 +2304,12 @@ export class FlowEngine {
         this.#gates.set(context.sessionId, gate);
         if (gate.phase === 'working') throw new HostToolRefused(NOT_NOW);
         const read = readSessionPlan(input);
+        const technical = technicalSteps(read.steps);
+        if (technical.length > 0 && !gate.reworded) {
+          gate.reworded = true;
+          throw new HostToolRefused(plainWordsMessage(technical));
+        }
+        gate.reworded = false;
         const proposal: SessionPlan = {
           steps: read.steps.map(this.#clean), files: read.files.map(this.#clean), confidence: read.confidence, reason: this.#clean(read.reason),
           proposedAt: this.#at(), go: null,
@@ -2317,6 +2324,15 @@ export class FlowEngine {
         gate.pending = proposal;
         this.#journal({ id: context.sessionId, ticket: ticket.id, project }, { type: 'CUSTOM', name: 'cleared.session_plan', value: proposal });
         return PROPOSED;
+      },
+      // From the journal, as the screen reads it: the plan the author had its Go for.
+      report_plan_step: async (input, context) => {
+        const held = sessionPlanOf(this.#store.events.after(context.sessionId));
+        if (!held?.go) throw new HostToolRefused(NO_STEP_YET);
+        const total = held.steps.length;
+        const step = readPlanStep(input, total);
+        this.#journal({ id: context.sessionId, ticket: ticket.id, project }, { type: 'CUSTOM', name: 'cleared.plan_step', value: { step, total } });
+        return stepKept(step, total);
       },
       report_changes: async (input, context) => {
         const read = readChangesReport(input, this.#ticketFiles(ticket.id));

@@ -225,6 +225,7 @@
   "confidence_waits": "Attend votre Go.",
   "confidence_starts": "Démarre seul à la fin du délai.",
   "plan_steps": "Étapes",
+  "plan_step_technical": "Une étape technique",
   "plan_files": "Fichiers",
   "facts_proposed": "Proposé",
   "session_plan_line": "{ticket} · {confidence} · {steps}",

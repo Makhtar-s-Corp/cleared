@@ -70,11 +70,11 @@ async function tickAfter(t: Setup, ms: number): Promise<void> {
   await t.engine.settled();
 }
 
-test('the author is given its two host tools, and its first turn is asked for the plan, the end of its work for the report', async () => {
+test('the author is given its three host tools, and its first turn is asked for the plan, the end of its work for the report', async () => {
   const t = await gated({ author: planned('high') });
   await t.engine.start(t.ticket.id, 'u1');
   const author = t.startedSessions[0]!;
-  assert.deepEqual(author.input.tools?.map((tool) => tool.name), ['propose_session_plan', 'report_changes']);
+  assert.deepEqual(author.input.tools?.map((tool) => tool.name), ['propose_session_plan', 'report_plan_step', 'report_changes']);
   // Issue #335 (P219): the definitions as written, in their order, nothing of the ticket in them,
   // so every author of the project sends the same tools ahead of its prompt.
   assert.equal(JSON.stringify(author.input.tools?.map(({ name, description, inputSchema }) => ({ name, description, inputSchema }))), JSON.stringify(AUTHOR_TOOLS));
@@ -86,6 +86,7 @@ test('the author is given its two host tools, and its first turn is asked for th
   const learned = t.engine.policyFor(author.input).learned;
   assert.ok(learned.some((rule) => rule.tool === 'mcp__cleared__propose_session_plan'));
   assert.ok(learned.some((rule) => rule.tool === 'mcp__cleared__report_changes'));
+  assert.ok(learned.some((rule) => rule.tool === 'mcp__cleared__report_plan_step'), 'a step reported never asks for a permission');
   await heldAt(t);
   await t.engine.close();
 });
@@ -304,6 +305,92 @@ test('report_changes refuses a file in two groups; the next report is kept', asy
   assert.match(bad?.message ?? '', /src\/entries\.ts/);
   assert.equal(calls.find((c) => c.toolCallId === 'report-good')?.outcome, 'ok');
   assert.deepEqual(customs(t, 'cleared.changes'), [{ groups: [{ intent: 'Sort', files: ['src/entries.ts'] }] }]);
+  await t.engine.close();
+});
+
+// ---- the step the author reports, and a plan written for a person (issue #501) ----
+
+const stepCall = (id: string, step: unknown): FakeStep => ({ hostCall: { toolCallId: id, name: 'report_plan_step', input: { step } } });
+const callsOf = (t: Setup) => customs(t, 'cleared.host_call') as { toolCallId: string; outcome: string; message?: string }[];
+const TWO = ['Lire le composant', 'Lancer les tests du projet'];
+
+test('each step reported is kept as a session event, with the plan\'s length, and the author reads what was kept', async () => {
+  const t = await gated({
+    author: [
+      started, proposal('high', 'plan-1', TWO), finished(0.1), { awaitMessage: true },
+      started, stepCall('step-1', 1), stepCall('step-2', 2), report('report-1', [{ intent: 'Sort', files: ['src/entries.ts'] }]), ...text('a1', 'Done.'), finished(0.3),
+    ],
+  });
+  await t.engine.start(t.ticket.id, 'u1', { plan: 'p1', item: 1 });
+  await until(() => t.startedSessions.length === 2, 'the review');
+  assert.deepEqual(customs(t, 'cleared.plan_step'), [{ step: 1, total: 2 }, { step: 2, total: 2 }]);
+  assert.equal(callsOf(t).find((c) => c.toolCallId === 'step-2')?.outcome, 'ok');
+  await t.engine.close();
+});
+
+test('a step reported before the Go, or that the plan does not hold, is refused and not kept; the work goes on', async () => {
+  const t = await gated({
+    author: [
+      started, stepCall('too-soon', 1), proposal('high', 'plan-1', TWO), finished(0.1), { awaitMessage: true },
+      started, stepCall('unknown', 3), stepCall('words', 'Lancer les tests'), stepCall('known', 2), report('report-1', [{ intent: 'Sort', files: ['src/entries.ts'] }]), ...text('a1', 'Done.'), finished(0.3),
+    ],
+  });
+  await t.engine.start(t.ticket.id, 'u1', { plan: 'p1', item: 1 });
+  await until(() => t.startedSessions.length === 2, 'the review');
+  const calls = callsOf(t);
+  for (const id of ['too-soon', 'unknown', 'words']) assert.equal(calls.find((c) => c.toolCallId === id)?.outcome, 'refused', id);
+  assert.match(calls.find((c) => c.toolCallId === 'too-soon')?.message ?? '', /Go/);
+  assert.match(calls.find((c) => c.toolCallId === 'unknown')?.message ?? '', /2 steps/);
+  assert.deepEqual(customs(t, 'cleared.plan_step'), [{ step: 2, total: 2 }]);
+  await t.engine.close();
+});
+
+test('the author is told to report each step, in its first message and in the Go', async () => {
+  const t = await gated({ author: planned('high') });
+  await t.engine.start(t.ticket.id, 'u1', { plan: 'p1', item: 1 });
+  await until(() => t.startedSessions.length === 2, 'the review');
+  const author = t.startedSessions[0]!;
+  assert.match(author.input.prompt, /report_plan_step/);
+  assert.ok(userTexts(t, author.id).some((message) => /^Go:/.test(message) && /report_plan_step/.test(message)), 'the Go says it');
+  await t.engine.close();
+});
+
+test('the author is asked for steps a person reads, with the example of the owner\'s direction', async () => {
+  const t = await gated({ author: planned('medium') });
+  await t.engine.start(t.ticket.id, 'u1');
+  await heldAt(t);
+  const { prompt } = t.startedSessions[0]!.input;
+  assert.match(prompt, /no command name, file name or path/);
+  assert.match(prompt, /Run npm test/);
+  await t.engine.close();
+});
+
+test('a plan whose step names a command or a path is refused and not kept; the plan the author writes again is', async () => {
+  const t = await gated({
+    author: [started, proposal('medium', 'plan-bad', ['Lire web/Message.tsx', 'Lire le composant', 'Lancer npm test']), proposal('medium', 'plan-good', TWO), finished(0.1), { awaitMessage: true }],
+  });
+  await t.engine.start(t.ticket.id, 'u1');
+  const item = await heldAt(t);
+  const bad = callsOf(t).find((c) => c.toolCallId === 'plan-bad');
+  assert.equal(bad?.outcome, 'refused');
+  assert.match(bad?.message ?? '', /1 and 3/, 'it names the steps by their number');
+  assert.match(bad?.message ?? '', /no command name, file name or path/);
+  assert.equal(callsOf(t).find((c) => c.toolCallId === 'plan-good')?.outcome, 'ok');
+  assert.deepEqual(item.plan.steps, TWO);
+  assert.equal(customs(t, 'cleared.session_plan').length, 1);
+  await t.engine.close();
+});
+
+test('a plan refused for its words is taken the second time, so a false alarm never sends the ticket back: the screens fold it', async () => {
+  const words = ['Passer le fichier a/b/c au format voulu'];
+  const t = await gated({
+    author: [started, proposal('medium', 'plan-1', words), proposal('medium', 'plan-2', words), finished(0.1), { awaitMessage: true }],
+  });
+  await t.engine.start(t.ticket.id, 'u1');
+  const item = await heldAt(t);
+  assert.equal(callsOf(t).find((c) => c.toolCallId === 'plan-1')?.outcome, 'refused');
+  assert.equal(callsOf(t).find((c) => c.toolCallId === 'plan-2')?.outcome, 'ok');
+  assert.deepEqual(item.plan.steps, words);
   await t.engine.close();
 });
 

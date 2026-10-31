@@ -79,6 +79,8 @@ export const CUSTOM_NAMES = [
   // Milestone 5 (C15, issue #422): the session waits for its service's
   // prepared image, built because what it holds changed.
   'cleared.prepared_image',
+  // Issue #501: the step of its plan the author says it has reached.
+  'cleared.plan_step',
   // Milestone 6 (issue #453): the flow recreated the session's container
   // after it stopped, and resumed the session in it.
   'cleared.container_recreated',
@@ -174,6 +176,9 @@ export type CustomValue = {
   // The author's session plan as proposed (`go` null), then again when it
   // gets its Go, with who and when: the last one is the plan.
   'cleared.session_plan': SessionPlan;
+  // The step the author says it starts (report_plan_step, issue #501), from
+  // one, and how many its plan held: the session screen reads the last one.
+  'cleared.plan_step': { readonly step: number; readonly total: number };
   // The author's report of its changes by intent, as report_changes kept it
   // (the files no group named under "Other changes").
   'cleared.changes': ChangesReport;

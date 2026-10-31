@@ -672,3 +672,42 @@ Each ticket went back to Todo after its publish with "The release could not be r
 
 - Pull request: against `v2`, closes #499.
 - Author: Opus 5.5 (claude-opus-5-5), lane `v2-j7-session`.
+
+## 2026-10-31: "pull request" stays in every screen (the owner's decision, lane `v2-j7-plan-step`, issue #501)
+
+The owner decided that "pull request" is kept everywhere in the interface, in French as in English. This answers question 2 of the entry on the session screen above: option (a), no "demande de fusion" in any catalog. `session.glance_fact_pr` stays listed as a shared word in `app/web/test/i18n-audit.test.tsx`.
+
+## 2026-10-31: the agent reports the step of its plan, and its plan is written for a person (the owner's direction, lane `v2-j7-plan-step`, issue #501, P272)
+
+This delivers questions 1 and 3 of the entry on the session screen above, each as its option (b).
+
+**The tool.**
+- **An MCP host tool, not a command of the harness.** `report_plan_step` is a third entry of `AUTHOR_TOOLS`, next to `propose_session_plan` and `report_changes`. That path already runs from the model to the service, journals, and is allowed by the policy without a request. A command in the container would need a new way back to the service.
+- **A number, not the step's words.** A step's words may be folded on the screen, and a number cannot be misread. The service reads the plan from the journal, as the screen does, so the check does not depend on the gate's memory.
+- **Refused, and nothing kept:** a report before the Go, by an author with no plan, or with a number the plan does not hold. The agent reads why and carries on.
+- **The event** is `cleared.plan_step`, `{ step, total }`. The call is no row of the thread, so the sentence at the top still says what the agent does.
+
+**The screen.** The count beside "Où il en est" says "Étape 3 sur 5 du plan" and the plan marks that step. "Étape 2 sur 5" with no mark, as before #501, whenever the report cannot be trusted: none at all, a number or a length the plan does not hold, a plan with no Go, a plan replaced since, a reviewer's request since, a later author with no plan of its own. Past the author's stages the count is the ticket's again and the plan is in the fold.
+
+**The plan's words.**
+- **Asked** in the tool's schema, the first message and the language rule, which used to say that commands stay as they are without excepting the steps.
+- **Checked** by one function, `src/flow/plan-words.ts`, read by the tool and by the screens.
+- **Refused once, then taken.** The check reads the shape of the words and can be wrong. A plan refused every time could end the first turn without a plan and send the ticket back to Todo, so the second proposal is kept and the screens fold it.
+- **Folded** rather than rewritten: "Une étape technique" keeps the step's line and number, so a reported number still finds its line, and its words are behind "Voir le détail" under the plan. No sentence is made up from a command. Reception says the same, and the session it links to holds the words. No new field holds the technical detail: `files`, the journal and the Plan tab already do.
+
+**Limits, to be read by the owner.**
+- **No real session ran.** Everything is proven on the fake harness, the app's fixtures and made-up answers. Whether a real agent calls the tool at each step is only asked for in its prompt, not enforced, and has not been observed.
+- **Codex and Cursor** are given no host tools, so they are asked for no plan and report nothing: the stage out of five.
+- **A repair reopened after failed checks** does not reset the step, unlike a reviewer's request: the last step reported stays until the next one.
+- **The check is a list and a shape.** It misses a command it does not know and a two-part path such as `foo/bar`, whose first part is not a known folder. `kubectl` is not in the list because `test/flow/never-deploys.test.ts` refuses that word in the service's code, and that guard was left as it is.
+
+**Captures.** `docs/v2/plan-step/before/` and `after/`, by `v2/scripts/session-captures.ts`: running, waiting for a permission, waiting for the Go, done, at 1440x900 and 390x844, each under 500 KB. The done captures are the same before and after, byte for byte: past its stages the plan is in the fold, so this lane changes nothing there. The fixture's plan changed with the lane, so the before and after show the wording as asked, not a rewrite of the same words. `SESSION_EXTRA` adds `running-unreported`, the fallback and the fold, which axe and sloplint read; it is in `after/` only, since it is a state the old screen did not have.
+
+**Rules read.** The anti-slop rulebook was read as a filter on the code and the copy. Its installer and its mode question were not used, and nothing of it is in this repository.
+
+**Not done here.**
+- **The weekly quota.** This session has no way to read it, so the 90 % stop could not be checked.
+- **The progress dashboard.** The owner's rule asks a sub-agent to build it and this brief forbids sub-agents, so the author kept `.dashboard/index.html` by hand, outside git. No sub-agent was started. The session's built-in advisor tool, a reviewer model, was consulted on the design.
+
+- Pull request: against `v2`, closes #501.
+- Author: Opus 5.5 (claude-opus-5-5), lane `v2-j7-plan-step`.

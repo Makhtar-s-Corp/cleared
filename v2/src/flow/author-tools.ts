@@ -9,6 +9,9 @@
 //   propose_session_plan: the author's first turn ends with its plan (its
 //   steps, the files it means to change, its confidence and why); the flow
 //   holds it until a Go (flow/plan-gate.ts).
+//   report_plan_step: once the plan has its Go, the number of the step the
+//   author starts. A session event, read by the session screen; a number and
+//   not its words, since a step's words may be folded or rewritten (issue #501).
 //   report_changes: at the end of its work, the changed files grouped by
 //   intent; a file in two groups is refused, and the changed files no group
 //   names go to "Other changes". The release card reads the last report
@@ -18,10 +21,11 @@ import type { ChangesReport, SessionPlan } from '../api/types.ts';
 import { WORKDIR_MOUNT } from '../container/session-runtime.ts';
 import { HostToolRefused, type HostCallContext, type HostTool, type JsonSchema } from '../session/contract.ts';
 
-export type AuthorToolName = 'propose_session_plan' | 'report_changes';
+export type AuthorToolName = 'propose_session_plan' | 'report_plan_step' | 'report_changes';
 
 export type AuthorToolInput = {
   propose_session_plan: Pick<SessionPlan, 'steps' | 'files' | 'confidence' | 'reason'>;
+  report_plan_step: { readonly step: number };
   report_changes: ChangesReport;
 };
 
@@ -45,12 +49,23 @@ export const AUTHOR_TOOLS: readonly (Pick<HostTool, 'description' | 'inputSchema
     inputSchema: {
       type: 'object',
       properties: {
-        steps: list('The steps you will take, in order, one short sentence each, in the language your first message names.'),
+        steps: list('The steps you will take, in order, one short sentence each for a person who does not read code, in the language your first message names: what the step does, with no command name, file name or path. Run the project\'s tests, not Run npm test.'),
         files: list('The files you mean to change or create, as paths in the checkout.'),
         confidence: { type: 'string', enum: ['low', 'medium', 'high'], description: 'high: the change is clear and small; medium: one point is uncertain; low: you need the owner to look first.' },
         reason: text('Why this confidence, in one or two sentences, in the language your first message names.'),
       },
       required: ['steps', 'files', 'confidence', 'reason'],
+    },
+  },
+  {
+    name: 'report_plan_step',
+    description: 'Once your plan has its Go, say which step of it you start, each time you start one: the person who follows your session reads it. Then carry on, without ending your turn.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        step: { type: 'number', description: 'The number of the step in your plan, a whole number, 1 for the first.' },
+      },
+      required: ['step'],
     },
   },
   {
@@ -121,6 +136,15 @@ export function readSessionPlan(input: unknown): AuthorToolInput['propose_sessio
   if (confidence !== 'low' && confidence !== 'medium' && confidence !== 'high') refuse('confidence is low, medium or high.');
   const reason = textOf(record.reason, 'The reason of the confidence', MAX_REASON);
   return { steps, files, confidence: confidence as SessionPlan['confidence'], reason };
+}
+
+// The step as the model gave it: a whole number of the plan, from one.
+export function readPlanStep(input: unknown, total: number): number {
+  const step = (typeof input === 'object' && input !== null ? input as Record<string, unknown> : {}).step;
+  if (typeof step !== 'number' || !Number.isInteger(step) || step < 1 || step > total) {
+    return refuse(`Give the number of a step of your plan: it has ${total} step${total === 1 ? '' : 's'}, numbered from 1.`);
+  }
+  return step;
 }
 
 // The report as the model gave it, checked against the files the session

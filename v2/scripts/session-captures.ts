@@ -51,12 +51,14 @@ const OTHER = 'LOCAL-9';
 const TITLE = 'Afficher la date de chaque message du livre d\'or';
 const BODY = "## Ce qu'il faut\n\nChaque message du livre d'or montre le jour où il a été écrit.\n\n- [ ] La date s'affiche sous le message\n- [ ] `npm test` passe\n\nDétails : [la maquette](https://example.com/maquette).";
 const PLAN_STEPS = [
-  'Lire le composant `Message` et son **test**',
-  'Ajouter la date au `Message`',
+  'Lire le composant du message et son test',
+  'Ajouter la date au message',
   'Formater la date selon la langue de la page',
   'Écrire le test de l\'affichage',
-  'Lancer `npm test` et corriger ce qui échoue',
+  'Lancer les tests du projet et corriger ce qui échoue',
 ];
+// An older session's plan, which never reported a step: the fallback, under SESSION_EXTRA.
+const OLD_PLAN_STEPS = ['Lire le composant `Message` et son **test**', 'Ajouter la date au `Message`', 'Modifier web/Message.tsx', 'Écrire le test de l\'affichage', 'Lancer `npm test` et corriger ce qui échoue'];
 const PLAN = { steps: PLAN_STEPS, files: ['web/Message.tsx', 'web/Message.test.tsx'], confidence: 'high', reason: 'Le composant est petit et il a déjà un test.', proposedAt: ago(26) };
 const GO = { by: 'delay', at: ago(24) };
 
@@ -106,9 +108,11 @@ const authorStory = (session: string) => [
   ...tool(session, 27, 'c2', 'Read', { kind: 'read', path: 'web/Message.test.tsx' }, { kind: 'read', path: 'web/Message.test.tsx', bytes: 600 }),
   custom(session, 26, 'cleared.session_plan', { ...PLAN, go: null }),
   custom(session, 24, 'cleared.session_plan', { ...PLAN, go: GO }),
+  custom(session, 23, 'cleared.plan_step', { step: 2, total: PLAN_STEPS.length }),
   ...tool(session, 22, 'c3', 'Edit', { kind: 'edit', path: 'web/Message.tsx', added: 14, removed: 2 }, { kind: 'edit', ok: true }),
   ...text(session, 20, 'm1', 'La date est ajoutée au message. Je passe au format selon la langue de la page.'),
   ...tool(session, 16, 'c4', 'Edit', { kind: 'edit', path: 'web/Message.test.tsx', added: 22, removed: 0 }, { kind: 'edit', ok: true }),
+  custom(session, 15, 'cleared.plan_step', { step: 4, total: PLAN_STEPS.length }),
   custom(session, 12, 'cleared.permission_answered', { requestId: 'd1', decision: 'reject_once', by: 'policy', rule: 'host.docker' }),
   ...tool(session, 9, 'c5', 'Bash', { kind: 'execute', command: 'git status' }, { kind: 'execute', output: 'Sur la branche cleared/local-7', cut: 0, isError: false }),
 ];
@@ -127,7 +131,17 @@ const running = (): Story => {
   const s = summary(AUTHOR, 'author', 'working', 'Running npm test', 28, 0, 40);
   return {
     sessions: [s, elsewhere], details: { [AUTHOR]: { ...s, state: state('working', 'Running npm test', CHECKS) } }, ticket: ticket('In Progress', null), inbox: [elsewherePlan],
-    events: { [AUTHOR]: [event(AUTHOR, 28, { type: 'STATE_SNAPSHOT', snapshot: state('working', 'Running npm test', CHECKS) }), ...authorStory(AUTHOR), ...tool(AUTHOR, 0.2, 'c6', 'Bash', { kind: 'execute', command: 'npm test' })] },
+    events: { [AUTHOR]: [event(AUTHOR, 28, { type: 'STATE_SNAPSHOT', snapshot: state('working', 'Running npm test', CHECKS) }), ...authorStory(AUTHOR), custom(AUTHOR, 0.3, 'cleared.plan_step', { step: 5, total: PLAN_STEPS.length }), ...tool(AUTHOR, 0.2, 'c6', 'Bash', { kind: 'execute', command: 'npm test' })] },
+  };
+};
+
+// An agent that reports nothing, with a plan that names commands: the stage out of five, the words folded.
+const unreported = (): Story => {
+  const story = running();
+  const events = (story.events[AUTHOR] ?? []) as { event: { type: string; name?: string; value?: Record<string, unknown> } }[];
+  return {
+    ...story,
+    events: { [AUTHOR]: events.filter(({ event }) => event.name !== 'cleared.plan_step').map((one) => (one.event.name === 'cleared.session_plan' ? { ...one, event: { ...one.event, value: { ...one.event.value, steps: OLD_PLAN_STEPS } } } : one)) },
   };
 };
 
@@ -278,7 +292,7 @@ const SCENES: readonly { readonly name: string; readonly story: () => Story; rea
   { name: 'waiting-review', story: review, opens: REVIEWER },
   { name: 'done-pr', story: done, opens: REVIEWER },
   { name: 'failed', story: failed, opens: AUTHOR },
-  ...(process.env.SESSION_EXTRA ? [{ name: 'waiting-go', story: planWaits, opens: AUTHOR }, { name: 'waiting-question', story: question, opens: AUTHOR }] : []),
+  ...(process.env.SESSION_EXTRA ? [{ name: 'waiting-go', story: planWaits, opens: AUTHOR }, { name: 'waiting-question', story: question, opens: AUTHOR }, { name: 'running-unreported', story: unreported, opens: AUTHOR }] : []),
 ];
 
 const stateDir = mkdtempSync(join(tmpdir(), 'cleared-v2-j7-session-'));

@@ -34,6 +34,7 @@ import {
   repairLine, sessionLink, sessionOf, sessionsLine, shareLine, short, variantFacts, variantHarness, variantTests,
   ticketTitle, trainLine, stopState, undoApproval, type Gesture, type InboxView, type Item, type Local,
 } from './model.ts';
+import { humanSteps } from '../session/glance.ts';
 import './inbox.css';
 import { Facts } from '@/components/facts/Facts.tsx';
 
@@ -431,6 +432,11 @@ function PlanBody({ item, view, t }: { readonly item: PlanItemInbox; readonly vi
 
 // An author's session plan waiting for its Go (decision 22): what it means
 // to do and to touch, how sure it is and why, and who let it start.
+// A plan's steps as a person reads them (issue #501): the session it opens holds the words a step names.
+export function PlanStepList({ steps, t }: { readonly steps: readonly string[]; readonly t: Translate }) {
+  return <ol className="plan-steps">{humanSteps({ steps }).map((step, index) => <li key={index}>{step.text ?? t('plan_step_technical')}</li>)}</ol>;
+}
+
 function SessionPlanBody({ item, view, t }: { readonly item: SessionPlanItem; readonly view: InboxView; readonly t: Translate }) {
   const { plan } = item;
   const session = sessionOf(view, item.sessionId);
@@ -446,7 +452,7 @@ function SessionPlanBody({ item, view, t }: { readonly item: SessionPlanItem; re
         {waiting ? <p className="confidence-rule">{t(plan.confidence === 'high' ? 'confidence_starts' : 'confidence_waits')}</p> : null}
       </div>
       <h3 className="d-sub">{t('plan_steps')}</h3>
-      <ol className="plan-steps">{plan.steps.map((step, index) => <li key={index}>{step}</li>)}</ol>
+      <PlanStepList steps={plan.steps} t={t} />
       {plan.files.length > 0 ? <><h3 className="d-sub">{t('plan_files')}</h3><ul className="plan-files">{plan.files.map((file) => <li key={file}><code>{file}</code></li>)}</ul></> : null}
       <dl className="facts">
         {session ? <Fact label={t('facts_session')}>{pausedLine(item, session, view.now, t)}</Fact> : null}

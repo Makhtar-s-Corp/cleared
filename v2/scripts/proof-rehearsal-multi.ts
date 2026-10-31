@@ -181,7 +181,7 @@ export function multiScript(): RehearsalScript {
     author: { steps: planned('author', [NOTE.path], 'The change the ticket asks for'), file: NOTE },
     authorRules: [
       // Ticket 1: the contract gains severity, validated by the owner; then each service, then the integration.
-      { when: of(1, 'the contract step'), service: 'filter-api', files: [{ path: 'contract/openapi.yaml', replace: [ACCEPTED, `${ACCEPTED}\n                    severity: none`] }, { path: 'contract/openapi.yaml', replace: [REFUSED, `${REFUSED}\n                    severity: review`] }], steps: planned('t1-contract', ['contract/openapi.yaml'], 'POST /check answers a severity') },
+      { when: of(1, 'the contract step'), service: 'filter-api', files: [{ path: 'contract/openapi.yaml', replace: [ACCEPTED, `${ACCEPTED}\n                    severity: none`] }, { path: 'contract/openapi.yaml', replace: [REFUSED, `${REFUSED}\n                    severity: review`] }], steps: planned('t1-contract', ['contract/openapi.yaml'], 'The check answers a severity') },
       { when: of(1, 'the step of filter-api'), service: 'filter-api', files: [NOTE], steps: planned('t1-filter', [NOTE.path], 'The filter answers the severity') },
       { when: of(1, 'the step of guestbook'), service: 'guestbook', files: [NOTE], steps: planned('t1-guestbook', [NOTE.path], 'A flagged entry is held for review') },
       { when: of(1, 'the integration step'), service: 'guestbook', files: [], steps: planned('t1-integration', [], 'The end-to-end test across both services') },
@@ -192,7 +192,7 @@ export function multiScript(): RehearsalScript {
       { when: of(2, 'the integration step'), service: 'guestbook', files: [], steps: planned('t2-integration', [], 'The end-to-end test across both services') },
       // Ticket 3: the filter API alone changes the contract the guestbook consumes.
       // A ticket of one service has one step and the author's prompt alone (flow/engine.ts start).
-      { when: of(3, ''), service: 'filter-api', files: [{ path: 'contract/openapi.yaml', replace: [ACCEPTED, `${ACCEPTED}\n                    positions: {}`] }, NOTE], steps: planned('t3-filter', ['contract/openapi.yaml', NOTE.path], 'POST /check answers the positions', { work: [T3_QUESTION] }) },
+      { when: of(3, ''), service: 'filter-api', files: [{ path: 'contract/openapi.yaml', replace: [ACCEPTED, `${ACCEPTED}\n                    positions: {}`] }, NOTE], steps: planned('t3-filter', ['contract/openapi.yaml', NOTE.path], 'The check answers the positions', { work: [T3_QUESTION] }) },
       // Ticket 4: works until the owner takes it over.
       { when: of(4, ''), service: 'guestbook', files: [{ path: 'src/page.ts', replace: ['export', '// The count of entries above the list (rehearsal).\nexport'] }], steps: planned('t4-guestbook', ['src/page.ts'], 'The count above the list', { hold: true }) },
     ],

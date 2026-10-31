@@ -48,6 +48,8 @@ test('the measured steps and the custom names are the plan\'s', () => {
     'cleared.production_checked',
     // Milestone 5: a session waits for its service's prepared image (C15, issue #422).
     'cleared.prepared_image',
+    // Issue #501: the step of its plan the author says it has reached.
+    'cleared.plan_step',
     // Milestone 6: the session's container recreated after it stopped (issue #453).
     'cleared.container_recreated',
   ]);
@@ -101,8 +103,9 @@ test('the events of lane 17 and lane 31 carry what their readers need, and never
     { type: 'CUSTOM', name: 'cleared.terminal_input', value: { by: 'u1', line: 'git status' } },
     { type: 'CUSTOM', name: 'cleared.terminal_closed', value: { by: 'u1', reason: 'give_back', outputBytes: 2048 } },
     { type: 'CUSTOM', name: 'cleared.human_edit', value: { by: 'u1', path: 'src/page.ts', added: 1, removed: 1, before: 'a'.repeat(64), after: 'b'.repeat(64), via: 'editor' } },
+    { type: 'CUSTOM', name: 'cleared.plan_step', value: { step: 2, total: 5 } },
   ];
-  assert.equal(events.length, 6);
+  assert.equal(events.length, 7);
   const edit = events[5] as Extract<AgUiEvent, { name: 'cleared.human_edit' }>;
   assert.deepEqual(Object.keys(edit.value).sort(), ['added', 'after', 'before', 'by', 'path', 'removed', 'via'], 'a human edit is journaled without its content');
   const closed = events[4] as Extract<AgUiEvent, { name: 'cleared.terminal_closed' }>;
