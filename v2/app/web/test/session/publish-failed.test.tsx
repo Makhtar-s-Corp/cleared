@@ -40,7 +40,7 @@ const view = (events: readonly { minutes: number; event: Record<string, unknown>
 };
 
 test('the head says it in one sentence: the review passed and the publication failed, and the ticket is back in the queue', () => {
-  const failed = view([failure('token_denied')]);
+  const failed = view([failure('write_denied')]);
   assert.match(doingNow(failed, fr), /relecture a réussi.*publication a échoué/i);
   assert.match(doingNow({ ...failed, language: 'en' }, en), /review passed.*publication failed/i);
   const text = visibleText(html(<SessionHead view={failed} t={fr} />)).join(' ');
@@ -49,7 +49,7 @@ test('the head says it in one sentence: the review passed and the publication fa
 });
 
 test('the action: why, in human words, what to do, the reason as it came behind "Voir le détail"', () => {
-  const failed = view([failure('token_denied')]);
+  const failed = view([failure('write_denied')]);
   const action = pendingAction(failed, []);
   assert.equal(action?.kind, 'publish');
   const markup = html(<ActionCard action={action as never} view={failed} t={fr} />);
@@ -72,7 +72,7 @@ test('every cause has its own words in both languages, and an action', () => {
     }
   }
   const taken = view([failure('branch_taken')]);
-  const denied = view([failure('token_denied')]);
+  const denied = view([failure('write_denied')]);
   assert.notEqual(html(<ActionCard action={pendingAction(taken, []) as never} view={taken} t={fr} />), html(<ActionCard action={pendingAction(denied, []) as never} view={denied} t={fr} />));
 });
 
@@ -87,7 +87,7 @@ test('the action is a real gesture: the ticket starts again from here, and what 
 });
 
 test('the stages: the review is done, the publication is where it stopped, and nothing is in progress', () => {
-  const failed = view([failure('token_denied')]);
+  const failed = view([failure('write_denied')]);
   const stage = stageOf(failed, []);
   assert.deepEqual(stage?.stages.map((one) => [one.key, one.state]), [['prepare', 'done'], ['write', 'done'], ['review', 'done'], ['publish', 'failed'], ['ship', 'todo']]);
   assert.equal(stage?.current, 4);
@@ -105,18 +105,18 @@ test('any session ended on a ticket back in Todo: no stage stays in progress', (
 });
 
 test('an old failure is not said once the ticket moved on: it runs again, or a later session started', () => {
-  assert.equal(publishFailureOf(view([failure('token_denied')], { ticket: ticket({ status: 'In Progress' }) })), null);
-  assert.equal(pendingAction(view([failure('token_denied')], { ticket: ticket({ status: 'In Progress' }) }), []), null);
-  const earlier = { summary: summary(), thread: threadOfEvents('s-reviewer', [failure('token_denied', 3)]) };
+  assert.equal(publishFailureOf(view([failure('write_denied')], { ticket: ticket({ status: 'In Progress' }) })), null);
+  assert.equal(pendingAction(view([failure('write_denied')], { ticket: ticket({ status: 'In Progress' }) }), []), null);
+  const earlier = { summary: summary(), thread: threadOfEvents('s-reviewer', [failure('write_denied', 3)]) };
   const later = { summary: summary({ id: 's-author-2', role: 'author', startedAt: at(1), phase: 'failed' }), thread: threadOfEvents('s-author-2', []) };
   assert.equal(publishFailureOf(view([], { parts: [earlier, later] })), null);
 });
 
 test('the author\'s session of the same ticket says it too', () => {
-  const reviewerPart = { summary: summary(), thread: threadOfEvents('s-reviewer', [failure('token_denied')]) };
+  const reviewerPart = { summary: summary(), thread: threadOfEvents('s-reviewer', [failure('write_denied')]) };
   const own = summary({ id: 's-author', role: 'author', startedAt: at(30) });
   const thread = threadOfEvents('s-author', []);
   const author = view([], { summary: own, thread, parts: [{ summary: own, thread }, reviewerPart] });
-  assert.equal(publishFailureOf(author)?.code, 'token_denied');
+  assert.equal(publishFailureOf(author)?.code, 'write_denied');
   assert.equal(pendingAction(author, [])?.kind, 'publish');
 });

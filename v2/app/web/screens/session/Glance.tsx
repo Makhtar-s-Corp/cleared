@@ -131,13 +131,13 @@ export function ActionCard({ action, view, t, plan, giveback, onAnswer, onQuesti
       case 'publish': {
         const { code, detail, service } = action.failure;
         // What the token may do comes first when it is the cause: then the ticket can run again.
-        const token = code === 'token_denied' || code === 'pull_request';
+        const token = code === 'write_denied' || code === 'pull_request';
         return (
           <div data-publish-failure={code}>
             <p className="s-action-title">{t(`glance_publish_${code}_title`)}</p>
             <p className="s-action-why">{t(`glance_publish_${code}_todo`)}</p>
             <div className="s-action-buttons">
-              {token ? <Button asChild variant="ink" className="btn primary"><a href="/setup/forge" data-act="publish_token">{t('glance_publish_open_token')}</a></Button> : null}
+              {token ? <Button asChild variant="ink" className="btn primary"><a href="/setup/forge" data-act="publish_token">{t('glance_publish_open_forge')}</a></Button> : null}
               <Button variant={token ? 'outline' : 'ink'} className={token ? 'btn' : 'btn primary'} data-act="publish_restart" disabled={restarting} onClick={onRestart}>{t(restarting ? 'glance_publish_restarting' : 'glance_publish_restart')}</Button>
             </div>
             {restartNote ? <p className="s-action-why" role="alert">{restartNote}</p> : null}

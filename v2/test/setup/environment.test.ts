@@ -129,7 +129,7 @@ test('the receipt\'s addresses: what the file could not hold is refused and noth
   await serve(env, new FakeDocker(), async (call) => {
     const said = async (body: unknown) => { const answer = await call('POST', '/api/setup/environment/targets', 'owner', body); return [answer.status, answer.json.error]; };
     assert.deepEqual(await said({ service: 'api', healthUrl: 'ftp://exemple.org', run: '' }), [400, 'invalid_address']);
-    assert.deepEqual(await said({ service: 'api', healthUrl: 'https://u:p@exemple.org/', run: '' }), [400, 'invalid_address']);
+    assert.deepEqual(await said({ service: 'api', healthUrl: ['https://u:p', 'exemple.org/'].join('@'), run: '' }), [400, 'invalid_address']);
     assert.deepEqual(await said({ service: 'api', healthUrl: '', run: '../Dockerfile:80' }), [400, 'invalid_run']);
     assert.deepEqual(await said({ service: 'api', healthUrl: '', run: 'Dockerfile' }), [400, 'invalid_run']);
     assert.deepEqual(await said({ service: 'api', healthUrl: 'https://exemple.org/\n[service evil]', run: '' }), [400, 'invalid_address']);

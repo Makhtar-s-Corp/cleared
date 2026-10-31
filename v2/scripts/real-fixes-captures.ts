@@ -195,11 +195,11 @@ const DETECTED = { healthUrl: 'http://127.0.0.1:9811/health', run: 'Dockerfile:3
 const SCENES: readonly Scene[] = [
   { name: 'token-step', path: '/setup/forge', routes: (page) => tokenRoutes(page, { contents: 'refused', pullRequests: 'refused' }), act: pasteToken },
   { name: 'health-run-step', path: '/setup/environment', routes: (page) => environmentRoutes(page, { healthUrl: null, run: null, detected: DETECTED }) },
-  { name: 'session-publish-failed', path: `/sessions/${REVIEWER}`, routes: (page) => sessionRoutes(page, { code: 'token_denied', detail: REFUSED }) },
+  { name: 'session-publish-failed', path: `/sessions/${REVIEWER}`, routes: (page) => sessionRoutes(page, { code: 'write_denied', detail: REFUSED }) },
   { name: 'quota-unavailable', path: '/consumption', routes: (page) => consumptionRoutes(page, []) },
   ...(process.env.REAL_FIXES_EXTRA ? [
     {
-      name: 'session-publish-restart', path: `/sessions/${REVIEWER}`, routes: (page: any) => sessionRoutes(page, { code: 'token_denied', detail: REFUSED }),
+      name: 'session-publish-restart', path: `/sessions/${REVIEWER}`, routes: (page: any) => sessionRoutes(page, { code: 'write_denied', detail: REFUSED }),
       check: async (page: any) => same('restart', await asked(page, `**/api/service/tickets/${TICKET}/move`, '[data-act="publish_restart"]', ticket), { status: 'Todo' }),
     },
     {
