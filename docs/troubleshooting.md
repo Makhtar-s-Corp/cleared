@@ -182,7 +182,7 @@ The rights a fine-grained token needs are listed on the Forge step: Metadata, Co
 
 ### `repository`: each connected repository
 
-For each repository of the workspace, the doctor asks GitHub whether the token reaches it and may push there.
+For each repository of the workspace, the doctor asks GitHub whether the token reaches it and may push there. The account's rights do not settle it, since an administrator's fine-grained token may still have no write access, so the doctor also asks about the token itself: it sends GitHub a branch at a commit that does not exist and a pull request with no branch. GitHub can only refuse both, and the way it refuses says what the token may do. Nothing is written on the repository.
 
 - **failed:** {repo} is not reached: the token does not see it (404).
 - **What to do:** Add {repo} to the token's repositories on GitHub, or fix repo in the workspace file.
@@ -196,7 +196,12 @@ For each repository of the workspace, the doctor asks GitHub whether the token r
 - **failed:** GitHub did not answer about {repo} within {limit}.
 - **What to do:** Run the doctor again; check that this machine reaches {api}.
 
+- **failed:** {repo} is reached, but the token may not write there: Cleared pushes branches and opens pull requests there.
+- **What to do:** Give the token itself Contents, Pull requests or both, read and write, on {repo}. If an organisation owns it, it must approve the token too.
+
 - **note:** {repo} is reached; GitHub did not say what the token may do there.
+
+- **note:** {repo} is reached; GitHub did not answer what the token may write there.
 
 A fine-grained token's repositories are changed on GitHub, on the token's own page; the token's value stays the same, so nothing is saved again in Cleared. This check says "not run" until a workspace exists and the `forge` check passes.
 

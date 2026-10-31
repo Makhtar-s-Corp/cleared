@@ -18,5 +18,6 @@
 .setup-step p.setup-env-offer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
 
 /* What the receipt's captures need of a service (issue #505). */
-.setup-targets { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); max-width: none; }
+.setup-env-item .setup-targets { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); max-width: none; }
+.setup-env-item .setup-targets input { max-width: 420px; }
 .setup-targets .setup-env-need { margin-bottom: var(--space-2); }

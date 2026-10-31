@@ -149,6 +149,8 @@ The second forward is for the Browser tab's previews, which the browser loads fr
 
 The workspace the Repositories step writes is used at once, with no restart: the first ticket, the tickets and batches typed in the Tower, the lead with its plans, schedules and service map, the quota reading, the lessons proposed from handovers, the notifications, the tracker mirrors, `cleared run` and the workspace's record all start on it. The checks, the test secrets and the environment step read it at each use.
 
+The address and the trial a service's receipt captures need, confirmed on the environment step, are used from the next ticket on, with no restart either. The step proposes them from the repository (its `[release] health_url` and the first `EXPOSE` of its Dockerfile) and writes nothing until you confirm. The image holds Playwright's Chromium and its ffmpeg, so these captures need nothing else installed.
+
 A restart of the service is needed for:
 
 - A workspace changed once Cleared runs on one: a repository connected later from the Services screen, or one removed. The environment step says so for a new repository, and proposes no setup session for it until the restart.

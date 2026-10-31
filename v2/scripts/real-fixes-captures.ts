@@ -149,7 +149,7 @@ const SPEND = { sessions: 2, turns: 2, tokens: 35_500, workMs: 22 * 60_000, cost
 const LEVERS = { model: { current: 'claude-opus-5-5', choice: null, options: ['claude-opus-5-5', 'claude-haiku-5-5'], reviewer: 'claude-sonnet-5-5' }, maxLanes: { choice: null, options: [1, 2, 3] }, paused: false };
 const claude = (quotas: readonly unknown[]) => ({
   harness: 'claude-code', sessions: 2, tokens: 35_500, perDay: DAYS.map((day, index) => ({ day, tokens: index === 6 ? 35_500 : 0 })), quotas,
-  lastReading: { at: ago(35), source: 'claude-code /api/oauth/usage', ok: false, error: 'the endpoint refused the login (HTTP 403)' }, costUsd: 0.13, costTurns: { reported: 2, turns: 2 },
+  lastReading: { at: ago(35), source: 'claude-code /api/oauth/usage', ok: false, error: 'the endpoint refused the login (HTTP 403)', unavailable: true }, costUsd: 0.13, costTurns: { reported: 2, turns: 2 },
 });
 async function consumptionRoutes(page: any, quotas: readonly unknown[]) {
   const body = { at: new Date(NOW).toISOString(), timeZone: 'Europe/Paris', days: DAYS, harnesses: [claude(quotas)], levers: LEVERS, wins: [] };
