@@ -1,3 +1,4 @@
+import type { ReceiptTargets } from '../workspace/receipt-targets.ts';
 // The environment step's answer (docs/v2/milestone-5-plan.md, section 3.1:
 // each new module keeps its route types in its own types.ts), read by the
 // service's environment step and by the app's setup screen.
@@ -30,6 +31,8 @@ export type EnvironmentService = {
   // image did not build, or the check failed in it.
   readonly proposal: 'no_devcontainer' | 'build_failed' | 'check_failed' | null;
   readonly setupTicket: string | null;                          // the open setup session's ticket, when there is one
+  // What the receipt's captures need (issue #505): what the workspace says, and what the repository proposes.
+  readonly proof?: ReceiptTargets & { readonly detected: ReceiptTargets };
 };
 
 export type EnvironmentCheck = { readonly command: string; readonly passed: boolean; readonly at: string; readonly ms: number; readonly tail: string };

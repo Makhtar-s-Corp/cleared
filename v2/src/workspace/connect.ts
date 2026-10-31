@@ -184,7 +184,7 @@ async function folderCheckout(service: Planned, dir: string, env: NodeJS.Process
 }
 
 // Written beside its name and renamed into place, mode 600.
-function writeWhole(path: string, text: string): void {
+export function writeWhole(path: string, text: string): void {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const part = `${path}.part`;
   rmSync(part, { force: true });

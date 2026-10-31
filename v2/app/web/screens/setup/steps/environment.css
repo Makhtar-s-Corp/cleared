@@ -16,3 +16,7 @@
 .setup-step .setup-env-output { margin: var(--space-2) 0; padding: var(--space-2) 12px; max-height: 16em; overflow: auto; background: var(--sunken); border-radius: var(--radius); font-family: var(--mono); font-size: var(--text-sm); white-space: pre-wrap; overflow-wrap: anywhere; }
 .setup-env-output:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
 .setup-step p.setup-env-offer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2) var(--space-3); }
+
+/* What the receipt's captures need of a service (issue #505). */
+.setup-targets { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); max-width: none; }
+.setup-targets .setup-env-need { margin-bottom: var(--space-2); }

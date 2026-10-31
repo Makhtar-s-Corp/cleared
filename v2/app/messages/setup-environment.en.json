@@ -45,5 +45,22 @@
   "environment_detail_check_ok": "Passed in {took}.",
   "environment_detail_error": "What the build said",
   "environment_detail_base": "Built on",
-  "environment_detail_proposal": "If the tests need more than the session image, a setup session writes its .devcontainer."
+  "environment_detail_proposal": "If the tests need more than the session image, a setup session writes its .devcontainer.",
+  "environment_targets_proposed": "Cleared found these settings in the repository for the receipt's captures: confirm or correct them.",
+  "environment_targets_missing": "Without these settings, this service's receipt stays without captures: give them if it has a screen.",
+  "environment_targets_both": "This service's receipt will carry a capture before and a capture after.",
+  "environment_targets_before": "This service's receipt will carry a capture before, but no capture after.",
+  "environment_targets_after": "This service's receipt will carry a capture after, but no capture before.",
+  "environment_targets_none": "This service's receipt stays without captures.",
+  "environment_targets_url": "Address that answers when the service runs",
+  "environment_targets_url_hint": "For example https://example.org/health. The capture before opens its root, from this machine.",
+  "environment_targets_run": "File that runs the service, and its port",
+  "environment_targets_run_hint": "For example Dockerfile:3000. The capture after opens the ticket's trial on this port.",
+  "environment_targets_confirm": "Confirm",
+  "environment_targets_save": "Save",
+  "environment_targets_saving": "Saving",
+  "environment_targets_change": "Change",
+  "environment_error_invalid_address": "Give an http or https address, with no name or password.",
+  "environment_error_invalid_run": "Give the file and the port in this form: Dockerfile:3000.",
+  "environment_error_environment": "The repositories come from Cleared's settings: change them there."
 }

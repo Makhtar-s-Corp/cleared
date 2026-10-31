@@ -123,6 +123,7 @@ import { skillPath } from '../knowledge/skill.ts';
 import { DEFAULT_SAFE_COMMANDS, learnedPatterns, type Policy } from '../session/policy.ts';
 import type { Store } from '../store/db.ts';
 import type { Actor, Ticket, TicketId } from '../tickets/contract.ts';
+import { recordWorkspace } from '../tickets/local-store.ts';
 import { BranchNames, freeBranch, isTicketBranch } from './branch-names.ts';
 import { publishFailureCode, publishHint, type PublishFailureCode } from './publish-failure.ts';
 import { replayBranch, ticketBranch } from '../workspace/checkout.ts';
@@ -1074,6 +1075,19 @@ export class FlowEngine {
   #lastSession(ticket: TicketId, role: Role): { id: SessionId; ticket: string; project: string } | undefined {
     const row = this.#flowRows(ticket).filter((r) => r.role === role).at(-1);
     return row ? { id: row.id, ticket: row.ticket, project: row.project } : undefined;
+  }
+
+  // What the receipt's captures need of a service, confirmed on the assistant's
+  // environment step (issue #505): the effects and the plans of the siblings read
+  // these same objects each time they need them, so the next ticket has them with
+  // no restart, and the registry's row says the same.
+  applyServiceTargets(name: string, targets: Pick<ServiceConfig, 'healthUrl' | 'run'>): void {
+    const service = this.#workspace.services.find((one) => one.name === name);
+    if (!service) return;
+    Object.assign(service, targets);
+    // The row is what the configuration says; a ledger with no such table has none to keep in step.
+    try { recordWorkspace(this.#store.db, this.#workspace, this.#at()); }
+    catch (error) { console.error(`cleared-v2: the service row of ${name} was not updated (${error instanceof Error ? error.name : typeof error})`); }
   }
 
   // ---- starting a ticket --------------------------------------------------
