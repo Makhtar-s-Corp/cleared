@@ -682,7 +682,7 @@ The owner decided that "pull request" is kept everywhere in the interface, in Fr
 This delivers questions 1 and 3 of the entry on the session screen above, each as its option (b).
 
 **The tool.**
-- **An MCP host tool, not a command of the harness.** `report_plan_step` is a third entry of `AUTHOR_TOOLS`, next to `propose_session_plan` and `report_changes`. That path already runs from the model to the service, journals, and is allowed by the policy without a request. A command in the container would need a way back to the service, which a session must not have.
+- **An MCP host tool, not a command of the harness.** `report_plan_step` is a third entry of `AUTHOR_TOOLS`, next to `propose_session_plan` and `report_changes`. That path already runs from the model to the service, journals, and is allowed by the policy without a request. A command in the container would need a new way back to the service.
 - **A number, not the step's words.** A step's words may be folded on the screen, and a number cannot be misread. The service reads the plan from the journal, as the screen does, so the check does not depend on the gate's memory.
 - **Refused, and nothing kept:** a report before the Go, by an author with no plan, or with a number the plan does not hold. The agent reads why and carries on.
 - **The event** is `cleared.plan_step`, `{ step, total }`. The call is no row of the thread, so the sentence at the top still says what the agent does.
@@ -697,7 +697,7 @@ This delivers questions 1 and 3 of the entry on the session screen above, each a
 
 **Limits, to be read by the owner.**
 - **No real session ran.** Everything is proven on the fake harness, the app's fixtures and made-up answers. Whether a real agent calls the tool at each step is only asked for in its prompt, not enforced, and has not been observed.
-- **Codex and Cursor** have no host tools, so they ask for no plan and report nothing: the stage out of five.
+- **Codex and Cursor** are given no host tools, so they are asked for no plan and report nothing: the stage out of five.
 - **A repair reopened after failed checks** does not reset the step, unlike a reviewer's request: the last step reported stays until the next one.
 - **The check is a list and a shape.** It misses a command it does not know and a two-part path such as `foo/bar`, whose first part is not a known folder. `kubectl` is not in the list because `test/flow/never-deploys.test.ts` refuses that word in the service's code, and that guard was left as it is.
 
