@@ -639,7 +639,7 @@ Each ticket went back to Todo after its publish with "The release could not be r
 **The author's choices, to be read by the owner.**
 - **Stages rather than plan steps,** question 1 below. The stage is the ticket's, out of five: Préparation, Écriture du code, Relecture automatique, Votre décision, Mise en production.
 - **The agent's description of a command is not used in the sentence,** although it is written in the interface's language since #496. An older session or a disobedient agent would put English or a path at the top of the screen. It stays in the fold.
-- **The cost is read from the ledger for an open ticket too,** once a minute while the view is shown, since it reads every event of the ticket. It counts finished turns only; before the first, the sentence is the tokens the session's state reports, and with none the line is not drawn.
+- **The cost is read from the ledger for an open ticket too,** once a minute while the view is shown, since it reads every event of the ticket. It counts finished turns only; before the first, it says the tokens the session's state reports, and with none the line is not drawn.
 - **The thread has no scroll area of its own any more.** sloplint's render tier failed the rows it clipped, and a long thread now makes a long page once the fold is open, with the ticket's number as a link to its text below it. The code that kept the thread at its end is gone.
 - **The top bar says the ticket's number alone,** since the title is now the screen's heading. The window's title keeps both.
 - **The ticket has no page of its own in the app,** so its link opens the fold at its text.
