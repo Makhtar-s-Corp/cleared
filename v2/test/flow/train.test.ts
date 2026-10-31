@@ -461,3 +461,28 @@ test('a landed train: the production page of each service that configures one is
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// Issues #508 and #510: a ticket in steps over linked services names its checkouts through the step's own path.
+test('a ticket in steps over linked services works, is reviewed and publishes under one free name', async () => {
+  const prepared: string[] = [];
+  const published: string[] = [];
+  const { ticket } = await train({
+    extra: {
+      async remoteBranches() { return { names: ['cleared/LOCAL-2'], checkout: null }; },
+      async prepareWorkdir({ ticket: asked, role, service, branch }) {
+        prepared.push(`${role}:${service?.name}:${branch}`);
+        return { workdir: `/work/${asked.id}/${service?.name}`, briefing: { projectPage: '', decisions: [], glossary: [], lessons: [], lastHandover: null } };
+      },
+      async publish(input) {
+        const name = input.service?.name ?? 'guestbook';
+        published.push(`${name}:${input.branch}`);
+        return { url: `https://example.invalid/${name}/pull/7`, number: 7, head: HEAD[name] as string, created: true };
+      },
+    },
+  });
+  assert.equal(ticket.id, 'LOCAL-2');
+  assert.ok(prepared.filter((one) => one.startsWith('author:')).length >= 2, `a step's author each: ${prepared.join(', ')}`);
+  assert.ok(prepared.every((one) => one.endsWith(':cleared/LOCAL-2.2')), prepared.join(', '));
+  assert.deepEqual([...published].sort(), ['filter-api:cleared/LOCAL-2.2', 'guestbook:cleared/LOCAL-2.2']);
+});
+

@@ -1341,7 +1341,7 @@ export class FlowEngine {
     const began = this.#now();
     const scoped = this.#several ? service : undefined;
     const settings = await this.#effects.settings(scoped);
-    const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author', ...(scoped ? { service: scoped } : { branch: this.#branchOf(id) }) });
+    const prepared = await this.#effects.prepareWorkdir({ ticket, role: 'author', ...(scoped ? { service: scoped } : {}), branch: this.#branchOf(id) });
     const workdirs = this.#workdirs.get(id) ?? new Map<string, string>();
     this.#workdirs.set(id, workdirs);
     workdirs.set(service.name, prepared.workdir);

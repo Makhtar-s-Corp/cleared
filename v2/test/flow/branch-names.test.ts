@@ -14,6 +14,7 @@ import { realEffects } from '../../src/flow/effects.ts';
 import type { FlowEffects } from '../../src/flow/engine.ts';
 import { publish } from '../../src/workspace/publish.ts';
 import { commit, gitIn, remote, tempDir } from '../workspace/git.ts';
+import { stepped } from './steps-harness.ts';
 import { CONFIG, REPORT_FIX, REPORT_PASS, quickAuthor, reopenScript, reviewerScript, setup, until } from './support.ts';
 
 test('the first free name: the ticket\'s own, else a number after a dot, past a folder of the same name', () => {
@@ -193,4 +194,22 @@ test('published under the free name, the other install\'s branch stays where it 
   await publish({ project: dir, workdir, base: 'main', branch: 'cleared/LOCAL-1.2', repo: 'example-org/guestbook', ticket: 'LOCAL-1', gitEnv: env, ghEnv: env, forge: forge as never });
   assert.equal(gitIn(dir, ['ls-remote', 'origin', 'refs/heads/cleared/LOCAL-1']).split('\t')[0], other);
   assert.match(gitIn(dir, ['ls-remote', 'origin', 'refs/heads/cleared/LOCAL-1.2']), /cleared\/LOCAL-1\.2/);
+});
+
+test('a ticket in steps: each step\'s author works under the ticket\'s free name, from the first step on', async () => {
+  const prepared: string[] = [];
+  const { t, ticket, contract } = await stepped({
+    effects: {
+      async remoteBranches() { return { names: ['cleared/LOCAL-2'], checkout: null }; },
+      async prepareWorkdir({ ticket: asked, role, service, branch }) {
+        prepared.push(`${role}:${service?.name}:${branch}`);
+        return { workdir: `/work/${asked.id}/${service?.name}`, briefing: { projectPage: '', decisions: [], glossary: [], lessons: [], lastHandover: null } };
+      },
+    },
+  });
+  assert.equal(ticket.id, 'LOCAL-2');
+  await t.engine.start(ticket.id, 'u1');
+  await until(() => contract() !== undefined, 'the contract item', 5000);
+  await t.engine.settled();
+  assert.deepEqual(prepared, ['author:filter-api:cleared/LOCAL-2.2']);
 });
