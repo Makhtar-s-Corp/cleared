@@ -12,7 +12,7 @@ import { applyAll, emptyModel, parseCriteria, threadOf, timeline, type SessionMo
 import type { SessionSummary } from '../../../../src/api/types.ts';
 import { modelOf, tool } from '../../../test/session/support.ts';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { Composer, SessionSummaryStrip } from '../../screens/session/Session.tsx';
+import { Composer } from '../../screens/session/Session.tsx';
 
 const sentinel: Translate = (key) => `«${key}»`;
 // The screen's catalog over the shell's, as the shell gives it (lib/catalogs.ts): the intent's words are the shell's.
@@ -36,9 +36,9 @@ test('the English screen reads as the capture, in milestone 1\'s words', () => {
   const text = visibleText(renderSession(viewOf(), en)).join('\n');
   for (const expected of [
     TICKET_TITLE, 'LOCAL-161', 'Done when', 'Entries grouped by week, Monday first', 'Same totals as today, a test proves it', 'Plan of the session',
-    'Paused, waiting for you', '18\u00a0min · 35,500 tokens',
+    'Paused, waiting for you', '18\u00a0min', '35,500 tokens', 'The agent is waiting for your agreement to go on.',
     'Read', 'src/screens/Upcoming.jsx', 'and 2 more files', 'Edit', 'src/engine/upcoming.mjs', '+24', '−6', 'Run the project\'s tests', 'npm run test:upcoming', '18 passed', QUESTION_TEXT, ANSWER_TEXT,
-    'Allow the author to install date-fns?', 'The command adds a dependency to the project.', 'Command', 'npm install date-fns', 'Allow once', 'Always in this project', 'Deny',
+    'Allow the author to install date-fns?', 'The command adds a dependency to the project.', 'Show details', 'npm install date-fns', 'Allow once', 'Always in this project', 'Deny',
     'Changes', 'Checks', 'Targeted tests', 'Full suite', 'Hand over to Codex', 'Interrupt', 'Send',
   ]) assert.ok(text.includes(expected), `missing: ${expected}`);
 });
@@ -46,21 +46,20 @@ test('the English screen reads as the capture, in milestone 1\'s words', () => {
 test('the request has its three buttons, and nothing else on the page answers it', () => {
   const html = renderSession(viewOf(), en);
   assert.deepEqual([...html.matchAll(/data-answer="([a-z_]+)"/g)].map((m) => m[1]), ['allow_once', 'allow_always', 'reject_once']);
-  assert.equal(count(html, /data-row="/g), 9, 'nine rows: the read group, the plan and its Go, two edits, the run, the two messages, the install');
+  assert.equal(count(html, /data-row="/g), 10, 'the request at the top, then nine rows: the read group, the plan and its Go, two edits, the run, the two messages, the install that waits');
+  assert.equal(count(html, /data-row="waits"/g), 1, 'the thread says it waits; it does not answer');
   assert.equal(count(html, /data-row="read"/g), 1);
   assert.equal(count(html, /data-row="edit"/g), 2);
   assert.equal(count(html, /data-row="request"/g), 1);
 });
 
-test('the composer has Send and Interrupt; the hand over is offered on a live author, and off, with its reason, on a reviewer (B6.3)', () => {
+test('the composer has Send and Interrupt; the hand over is offered on a live author, and not drawn on a reviewer (B6.3)', () => {
   const html = renderSession(viewOf(), en);
   assert.match(html, /<button[^>]*id="send"[^>]*type="submit"|<button[^>]*type="submit"[^>]*id="send"/);
   assert.match(html, /<button[^>]*id="interrupt"/);
   assert.match(html, /<button[^>]*id="handover"[^>]*data-to="codex"/);
-  assert.doesNotMatch(html, /<button[^>]*id="handover"[^>]*aria-disabled/);
   const reviewer = renderSession(viewOf({ summary: { ...(viewOf().summary), role: 'reviewer' } }), en);
-  assert.match(reviewer, /<button[^>]*id="handover"[^>]*aria-disabled="true"/);
-  assert.ok(visibleText(reviewer).includes('Only a live author\'s session is handed over, when nobody has taken it over.'));
+  assert.doesNotMatch(reviewer, /id="handover"/);
   assert.match(html, /placeholder="Message the author…"/);
 });
 
@@ -176,10 +175,11 @@ test('Author and Reviewer filter the ticket\'s thread, never links to another pa
   const both = renderSession({ ...view, siblings: [view.summary, reviewer] }, en);
   assert.doesNotMatch(both, /<a[^>]*href="\/sessions\//, 'no link to a session');
   const pressed = [...both.matchAll(/<button[^>]*data-filter="([a-z]+)"[^>]*aria-pressed="(true|false)"[^>]*>([^<]*)</g)].map((m) => [m[1], m[2], m[3]]);
-  assert.deepEqual(pressed, [['all', 'true', 'Whole ticket'], ['author', 'false', 'Author · Opus'], ['reviewer', 'false', 'Reviewer · Sonnet']]);
+  assert.deepEqual(pressed, [['all', 'true', 'Whole ticket'], ['author', 'false', 'Author (Opus)'], ['reviewer', 'false', 'Reviewer (Sonnet)']]);
   const filtered = renderSession({ ...view, siblings: [view.summary, reviewer], filter: 'reviewer' }, en);
   assert.match(filtered, /data-filter="reviewer" aria-pressed="true"/);
-  assert.equal(count(filtered, /data-row="/g), 0, 'the reviewer has no row yet: the author\'s are filtered out');
+  assert.equal(count(filtered, /data-row="/g), 1, 'the reviewer has no row yet, the author\'s are filtered out: the request at the top alone');
+  assert.equal(count(filtered, /data-row="request"/g), 1);
   const asReviewer = renderSession({ ...view, summary: reviewer, siblings: [view.summary, reviewer] }, en);
   assert.match(asReviewer, /placeholder="Message the reviewer…"/);
   assert.doesNotMatch(renderSession(view, en), /data-filter=/, 'one session: nothing to filter yet');
@@ -237,9 +237,9 @@ test('an ended session shows its duration up to its last event, not the stale su
 // Lane 37: the thread's request says what the inbox says, from lib/request.ts.
 test('a waiting request asks its question with who asks, says why in the person\'s words, and folds its command, kept whole in data-command', () => {
   const html = renderSession(viewOf(), en);
-  assert.match(html, /<p class="request-title">Allow the author to install date-fns\?<\/p>/);
+  assert.match(html, /<p class="s-action-title">Allow the author to install date-fns\?<\/p>/);
   assert.match(html, /data-command="npm install date-fns"/);
-  assert.match(html, /<details class="request-fold"><summary>/, 'a plain install stays folded');
+  assert.match(html, /<details class="s-action-fold"><summary>/, 'a plain install stays folded');
   const fr = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
   assert.ok(visibleText(renderSession(viewOf(), fr)).includes('Autoriser l\'auteur à installer date-fns ?'));
 });
@@ -293,11 +293,3 @@ test('a container lost then recreated reads in English and in French, from the c
   ]) assert.ok(french.some((line) => line.includes(expected)), `manque : ${expected}`);
 });
 
-// The owner's request of 2026-10-30: what it does, what it waits for from me, where it is.
-test('the summary says what the session does, what it waits for and where it is, and the answer is one click away', () => {
-  const html = renderToStaticMarkup(<SessionSummaryStrip view={viewOf()} t={en} onAnswer={() => undefined} />);
-  assert.match(html, /data-session-summary=""[^>]*data-wants="answer"/);
-  assert.match(html, /data-act="summary_answer"/);
-  const text = visibleText(html);
-  for (const word of ['What it does', 'What it needs from you', 'Where it is', TICKET_TITLE, 'Your answer to a request']) assert.ok(text.includes(word), `missing: ${word}`);
-});

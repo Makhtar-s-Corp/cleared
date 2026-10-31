@@ -45,7 +45,7 @@ test('from 1280 px a waiting request\'s row carries its three answers, in French
 
 test('the row says the request\'s intent in French, and the group of what no longer waits is "Traité" with its count', () => {
   const shown = visibleText(renderInbox(viewOf(), fr));
-  for (const expected of ['En attente · 5', 'Lire l\'historique et le diff du dépôt puis lancer les tests du projet', 'LOCAL-158 · relecteur en pause', 'Installer date-fns', 'Traité · 3'])
+  for (const expected of ['En attente · 5', 'Lire l\'historique et les changements du dépôt puis lancer les tests du projet', 'LOCAL-158 · relecteur en pause', 'Installer date-fns', 'Traité · 3'])
     assert.ok(shown.includes(expected), `missing: ${expected}`);
   const open = visibleText(renderInbox(viewOf(), fr, { handledOpen: true }));
   for (const expected of ['Lancer le script db:migrate', 'LOCAL-160 · ne vous attend plus']) assert.ok(open.includes(expected), `missing: ${expected}`);
@@ -56,7 +56,7 @@ test('the compound request\'s detail: the question, the ticket, the three answer
   const shown = visibleText(html);
   for (const expected of [
     'Autorisation', 'LOCAL-158', 'Ouvrir la session',
-    'Autoriser le relecteur à lire l\'historique et le diff du dépôt puis à lancer les tests du projet\u202f?',
+    'Autoriser le relecteur à lire l\'historique et les changements du dépôt puis à lancer les tests du projet\u202f?',
     '“Comings and goings” replaces “Departures and arrivals”',
     'Autoriser une fois', 'Toujours pour ce projet', 'Refuser', 'Motif du refus (facultatif)',
     'Pourquoi la question', '«\u00a0git merge-base\u00a0» n\'est pas une commande que la politique autorise seule.',

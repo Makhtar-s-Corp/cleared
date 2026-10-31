@@ -10,7 +10,7 @@ import { FIXTURE_NOW } from '../../../fixtures/tower.ts';
 import { loadCatalog } from '../../../src/catalog.ts';
 import { translator } from '../../lib/i18n.ts';
 import { applyAll, emptyModel, threadOf, type SessionView } from '../../screens/session/model.ts';
-import { Composer } from '../../screens/session/Session.tsx';
+import { HandoverButton } from '../../screens/session/Session.tsx';
 import { visibleText } from '../render.tsx';
 
 const en = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
@@ -24,7 +24,7 @@ function composer(summary: Partial<SessionSummary>, t = en, props: { handing?: b
     summary: { ...(fixture.sessions[0] as SessionSummary), ...summary }, thread: threadOf(model), ticket: fixture.ticket, siblings: fixture.sessions,
     me: USER, language: 'en', now: FIXTURE_NOW, ...(props.takenOver !== undefined ? { takenOver: props.takenOver } : {}),
   };
-  return renderToStaticMarkup(<Composer view={view} t={t} handing={props.handing ?? false} />);
+  return renderToStaticMarkup(<HandoverButton view={view} t={t} handing={props.handing ?? false} />);
 }
 
 test('the button names the other harness, in English and in French, and carries its target', () => {
@@ -37,15 +37,10 @@ test('the button names the other harness, in English and in French, and carries 
   assert.ok(visibleText(composer({ harness: 'codex' }, fr)).includes('Confier à Claude Code'));
 });
 
-test('the button is off, with its reason, for Cursor, a reviewer and a session taken over (an ended one: app/test/session/handover.test.ts); it is disabled while the gesture runs', () => {
-  const reason = 'Only a live author\'s session is handed over, when nobody has taken it over.';
+test('the button is not drawn for Cursor, a reviewer and a session taken over (an ended one: app/test/session/handover.test.ts); it is disabled while the gesture runs', () => {
   for (const html of [
     composer({ harness: 'cursor' }), composer({ role: 'reviewer' }),
     composer({}, en, { takenOver: { by: USER, at: FIXTURE_NOW.toISOString() } }),
-  ]) {
-    assert.match(html, /<button[^>]*id="handover"[^>]*aria-disabled="true"/);
-    assert.doesNotMatch(html, /id="handover"[^>]*data-to/);
-    assert.ok(visibleText(html).includes(reason));
-  }
+  ]) assert.equal(html, '');
   assert.match(composer({ harness: 'claude-code' }, en, { handing: true }), /<button[^>]*id="handover"[^>]*disabled/);
 });

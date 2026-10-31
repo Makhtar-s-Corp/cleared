@@ -20,7 +20,8 @@ import { closedLine, type CloseReason, type TerminalStatus } from '../components
 import { closeFailureKey } from '../lib/close.ts';
 import { hasMark, translator, type Translate } from '../lib/i18n.ts';
 import { ConsumptionView } from '../screens/consumption/Consumption.tsx';
-import { Composer, SessionHeading } from '../screens/session/Session.tsx';
+import { Composer, HandoverButton } from '../screens/session/Session.tsx';
+import { SessionHead } from '../screens/session/Glance.tsx';
 import { OpenInEditor, TabStrip } from '../screens/session/Tabs.tsx';
 import { TABS } from '../screens/session/tabs.ts';
 import { applyAll, emptyModel, threadOf, type SessionView } from '../screens/session/model.ts';
@@ -87,7 +88,7 @@ function view(summary: Partial<SessionSummary>, extra: Partial<SessionView> = {}
 test('the composer says the hand-over to Codex and back, and why it is off, from the catalogs', () => {
   const cases: Partial<SessionSummary>[] = [{ harness: 'claude-code' }, { harness: 'codex' }, { harness: 'cursor' }, { role: 'reviewer' }];
   for (const summary of cases) {
-    both(`composer ${JSON.stringify(summary)}`, 'session', (t) => html(<><Composer view={view(summary)} t={t} /><Composer view={view(summary)} t={t} handing note={t('handover_failed')} /></>), ['Claude Code', 'Codex', 'Cursor']);
+    both(`composer ${JSON.stringify(summary)}`, 'session', (t) => html(<><Composer view={view(summary)} t={t} /><Composer view={view(summary)} t={t} note={t('handover_failed')} /><HandoverButton view={view(summary)} t={t} handing /></>), ['Claude Code', 'Codex', 'Cursor']);
   }
   both('composer taken over', 'session', (t) => html(<Composer view={view({ harness: 'claude-code' }, { takenOver: { by: USER, at: FIXTURE_NOW.toISOString() } as never })} t={t} />), ['Claude Code', 'Codex']);
 });
@@ -119,5 +120,5 @@ test('the Close says every refusal from the catalogs, in both languages', () => 
     for (const screen of ['session', 'inbox'] as const) both(`close refusal ${status}`, screen, (t) => t(closeFailureKey(status), { n: 2000 }));
   }
   both('close reasons', 'session', (t) => `${t('close_empty')} ${t('close_long', { n: 2000 })}`);
-  both('session heading', 'session', () => html(<SessionHeading view={view({})} />), ['LOCAL', 'Add', 'Guestbook']);
+  both('session head', 'session', (t) => html(<SessionHead view={view({})} t={t} />), ['LOCAL', 'Add', 'Guestbook', 'Upcoming group entries by week']);
 });

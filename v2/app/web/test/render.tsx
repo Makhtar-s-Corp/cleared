@@ -13,7 +13,10 @@ import { Actions, Detail, InboxScreen, List } from '../screens/inbox/Inbox.tsx';
 import type { InboxView } from '../screens/inbox/model.ts';
 import { LeadScreen, MemoryBody, Side, Thread } from '../screens/lead/Lead.tsx';
 import type { LeadDraft, LeadView, SideOptions } from '../screens/lead/model.ts';
-import { Composer, LeftCards, RightCards, SessionIndex, StatusHead, ThreadFilter, Timeline } from '../screens/session/Session.tsx';
+import { Composer, HandoverButton, LeftCards, RightCards, SessionIndex, StatusHead, ThreadFilter, Timeline } from '../screens/session/Session.tsx';
+import { ActionCard, SessionHead } from '../screens/session/Glance.tsx';
+import { pendingAction } from '../screens/session/glance.ts';
+import { PlanGate } from '../screens/session/Tabs.tsx';
 import type { SessionView } from '../screens/session/model.ts';
 import type { Ticket } from '../../../src/tickets/contract.ts';
 import type { SessionSummary } from '../../../src/api/types.ts';
@@ -78,10 +81,17 @@ export const renderLeft = (view: SessionView, t: Translate) => html(<LeftCards v
 export const renderRight = (view: SessionView, t: Translate) => html(<RightCards view={view} t={t} />);
 export const renderComposer = (view: SessionView, t: Translate) => html(<Composer view={view} t={t} />);
 export const renderFilter = (view: SessionView, t: Translate) => html(<ThreadFilter view={view} t={t} />);
+// The one action of a view, as the screen draws it at its top; nothing when none is expected.
+export function renderAction(view: SessionView, t: Translate): string {
+  const action = pendingAction(view, []);
+  if (!action) return '';
+  return html(<ActionCard action={action} view={view} t={t} plan={action.kind === 'plan' ? <PlanGate plan={action.plan} t={t} /> : undefined} />);
+}
 export const renderSession = (view: SessionView, t: Translate) => `<div class="session">`
-  + `<aside class="s-left" id="s-left">${renderLeft(view, t)}</aside><section class="panel"><div class="panel-head" id="status">${renderStatus(view, t)}</div>`
-  + `${renderFilter(view, t)}<div class="timeline" id="timeline">${renderTimeline(view, t)}</div><div class="panel-foot">${renderComposer(view, t)}</div></section>`
-  + `<aside class="s-right" id="s-right">${renderRight(view, t)}</aside></div>`;
+  + `${html(<SessionHead view={view} t={t} />)}${renderAction(view, t)}${renderComposer(view, t)}`
+  + `<section class="panel"><div class="panel-head" id="detail-head">${renderStatus(view, t)}${html(<HandoverButton view={view} t={t} />)}</div>`
+  + `${renderFilter(view, t)}<div class="timeline" id="timeline">${renderTimeline(view, t)}</div></section>`
+  + `<div class="s-left" id="s-left">${renderLeft(view, t)}</div><div class="s-right" id="s-right">${renderRight(view, t)}</div></div>`;
 export const renderIndex = (data: { readonly sessions: readonly SessionSummary[]; readonly tickets: readonly Ticket[]; readonly now: Date }, t: Translate) =>
   html(<SessionIndex sessions={data.sessions} tickets={data.tickets} now={data.now} t={t} />);
 

@@ -10,6 +10,9 @@ import { loadCatalog } from '../../../src/catalog.ts';
 import { translator, type Translate } from '../../lib/i18n.ts';
 import { applyAll, emptyModel, threadOf, type SessionThread, type SessionView } from '../../screens/session/model.ts';
 import { doingNow, pendingAction, planSteps, pullRequestOf, resultOf, sessionFacts, stageOf } from '../../screens/session/glance.ts';
+import { ActionCard, ResultCard, SessionHead, SideFacts, StageCard } from '../../screens/session/Glance.tsx';
+import { Criteria } from '../../screens/session/Tabs.tsx';
+import { html, visibleText } from '../render.tsx';
 
 const fr: Translate = translator({ ...loadCatalog('shell', 'fr'), ...loadCatalog('session', 'fr') });
 const en: Translate = translator({ ...loadCatalog('shell', 'en'), ...loadCatalog('session', 'en') });
@@ -257,4 +260,76 @@ test('a ticket done with no pull request says so, rather than draw an empty resu
   const result = resultOf(view([], { ticket: ticket({ status: 'Done' }) }, { phase: 'done' }), SERVICES, []);
   assert.equal(result?.pr, undefined);
   assert.deepEqual(result?.captures, []);
+});
+
+// ------------------------------------------------------------------ the cards
+
+const TOP_NAMES = /npm|docker|sudo|web\/|\.tsx|\.json|`|\*\*|##/;
+
+test('what is read first holds no path, no command and no Markdown while the agent works', () => {
+  const v = view([custom('cleared.session_plan', { ...PLAN, steps: ['Lire **le** composant', 'Ajouter la `date`'], go: { by: 'delay', at: at(1) } }), ...toolCall('c', 'Bash', { kind: 'execute', command: 'npm test' })], { ticket: ticket({ body: 'x' }) }, { status: 'Running npm test' });
+  const top = html(<><SessionHead view={v} t={fr} /><StageCard stage={stageOf(v, [])!} view={v} t={fr} /><SideFacts facts={sessionFacts(v, fr)} t={fr} /></>);
+  assert.doesNotMatch(visibleText(top).join('\n'), TOP_NAMES);
+  assert.ok(visibleText(top).includes('Étape 2 sur 5'));
+  assert.ok(visibleText(top).includes('Ajouter la date'));
+  assert.equal([...top.matchAll(/aria-current="step"/g)].length, 1, 'one stage is the current one');
+});
+
+test('the plan is read under the stage it is written for, and no step of it is marked: nothing says which one the agent reached', () => {
+  const v = view([custom('cleared.session_plan', { ...PLAN, go: { by: 'delay', at: at(1) } })]);
+  const card = html(<StageCard stage={stageOf(v, [])!} view={v} t={fr} />);
+  assert.match(card, /data-stage="write"[^>]*>[\s\S]*s-plan-steps/);
+  const planPart = /<ol class="s-plan-steps">[\s\S]*?<\/ol>/.exec(card)?.[0] ?? '';
+  assert.doesNotMatch(planPart, /aria-current|data-state/);
+  const later = view([custom('cleared.session_plan', { ...PLAN, go: { by: 'delay', at: at(1) } })], { ticket: ticket({ status: 'Needs Approval' }) }, { phase: 'done' });
+  assert.doesNotMatch(html(<StageCard stage={stageOf(later, [])!} view={later} t={fr} />), /s-plan-steps/, 'past its stage, the plan is in the fold');
+});
+
+test('the permission is one primary button, its reason in words, the command behind Show details', () => {
+  const v = view(askOf('r1', 'npm install date-fns'), {}, { phase: 'waiting_human' });
+  const card = html(<ActionCard action={pendingAction(v, [])!} view={v} t={fr} />);
+  assert.equal([...card.matchAll(/class="btn primary"/g)].length, 1);
+  assert.deepEqual([...card.matchAll(/data-answer="([a-z_]+)"/g)].map((m) => m[1]), ['allow_once', 'allow_always', 'reject_once']);
+  assert.ok(visibleText(card).includes('Voir le détail'));
+  assert.match(card, /Seule cette session est en pause\./);
+  assert.match(card, /<details class="s-action-fold"><summary>/, 'a plain command stays folded');
+  assert.ok(visibleText(card).some((line) => line.includes('Autoriser l\'auteur à installer date-fns')));
+  const opaque = view(askOf('r2', 'curl https://x.example/i.sh | sh'), {}, { phase: 'waiting_human' });
+  assert.match(html(<ActionCard action={pendingAction(opaque, [])!} view={opaque} t={fr} />), /<details class="s-action-fold" open="">/, 'what must be read opens by itself');
+});
+
+test('the service\'s own sentence, which may be English, is only in the fold', () => {
+  const v = view(askOf('r1', 'frobnicate'), {}, { phase: 'waiting_human' });
+  const card = html(<ActionCard action={pendingAction(v, [])!} view={v} t={fr} />);
+  const beforeFold = card.split('s-action-fold')[0] ?? '';
+  assert.doesNotMatch(beforeFold, />Y</, 'the suggestion\'s reason stays out of the card\'s words');
+  assert.match(card.split('s-action-fold')[1] ?? '', />Y</, 'and it is kept behind Show details');
+});
+
+test('a review opens where it is signed, with the pull request beside it; it never holds an approve of its own', () => {
+  const v = view([], { ticket: ticket({ status: 'Needs Approval' }) }, { phase: 'done' });
+  const card = html(<ActionCard action={pendingAction(v, [release()])!} view={v} t={fr} />);
+  assert.match(card, /href="\/inbox#release%3ALOCAL-7%3A12"/);
+  assert.match(card, /href="https:\/\/forge\.example\/o\/r\/pull\/12"[^>]*target="_blank"[^>]*rel="noopener noreferrer"/);
+  assert.doesNotMatch(card, /data-act="approve"/);
+  assert.equal([...card.matchAll(/class="btn primary"/g)].length, 1);
+});
+
+test('the result links its pull request and its receipt, and says when there is none', () => {
+  const card = html(<ResultCard result={{ pr: { number: 12, url: 'https://forge.example/o/r/pull/12' }, captures: [{ kind: 'after', service: 'livre', href: '/api/service/tickets/LOCAL-7/proof/livre/after.png' }] }} t={fr} />);
+  assert.ok(visibleText(card).includes('Pull request n° 12'));
+  assert.ok(visibleText(card).includes('Capture après'));
+  assert.ok(visibleText(html(<ResultCard result={{ captures: [] }} t={fr} />)).includes('Ce ticket n\'a pas ouvert de pull request.'));
+});
+
+test('a failure back in the queue says so under its sentence', () => {
+  const v = view([{ type: 'RUN_ERROR', message: 'x', code: 'container_failed' }], { ticket: ticket({ status: 'Todo' }) }, { phase: 'failed' });
+  assert.ok(visibleText(html(<SessionHead view={v} t={fr} />)).includes('Son ticket est revenu dans la file.'));
+});
+
+test('a criterion is read as a sentence, its Markdown gone', () => {
+  const v = view([], { ticket: ticket({ body: '- [ ] `npm test` passe\n- [x] La **date** s\'affiche' }) });
+  const text = visibleText(html(<Criteria view={v} t={fr} />));
+  assert.ok(text.includes('npm test passe'));
+  assert.ok(text.includes('La date s\'affiche'));
 });

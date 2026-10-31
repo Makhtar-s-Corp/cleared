@@ -100,14 +100,14 @@ function rowSaid(row: Row | undefined, who: string, t: Translate): string {
   }
 }
 
-const FAILURES: Readonly<Record<string, string>> = { container_failed: 'glance_failed_container', container_lost: 'glance_failed_lost' };
+const FAILURE_KEYS: Readonly<Record<string, string>> = { container_failed: 'glance_failed_container', container_lost: 'glance_failed_lost' };
 
 function endedSaid(view: SessionView, t: Translate): string {
   const phase = phaseOf(view);
   if (phase === 'failed') {
-    const code = view.thread.rows.findLast((row) => row.kind === 'error');
-    const key = code?.kind === 'error' && code.code !== undefined ? FAILURES[code.code] : undefined;
-    return t(key ?? 'glance_failed');
+    const last = view.thread.rows.findLast((row) => row.kind === 'error');
+    const code = last?.kind === 'error' ? last.code ?? '' : '';
+    return t(FAILURE_KEYS[code] ?? 'glance_failed');
   }
   if (phase === 'stopped') return t('glance_stopped');
   switch (view.ticket?.status) {
