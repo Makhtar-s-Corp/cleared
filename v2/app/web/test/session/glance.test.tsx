@@ -324,7 +324,7 @@ test('a plan a person can read has no fold of its own', () => {
 });
 
 test('a technical step keeps its place: the agent\'s report still marks the right line', () => {
-  const card = stageCard(view([custom('cleared.session_plan', { ...going, steps: ['Lire le composant', 'Lancer npm test', 'Corriger'] }), reported(3)]));
+  const card = stageCard(view([custom('cleared.session_plan', { ...going, steps: ['Lire le composant', 'Lancer npm test', 'Corriger'] }), reported(3, 3)]));
   assert.match(/<ol class="s-plan-steps"[^>]*>[\s\S]*?<\/ol>/.exec(card)?.[0] ?? '', /aria-current="step"[^>]*>(?:(?!<\/li>)[\s\S])*Corriger/);
 });
 

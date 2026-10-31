@@ -23,7 +23,7 @@ test('the author has three host tools, declared as data, each an object schema t
 test('report_plan_step takes the number of a step, not its words, and its schema says so (issue #501)', () => {
   const tool = AUTHOR_TOOLS.find((one) => one.name === 'report_plan_step')!;
   assert.deepEqual(tool.inputSchema.required, ['step']);
-  assert.equal((tool.inputSchema.properties.step as { type?: string }).type, 'integer');
+  assert.equal((tool.inputSchema.properties.step as { type?: string }).type, 'number');
   assert.match(tool.description, /each time you start/i);
 });
 

@@ -374,7 +374,7 @@ export function Timeline({ view, t, onFile, onResume }: {
   return <>{out}</>;
 }
 
-const emptyThread = (part: TicketPart): SessionThread => ({ lastSeq: 0, lastAt: undefined, state: undefined, rows: [], turns: [], pending: [], interrupts: [], steps: [], plan: null, checkpoints: [], ...(part.thread ?? {}) });
+const emptyThread = (part: TicketPart): SessionThread => ({ lastSeq: 0, lastAt: undefined, state: undefined, rows: [], turns: [], pending: [], interrupts: [], steps: [], plan: null, planStep: null, checkpoints: [], ...(part.thread ?? {}) });
 
 // Author and Reviewer filter the ticket's thread (lane 36): the whole
 // ticket, or one role's rows, once the ticket has two sessions.
@@ -964,7 +964,7 @@ function Live({ view: viewId, loaded }: { readonly view: string; readonly loaded
   const actingDetail = details.get(id);
   const view: SessionView = useMemo(() => ({
     summary: acting, ticket: ticketNow, siblings: sessions, me: context.me.user.id, language: context.me.language, now, busy, answers, takenOver: actingTaken, steps, cost, production, captures,
-    thread: actingThread ?? { lastSeq: 0, lastAt: undefined, state: actingDetail?.state, rows: [], turns: [], pending: [], interrupts: [], steps: [], plan: null, checkpoints: [] },
+    thread: actingThread ?? { lastSeq: 0, lastAt: undefined, state: actingDetail?.state, rows: [], turns: [], pending: [], interrupts: [], steps: [], plan: null, planStep: null, checkpoints: [] },
     parts, filter, unfolded,
   }), [acting, ticketNow, sessions, context.me, now, busy, answers, actingTaken, steps, cost, production, captures, actingThread, actingDetail, parts, filter, unfolded]);
   const ended = ENDED.has(phaseOf(view));

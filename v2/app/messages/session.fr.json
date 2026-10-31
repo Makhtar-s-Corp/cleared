@@ -364,6 +364,8 @@
   "glance_pr": "Pull request n° {n}",
   "glance_plan_title": "Lancer ce plan en {n} étapes ?",
   "glance_plan_steps": "Le plan de l'agent, {n} étapes",
+  "glance_plan_step_count": "Étape {n} sur {total} du plan",
+  "glance_plan_step_technical": "Une étape technique",
   "glance_stage_title": "Où il en est",
   "glance_stage_count": "Étape {n} sur {total}",
   "glance_stage_prepare": "Préparation",

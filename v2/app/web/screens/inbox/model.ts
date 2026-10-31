@@ -39,6 +39,7 @@ import type {
   ApproveBody, ContractItem, InboxItem, KnowledgeItem, NextInboxItem, PermissionItem, Plan, PlanItem, PlanItemInbox, QuestionItem, ReleaseFlag, ReleaseFlagKind,
   ReleaseItem, SessionPlan, SessionPlanItem, SessionSummary, TicketVariant, TrainState, TrainStop, VariantsItem,
 } from '../../../../src/api/types.ts';
+import { isTechnical } from '../../../../src/flow/plan-words.ts';
 import type { Decision } from '../../../../src/session/contract.ts';
 import type { Question, ToolInput } from '../../../../src/session/events.ts';
 import { answersFor as choiceAnswers } from '../../components/choices/model.ts';
@@ -500,7 +501,10 @@ export function itemTitle(item: Item, view: InboxView | undefined, t: Translate)
     case 'permission': return permissionTitle(item, t);
     case 'question': return item.questions[0]?.question ?? '';
     case 'plan': return item.title;
-    case 'session_plan': return (view && ticketTitle(view, item.ticket)) ?? item.plan.steps[0] ?? item.ticket;
+    case 'session_plan': {
+      const first = item.plan.steps[0];
+      return (view && ticketTitle(view, item.ticket)) ?? (first !== undefined && !isTechnical(first) ? first : item.ticket);
+    }
     case 'contract': return item.path;
     case 'knowledge': return item.text;
     case 'variants': return (view && ticketTitle(view, item.ticket)) ?? item.ticket;

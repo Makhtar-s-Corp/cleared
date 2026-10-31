@@ -7,12 +7,13 @@
 // description are its own words, in any language and full of paths, so they stay
 // in the fold; a command the table cannot say is "a command".
 //
-// The stage is the ticket's, out of five, read from what the service knows. No
-// event says which step of its own plan an agent has reached, so the screen lists
-// that plan without a mark rather than invent a position in it (decisions log,
-// lane j7-session).
+// The stage is the ticket's, out of five, read from what the service knows. The
+// step of its own plan is the agent's word (report_plan_step, issue #501): with no
+// report, or one the plan does not hold, the screen lists that plan without a mark
+// rather than invent a position in it.
 import type { NextInboxItem, SessionPlan } from '../../../../src/api/types.ts';
 import type { Ticket } from '../../../../src/tickets/contract.ts';
+import { isTechnical } from '../../../../src/flow/plan-words.ts';
 import { blocksOf, runsOf, type Run } from '../../components/markdown/model.ts';
 import { intentSentence, intentsOf } from '../../lib/intent.ts';
 import type { Translate } from '../../lib/i18n.ts';
@@ -176,6 +177,28 @@ function plainStep(step: string): string {
 }
 export const planSteps = (plan: Pick<SessionPlan, 'steps'>): string[] => plan.steps.map(plainStep).filter(Boolean);
 
+// What a person reads of each step, one line a step so that a reported number
+// finds its line: its sentence, or null for one that names a command, a file or
+// a path, whose words stay for the fold.
+export type HumanStep = { readonly text: string | null; readonly raw: string };
+export const humanSteps = (plan: Pick<SessionPlan, 'steps'>): HumanStep[] => plan.steps.map((step) => {
+  const raw = plainStep(step);
+  return { text: raw === '' || isTechnical(step) ? null : raw, raw };
+});
+
+// The step the agent reported on the plan of the ticket's last author: null when
+// it reported none, when its plan has no agreement, or when the number is not one
+// of this plan's. A later author with no plan of its own has no step.
+export function planStepOf(view: SessionView): { readonly step: number; readonly total: number } | null {
+  const thread = partsOf(view).filter((part) => part.summary.role === 'author').at(-1)?.thread;
+  const plan = thread?.plan;
+  const reported = thread?.planStep;
+  if (!plan?.go || !reported) return null;
+  const total = plan.steps.length;
+  if (!Number.isInteger(reported.step) || reported.step < 1 || reported.step > total || reported.total !== total) return null;
+  return { step: reported.step, total };
+}
+
 // How long the ticket's sessions have run, and what they used: what the agents
 // reported in dollars when all of them did, else the tokens. Never an estimate.
 export function sessionFacts(view: SessionView, t: Translate): { readonly duration: string; readonly cost?: string } {
@@ -229,6 +252,3 @@ export function resultOf(view: SessionView, services: readonly ServiceHome[], in
   const pr = pullRequestOf(view.ticket, services, inbox);
   return { ...(pr ? { pr } : {}), captures: [...kept.values()] };
 }
-
-export const planStepOf = (_view: SessionView): { step: number; total: number } | null => null;
-export const humanSteps = (_plan: Pick<SessionPlan, 'steps'>): { text: string | null; raw: string }[] => [];

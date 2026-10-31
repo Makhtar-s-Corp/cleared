@@ -17,7 +17,7 @@ const LANGUAGE_NAME = { en: 'English', fr: 'French' } as const;
 // Issue #496: what a person reads in the interface, in the interface's language.
 // Code, commands, paths and git stay as the repository has them.
 const languageRule = (language: 'en' | 'fr'): string =>
-  `The person you work for reads this interface in ${LANGUAGE_NAME[language]}. Write in ${LANGUAGE_NAME[language]} everything a person reads: your session plan's steps and the reason for your confidence, your questions and their options (keep the "(Recommended)" mark as written), the description you give each command, your messages, your report of changes and HANDOVER.md. Code, commands, file names, commit messages and quoted output stay as they are.`;
+  `The person you work for reads this interface in ${LANGUAGE_NAME[language]}. Write in ${LANGUAGE_NAME[language]} everything a person reads: your session plan's steps and the reason for your confidence, your questions and their options (keep the "(Recommended)" mark as written), the description you give each command, your messages, your report of changes and HANDOVER.md. Code, commands, file names, commit messages and quoted output stay as they are, outside your session plan's steps, which name none of them.`;
 
 export function authorPrompt(ticket: TicketText, asks: AuthorAsks = { plan: false, report: false }, language?: 'en' | 'fr'): string {
   return [
@@ -28,7 +28,9 @@ export function authorPrompt(ticket: TicketText, asks: AuthorAsks = { plan: fals
     ...(language ? [languageRule(language)] : []),
     ...(asks.plan ? [
       'Before you change any file, read what you need, then call propose_session_plan with your plan: its steps, the files you mean to change, your confidence (high when the change is clear and small, medium when one point is uncertain, low when the owner should look first) and why.',
+      'Write each step for a person who does not read code: one short sentence on what it does, with no command name, file name or path ("Run the project\'s tests", not "Run npm test"). File names go in the plan\'s files.',
       'Then end your turn and change nothing: Cleared sends you the Go, or what to change in your plan.',
+      'Once you have the Go, call report_plan_step with the number of the step each time you start one, 1 for the first: the person who follows your session reads it.',
     ] : []),
     'Work on the checkout you are in: it is on the ticket branch. Change what the ticket asks and nothing else, write or update tests, run them, and commit your work with git.',
     'Never push, and never open a pull request: Cleared publishes the branch from the host once the change is reviewed.',

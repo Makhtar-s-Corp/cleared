@@ -68,6 +68,15 @@
 .s-plan-title { margin-bottom: var(--space-1); font-size: var(--text-sm); color: var(--text-muted); }
 .s-plan-steps { display: grid; gap: 2px; margin: 0; padding-left: 20px; }
 .s-plan-steps li::marker { color: var(--text-muted); font-size: var(--text-sm); }
+.s-plan-step { display: inline-flex; align-items: flex-start; gap: var(--space-1); }
+.s-plan-step svg { flex: none; margin-top: var(--space-1); }
+.s-plan-steps > li[data-state="done"] svg { color: var(--success-text); }
+.s-plan-steps > li[data-state="todo"] { color: var(--text-muted); }
+.s-plan-steps > li[data-state="todo"] svg { color: var(--placeholder); }
+.s-plan-steps > li[data-state="current"] { font-weight: var(--weight-strong); color: var(--text); }
+.s-plan-steps > li[data-state="current"] svg { color: var(--theme-accent); }
+.s-plan-steps > li[data-state="failed"] { font-weight: var(--weight-strong); color: var(--danger-text); }
+.s-plan-raw { display: grid; gap: 2px; margin: var(--space-1) 0 0; padding-left: 20px; font-size: var(--text-sm); }
 
 /* The result. */
 .s-result-none { font-size: var(--text-md); color: var(--text-secondary); }

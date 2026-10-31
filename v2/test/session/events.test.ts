@@ -99,13 +99,13 @@ test('the events of lane 17 and lane 31 carry what their readers need, and never
   const events: AgUiEvent[] = [
     { type: 'CUSTOM', name: 'cleared.session_plan', value: { steps: ['Sort'], files: ['src/entries.ts'], confidence: 'high', reason: 'One function.', proposedAt: at, go: { by: 'delay', at } } },
     { type: 'CUSTOM', name: 'cleared.changes', value: { groups: [{ intent: 'Sort', files: ['src/entries.ts'] }, { intent: 'Other changes', files: ['README.md'] }] } },
-    { type: 'CUSTOM', name: 'cleared.plan_step', value: { step: 2, total: 5 } },
     { type: 'CUSTOM', name: 'cleared.terminal_opened', value: { by: 'u1', cols: 120, rows: 32 } },
     { type: 'CUSTOM', name: 'cleared.terminal_input', value: { by: 'u1', line: 'git status' } },
     { type: 'CUSTOM', name: 'cleared.terminal_closed', value: { by: 'u1', reason: 'give_back', outputBytes: 2048 } },
     { type: 'CUSTOM', name: 'cleared.human_edit', value: { by: 'u1', path: 'src/page.ts', added: 1, removed: 1, before: 'a'.repeat(64), after: 'b'.repeat(64), via: 'editor' } },
+    { type: 'CUSTOM', name: 'cleared.plan_step', value: { step: 2, total: 5 } },
   ];
-  assert.equal(events.length, 6);
+  assert.equal(events.length, 7);
   const edit = events[5] as Extract<AgUiEvent, { name: 'cleared.human_edit' }>;
   assert.deepEqual(Object.keys(edit.value).sort(), ['added', 'after', 'before', 'by', 'path', 'removed', 'via'], 'a human edit is journaled without its content');
   const closed = events[4] as Extract<AgUiEvent, { name: 'cleared.terminal_closed' }>;

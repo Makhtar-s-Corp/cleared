@@ -34,6 +34,8 @@ const PROMPT_AUTHOR = 'cleared';
 // The author's host call that proposes its session plan: the plan's own
 // row says it (lane 17's cleared.session_plan), so the call is not a row.
 const PLAN_TOOL = 'mcp__cleared__propose_session_plan';
+// So is the call that reports a step: it says where the agent is, not what it does.
+const STEP_TOOL = 'mcp__cleared__report_plan_step';
 
 // ---------------------------------------------------------------- the model
 
@@ -121,15 +123,18 @@ export type SessionModel = {
   readonly requests: Map<string, ToolRow>;
   readonly questions: Map<string, QuestionRow>;
   plan: SessionPlan | null;                         // the last cleared.session_plan: the proposal, or its Go
+  planStep: PlanStep | null;                        // the last step reported on that plan (issue #501)
   readonly checkpoints: Checkpoint[];               // the author's branch at each move (issue #272)
   readonly proofs: ProofCaptured[];                 // the proof receipt's captures, a service at a time (P210)
 };
+
+export type PlanStep = CustomValue['cleared.plan_step'];
 
 // The proof receipt's captures of a service, as the flow journals them (P210).
 export type ProofCaptured = Pick<CustomValue['cleared.proof_captured'], 'service' | 'before' | 'after' | 'video'>;
 
 export function emptyModel(): SessionModel {
-  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], turns: [], pending: [], steps: [], tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map(), plan: null, checkpoints: [], proofs: [] };
+  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], turns: [], pending: [], steps: [], tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map(), plan: null, planStep: null, checkpoints: [], proofs: [] };
 }
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -303,13 +308,19 @@ function custom(model: SessionModel, stored: SessionEvent, at: string, event: Ex
       break;
     case 'cleared.review_channel': {
       const { from, round, limit, text } = event.value;
+      // The work a review asks for is not a step of the plan.
+      if (from === 'reviewer') model.planStep = null;
       const asked = from === 'author' ? [...model.rows].reverse().find((row): row is ChannelRow => row.kind === 'channel' && row.from === 'reviewer' && row.round === round) : undefined;
       model.rows.push({ kind: 'channel', at, from, round, limit, text, ...(asked ? { afterMs: Math.max(0, Date.parse(at) - Date.parse(asked.at)) } : {}) });
       break;
     }
     case 'cleared.session_plan':
       model.plan = event.value;
+      model.planStep = null;
       model.rows.push({ kind: 'plan', at, confidence: event.value.confidence, go: event.value.go });
+      break;
+    case 'cleared.plan_step':
+      model.planStep = event.value;
       break;
     case 'cleared.checkpoint':
       model.checkpoints.push({ ...event.value, seq: stored.seq });
@@ -356,7 +367,7 @@ export function timeline(model: SessionModel): Row[] {
   const out: Row[] = [];
   for (const row of model.rows) {
     if (row.kind === 'message' && (row.by === PROMPT_AUTHOR || !row.text.trim())) continue;
-    if (row.kind === 'tool' && row.name === PLAN_TOOL) continue;
+    if (row.kind === 'tool' && (row.name === PLAN_TOOL || row.name === STEP_TOOL)) continue;
     const previous = out[out.length - 1];
     if (row.kind === 'tool' && row.input?.kind === 'read' && !row.request) {
       if (previous?.kind === 'read') out[out.length - 1] = { ...previous, paths: [...previous.paths, row.input.path] };
@@ -452,6 +463,7 @@ export type SessionThread = {
   readonly interrupts: readonly QuestionInterrupt[];
   readonly steps: readonly Step[];
   readonly plan: SessionPlan | null;
+  readonly planStep: PlanStep | null;
   readonly checkpoints: readonly Checkpoint[];
   readonly proofs?: readonly ProofCaptured[];
 };
@@ -465,7 +477,7 @@ export function interruptsOf(model: SessionModel): QuestionInterrupt[] {
 
 export function threadOf(model: SessionModel): SessionThread {
   return {
-    lastSeq: model.lastSeq, lastAt: model.lastAt, state: model.state, rows: timeline(model), turns: [...model.turns], pending: [...model.pending], interrupts: interruptsOf(model), steps: [...model.steps], plan: model.plan,
+    lastSeq: model.lastSeq, lastAt: model.lastAt, state: model.state, rows: timeline(model), turns: [...model.turns], pending: [...model.pending], interrupts: interruptsOf(model), steps: [...model.steps], plan: model.plan, planStep: model.planStep,
     checkpoints: [...model.checkpoints], proofs: [...model.proofs],
   };
 }

@@ -42,6 +42,7 @@ export type Gate = {
   plan?: SessionPlan;                     // held, waiting for its Go
   heldAt?: number;                        // when the hold (held or unplanned) began, in ms
   stepOpen: boolean;                      // the plan_gate step is open
+  reworded?: boolean;                     // a plan of this session was refused for its words (issue #501)
 };
 
 export type GoBy = NonNullable<SessionPlan['go']>['by'];
@@ -56,6 +57,7 @@ export function goMessage(by: GoBy, minutes: number, origin: Origin | undefined)
   return [
     `Go: your session plan is approved ${who}.`,
     'Carry it out now: change what the ticket asks and nothing else, write or update tests, run them, and commit your work.',
+    'Each time you start a step of the plan, call report_plan_step with its number, 1 for the first, then carry on: the person who follows your session reads it.',
     'If the work turns out different from the plan, say so in your final message. When your work is committed, call report_changes, then end your turn.',
   ].join('\n');
 }
@@ -76,6 +78,17 @@ export const noPlanNote = (minutes: number): string =>
   `The author did not propose a session plan within ${minutes} minutes of the end of its first turn, so it did not start on the code: the ticket is back in Todo. Move it to Todo to start it again.`;
 
 export const PROPOSED = 'Your plan is recorded. End your turn now and change nothing: Cleared sends you the Go, or what to change in the plan.';
+export const NO_STEP_YET = 'You have no session plan with its Go yet, so there is no step to report: carry on, and report your steps once you have the Go. An author with no plan of its own has none to report.';
+export const stepKept = (step: number, total: number): string => `Step ${step} of ${total} is what the person now reads. Carry on.`;
+
+// A plan refused for its words, once (flow/plan-words.ts). A second refusal
+// could send a ticket back over a false alarm, so the next plan is taken and
+// the screens fold what it still names.
+export const plainWordsMessage = (numbers: readonly number[]): string => {
+  const said = numbers.length === 1 ? `Step ${numbers[0]}` : `Steps ${numbers.slice(0, -1).join(', ')} and ${numbers.at(-1)}`;
+  return `${said} of your plan: a person who does not read code reads these sentences, so they hold no command name, file name or path. Say what the step does ("Run the project's tests", not "Run npm test"); file names go in files. Propose the plan again with that change.`;
+};
+
 export const NOT_NOW = 'Your session plan already has its Go: carry on with the work, then call report_changes.';
 export const NOT_AGAIN = 'Your plan had its Go before the review: do what the review asks, without a new plan, then call report_changes.';
 
