@@ -348,7 +348,7 @@
   "glance_failed": "The session stopped on an error.",
   "glance_failed_container": "The session stopped: its container could not keep running.",
   "glance_failed_lost": "The session stopped: its container disappeared.",
-  "glance_tokens": "{count} tokens",
+  "glance_used": "{count} tokens",
   "glance_ticket_open": "Read the text of ticket {ticket}",
   "glance_only_this": "Only this session is paused.",
   "glance_row_waits": "Waiting for your answer, at the top of this page.",

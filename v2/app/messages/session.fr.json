@@ -348,7 +348,7 @@
   "glance_failed": "La session s'est arrêtée sur une erreur.",
   "glance_failed_container": "La session s'est arrêtée : son conteneur n'a pas pu rester en marche.",
   "glance_failed_lost": "La session s'est arrêtée : son conteneur a disparu.",
-  "glance_tokens": "{count} jetons",
+  "glance_used": "{count} jetons",
   "glance_ticket_open": "Lire le texte du ticket {ticket}",
   "glance_only_this": "Seule cette session est en pause.",
   "glance_row_waits": "Attend votre réponse, en haut de cette page.",

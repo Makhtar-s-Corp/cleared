@@ -191,7 +191,7 @@ export function sessionFacts(view: SessionView, t: Translate): { readonly durati
   }
   const usage = parts.reduce((sum, part) => sum + (part.thread?.state?.usage.inputTokens ?? 0) + (part.thread?.state?.usage.outputTokens ?? 0), 0);
   const tokens = cost?.tokens ?? usage;
-  return tokens > 0 ? { duration, cost: t('glance_tokens', { count: count(tokens, view.language) }) } : { duration };
+  return tokens > 0 ? { duration, cost: t('glance_used', { count: count(tokens, view.language) }) } : { duration };
 }
 
 // The ticket's pull request, as the service builds it (setup/steps/first-ticket.ts
