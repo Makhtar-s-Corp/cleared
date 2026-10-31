@@ -58,8 +58,8 @@ test('a ticket of one step, or whose steps were not read, shows no steps and say
 });
 
 test('the service line says which step this session is', () => {
-  assert.equal(serviceLine('filter-api', en, { current: 2, total: 4 }), 'on filter-api · step 2 of 4');
-  assert.equal(serviceLine('filter-api', fr, { current: 2, total: 4 }), 'sur filter-api · étape 2 sur 4');
+  assert.equal(serviceLine('filter-api', en, { current: 2, total: 4 }), 'on filter-api, step 2 of 4');
+  assert.equal(serviceLine('filter-api', fr, { current: 2, total: 4 }), 'sur filter-api, étape 2 sur 4');
   assert.equal(serviceLine('filter-api', en, { current: null, total: 4 }), 'on filter-api');
   assert.equal(serviceLine('filter-api', en), 'on filter-api');
   assert.equal(serviceLine(undefined, en, { current: 2, total: 4 }), undefined);

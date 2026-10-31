@@ -84,7 +84,8 @@ test('Ctrl-K, a ticket\'s number and Enter open its session in the page; the pal
     await page.waitForURL(new RegExp(`^${base}/sessions/[A-Za-z0-9_-]+$`));
     await palette.waitFor({ state: 'detached' });
     await page.locator('.session:not([aria-busy]) #status').waitFor();
-    assert.match(await page.locator('#top-bar').innerText(), /LOCAL-161 · Upcoming: group entries by week/, 'the bar names the ticket');
+    assert.match(await page.locator('#top-bar').innerText(), /LOCAL-161/, 'the bar names the ticket');
+    assert.equal(await page.locator('.s-title').innerText(), 'Upcoming: group entries by week', 'the screen says its title once');
     assert.match(await page.title(), /^Cleared · LOCAL-161 · Upcoming: group entries by week$/);
     assert.ok(await marked(page), 'the same document');
     assert.equal(await documents(page), 1);

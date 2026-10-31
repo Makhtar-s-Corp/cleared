@@ -148,20 +148,20 @@ test('what it waits for, how it ended: one sentence each, in both languages', ()
   assert.equal(doingNow(waits, en), 'The agent is waiting for your agreement to go on.');
   assert.equal(doingNow(view([custom('cleared.session_plan', { ...PLAN, go: null })], {}, { phase: 'waiting_human' }), fr), 'L\'agent a préparé son plan et attend votre accord.');
   assert.equal(doingNow(view([custom('cleared.question', { requestId: 'q', questions: [] })], {}, { phase: 'waiting_human' }), fr), 'L\'agent vous pose une question.');
-  assert.equal(doingNow(view([], { ticket: ticket({ status: 'Needs Approval' }) }, { phase: 'done' }), fr), 'Le travail est prêt : il attend votre relecture.');
-  assert.equal(doingNow(view([], { ticket: ticket({ status: 'In Review' }) }, { phase: 'done' }), fr), 'L\'auteur a fini : la relecture va commencer.');
-  assert.equal(doingNow(view([], { ticket: ticket({ status: 'Ready to Ship' }) }, { phase: 'done' }), fr), 'Vous avez approuvé : la mise en production suit son cours.');
+  assert.equal(doingNow(view([], { ticket: ticket({ status: 'Needs Approval' }) }, { phase: 'done' }), fr), 'Le travail est prêt\u00a0: il attend votre relecture.');
+  assert.equal(doingNow(view([], { ticket: ticket({ status: 'In Review' }) }, { phase: 'done' }), fr), 'L\'auteur a fini\u00a0: la relecture va commencer.');
+  assert.equal(doingNow(view([], { ticket: ticket({ status: 'Ready to Ship' }) }, { phase: 'done' }), fr), 'Vous avez approuvé\u00a0: la mise en production suit son cours.');
   assert.equal(doingNow(view([], { ticket: ticket({ status: 'Done' }) }, { phase: 'done' }), fr), 'Ce ticket est terminé.');
   assert.equal(doingNow(view([], {}, { phase: 'stopped' }), fr), 'La session a été arrêtée.');
   assert.equal(doingNow(view([], {}, { phase: 'starting' }), fr), 'La session démarre.');
   assert.equal(doingNow(view(askOf('r1', 'npm test'), {}, { phase: 'stopped', dormant: true }), fr), 'L\'agent attend votre accord pour continuer.');
-  assert.equal(doingNow(view([], { takenOver: { by: 'me', at: at(1) } }), fr), 'Vous avez la main : l\'agent est en pause.');
-  assert.equal(doingNow(view([], { takenOver: { by: 'other', at: at(1) } }), fr), 'Un collègue a la main : l\'agent est en pause.');
+  assert.equal(doingNow(view([], { takenOver: { by: 'me', at: at(1) } }), fr), 'Vous avez la main\u00a0: l\'agent est en pause.');
+  assert.equal(doingNow(view([], { takenOver: { by: 'other', at: at(1) } }), fr), 'Un collègue a la main\u00a0: l\'agent est en pause.');
 });
 
 test('a failure says what happened in the person\'s words, never the service\'s English', () => {
-  assert.equal(doingNow(view([{ type: 'RUN_ERROR', message: 'container exited', code: 'container_failed' }], {}, { phase: 'failed' }), fr), 'La session s\'est arrêtée : son conteneur n\'a pas pu rester en marche.');
-  assert.equal(doingNow(view([{ type: 'RUN_ERROR', message: 'container gone', code: 'container_lost' }], {}, { phase: 'failed' }), fr), 'La session s\'est arrêtée : son conteneur a disparu.');
+  assert.equal(doingNow(view([{ type: 'RUN_ERROR', message: 'container exited', code: 'container_failed' }], {}, { phase: 'failed' }), fr), 'La session s\'est arrêtée\u00a0: son conteneur n\'a pas pu rester en marche.');
+  assert.equal(doingNow(view([{ type: 'RUN_ERROR', message: 'container gone', code: 'container_lost' }], {}, { phase: 'failed' }), fr), 'La session s\'est arrêtée\u00a0: son conteneur a disparu.');
   assert.equal(doingNow(view([{ type: 'RUN_ERROR', message: 'Boom in web/x.ts' }], {}, { phase: 'failed' }), fr), 'La session s\'est arrêtée sur une erreur.');
 });
 

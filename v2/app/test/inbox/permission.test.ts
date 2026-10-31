@@ -41,15 +41,15 @@ function viewOf(items: readonly Item[], overrides: Partial<InboxView> = {}): Inb
 
 // The table of shapes: each known kind of command, a compound, and an unknown one, in both languages.
 const SHAPES: readonly (readonly [string, string, string])[] = [
-  ['git log -5 --oneline; git merge-base main HEAD; git show 0cae6b1 --stat', 'Lire l\'historique et le diff du dépôt', 'Read the repository\'s history and diff'],
+  ['git log -5 --oneline; git merge-base main HEAD; git show 0cae6b1 --stat', 'Lire l\'historique et les changements du dépôt', 'Read the repository\'s history and diff'],
   ['npm test 2>&1 | tail -8', 'Lancer les tests du projet', 'Run the project\'s tests'],
   ['npm install date-fns', 'Installer date-fns', 'Install date-fns'],
   ['curl -s https://registry.example.invalid/v1/x', 'Appeler registry.example.invalid', 'Call registry.example.invalid'],
   // The live app's LOCAL-14 item (plan, 1.5): reads of several kinds, then the tests and the types.
   ['git show 0cae6b1; cat src/page.ts; grep -rn \'heading\' src | head -20; ls node_modules >/dev/null 2>&1 && (npm test 2>&1 | tail -8; npm run typecheck 2>&1 | tail -5)',
     'Lire le dépôt puis lancer les tests', 'Read the repository and run the tests'],
-  [REVIEW_COMMAND, 'Lire l\'historique et le diff du dépôt puis lancer les tests du projet', 'Read the repository\'s history and diff and run the project\'s tests'],
-  ['git status; npm install date-fns; npm test', 'Lire l\'historique et le diff du dépôt, installer date-fns puis lancer les tests du projet', 'Read the repository\'s history and diff, install date-fns and run the project\'s tests'],
+  [REVIEW_COMMAND, 'Lire l\'historique et les changements du dépôt puis lancer les tests du projet', 'Read the repository\'s history and diff and run the project\'s tests'],
+  ['git status; npm install date-fns; npm test', 'Lire l\'historique et les changements du dépôt, installer date-fns puis lancer les tests du projet', 'Read the repository\'s history and diff, install date-fns and run the project\'s tests'],
   // A command the table does not know is said by its first word, never cut short.
   ['docker compose up -d', 'Lancer docker', 'Run docker'],
 ];
@@ -127,7 +127,7 @@ test('a request that is not a command says what it does to what, and the tool wh
 
 test('the request is asked as a question, naming who asks: the reviewer, the author, or the session', () => {
   const view = viewOf([compound]);
-  assert.equal(permissionAsk(compound, view, fr), 'Autoriser le relecteur à lire l\'historique et le diff du dépôt puis à lancer les tests du projet\u202f?');
+  assert.equal(permissionAsk(compound, view, fr), 'Autoriser le relecteur à lire l\'historique et les changements du dépôt puis à lancer les tests du projet\u202f?');
   assert.equal(permissionAsk(compound, view, en), 'Allow the reviewer to read the repository\'s history and diff and run the project\'s tests?');
   const author = { ...command('npm install date-fns'), sessionId: 'fixture-160' };
   assert.equal(permissionAsk(author, view, fr), 'Autoriser l\'auteur à installer date-fns\u202f?');

@@ -388,7 +388,7 @@
   "glance_fact_cost": "Cost",
   "glance_fact_pr": "Pull request",
   "glance_ticket_text": "The ticket",
-  "glance_session_title": "The session",
+  "glance_session_title": "About the session",
   "glance_pr_short": "#{n}",
   "glance_back_todo": "Its ticket went back to the queue."
 }

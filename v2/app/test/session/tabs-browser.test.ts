@@ -21,6 +21,7 @@ import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { createPreviewHandler, type PreviewUpstream } from '../../src/preview.ts';
 import type { DataSource } from '../../src/proxy.ts';
 import { PASSWORD, signedIn, startApp, type Running } from '../support.ts';
+import { openDetails } from './fold.ts';
 
 const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
@@ -78,6 +79,7 @@ test('the four tabs switch, and the Go of a waiting plan calls its route', { ski
   const fixture = sessionFixture(FIXTURE_NOW, { plan: 'waiting' });
   const source = sessionSource(fixture);
   const seen = await browse(source, `/sessions/${AUTHOR_ID}`, async (page) => {
+    await openDetails(page);
     await page.locator('#timeline [data-row]').first().waitFor();
     const selected = async () => page.locator('[role="tab"][aria-selected="true"]').getAttribute('aria-controls');
     assert.equal(await selected(), 'tab-terminal');
@@ -86,8 +88,8 @@ test('the four tabs switch, and the Go of a waiting plan calls its route', { ski
     assert.ok(await page.locator('#tab-plan').isVisible());
     assert.ok(!(await page.locator('#tab-terminal').isVisible()));
     assert.match(page.url(), /#plan$/);
-    await page.locator('#tab-plan [data-act="plan_go"]').click();
-    await page.locator('#tab-plan [data-act="plan_go"]').waitFor({ state: 'detached' });
+    await page.locator('#session-action [data-act="plan_go"]').click();
+    await page.locator('#session-action [data-act="plan_go"]').waitFor({ state: 'detached' });
     assert.match(await page.locator('#tab-plan').innerText(), /Go given by you at/);
 
     // Nothing is changed before the Go: the Editor says so.
@@ -135,13 +137,14 @@ test('Hand over to Codex calls its route, the screen follows the Codex author, a
   const fixture = sessionFixture(FIXTURE_NOW);
   const source = sessionSource(fixture);
   const seen = await browse(source, `/sessions/${AUTHOR_ID}`, async (page) => {
+    await openDetails(page);
     await page.locator('#timeline [data-row]').first().waitFor();
     assert.equal((await page.locator('#handover').innerText()).trim(), 'Hand over to Codex');
     assert.equal(await page.locator('#handover').getAttribute('data-to'), 'codex');
     await page.locator('#handover').click();
     await page.locator('#handover[data-to="claude-code"]').waitFor();
     assert.equal((await page.locator('#handover').innerText()).trim(), 'Hand back to Claude Code');
-    assert.match(await page.locator('#status').innerText(), /gpt-6-luna/, 'the screen follows the Codex author');
+    assert.match(await page.locator('#detail-head').innerText(), /gpt-6-luna/, 'the screen follows the Codex author');
     await page.locator('#handover').click();
     await page.locator('#handover[data-to="codex"]').waitFor();
   });

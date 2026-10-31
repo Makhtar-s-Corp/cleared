@@ -18,6 +18,7 @@ import { join } from 'node:path';
 import { AUTHOR_ID, BASE_COMMIT, sessionFixture, sessionSource } from '../../fixtures/session.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { PASSWORD, startApp } from '../support.ts';
+import { openDetails } from './fold.ts';
 
 const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
@@ -42,6 +43,7 @@ async function open(language: 'en' | 'fr') {
   await page.click('button[type=submit]');
   await page.waitForURL(`${app.base}/`);
   await page.goto(`${app.base}/sessions/${AUTHOR_ID}`);
+  await openDetails(page);
   await page.locator('#timeline [data-row]').first().waitFor();
   await page.waitForFunction(() => document.querySelector('.session[aria-busy="true"]') === null);
   // The targeted tests' step: the author ran them before its commit.
@@ -89,7 +91,7 @@ test('Resume from here on a step: the instruction goes with the step, a new auth
     await last.locator('summary').click();
     assert.match(await last.locator('.step-detail').innerText(), /Corrected instruction\s+Group by ISO week, and keep the totals test first\./);
     assert.equal(h.documents(), loaded, 'no document loaded');
-    assert.equal(await page.locator('#status .phrase-title').innerText(), 'Working', 'the view acts on the new author');
+    assert.equal(await page.locator('#detail-head .phrase-title').innerText(), 'Working', 'the view acts on the new author');
 
     // The old continuation: folded under the earlier author, every row there to read.
     const earlier = page.locator(`#timeline details.earlier[data-session="${AUTHOR_ID}"]`);

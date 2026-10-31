@@ -18,6 +18,7 @@ import { AUTHOR_ID, sessionFixture, sessionSource } from '../../fixtures/session
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { sendJson } from '../../src/proxy.ts';
 import { PASSWORD, startApp } from '../support.ts';
+import { openDetails } from './fold.ts';
 
 const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
@@ -48,6 +49,7 @@ test('Open in an editor: the button, the two links as the service gave them, no 
     await page.click('button[type=submit]');
     await page.waitForURL(`${app.base}/`);
     await page.goto(`${app.base}/sessions/${AUTHOR_ID}`);
+    await openDetails(page);
     await page.locator('#timeline [data-row]').first().waitFor();
 
     const button = page.locator('#open-editor');
@@ -81,6 +83,7 @@ test('Open in an editor: the button, the two links as the service gave them, no 
     await french.click('button[type=submit]');
     await french.waitForURL(`${app.base}/`);
     await french.goto(`${app.base}/sessions/${AUTHOR_ID}`);
+    await openDetails(french);
     await french.locator('#open-editor').waitFor();
     assert.match(await french.locator('#open-editor').innerText(), /Ouvrir dans un éditeur/);
 
@@ -98,6 +101,7 @@ test('Open in an editor: the button, the two links as the service gave them, no 
       await none.click('button[type=submit]');
       await none.waitForURL(`${gone.base}/`);
       await none.goto(`${gone.base}/sessions/${AUTHOR_ID}`);
+      await openDetails(none);
       await none.locator('#timeline [data-row]').first().waitFor();
       await none.locator('#takeover').waitFor();
       assert.equal(await none.locator('#open-editor').count(), 0);

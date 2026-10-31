@@ -107,8 +107,8 @@ test('Author and Reviewer filter the thread: one role\'s rows, no handover row; 
 });
 
 test('the filters: the whole ticket, then the latest author and reviewer by their model, a role not started yet disabled', () => {
-  assert.deepEqual(filterOptions([AUTHOR, REVIEWER], en).map((o) => [o.filter, o.label, o.disabled]), [['all', 'Whole ticket', false], ['author', 'Author · Opus', false], ['reviewer', 'Reviewer · Sonnet', false]]);
-  assert.deepEqual(filterOptions([AUTHOR], fr).map((o) => [o.filter, o.label, o.disabled]), [['all', 'Tout le ticket', false], ['author', 'Auteur · Opus', false], ['reviewer', 'Relecteur, en attente', true]]);
+  assert.deepEqual(filterOptions([AUTHOR, REVIEWER], en).map((o) => [o.filter, o.label, o.disabled]), [['all', 'Whole ticket', false], ['author', 'Author (Opus)', false], ['reviewer', 'Reviewer (Sonnet)', false]]);
+  assert.deepEqual(filterOptions([AUTHOR], fr).map((o) => [o.filter, o.label, o.disabled]), [['all', 'Tout le ticket', false], ['author', 'Auteur (Opus)', false], ['reviewer', 'Relecteur, en attente', true]]);
 });
 
 test('consecutive edits of one file are one row with their sum and their count; an edit of another file, or one asked about, is its own', () => {

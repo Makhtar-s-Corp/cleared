@@ -20,6 +20,7 @@ import { join } from 'node:path';
 import { AUTHOR_ID, REVIEWER_ID, TICKET_ID, sessionFixture, sessionSource, startReview } from '../../fixtures/session.ts';
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { PASSWORD, startApp } from '../support.ts';
+import { openDetails } from './fold.ts';
 
 const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
@@ -54,8 +55,9 @@ test('the reviewer\'s start continues the author\'s view: a handover row, the sa
     await page.click('button[type=submit]');
     await page.waitForURL(`${app.base}/`);
     await page.goto(`${app.base}/sessions/${AUTHOR_ID}`);
+    await openDetails(page);
     await page.locator('#timeline [data-row]').first().waitFor();
-    assert.equal(await page.locator('#status .phrase-title').innerText(), 'Done');
+    assert.equal(await page.locator('#detail-head .phrase-title').innerText(), 'Done');
     assert.equal(await page.locator('[data-filter]').count(), 0, 'one session: no filter yet');
 
     // The author's diff, open in the Editor.
@@ -76,7 +78,7 @@ test('the reviewer\'s start continues the author\'s view: a handover row, the sa
     source.changed('ticket', TICKET_ID);
     await page.locator('#timeline [data-row="handover"]').waitFor({ state: 'attached' });
     console.log(`measure handover_row_ms ${Date.now() - started}`);
-    await page.waitForFunction(() => document.querySelector('#status .phrase-title')?.textContent === 'Reading the diff of src/engine/upcoming.mjs');
+    await page.waitForFunction(() => document.querySelector('#detail-head .phrase-title')?.textContent === 'Reading the diff of src/engine/upcoming.mjs');
     await page.waitForURL(new RegExp(`/sessions/${REVIEWER_ID}#editor$`));
     const after = await page.evaluate(() => ({
       view: (document.querySelector('[data-session-view] .session') as unknown as { kept?: string } | null)?.kept,
@@ -97,11 +99,11 @@ test('the reviewer\'s start continues the author\'s view: a handover row, the sa
 
     // Take over on the reviewer: its terminal, opened once.
     await page.locator('[role="tab"][aria-controls="tab-terminal"]').click();
-    await page.locator('#status #takeover').click();
+    await page.locator('#takeover').click();
     await page.locator('#tab-terminal [data-terminal-state="open"]').waitFor();
     assert.deepEqual(source.calls.filter((c) => /takeover|terminal\/open/.test(c.path)).map((c) => c.path), [`/api/sessions/${REVIEWER_ID}/takeover`, `/api/sessions/${REVIEWER_ID}/terminal/open`]);
-    await page.locator('#status #giveback').click();
-    await page.locator('#status #takeover').waitFor();
+    await page.locator('#giveback').click();
+    await page.locator('#takeover').waitFor();
 
     // A reload of the address lands on the same ticket view.
     await page.reload();
@@ -166,6 +168,7 @@ test('the lead\'s session address draws its own thread', { skip }, async () => {
     await page.waitForURL(`${app.base}/`);
     const lead = await (await page.request.get(`${app.base}/api/service/lead`)).json() as { sessionId: string };
     await page.goto(`${app.base}/sessions/${lead.sessionId}`);
+    await openDetails(page);
     await page.locator('#timeline [data-row]').first().waitFor();
     await page.waitForFunction(() => document.querySelector('.session[aria-busy="true"]') === null);
     assert.equal(await page.locator('[data-filter]').count(), 0, 'no ticket to filter');

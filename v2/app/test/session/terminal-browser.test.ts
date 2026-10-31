@@ -25,6 +25,7 @@ import { AUTHOR_ID, fixtureFile, sessionFixture, sessionSource, type SessionSour
 import { FIXTURE_NOW } from '../../fixtures/tower.ts';
 import { sendJson } from '../../src/proxy.ts';
 import { PASSWORD, startApp } from '../support.ts';
+import { openDetails } from './fold.ts';
 
 const PLAYWRIGHT = process.env.CLEARED_V2_PLAYWRIGHT;
 const skip = PLAYWRIGHT ? false : 'CLEARED_V2_PLAYWRIGHT is not set';
@@ -106,6 +107,7 @@ test('Take over, type in the terminal, save in the editor; no policy violation w
     await page.click('button[type=submit]');
     await page.waitForURL(`${app.base}/`);
     await page.goto(`${app.base}/sessions/${AUTHOR_ID}`);
+    await openDetails(page);
     await page.locator('#timeline [data-row]').first().waitFor();
     assert.equal(await page.evaluate(() => typeof (document.querySelector('meta[property="csp-nonce"]') as HTMLMetaElement | null)?.nonce), 'string');
 
@@ -235,6 +237,7 @@ test('on the public origin the terminal is not offered: why, and no command', { 
     await page.click('button[type=submit]');
     await page.waitForURL(`${app.base}/`);
     await page.goto(`${app.base}/sessions/${AUTHOR_ID}`);
+    await openDetails(page);
     await page.locator('#takeover').click();
     await page.locator('#tab-terminal .takeover').waitFor();
     const notice = await page.locator('#tab-terminal .takeover').innerText();
