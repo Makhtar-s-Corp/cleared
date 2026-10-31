@@ -32,7 +32,7 @@ Source: [Developing the agent interaction, Linear's developer docs](https://line
 
 **We take:** a small fixed set of states derived from what happened, not written by the agent, which is how `glance.ts` reads the session. A request for clarification is a state of its own, which is our one action at the top. A plan is a readable checklist of current and upcoming work.
 
-**What we could not take yet:** Linear knows the current step of a plan because the agent reports each step's status. Cleared's agents report no such thing, so the screen says the ticket's stage out of five and lists the agent's plan without a mark. That gap is a question for the owner in the decisions log, with this API as the model for closing it.
+**Taken since, by lane `v2-j7-plan-step` (issue #501):** Linear knows the current step of a plan because the agent reports it. Cleared's author now reports the number of the step it starts (`report_plan_step`), and the screen marks that step; with no report it keeps the ticket's stage out of five and lists the plan without a mark. We take the agent's report, not Linear's whole model: a number rather than a status for each step and a plan replaced at each update, since the steps before a reported one are done and the ones after it are to come.
 
 ## What we do not take
 
