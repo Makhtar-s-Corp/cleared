@@ -124,17 +124,20 @@ export type SessionModel = {
   readonly questions: Map<string, QuestionRow>;
   plan: SessionPlan | null;                         // the last cleared.session_plan: the proposal, or its Go
   planStep: PlanStep | null;                        // the last step reported on that plan (issue #501)
+  publishFailure: PublishFailure | null;            // the review passed and the publication failed (issue #507)
   readonly checkpoints: Checkpoint[];               // the author's branch at each move (issue #272)
   readonly proofs: ProofCaptured[];                 // the proof receipt's captures, a service at a time (P210)
 };
 
 export type PlanStep = CustomValue['cleared.plan_step'];
+// A publication that failed (issue #507), and when it was journaled.
+export type PublishFailure = CustomValue['cleared.publish_failed'] & { readonly at: string };
 
 // The proof receipt's captures of a service, as the flow journals them (P210).
 export type ProofCaptured = Pick<CustomValue['cleared.proof_captured'], 'service' | 'before' | 'after' | 'video'>;
 
 export function emptyModel(): SessionModel {
-  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], turns: [], pending: [], steps: [], tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map(), plan: null, planStep: null, checkpoints: [], proofs: [] };
+  return { lastSeq: 0, lastAt: undefined, state: undefined, rows: [], turns: [], pending: [], steps: [], tools: new Map(), texts: new Map(), requests: new Map(), questions: new Map(), plan: null, planStep: null, publishFailure: null, checkpoints: [], proofs: [] };
 }
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
@@ -322,6 +325,9 @@ function custom(model: SessionModel, stored: SessionEvent, at: string, event: Ex
     case 'cleared.plan_step':
       model.planStep = event.value;
       break;
+    case 'cleared.publish_failed':
+      model.publishFailure = { ...event.value, at };
+      break;
     case 'cleared.checkpoint':
       model.checkpoints.push({ ...event.value, seq: stored.seq });
       break;
@@ -464,6 +470,7 @@ export type SessionThread = {
   readonly steps: readonly Step[];
   readonly plan: SessionPlan | null;
   readonly planStep: PlanStep | null;
+  readonly publishFailure?: PublishFailure | null;
   readonly checkpoints: readonly Checkpoint[];
   readonly proofs?: readonly ProofCaptured[];
 };
@@ -477,7 +484,7 @@ export function interruptsOf(model: SessionModel): QuestionInterrupt[] {
 
 export function threadOf(model: SessionModel): SessionThread {
   return {
-    lastSeq: model.lastSeq, lastAt: model.lastAt, state: model.state, rows: timeline(model), turns: [...model.turns], pending: [...model.pending], interrupts: interruptsOf(model), steps: [...model.steps], plan: model.plan, planStep: model.planStep,
+    lastSeq: model.lastSeq, lastAt: model.lastAt, state: model.state, rows: timeline(model), turns: [...model.turns], pending: [...model.pending], interrupts: interruptsOf(model), steps: [...model.steps], plan: model.plan, planStep: model.planStep, publishFailure: model.publishFailure,
     checkpoints: [...model.checkpoints], proofs: [...model.proofs],
   };
 }

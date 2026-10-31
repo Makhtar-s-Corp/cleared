@@ -19,7 +19,7 @@ import { intentSentence, intentsOf } from '../../lib/intent.ts';
 import type { Translate } from '../../lib/i18n.ts';
 import { opaque } from '../../lib/request.ts';
 import { count, lasted } from '../../lib/time.ts';
-import { ENDED, phaseOf, takenOverOf, type QuestionRow, type RequestState, type Row, type SessionThread, type SessionView, type ToolRow } from './model.ts';
+import { ENDED, phaseOf, takenOverOf, type PublishFailure, type QuestionRow, type RequestState, type Row, type SessionThread, type SessionView, type ToolRow } from './model.ts';
 import { partsOf, type TicketPart } from './ticket.ts';
 
 export type PullRequest = { readonly number: number; readonly url: string };
@@ -29,9 +29,11 @@ export type PendingAction = { readonly total: number } & (
   | { readonly kind: 'plan'; readonly session: string; readonly plan: SessionPlan }
   | { readonly kind: 'review'; readonly what: NextInboxItem['kind']; readonly href: string; readonly pr?: PullRequest }
   | { readonly kind: 'giveback' }
+  | { readonly kind: 'publish'; readonly failure: PublishFailure }
 );
 export const STAGES = ['prepare', 'write', 'review', 'decide', 'ship'] as const;
-export type StageKey = (typeof STAGES)[number];
+// `publish` stands in for `decide` when the publication failed: there is nothing to decide on.
+export type StageKey = (typeof STAGES)[number] | 'publish';
 export type Stage = { readonly key: StageKey; readonly state: 'done' | 'current' | 'failed' | 'todo' };
 export type StageView = { readonly stages: readonly Stage[]; readonly current: number; readonly total: number };
 export type Capture = { readonly kind: 'before' | 'after' | 'video' | 'production'; readonly service: string; readonly href: string };
@@ -44,6 +46,16 @@ const phaseOfPart = ({ summary, thread }: TicketPart) => (ENDED.has(summary.phas
 const answers = (part: TicketPart): boolean => !ENDED.has(phaseOfPart(part)) || part.summary.dormant === true;
 const THREADS_SAY: ReadonlySet<NextInboxItem['kind']> = new Set(['permission', 'question', 'session_plan']);
 const waitingHere = (inbox: readonly NextInboxItem[], ticket: string) => inbox.filter((item) => item.ticket === ticket && item.state === 'waiting');
+
+// The publication that failed, while it still says where the ticket is: the ticket
+// is back in Todo and no session of it started since (issue #507).
+export function publishFailureOf(view: SessionView): PublishFailure | null {
+  if (view.ticket?.status !== 'Todo') return null;
+  const parts = partsOf(view);
+  const failure = parts.map((part) => part.thread?.publishFailure ?? null).filter((one) => one !== null).sort((a, b) => Date.parse(b.at) - Date.parse(a.at))[0];
+  if (!failure) return null;
+  return parts.some((part) => Date.parse(part.summary.startedAt) > Date.parse(failure.at)) ? null : failure;
+}
 
 // What the person is asked for, never another ticket's: their own take over
 // first, then the oldest request or question of the ticket's sessions, then its
@@ -69,6 +81,8 @@ export function pendingAction(view: SessionView, inbox: readonly NextInboxItem[]
     const planning = parts.filter((part) => part.summary.role === 'author' && answers(part) && part.thread?.plan?.go === null).at(-1);
     if (planning?.thread?.plan) return { kind: 'plan', session: planning.summary.id, plan: planning.thread.plan, total: 1 };
   }
+  const failure = publishFailureOf(view);
+  if (failure) return { kind: 'publish', failure, total: 1 };
   const waiting = waitingHere(inbox, view.summary.ticket).filter((item) => !THREADS_SAY.has(item.kind));
   const item = waiting.find((one) => one.kind === 'release') ?? waiting[0];
   if (!item) return null;
@@ -130,6 +144,7 @@ export function doingNow(view: SessionView, t: Translate): string {
   if (action?.kind === 'permission') return t('glance_waiting_permission');
   if (action?.kind === 'question') return t('glance_waiting_question');
   if (action?.kind === 'plan') return t('glance_waiting_plan');
+  if (action?.kind === 'publish') return t('glance_publish_now');
   if (ended) return endedSaid(view, t);
   if (phase === 'starting') return t('glance_starting');
   if (phase === 'waiting_human') return t('glance_idle');
@@ -145,18 +160,23 @@ const writing = (thread: SessionThread | undefined): boolean =>
 export function stageOf(view: SessionView, inbox: readonly NextInboxItem[]): StageView | null {
   const { role } = view.summary;
   if (role !== 'author' && role !== 'reviewer') return null;
+  if (publishFailureOf(view)) {
+    const failed: Stage[] = [{ key: 'prepare', state: 'done' }, { key: 'write', state: 'done' }, { key: 'review', state: 'done' }, { key: 'publish', state: 'failed' }, { key: 'ship', state: 'todo' }];
+    return { stages: failed, current: 4, total: STAGES.length };
+  }
   const status = view.ticket?.status;
   const phase = phaseOf(view);
-  const stopped = phase === 'failed' || phase === 'stopped';
+  // An ended session on a ticket back in Todo is not in progress, whatever put it back.
+  const stopped = phase === 'failed' || phase === 'stopped' || (ENDED.has(phase) && status === 'Todo');
   const finished = status === 'Done';
   const reviewWaits = waitingHere(inbox, view.summary.ticket).some((item) => item.kind === 'release');
   const authorActs = role === 'author' && !ENDED.has(phase);
-  let key: StageKey;
+  let key: (typeof STAGES)[number];
   if (finished || status === 'Ready to Ship') key = 'ship';
   else if (status === 'Needs Approval' || reviewWaits) key = 'decide';
   else if (role === 'reviewer' || (status === 'In Review' && !authorActs)) key = 'review';
   else key = partsOf(view).filter((part) => part.summary.role === 'author').some((part) => writing(part.thread)) ? 'write' : 'prepare';
-  const at = STAGES.indexOf(key);
+  const at = STAGES.indexOf(key as (typeof STAGES)[number]);
   const nowState: Stage['state'] = finished ? 'done' : stopped && !view.summary.dormant ? 'failed' : 'current';
   return {
     stages: STAGES.map((one, index) => ({ key: one, state: index < at ? 'done' : index === at ? nowState : 'todo' })),

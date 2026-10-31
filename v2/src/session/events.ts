@@ -5,6 +5,7 @@
 // the JSON of a typed value in it, read back with readToolInput and
 // readToolOutput. Nothing here depends on @ag-ui/core at run time; a test
 // checks every type name against its EventType.
+import type { PublishFailureCode } from '../flow/publish-failure.ts';
 import type { ChangesReport, HumanEdit, ProductionCheck, SessionPlan, TerminalMode } from '../api/types.ts';
 import type { Decision, Harness, SessionId, StopReason, ToolKind, UserId } from './contract.ts';
 import type { Verdict } from './policy.ts';
@@ -81,6 +82,8 @@ export const CUSTOM_NAMES = [
   'cleared.prepared_image',
   // Issue #501: the step of its plan the author says it has reached.
   'cleared.plan_step',
+  // Issue #507: the review passed and the publication failed.
+  'cleared.publish_failed',
   // Milestone 6 (issue #453): the flow recreated the session's container
   // after it stopped, and resumed the session in it.
   'cleared.container_recreated',
@@ -179,6 +182,9 @@ export type CustomValue = {
   // The step the author says it starts (report_plan_step, issue #501), from
   // one, and how many its plan held: the session screen reads the last one.
   'cleared.plan_step': { readonly step: number; readonly total: number };
+  // Why the publication failed (flow/publish-failure.ts), the service it failed
+  // on in a workspace of several, and the error's words, cleaned, for the fold.
+  'cleared.publish_failed': { readonly code: PublishFailureCode; readonly service: string | null; readonly detail: string };
   // The author's report of its changes by intent, as report_changes kept it
   // (the files no group named under "Other changes").
   'cleared.changes': ChangesReport;

@@ -124,6 +124,7 @@ import { DEFAULT_SAFE_COMMANDS, learnedPatterns, type Policy } from '../session/
 import type { Store } from '../store/db.ts';
 import type { Actor, Ticket, TicketId } from '../tickets/contract.ts';
 import { BranchNames, freeBranch, isTicketBranch } from './branch-names.ts';
+import { publishFailureCode, publishHint, type PublishFailureCode } from './publish-failure.ts';
 import { replayBranch, ticketBranch } from '../workspace/checkout.ts';
 import type { Published } from '../workspace/publish.ts';
 import { serviceLocks } from '../approval/service.ts';
@@ -3156,6 +3157,11 @@ export class FlowEngine {
 
   // ---- a pass: publish, record, ask the lock -------------------------------
 
+  // What the session screen says of a publication that failed (issue #507).
+  #publishFailed(session: { readonly id: SessionId; readonly ticket: TicketId; readonly project: string }, code: PublishFailureCode, service: string | null, detail: string): void {
+    this.#journal(session, { type: 'CUSTOM', name: 'cleared.publish_failed', value: { code, service, detail: this.#clean(detail).slice(0, 2000) } });
+  }
+
   async #publishAndAsk(reviewer: Live, report: string, round: number): Promise<void> {
     const { ticket: id, project, workdir, model } = reviewer.input;
     const session = { id: reviewer.id, ticket: id, project };
@@ -3172,7 +3178,9 @@ export class FlowEngine {
       published = await this.#effects.publish({ ticket: id, workdir, branch: this.#branchOf(id), report, receipt: this.#receipt(id, reviewer) });
     } catch (error) {
       this.#step(session, 'STEP_FINISHED', 'release');
-      await this.#putBack(id, `The branch was not published: ${name(error)}`, 'publish_refused');
+      const code = publishFailureCode(error);
+      this.#publishFailed(session, code, null, name(error));
+      await this.#putBack(id, `The branch was not published: ${name(error)}.${publishHint(code)}`, 'publish_refused');
       return;
     }
     const reviewedAt = this.#now().toISOString();
@@ -3377,10 +3385,16 @@ export class FlowEngine {
         published.push({ service, pr, files: changed?.files ?? null, diff: changed?.diff ?? '' });
       } catch (error) {
         if ((error as { code?: unknown }).code === 'empty') { skipped.push(service.name); continue; }
-        return fail(`The branch was not published on ${service.name}: ${name(error)}`, 'publish_refused');
+        const code = publishFailureCode(error);
+        this.#publishFailed(session, code, service.name, name(error));
+        return fail(`The branch was not published on ${service.name}: ${name(error)}.${publishHint(code)}`, 'publish_refused');
       }
     }
-    if (published.length === 0) return fail(`The branch was not published: no service of the ticket (${order.map((s) => s.name).join(', ')}) has a commit of its own.`, 'publish_refused');
+    if (published.length === 0) {
+      const said = `no service of the ticket (${order.map((s) => s.name).join(', ')}) has a commit of its own.`;
+      this.#publishFailed(session, 'no_commit', null, said);
+      return fail(`The branch was not published: ${said}`, 'publish_refused');
+    }
     // A ticket of one service of several publishes one pull request, whose head is judged as a one-service ticket's.
     const lane = await this.#judgeFast(ticket, published.length === 1 ? { head: (published[0] as (typeof published)[number]).pr.head } : undefined);
     const announcement = [
